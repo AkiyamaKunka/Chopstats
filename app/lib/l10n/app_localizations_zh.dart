@@ -1634,10 +1634,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get mealCardLeftoverTitle => '🍽️ 已扣除剩菜';
 
   @override
-  String get notificationChannelName => '总结与餐食';
+  String get notificationChannelName => '每日总结';
 
   @override
-  String get notificationChannelDescription => '每日热量总结和自动记录的餐食卡片';
+  String get notificationChannelDescription => '在你设定的时间发送当天的热量总结';
 
   @override
   String dayLoadFailed(String error) {
@@ -2216,11 +2216,10 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get watcherLimitedAccess =>
-      '目前只共享了部分选中的照片，新的食物照片不会被自动看到。请授予访问所有照片的权限，才能自动记录。';
+      '目前只共享了部分选中的照片，新的食物照片不会被自动看到。请允许访问所有照片，才能自动记录。';
 
   @override
-  String get watcherLimitedFooter =>
-      '筷拍无法访问你的全部照片，新拍的照片不会被自动记录。请在系统「设置」里允许访问所有照片。';
+  String get watcherLimitedFooter => '筷拍无法访问你的全部照片，新拍的照片不会被自动记录。';
 
   @override
   String get fixAction => '去修复';
@@ -2297,7 +2296,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String nlMissingKey(String provider) {
-    return '❌ 还没有 $provider 的 API 密钥——请先在「设置」里添加，才能用文字记录。';
+    return '❌ 还没有 $provider 的 API Key——请先在「设置」里添加，才能用文字记录。';
   }
 
   @override
@@ -3014,7 +3013,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get backupAndroidFooter =>
-      'Android 自带的备份可以把应用数据保存在你的 Google 账户里。换手机之前，请导出一个文件，再在新手机上导入。导入会合并：已有的餐不会被改动。';
+      'Android 自带的备份可以把饮食记录保存在你的 Google 账户里，但不包括 API Key 和服务器上传密钥：在新手机上需要重新输入。换手机时，请用「导出数据」→「保存到设备…」存一个文件，再在新手机上导入。导入会合并：已有的餐不会被改动。';
 
   @override
   String get backupStatusOff => '已关闭';
@@ -3253,4 +3252,159 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get bodyDeleteFailed => '没能删除，请再试一次。';
+
+  @override
+  String get serverHttpConsentNote =>
+      '这个服务器地址以 http:// 开头，筷拍发送的内容和你的上传密钥都会以未加密的方式经过网络。';
+
+  @override
+  String get serverHttpsRequiredConsentNote =>
+      '这个服务器地址不是以 https:// 开头的。在你把地址改成 https:// 之前，筷拍不会向它发送任何内容。';
+
+  @override
+  String get serverHttpFooter =>
+      '这个地址以 http:// 开头：照片、餐食文字和上传密钥都会以未加密的方式传输。服务器有了证书后，请改成 https://。';
+
+  @override
+  String get serverNeedsHttpsFooter =>
+      '需要 https:// —— 地址不是以 https:// 开头时，筷拍不会发送任何内容：不发照片、不发餐食文字，也不发上传密钥。请先为服务器配置 https，再在这里修改地址。';
+
+  @override
+  String get serverNeedsHttpsField => '需要 https://';
+
+  @override
+  String get setupLinkNeedsHttps =>
+      '这个配置链接里的服务器地址不是 https://。筷拍不会向普通的 http:// 服务器发送任何内容，所以没有进行任何设置。';
+
+  @override
+  String get errServerNeedsHttps =>
+      '你的服务器地址不是以 https:// 开头的 —— 筷拍不会向它发送任何内容。请在设置里把它改成 https:// 地址。';
+
+  @override
+  String get reasonServerNeedsHttps => '服务器地址需要 https://';
+
+  @override
+  String get diagServerNeedsHttps => '服务器地址不是以 https:// 开头的，所以不会向它发送任何内容。';
+
+  @override
+  String get diagFixServerHttps => '先为服务器配置 https，再到设置里把服务器地址改成 https://…。';
+
+  @override
+  String shareConsentDeclinedMany(int count) {
+    return '$count 张分享的照片没有分析 — 没有发送任何内容。';
+  }
+
+  @override
+  String get exportSheetTitle => '导出数据';
+
+  @override
+  String get exportSaveToDevice => '保存到设备…';
+
+  @override
+  String get exportShare => '分享…';
+
+  @override
+  String get exportSaved => '导出文件已保存。';
+
+  @override
+  String get exportSaveBusy => '另一个文件窗口还开着。关掉它再试一次。';
+
+  @override
+  String get exportSaveFailed => '导出文件没能保存。可以改用「分享…」。';
+
+  @override
+  String get settingsHealthReminder => '筷拍不提供医疗建议。涉及健康或饮食的决定，请咨询医疗专业人士。';
+
+  @override
+  String backupSizeNearLimit(String size) {
+    return '这里的数据有 $size。Android 自带的备份对每个应用最多保存 25 MB，超过后会停止备份，也不会提示你：请用「导出数据」→「保存到设备…」留一份副本。';
+  }
+
+  @override
+  String get diagBackupSizeTitle => 'Android 备份';
+
+  @override
+  String diagBackupSizeLine(String size) {
+    return 'Android 自带的备份大约要保存 $size，它对每个应用最多保存 25 MB。';
+  }
+
+  @override
+  String get autoScanNeedsHttps =>
+      '自动记录没有运行：你的服务器地址不是以 https:// 开头的，筷拍不会向它发送任何内容。请到「AI 服务」›「你自己的服务器」修改地址。';
+
+  @override
+  String get diagBgStopNeedsHttps => '没有运行：服务器地址不是以 https:// 开头的。';
+
+  @override
+  String get addChooseAllPhotos => '从所有照片中选择…';
+
+  @override
+  String get addPickerNote => 'Android 的照片选择器会显示你的所有照片，筷拍只会收到你选中的那一张。';
+
+  @override
+  String get addPickerUnavailable => '这台手机上无法打开照片选择器。你仍然可以在相册应用里把照片分享给筷拍。';
+
+  @override
+  String addOldPhotoLoggedToday(String taken, int days) {
+    return '这张照片拍摄于 $taken，已超过 $days 天，所以这餐记在了今天。如需记到拍摄当天，请打开这餐修改日期。';
+  }
+
+  @override
+  String get discardChangesTitle => '放弃更改？';
+
+  @override
+  String get discardChangesBody => '你在这里的更改尚未保存。';
+
+  @override
+  String get discardChangesKeep => '继续编辑';
+
+  @override
+  String get discardChangesDiscard => '放弃';
+
+  @override
+  String get summaryBatteryRestrictedHint => '电池使用受限 —— 每日总结无法送达。';
+
+  @override
+  String get notificationsAllowAction => '允许通知';
+
+  @override
+  String get notificationMealChannelName => '自动记录的餐食';
+
+  @override
+  String get notificationMealChannelDescription => '从相册自动记录每一餐时发送的卡片';
+
+  @override
+  String get watcherAllowAllPhotos => '允许访问所有照片';
+
+  @override
+  String coachWeekday(String weekday) {
+    String _temp0 = intl.Intl.selectLogic(weekday, {
+      'mon': '周一',
+      'tue': '周二',
+      'wed': '周三',
+      'thu': '周四',
+      'fri': '周五',
+      'sat': '周六',
+      'sun': '周日',
+      'other': '',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String coachTitleOnDay(String day, String kcal) {
+    return '$day：$kcal 千卡';
+  }
+
+  @override
+  String get coachEmptyOnDay => '当天没有记录。拍下一餐，它会自动出现在这里。';
+
+  @override
+  String diagBgRunNotFinished(String step) {
+    return '尚未完成 —— 仍在运行，或之后被停止；最后一步：$step。';
+  }
+
+  @override
+  String get watcherLimitedFooterIos =>
+      '筷拍无法访问你的全部照片，新拍的照片不会被自动记录。请在系统「设置」里允许访问所有照片。';
 }

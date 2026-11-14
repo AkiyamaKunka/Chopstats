@@ -7,6 +7,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:calorie_tracker/core/contracts.dart';
+import 'package:calorie_tracker/core/server_transport.dart';
 import 'package:calorie_tracker/l10n/app_localizations.dart';
 import 'package:calorie_tracker/l10n/app_localizations_en.dart';
 import 'package:calorie_tracker/l10n/app_localizations_zh.dart';
@@ -100,6 +101,65 @@ void main() {
     expect(AppLocalizationsZh().diagFixVpn, contains('VPN'));
   });
 
+  // Owner decision 2026-11-13: a server address that is not https:// is
+  // sent nothing, so the test page stops at Configuration and contacts
+  // nothing — not even the reachability probe — and says how to fix it.
+  for (final locale in ['en', 'zh']) {
+    test('a plain http:// server stops at Configuration, contacting '
+        'nothing ($locale)', () async {
+      debugRequireHttpsServerOverride = true;
+      addTearDown(() => debugRequireHttpsServerOverride = null);
+      final l = locale == 'zh' ? AppLocalizationsZh() : AppLocalizationsEn();
+      final settings = FakeSettings()
+        ..provider = 'server'
+        ..apiKey = 'k'
+        ..serverBaseUrl = 'http://h.test';
+      var contacted = 0;
+      final analyzer = _okAnalyzer()
+        ..onProbeKey = (_) async {
+          contacted++;
+          return const KeyProbe(KeyProbeResult.ok);
+        };
+      final results = await _diag(
+              settings: settings,
+              analyzer: analyzer,
+              l10n: l,
+              client: MockClient((_) async {
+                contacted++;
+                return http.Response('ok', 404);
+              }))
+          .run()
+          .toList();
+      expect(results, hasLength(1));
+      expect(results.single.stage, l.diagStageConfiguration);
+      expect(results.single.status, DiagStatus.fail);
+      expect(results.single.summary, l.diagServerNeedsHttps);
+      expect(results.single.fix, l.diagFixServerHttps);
+      expect(contacted, 0);
+    });
+  }
+
+  test('a plain http:// server with the https switch off is checked as '
+      'before', () async {
+    debugRequireHttpsServerOverride = false;
+    addTearDown(() => debugRequireHttpsServerOverride = null);
+    final settings = FakeSettings()
+      ..provider = 'server'
+      ..apiKey = 'k'
+      ..serverBaseUrl = 'http://h.test';
+    final probed = <Uri>[];
+    final results = await _diag(
+            settings: settings,
+            client: MockClient((req) async {
+              probed.add(req.url);
+              return http.Response('ok', 404);
+            }))
+        .run()
+        .toList();
+    expect(results.first.status, DiagStatus.pass);
+    expect(probed, [Uri.parse('http://h.test')]);
+  });
+
   test('a passing key probe tells the store the credentials work — the '
       'automatic-scan pause lifts without a key edit', () async {
     // Review 2026-10-12: the owner who fixed the account at the provider's
@@ -115,7 +175,7 @@ void main() {
     final server = FakeSettings()
       ..provider = 'server'
       ..apiKey = 'k'
-      ..serverBaseUrl = 'http://h.test';
+      ..serverBaseUrl = 'https://h.test';
     await _diag(settings: server).run().toList();
     expect(server.credentialsProvenCalls, [false, true]);
 
@@ -412,6 +472,58 @@ void main() {
     expect(find.text('Photo analysis'), findsOneWidget);
   });
 
+  // Privacy lane item 5: what Android's own backup would carry, against
+  // its 25 MB per-app limit (meal pictures live in the database).
+  group('the Android backup size', () {
+    const mb = 1024 * 1024;
+    Future<void> open(WidgetTester tester, Future<int?> Function()? load,
+        {Locale locale = const Locale('en')}) async {
+      tester.view.physicalSize = const Size(800, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(MaterialApp(
+          locale: locale,
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          home: DiagnosticsScreen(
+              diagnostics: _diag(),
+              loadBackgroundRuns: () async => [],
+              loadLateImports: () async => null,
+              loadGlassesChecks: () async => [],
+              loadBackupSize: load)));
+      await tester.pumpAndSettle();
+    }
+
+    for (final (locale, l) in [
+      (const Locale('en'), AppLocalizationsEn() as AppLocalizations),
+      (const Locale('zh'), AppLocalizationsZh() as AppLocalizations),
+    ]) {
+      testWidgets('shows the size (${locale.languageCode})', (tester) async {
+        await open(tester, () async => 3 * mb + mb ~/ 5, locale: locale);
+        final section = find.byKey(const Key('diagBackupSize'));
+        expect(section, findsOneWidget);
+        expect(find.text(l.diagBackupSizeTitle), findsOneWidget);
+        expect(find.text(l.diagBackupSizeLine('3.2 MB')), findsOneWidget);
+        expect(find.text(l.backupSizeNearLimit('3.2 MB')), findsNothing);
+      });
+    }
+
+    testWidgets('over 20 MB it says to keep a copy', (tester) async {
+      await open(tester, () async => 23 * mb);
+      expect(find.text(AppLocalizationsEn().backupSizeNearLimit('23.0 MB')),
+          findsOneWidget);
+    });
+
+    testWidgets('no loader (iPhone) or no size: no section', (tester) async {
+      await open(tester, null);
+      expect(find.byKey(const Key('diagBackupSize')), findsNothing);
+      await open(tester, () async => null);
+      expect(find.byKey(const Key('diagBackupSize')), findsNothing);
+      await open(tester, () async => throw StateError('unreadable'));
+      expect(find.byKey(const Key('diagBackupSize')), findsNothing);
+    });
+  });
+
   testWidgets('problems show the count and the fixes', (tester) async {
     tester.view.physicalSize = const Size(800, 2400);
     tester.view.devicePixelRatio = 1.0;
@@ -531,6 +643,7 @@ void main() {
   // 2026-10-18: what the background scans did, from their own record.
   group('recent background scans', () {
     final t0 = DateTime.utc(2026, 10, 18, 3, 0);
+    // Labelled by the run after it (background_runs.dart).
     final killed = BackgroundRunRecord(
         start: t0,
         platform: 'ios',
@@ -539,6 +652,7 @@ void main() {
         offered: 2,
         analyzed: 1,
         saved: 1,
+        stopReason: BackgroundStop.stoppedBySystem,
         watermarkBefore: DateTime.utc(2026, 10, 11, 2, 26));
     final budget = BackgroundRunRecord(
         start: t0.subtract(const Duration(minutes: 30)),
@@ -588,6 +702,26 @@ void main() {
       expect(find.textContaining('14 s'), findsOneWidget);
       expect(find.text('Stopped by an error (PlatformException).'),
           findsOneWidget);
+    });
+
+    // Review (finding 11): the label was written and never shown.
+    testWidgets('an entry no later run has labelled yet reads "not finished '
+        'yet", not "ended by the system"', (tester) async {
+      final open = BackgroundRunRecord(
+          start: t0.add(const Duration(minutes: 30)),
+          platform: 'android',
+          stage: BackgroundRunStage.scan);
+      await pump(tester, [open, killed]);
+      expect(
+          find.text('Not finished yet — still running, or stopped since; '
+              'last step: listing photos.'),
+          findsOneWidget);
+      expect(
+          find.text('Ended by the system before it finished — last step: '
+              'processing a photo.'),
+          findsOneWidget);
+      final l = AppLocalizationsEn();
+      expect(backgroundRunVerdict(l, open), isNot(contains('Ended')));
     });
 
     testWidgets('in Chinese', (tester) async {

@@ -11,9 +11,11 @@ library;
 import '../core/chain_match.dart' show chainByKey;
 import '../core/coerce.dart' show calendarDaysBetween;
 import '../core/outcome_kind.dart';
+import '../core/server_transport.dart' show isServerNeedsHttpsMessage;
 import '../l10n/app_localizations.dart';
 import '../services/assist/meal_assist.dart' show AssistAppliedNotice;
-import 'format.dart' show formatKcal, mealDescription;
+import 'format.dart'
+    show englishClock, formatKcal, mealDescription, phoneUses24HourClock;
 import 'photo_pipeline.dart';
 import 'provider_names.dart';
 
@@ -86,9 +88,11 @@ String outcomeBody(AppLocalizations l, PhotoOutcome o,
     case PhotoOutcomeKind.failed:
       return switch (o.errorKind) {
         AnalysisErrorKind.noApiKey => l.errNoApiKey,
-        AnalysisErrorKind.noServerKey => isBadServerAddress(o.message)
-            ? l.errBadServerAddress
-            : l.errNoServerKey,
+        AnalysisErrorKind.noServerKey => isServerNeedsHttpsMessage(o.message)
+            ? l.errServerNeedsHttps
+            : isBadServerAddress(o.message)
+                ? l.errBadServerAddress
+                : l.errNoServerKey,
         AnalysisErrorKind.rejectedKey => l.errRejectedKey,
         AnalysisErrorKind.regionBlocked =>
           l.errRegionBlocked(regionProvider(l, o.message)),
@@ -215,7 +219,9 @@ String? retryReason(AppLocalizations l, PhotoOutcome o) {
     AnalysisErrorKind.serverBusy => l.reasonServerBusy,
     AnalysisErrorKind.serverError => l.reasonServerFailed,
     AnalysisErrorKind.noApiKey => l.reasonNoApiKey,
-    AnalysisErrorKind.noServerKey => l.reasonNoServerKey,
+    AnalysisErrorKind.noServerKey => isServerNeedsHttpsMessage(o.message)
+        ? l.reasonServerNeedsHttps
+        : l.reasonNoServerKey,
     AnalysisErrorKind.regionBlocked =>
       l.reasonRegionBlocked(regionProvider(l, o.message)),
     _ => null,
@@ -227,6 +233,13 @@ String? retryReason(AppLocalizations l, PhotoOutcome o) {
 /// send the user looking for a missing field (run 7, B2).
 bool isBadServerAddress(String message) =>
     message.contains('not a valid web address');
+
+/// The saved server address is set but nothing is sent to it: it does not
+/// parse ([isBadServerAddress]), or it is not https:// while the https
+/// switch is on (core/server_transport.dart). Either way "check your server
+/// address", not "AI isn't set up yet", and Retry would fail the same way.
+bool isUnusableServerAddress(String message) =>
+    isBadServerAddress(message) || isServerNeedsHttpsMessage(message);
 
 /// Who refused the network region, out of the analyzers' "`Provider` is
 /// not available from your current network region …" (Gemini's region
@@ -317,11 +330,19 @@ String badModelText(AppLocalizations l, String? message) {
 int calendarDayDiff(DateTime from, DateTime to) =>
     calendarDaysBetween(from, to);
 
-/// "Today 21:30" / "Tomorrow 07:00" / "Yesterday 14:02" / "09-28 14:02".
-/// [now] is a test seam.
-String dayTimeLabel(AppLocalizations l, DateTime when, {DateTime? now}) {
-  final hhmm = '${when.hour.toString().padLeft(2, '0')}:'
-      '${when.minute.toString().padLeft(2, '0')}';
+/// "Today 9:30 PM" / "Tomorrow 7:00 AM" / "Yesterday 2:02 PM" /
+/// "09-28 2:02 PM", or "Today 21:30" ... on a 24-hour phone: English
+/// follows the phone's 12/24-hour setting ([use24h] overrides it), as
+/// Report Time beside it does (it was always 24-hour: 'Report Time 9:30
+/// PM' above 'Next summary Today 21:30'); Chinese is 24-hour either way.
+/// [now] is a test seam. Callers pass nothing new: the phone's setting is
+/// read here, so Settings, the backup status, the add flow's quota pause
+/// and the background notice all follow it.
+String dayTimeLabel(AppLocalizations l, DateTime when,
+    {DateTime? now, bool? use24h}) {
+  final hhmm = englishClock(when.hour, when.minute,
+      use24h: l.localeName.startsWith('zh') ||
+          (use24h ?? phoneUses24HourClock()));
   // CALENDAR days apart (calendarDaysBetween), not the hours between two
   // local midnights: those are 23 on the day DST starts, which read as 0
   // days — tomorrow's slot said "Today" all that day, and yesterday's run

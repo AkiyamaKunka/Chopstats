@@ -2868,16 +2868,16 @@ abstract class AppLocalizations {
   /// **'🍽️ Leftovers deducted'**
   String get mealCardLeftoverTitle;
 
-  /// Android notification channel name: shown under Settings › Apps › Chopstats › Notifications and in a card's long-press menu. Android never translates it, so it is re-sent in the app language on every post.
+  /// The daily summary's Android notification channel (its id is the one every install has had, so the user's settings on it survive; until the Play push it was 'Reports & meals' and also carried the meal cards). Shown under Settings › Apps › Chopstats › Notifications and in a card's long-press menu. Android never translates it, so it is re-sent in the app language on every post.
   ///
   /// In en, this message translates to:
-  /// **'Reports & meals'**
+  /// **'Daily summary'**
   String get notificationChannelName;
 
-  /// Android notification channel description, shown under the channel name in the system notification settings.
+  /// The daily summary channel's description, shown under its name in the system notification settings.
   ///
   /// In en, this message translates to:
-  /// **'Daily calorie reports and auto-logged meal cards'**
+  /// **'Your calorie summary, at the time you set'**
   String get notificationChannelDescription;
 
   /// No description provided for @dayLoadFailed.
@@ -3729,13 +3729,13 @@ abstract class AppLocalizations {
   /// No description provided for @watcherLimitedAccess.
   ///
   /// In en, this message translates to:
-  /// **'Only SELECTED photos are shared, so new food photos won\'t be seen automatically. Grant access to ALL photos for automatic logging.'**
+  /// **'Only selected photos are shared, so new food photos won\'t be seen automatically. Allow access to all photos for automatic logging.'**
   String get watcherLimitedAccess;
 
-  /// First line of the Settings Photos footer while Watch Camera Roll is on but Photos access is not full (selected photos only, or withdrawn).
+  /// First line of the Settings Photos footer while Watch Camera Roll is on but Photos access is not full (selected photos only, or withdrawn). On Android it stands alone: the 'Allow access to all photos' link under it fixes it in place (watcherAllowAllPhotos). iOS shows watcherLimitedFooterIos, which starts with this sentence.
   ///
   /// In en, this message translates to:
-  /// **'Chopstats can\'t see all your photos, so new photos are not logged automatically. Allow access to all photos in the Settings app.'**
+  /// **'Chopstats can\'t see all your photos, so new photos are not logged automatically.'**
   String get watcherLimitedFooter;
 
   /// No description provided for @fixAction.
@@ -5039,10 +5039,10 @@ abstract class AppLocalizations {
   /// **'Nothing is being copied to iCloud Drive, so your meals would not come back after a reinstall, or on a new iPhone that does not get this iPhone\'s data from a backup or a transfer. Before either, export a file, then import it afterwards. API keys are never included, and the developer receives nothing.'**
   String get backupICloudFooterOff;
 
-  /// Footer of Settings › Your Data on Android (there is no automatic backup file on Android).
+  /// Footer of Settings › Your Data on Android (there is no automatic backup file on Android). Says Android's own Auto Backup can restore the food log from the Google account but not the keys, and that Export Data › Save to Device… is how to move phones. The keys part holds together with the backup rules that keep flutter_secure_storage's preference files out of cloud backup and device transfer (res/xml/data_extraction_rules.xml and backup_rules.xml, the native lane's PR #62): on a build without them those encrypted files do travel, though another phone cannot decrypt them. Keep this text and those rules in step.
   ///
   /// In en, this message translates to:
-  /// **'Android\'s own backup can keep this app\'s data in your Google account. Before you change phones, export a file and import it on the new phone. Import merges: meals already here are left alone.'**
+  /// **'Android\'s own backup can keep your food log in your Google account, but not your API keys or server upload key: on a new phone you enter them again. To move to a new phone, use Export Data, then Save to Device, and import that file on the new phone. Import merges: meals already here are left alone.'**
   String get backupAndroidFooter;
 
   /// Status line under the iCloud Backup switch: the user turned it off.
@@ -5458,6 +5458,252 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Couldn\'t delete. Try again.'**
   String get bodyDeleteFailed;
+
+  /// AI consent dialog, own server only, added after the consent text when the https switch is OFF (core/server_transport.dart kRequireHttpsServer = false) and the saved server address starts with http://. Not shown while the switch is on.
+  ///
+  /// In en, this message translates to:
+  /// **'This server\'s address starts with http://, so what Chopstats sends, and your upload key, cross the network unencrypted.'**
+  String get serverHttpConsentNote;
+
+  /// AI consent dialog, own server only, added after the consent text when the saved server address is refused by the https switch (core/server_transport.dart): plain http://, or no scheme. Nothing is sent to it.
+  ///
+  /// In en, this message translates to:
+  /// **'This server\'s address does not start with https://, so Chopstats sends it nothing until you change the address to https://.'**
+  String get serverHttpsRequiredConsentNote;
+
+  /// Settings > Your own server: added under the server section's footer when the https switch is OFF and the saved address starts with http://. Not shown while the switch is on.
+  ///
+  /// In en, this message translates to:
+  /// **'This address starts with http://: photos, meal text and the upload key travel unencrypted. Change it to https:// once your server has a certificate.'**
+  String get serverHttpFooter;
+
+  /// Settings > Your own server: added under the server section's footer when the saved server address is refused by the https switch (an address saved before the switch, or by an older app version). The address stays saved; nothing is sent to it.
+  ///
+  /// In en, this message translates to:
+  /// **'Needs https:// — Chopstats sends nothing to an address that does not start with https://: no photos, no meal text, no upload key. Set up https on your server, then change the address here.'**
+  String get serverNeedsHttpsFooter;
+
+  /// Settings > Your own server: the server address field's error line when the address typed (not saved) or the address saved does not start with https://. Short: shown under the field.
+  ///
+  /// In en, this message translates to:
+  /// **'Needs https://'**
+  String get serverNeedsHttpsField;
+
+  /// Snackbar when a bitewise://setup link is well formed but its server address is plain http:// (refused by the https switch). Nothing was saved.
+  ///
+  /// In en, this message translates to:
+  /// **'That setup link names a server without https://. Chopstats sends nothing to a plain http:// server, so nothing was set up.'**
+  String get setupLinkNeedsHttps;
+
+  /// A photo or a typed meal was not analyzed because the saved server address is not https:// (refused by the https switch). Nothing was sent; the photo is kept.
+  ///
+  /// In en, this message translates to:
+  /// **'Your server address does not start with https:// — Chopstats sends nothing to it. Change it to an https:// address in Settings.'**
+  String get errServerNeedsHttps;
+
+  /// Short reason in parentheses, as reasonNoServerKey: a photo was not analyzed because the saved server address is not https://.
+  ///
+  /// In en, this message translates to:
+  /// **'the server address needs https://'**
+  String get reasonServerNeedsHttps;
+
+  /// Test AI provider, Configuration check, own server: the saved address is refused by the https switch. The page stops here and contacts nothing.
+  ///
+  /// In en, this message translates to:
+  /// **'The server address does not start with https://, so nothing is sent to it.'**
+  String get diagServerNeedsHttps;
+
+  /// Test AI provider: the fix shown under diagServerNeedsHttps.
+  ///
+  /// In en, this message translates to:
+  /// **'Set up https on your server, then change the server address to https://… in Settings.'**
+  String get diagFixServerHttps;
+
+  /// Snackbar after Not now on the AI consent question for a share of several photos: one Not now covers that share and any shared while the question was open (not the start-up batch of copies an earlier run left unread, which is asked about on its own). count is 2 or more; one photo uses shareConsentDeclined. The count is those shares' photos not passed on, as known at the answer: a copy not read yet that turns out unusable (an unsupported type, over 25 MB, a read that fails) is counted too, so it can be a little high, never low.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} shared photos were not analyzed — nothing was sent.'**
+  String shareConsentDeclinedMany(int count);
+
+  /// Android: title of the sheet Export Data… opens, offering Save to Device… and Share….
+  ///
+  /// In en, this message translates to:
+  /// **'Export Data'**
+  String get exportSheetTitle;
+
+  /// Android, Export sheet: first option. Opens the system's save screen (Downloads, or any folder it offers) for the export file.
+  ///
+  /// In en, this message translates to:
+  /// **'Save to Device…'**
+  String get exportSaveToDevice;
+
+  /// Android, Export sheet: second option. Opens the share sheet with the export file, as iPhone's Export does.
+  ///
+  /// In en, this message translates to:
+  /// **'Share…'**
+  String get exportShare;
+
+  /// Snackbar: Save to Device… wrote the export file where the user chose.
+  ///
+  /// In en, this message translates to:
+  /// **'Export saved.'**
+  String get exportSaved;
+
+  /// Snackbar: Save to Device… could not open because another system file screen (a save or a file pick) is still open.
+  ///
+  /// In en, this message translates to:
+  /// **'Another file window is still open. Close it, then try again.'**
+  String get exportSaveBusy;
+
+  /// Snackbar: Save to Device… could not write the file (the folder refused it, the disk is full, or the system screen could not run).
+  ///
+  /// In en, this message translates to:
+  /// **'The export could not be saved. Try Share… instead.'**
+  String get exportSaveFailed;
+
+  /// Settings › Your Data, both platforms: a line under the section. Google Play's Health Content and Services policy asks apps to remind users to consult a healthcare professional. The policy's full not-a-medical-device disclaimer belongs in the store description, which the release lane writes; it is not part of this string.
+  ///
+  /// In en, this message translates to:
+  /// **'Chopstats does not give medical advice. For decisions about your health or diet, consult a healthcare professional.'**
+  String get settingsHealthReminder;
+
+  /// Settings › Your Data on Android, and the Test AI provider page: shown when what Android's own backup would carry for this app (meal pictures included) is over 20 MB. size is like '21.4 MB'.
+  ///
+  /// In en, this message translates to:
+  /// **'Your data here is {size}. Android\'s own backup stops at 25 MB per app, without telling you: keep a copy with Export Data, then Save to Device.'**
+  String backupSizeNearLimit(String size);
+
+  /// Test AI provider page, Android only: heading of the section with the size of what Android's own backup would carry for this app.
+  ///
+  /// In en, this message translates to:
+  /// **'Android backup'**
+  String get diagBackupSizeTitle;
+
+  /// Test AI provider page, Android only: the size of what Android's own backup would carry for this app (the database with meal pictures, preferences and files, minus what is excluded). size is like '3.2 MB'.
+  ///
+  /// In en, this message translates to:
+  /// **'About {size} for Android\'s own backup, which keeps at most 25 MB per app.'**
+  String diagBackupSizeLine(String size);
+
+  /// Settings › Photos footer while Watch Camera Roll is on (and the snackbar when it is turned on): the own server's saved address is not https://, so the automatic scan does not run at all (no photo is read). A photo added by hand is still tried and gets errServerNeedsHttps.
+  ///
+  /// In en, this message translates to:
+  /// **'Automatic logging is not running: your server address does not start with https://, and Chopstats sends nothing to it. Change it in AI Provider › Your own server.'**
+  String get autoScanNeedsHttps;
+
+  /// Test AI provider › Recent background scans: how a run ended when the own server's address is not https:// (nothing was read or sent).
+  ///
+  /// In en, this message translates to:
+  /// **'Not run: the server address does not start with https://.'**
+  String get diagBgStopNeedsHttps;
+
+  /// Android, Log › From recent photos and Leftovers: the button that opens Android's system photo picker, where every photo on the phone can be chosen. Shown under the recent-photos grid when the app has full photo access, and as the screen's one button when it has none.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose from all photos…'**
+  String get addChooseAllPhotos;
+
+  /// Android, Log › From recent photos and Leftovers, when the app has no full photo access: the line above the Choose from all photos button. The system picker needs no permission; the app gets only the photo the user picks there.
+  ///
+  /// In en, this message translates to:
+  /// **'Android\'s photo picker shows all your photos. Chopstats receives only the one you choose.'**
+  String get addPickerNote;
+
+  /// Android, Log › From recent photos and Leftovers: shown instead of the Choose from all photos button when the system photo picker could not open. Sharing a photo into the app from the gallery needs no permission and still works.
+  ///
+  /// In en, this message translates to:
+  /// **'The photo picker can\'t open on this phone. You can still share a photo to Chopstats from your gallery app.'**
+  String get addPickerUnavailable;
+
+  /// Log › From recent photos: added under the Meal logged dialog when the photo was taken before the dating window (spec §8: 45 days), so the meal was logged for today. {taken} is the day the photo was taken, with its year (e.g. 'Sep 1, 2026'); {days} is the window (45). The meal editor's date field moves the meal.
+  ///
+  /// In en, this message translates to:
+  /// **'This photo was taken on {taken}, more than {days} days ago, so its meal was logged for today. To log it on its own day, open the meal and change its date.'**
+  String addOldPhotoLoggedToday(String taken, int days);
+
+  /// Android push (ui lane): asked when back (gesture, button, app-bar back or a tap outside a sheet) would close Edit meal, Fix meals or the Body log sheet with unsaved typing.
+  ///
+  /// In en, this message translates to:
+  /// **'Discard changes?'**
+  String get discardChangesTitle;
+
+  /// Discard-changes dialog body, under discardChangesTitle: why the question is asked. The typing is kept on Keep editing, dropped on Discard.
+  ///
+  /// In en, this message translates to:
+  /// **'What you changed here has not been saved.'**
+  String get discardChangesBody;
+
+  /// Discard-changes dialog: stays on the screen with the typing kept.
+  ///
+  /// In en, this message translates to:
+  /// **'Keep editing'**
+  String get discardChangesKeep;
+
+  /// Discard-changes dialog: closes the screen and drops the unsaved typing (destructive style).
+  ///
+  /// In en, this message translates to:
+  /// **'Discard'**
+  String get discardChangesDiscard;
+
+  /// Settings › Daily summary, Android only: red hint shown while the summary is on and the app's battery usage is set to Restricted (App info › App battery usage), under which Android fires none of the app's alarms, the summary's included. Followed by the 'Open system settings' button. Worded like notificationsOffHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Battery use is Restricted — the daily summary can\'t be delivered.'**
+  String get summaryBatteryRestrictedHint;
+
+  /// Settings › Daily summary, Android 13+: the button under notificationsOffHint while the app has never asked for the notification permission. Tapping it shows Android's own permission dialog (asked once); after that the button reads openSystemSettings and opens the app's notification settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Allow notifications'**
+  String get notificationsAllowAction;
+
+  /// Android notification channel for the cards posted when a meal is logged automatically from the camera roll (and when automatic logging pauses), separate from the daily summary's channel since the Play push. Shown under Settings › Apps › Chopstats › Notifications and in a card's long-press menu; re-sent in the app language on every post.
+  ///
+  /// In en, this message translates to:
+  /// **'Logged meals'**
+  String get notificationMealChannelName;
+
+  /// The meal-card channel's description, shown under its name in the system notification settings.
+  ///
+  /// In en, this message translates to:
+  /// **'A card for each meal logged automatically from your camera roll'**
+  String get notificationMealChannelDescription;
+
+  /// Settings › Photos, Android only: a link under the footer while Watch Camera Roll is on and Photos access is partial. It shows Android 14+'s own dialog to change the selection or allow all photos (App info when that cannot help).
+  ///
+  /// In en, this message translates to:
+  /// **'Allow access to all photos'**
+  String get watcherAllowAllPhotos;
+
+  /// Android daily summary card: the short weekday name of the day the card describes, put in coachTitleOnDay. The weekday is one of mon, tue, wed, thu, fri, sat, sun.
+  ///
+  /// In en, this message translates to:
+  /// **'{weekday, select, mon{Mon} tue{Tue} wed{Wed} thu{Thu} fri{Fri} sat{Sat} sun{Sun} other{}}'**
+  String coachWeekday(String weekday);
+
+  /// Android daily summary card title, naming the day it describes (coachWeekday) instead of 'Today' or 'Yesterday': an inexact alarm can come after midnight, and a card re-fired after a reboot can come the next morning. Same shape as coachTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'{day}: {kcal} kcal'**
+  String coachTitleOnDay(String day, String kcal);
+
+  /// Android daily summary card body for a day with nothing logged, under coachTitleOnDay; says 'that day' rather than 'today' because the card may come late. Also the text of the nights armed ahead, which are rebuilt whenever something is logged.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing logged that day. Snap your next meal and it lands here automatically.'**
+  String get coachEmptyOnDay;
+
+  /// Diagnostics › Recent background scans: an entry with no end time that the next scan has not labelled yet — the newest, which may still be running, or may have been stopped by the system since. Once a later scan starts it is labelled and reads diagBgRunKilled. {step} is one of the diagBgStage* words.
+  ///
+  /// In en, this message translates to:
+  /// **'Not finished yet — still running, or stopped since; last step: {step}.'**
+  String diagBgRunNotFinished(String step);
+
+  /// iOS: first line of the Settings Photos footer while Watch Camera Roll is on but Photos access is not full; watcherLimitedFooter plus where to fix it (the Settings app). Must start with watcherLimitedFooter.
+  ///
+  /// In en, this message translates to:
+  /// **'Chopstats can\'t see all your photos, so new photos are not logged automatically. Allow access to all photos in the Settings app.'**
+  String get watcherLimitedFooterIos;
 }
 
 class _AppLocalizationsDelegate

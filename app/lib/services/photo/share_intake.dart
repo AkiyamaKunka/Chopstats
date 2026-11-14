@@ -19,10 +19,15 @@ import 'filename_dates.dart';
 import 'glasses.dart' show captureMetaFor;
 import 'photo_library.dart';
 
-/// Spec §6.1: SUPPORTED_QUEUE_EXTENSIONS ∪ server-side .tiff. Content is
-/// ultimately validated by decodability downstream (the analyzer's decode),
-/// not by extension — this set only filters obvious non-photos out of the
-/// share sheet.
+/// Spec §6.1: SUPPORTED_QUEUE_EXTENSIONS ∪ server-side .tiff, plus WebP
+/// and GIF (2026-11): what Android browsers and chat apps share, and how
+/// MainActivity names a nameless image stream (`IMG_<ts>.webp`, from its MIME
+/// type); they were dropped without a word. Every decoder in the upload
+/// chain reads both (the engine codec, iOS ImageIO, the `image` package),
+/// and a GIF is sent as its first frame. Not AVIF: its decoding is
+/// unverified. Content is ultimately validated by decodability downstream
+/// (the analyzer's decode), not by extension — this set only filters
+/// obvious non-photos out of the share sheet.
 const Set<String> supportedPhotoExtensions = {
   '.jpg',
   '.jpeg',
@@ -30,6 +35,8 @@ const Set<String> supportedPhotoExtensions = {
   '.heic',
   '.heif',
   '.tiff',
+  '.webp',
+  '.gif',
 };
 
 bool hasSupportedPhotoExtension(String name) {
@@ -109,6 +116,21 @@ bool isWithinFolder(String path, String folder) {
   return true;
 }
 
+/// [path] with '.' and '..' resolved, for comparing two spellings of one
+/// file.
+String _normalized(String path) {
+  final out = <String>[];
+  for (final s in path.split('/')) {
+    if (s.isEmpty || s == '.') continue;
+    if (s == '..') {
+      if (out.isNotEmpty) out.removeLast();
+    } else {
+      out.add(s);
+    }
+  }
+  return '/${out.join('/')}';
+}
+
 typedef FileBytesReader = Future<Uint8List?> Function(String path);
 typedef SharedFileCleanup = Future<void> Function(String path);
 
@@ -142,7 +164,7 @@ ShareIntake createShareIntake(AppSettings settings) => ShareIntake(
     readBytes: _readFileBytes,
     sharedFolder: Platform.isAndroid ? androidSharedPhotoFolder : null);
 
-class ShareIntake {
+class ShareIntake implements ShareDeliveries {
   ShareIntake(
       {required this._source,
       required this._library,
@@ -159,6 +181,10 @@ class ShareIntake {
   /// [androidSharedPhotoFolder]); null: any path (iOS, where the share
   /// extension writes the copies, and tests).
   final Future<String> Function()? _sharedFolder;
+
+  /// Whether a copy may wait on disk for its turn: only where every copy
+  /// has a path of its own (Android's share folder). See [photos].
+  bool get _copiesWait => _sharedFolder != null;
   final SharedMediaSource _source;
   final PhotoLibrary _library;
   final FileBytesReader _readBytes;
@@ -166,38 +192,222 @@ class ShareIntake {
   final DateTime Function() _clock;
   final int _capturedAtMaxAgeDays;
 
+  /// Deliveries (IntakePhoto.shareDelivery): one per batch event, numbered
+  /// as it arrives, before any of its copies is read.
+  int _deliveries = 0;
+  final Map<int, int> _deliverySize = {};
+  final Map<int, int> _deliveryUnreadable = {};
+
+  /// Deliveries the consent gate declined: their copies not read yet are
+  /// deleted unread.
+  final Set<int> _declined = {};
+
+  /// Android: every copy path handed to a delivery so far (normalized).
+  /// The start-up sweep and a live share can name the same copy (one
+  /// older than [strandedMinAge] whose event comes late): it goes to the
+  /// first delivery only, so it is counted, and read, once.
+  final Set<String> _delivered = {};
+
+  /// Wakes the reader from its pause-wait (set by [photos]).
+  void Function()? _wakeReader;
+
+  /// The start-up batches of copies left unread ([asksAlone]).
+  final Set<int> _startupBatches = {};
+
+  @override
+  bool asksAlone(int delivery) => _startupBatches.contains(delivery);
+
+  @override
+  int get arrivedDelivery => _deliveries;
+
+  @override
+  int photoCountOf(int delivery) =>
+      (_deliverySize[delivery] ?? 0) - (_deliveryUnreadable[delivery] ?? 0);
+
+  @override
+  void declineDeliveries(Set<int> deliveries) {
+    _declined.addAll(deliveries);
+    // Their unread copies go now, not when the stream resumes.
+    _wakeReader?.call();
+  }
+
   /// Cold-start share first, then live shares for the app's lifetime.
   /// (Explicit controller, not async*: an async* generator parked on the
   /// live-share stream would defer subscription cancellation forever.)
+  ///
+  /// BACKPRESSURE (review 171, C2), Android: a copy is read only while the
+  /// listener is not paused. The pipeline pauses the stream until each
+  /// photo's turn ends (PhotoPipeline.bindStream), and the consent gate
+  /// while it asks, so a 40-photo share holds one original in memory, plus
+  /// at most one read ahead — not all 40 (about 160 MB) in the stream's
+  /// buffer. The copies wait in the share folder meanwhile, each in a
+  /// folder of its own (MainActivity). Batches are read one after another,
+  /// in order.
+  ///
+  /// DELIVERIES: each batch event is numbered as it arrives
+  /// ([ShareDeliveries], IntakePhoto.shareDelivery), so the consent gate's
+  /// Not now covers the whole share it was asked about — and any that
+  /// arrived before the answer — and their copies not read yet are deleted
+  /// here unread ([declineThrough]).
+  ///
+  /// iOS reads each copy the moment it arrives, as before: the share
+  /// extension writes `<appGroup>/<file name>` and replaces a file of the
+  /// same name (FullSizeRender.jpg for every edited photo, TempImage.png
+  /// for every in-memory image), so a copy left waiting was overwritten by
+  /// the next share of that name — two shares, one meal (review
+  /// 2026-11-13). iOS shares one image at a time: one original per share.
   Stream<IntakePhoto> photos() {
     late final StreamController<IntakePhoto> controller;
     StreamSubscription<List<String>>? liveSub;
     var cancelled = false;
+    Completer<void>? resumed;
+    var reading = Future<void>.value();
 
-    Future<void> emitPaths(List<String> paths) async {
+    void wake() {
+      final r = resumed;
+      resumed = null;
+      r?.complete();
+    }
+
+    Future<void> emitPaths(List<String> paths, int delivery) async {
+      void unreadable() => _deliveryUnreadable[delivery] =
+          (_deliveryUnreadable[delivery] ?? 0) + 1;
+      bool declined() => _declined.contains(delivery);
       for (final path in paths) {
-        final photo = await _fromPath(path);
-        if (photo != null && !cancelled && !controller.isClosed) {
+        // A declined delivery is never waited on.
+        while (_copiesWait &&
+            controller.isPaused &&
+            !cancelled &&
+            !declined()) {
+          await (resumed ??= Completer<void>()).future;
+        }
+        // Cancelled, or declined by the consent gate's Not now: not read,
+        // but not left in the cache either.
+        if (cancelled || controller.isClosed || declined()) {
+          await _discard(path);
+          continue;
+        }
+        final IntakePhoto? photo;
+        try {
+          photo = await _fromPath(path, delivery);
+        } catch (_) {
+          unreadable();
+          continue; // one bad copy (already deleted) never stops the rest
+        }
+        if (photo == null) {
+          unreadable();
+        } else if (!cancelled && !controller.isClosed) {
           controller.add(photo);
         }
       }
     }
 
+    // One reader, batch after batch: a failure cannot break the chain, or
+    // every later share would wait behind it for good. The delivery is
+    // numbered here, as its batch event arrives (an empty one is none).
+    void enqueue(List<String> batch, {bool leftOver = false}) {
+      // Android's copies each have a path of their own: one already given
+      // to a delivery (the start-up sweep and a late live event) is not
+      // given again. iOS reuses names for new copies: never deduplicated.
+      final paths = _copiesWait
+          ? [for (final p in batch) if (_delivered.add(_normalized(p))) p]
+          : batch;
+      if (paths.isEmpty) return;
+      final delivery = ++_deliveries;
+      if (leftOver) _startupBatches.add(delivery);
+      _deliverySize[delivery] = paths.length;
+      reading = reading
+          .then((_) => emitPaths(paths, delivery))
+          .catchError((Object _) {});
+    }
+
+    _wakeReader = wake;
     controller = StreamController<IntakePhoto>(
       onListen: () async {
-        await emitPaths(await _source.initialImagePaths());
+        final initial = await _source.initialImagePaths();
         if (cancelled) return;
-        liveSub = _source.imagePathBatches().listen(
-            (batch) => unawaited(emitPaths(batch)),
+        enqueue(initial);
+        // Listened for at once, not after the launch share is read: the
+        // plugin drops a share that arrives while nobody listens, and the
+        // launch share may now wait on the pipeline for minutes.
+        liveSub = _source.imagePathBatches().listen(enqueue,
             onError: controller.addError,
-            onDone: controller.close);
+            onDone: () => reading = reading.then((_) => controller.close()));
+        if (_copiesWait) {
+          final left = await _leftOver(initial);
+          if (!cancelled && left.isNotEmpty) enqueue(left, leftOver: true);
+        }
       },
+      onResume: wake,
       onCancel: () async {
+        _wakeReader = null;
         cancelled = true;
+        wake();
         await liveSub?.cancel();
       },
     );
     return controller.stream;
+  }
+
+  /// How long a copy a killed app left unread is still logged at the next
+  /// start (Android); older ones are deleted unread.
+  static const strandedMaxAge = Duration(hours: 24);
+
+  /// A copy younger than this may still be being written for a share
+  /// whose own event delivers it: the start-up sweep leaves it alone.
+  static const strandedMinAge = Duration(seconds: 10);
+
+  /// The share folder's copies an earlier run never read (Android, review
+  /// 2026-11-13): with the C2 backpressure they wait there for minutes,
+  /// and an app killed mid-batch left them for good — full-size originals
+  /// in the cache, never logged, nothing said (MainActivity removes only
+  /// empty folders, and a recreated activity hands no share over again).
+  /// Those shared within [strandedMaxAge] come back, oldest first, to go
+  /// through the same consent gate and pipeline as any share: the user
+  /// shared them to be logged, and a copy still on disk was never read
+  /// (reading deletes it), so nothing is sent twice. Older ones are
+  /// deleted here, unread: logged days late they would surprise, and
+  /// could land on the wrong day. The launch share's own copies, and any
+  /// younger than [strandedMinAge], are left out.
+  Future<List<String>> _leftOver(List<String> launch) async {
+    final String root;
+    try {
+      root = await _sharedFolder!();
+    } catch (_) {
+      return const [];
+    }
+    final skip = {for (final p in launch) _normalized(p)};
+    final now = _clock();
+    final keep = <(DateTime, String)>[];
+    try {
+      await for (final entry
+          in Directory(root).list(recursive: true, followLinks: false)) {
+        if (entry is! File || !isWithinFolder(entry.path, root)) continue;
+        if (skip.contains(_normalized(entry.path))) continue;
+        final DateTime modified;
+        try {
+          modified = await entry.lastModified();
+        } catch (_) {
+          continue;
+        }
+        final age = now.difference(modified);
+        if (age < strandedMinAge) continue;
+        if (age > strandedMaxAge) {
+          await _cleanup(entry.path);
+          continue;
+        }
+        keep.add((modified, entry.path));
+      }
+    } catch (_) {
+      // No folder yet, or it cannot be listed: nothing left over.
+    }
+    keep.sort((a, b) => a.$1.compareTo(b.$1));
+    return [for (final k in keep) k.$2];
+  }
+
+  /// Deletes [path] unread when it is a copy this intake may delete.
+  Future<void> _discard(String path) async {
+    if (await _isShareCopy(path)) await _cleanup(path);
   }
 
   /// Whether [path] is a copy this intake may read and delete.
@@ -211,7 +421,7 @@ class ShareIntake {
     }
   }
 
-  Future<IntakePhoto?> _fromPath(String path) async {
+  Future<IntakePhoto?> _fromPath(String path, int delivery) async {
     // Android (review 171, C5): the plugin used to hand over a path of the
     // sender's making (its file name, climbing out of the cache with
     // '..'; or a share's text when it had no stream), which was read when
@@ -233,7 +443,8 @@ class ShareIntake {
       return IntakePhoto(bytes, '', name,
           capturedAt: capturedAt,
           deliberate: true,
-          capture: captureMetaFor(bytes, name));
+          capture: captureMetaFor(bytes, name),
+          shareDelivery: delivery);
     } finally {
       // Always remove the plugin's container copy — accepted, rejected, or
       // unreadable, it has served its purpose once we've looked at it (the
