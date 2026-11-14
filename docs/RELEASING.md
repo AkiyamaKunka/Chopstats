@@ -1391,7 +1391,7 @@ Data safety are required on closed, open and production tracks. In short:
   not diagnose, treat, cure, or prevent any medical condition") and
   reminds users to consult a healthcare professional. Both full
   descriptions end with the two sentences, and from 1.7.0 Settings › Your
-  Data reminds users in the app ("Chopstats is not medical advice. For
+  Data reminds users in the app ("Chopstats does not give medical advice. For
   decisions about your health or diet, consult a healthcare
   professional.", `settingsHealthReminder`; gated by
   `release_decisions_test.dart`).
@@ -1683,7 +1683,7 @@ starts allowing Android and Google Play):
    Device…** saves the file to a folder you pick"; under Delete
    everything, add that on Android uninstalling removes the API keys too
    (unlike the iOS Keychain), and that Android may offer to keep the
-   app's data. <!-- depends: native (hasFragileUserData, the "keep app data" uninstall option) -->
+   app's data.
 7. **Contact:** keep GitHub issues; add "or the developer email shown on
    Chopstats' Google Play page".
 

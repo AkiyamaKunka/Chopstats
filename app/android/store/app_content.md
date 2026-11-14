@@ -153,7 +153,7 @@ The Health Content and Services policy also wants, for a health app that
 is not a medical device, Google's disclaimer in the store description and
 a reminder to consult a healthcare professional. Both full descriptions
 in `metadata/` end with them. From 1.7.0 the app reminds users too: Settings
-› Your Data ends with "Chopstats is not medical advice. For decisions about
+› Your Data ends with "Chopstats does not give medical advice. For decisions about
 your health or diet, consult a healthcare professional." (`settingsHealthReminder`,
 in English and Chinese).
 <!-- gated: release_decisions_test (settingsHealthReminder in app_en.arb and app_zh.arb) -->
