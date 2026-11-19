@@ -352,6 +352,99 @@ void main() {
     });
   });
 
+  // Owner decision 1 (2026-11-13): the Google Play build ships WITHOUT
+  // broad photo access, and the GitHub APK keeps everything
+  // (docs/RELEASING.md § 6). One switch, --dart-define=CHOPSTATS_CHANNEL=play
+  // (lib/core/app_channel.dart and the manifest overlay it turns on): the
+  // release lane builds the bundle Play gets with it and the sideload APK
+  // without, and checks both before anything is uploaded or released.
+  group('the Play channel in the release lane', () {
+    final workflow = _readRepo('.github/workflows/release.yml');
+
+    /// The step named [name], through to the next step.
+    String step(String name) {
+      final start = workflow.indexOf('      - name: $name\n');
+      expect(start, isNonNegative, reason: name);
+      final next = RegExp(r'\n      - (name|uses):')
+          .firstMatch(workflow.substring(start + 1));
+      return workflow.substring(
+          start, next == null ? workflow.length : start + 1 + next.start);
+    }
+
+    /// Each `flutter build <kind>` command in [text], continuation lines
+    /// included.
+    List<String> builds(String text, String kind) => [
+          for (final m in RegExp('flutter build $kind\\b'
+                  r'(?:[^\\\n]|\\\n)*')
+              .allMatches(text))
+            m.group(0)!,
+        ];
+
+    test('the bundle is built with the define, the GitHub APK without it',
+        () {
+      final build = step('Build the signed app bundle and the arm64 APK');
+      final bundle = builds(build, 'appbundle');
+      final apk = builds(build, 'apk');
+      expect(bundle, hasLength(1));
+      expect(apk, hasLength(1));
+      expect(bundle.single, contains('--dart-define=CHOPSTATS_CHANNEL=play'));
+      expect(apk.single, isNot(contains('CHOPSTATS_CHANNEL')));
+      expect(apk.single, contains('--target-platform android-arm64'));
+      // Different Dart code: each build keeps its own Dart symbols.
+      expect(bundle.single,
+          contains('--split-debug-info=build/android/symbols/play'));
+      expect(apk.single,
+          contains('--split-debug-info=build/android/symbols/github'));
+      // No other build in the lane carries the define.
+      expect('CHOPSTATS_CHANNEL=play'.allMatches(workflow).length,
+          'CHOPSTATS_CHANNEL=play'.allMatches(build).length + 1,
+          reason: 'once in the bundle build, once in the check\'s message');
+    });
+
+    test('the run stops if the bundle asks for a photo permission or the '
+        'APK lost READ_MEDIA_IMAGES, before any upload', () {
+      final check = step('Check the Play bundle asks for no photo permission '
+          'and the APK keeps them');
+      expect(check, contains("if: steps.secrets.outputs.ready == 'true'"));
+      for (final kind in ['aab', 'apk']) {
+        expect(check,
+            contains('in_$kind=\$(scripts/android_permissions.sh "\$$kind")'));
+      }
+      expect(check,
+          contains('aab=app/build/app/outputs/bundle/release/app-release.aab'));
+      expect(check,
+          contains('apk=app/build/app/outputs/flutter-apk/app-release.apk'));
+      expect(
+          check,
+          contains('for p in READ_MEDIA_IMAGES READ_MEDIA_VISUAL_USER_SELECTED '
+              'READ_EXTERNAL_STORAGE; do'));
+      expect(check,
+          contains(r'grep -qx "android.permission.$p" <<<"$in_aab"'));
+      expect(
+          check,
+          contains(r'grep -qx android.permission.READ_MEDIA_IMAGES '
+              r'<<<"$in_apk"'));
+      expect('exit 1'.allMatches(check), hasLength(2));
+      final at = workflow.indexOf(check);
+      expect(at,
+          lessThan(workflow.indexOf('uses: r0adkll/upload-google-play')));
+      expect(
+          at,
+          lessThan(workflow.indexOf(
+              'uses: actions/upload-artifact', workflow.indexOf('  android:'))),
+          reason: 'the GitHub Release takes the APK from that artifact');
+      expect(
+          workflow,
+          contains('releaseFiles: '
+              'app/build/app/outputs/bundle/release/app-release.aab'));
+      // The script it reads them with: aapt2, and a bundle's own manifest.
+      final script = _readRepo('scripts/android_permissions.sh');
+      expect(script, contains('dump permissions'));
+      expect(script,
+          contains('base/manifest/AndroidManifest.xml base/resources.pb'));
+    });
+  });
+
   group('R-F11: neutral English', () {
     // Provider brand names may carry their Chinese name; nothing else may.
     const brandNames = ['深度求索', '通义千问', '豆包', '智谱'];
