@@ -37,6 +37,7 @@ import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:workmanager/workmanager.dart';
 
+import '../../core/app_channel.dart' show photoLibraryInBuild;
 import 'watcher.dart' show clampLookbackDays;
 
 /// Task name WorkManager hands back to the dispatcher.
@@ -151,11 +152,13 @@ bool? debugIsIOSOverride;
 /// Android: only while Watch Camera Roll is on. The daily summary is an OS
 /// alarm there (ui/os_summary.dart) and needs no job, so with the watcher
 /// off a run had nothing to do but boot an engine every 30 minutes, write
-/// its launch stamp and stop. A build without photo watching (a Play
-/// build that hides Watch Camera Roll) passes false for [watcherEnabled]
-/// and never registers the job; the summary is unaffected.
+/// its launch stamp and stop. The Google Play build has no Watch Camera
+/// Roll ([photoLibraryInBuild] false, core/app_channel.dart): never, so it
+/// never registers the job and cancels one a GitHub install left behind;
+/// the summary is unaffected.
 bool backgroundJobWanted({required bool watcherEnabled}) =>
-    (debugIsIOSOverride ?? Platform.isIOS) || watcherEnabled;
+    (debugIsIOSOverride ?? Platform.isIOS) ||
+    (watcherEnabled && photoLibraryInBuild);
 
 /// Integration-contract registration API. Android and iOS; anything else
 /// (desktop test hosts) is a no-op. On iOS the Dart-side frequency is
