@@ -215,7 +215,7 @@ bool _githubTagMatches(String pattern, String tag) {
 /// "Effective date:" line must say the same. Whoever merges a branch that
 /// changes the policy sets both to the merge date (docs/RELEASING.md § 6.8);
 /// this pin can only check that they agree, not that the date is new.
-const kPolicyEffectiveDate = '2026-11-14';
+const kPolicyEffectiveDate = '2026-11-19';
 
 void main() {
   group('R-F8: App Privacy answer B in the manifests', () {
