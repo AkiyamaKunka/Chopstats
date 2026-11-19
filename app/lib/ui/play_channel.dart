@@ -37,7 +37,8 @@ Future<bool> retireWatchCameraRoll(
 
 /// Whether the notice is owed. Never in a build with the photo library.
 bool watchRetiredNoticeOwed(SharedPreferences prefs) =>
-    !photoLibraryInBuild && (prefs.getBool(watchRetiredNoticePrefsKey) ?? false);
+    !photoLibraryInBuild &&
+    (prefs.getBool(watchRetiredNoticePrefsKey) ?? false);
 
 /// The user dismissed the notice: it is not shown again.
 Future<void> watchRetiredNoticeShown(SharedPreferences prefs) =>

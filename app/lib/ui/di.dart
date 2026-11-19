@@ -427,7 +427,10 @@ class AppServices {
     // A shared photo waits for the AI consent (App Store 5.1.2(i)) until
     // the app shell can ask; an allowed recipient passes straight through.
     final shareConsent = SharedPhotoConsentGate(store);
-    final thumbs = MealThumbResolver(dao: dao, library: photoLibrary);
+    // The Play build reads no photo library (core/app_channel.dart): a meal
+    // logged without a thumbnail keeps its placeholder there.
+    final thumbs = MealThumbResolver(
+        dao: dao, library: photoLibraryInBuild ? photoLibrary : null);
     // The photos an iCloud Backup hold kept back (the launch or resume
     // catch-up asked while it held; the pipeline let the live watcher's
     // go): caught up as soon as the offer is answered or dismissed, or the
@@ -479,19 +482,22 @@ class AppServices {
       picker: _ShareIntakePicker(photoLibrary),
       requestPhotoPermission: requestPhotos,
       thumbs: thumbs,
-      coverage: CoverageAuditor(
-          library: photoLibrary,
-          dao: dao,
-          // compute(): the audit hashes up to 2000 originals back-to-back —
-          // synchronous md5 on the UI isolate would freeze scrolling for
-          // the whole sweep.
-          hasher: (bytes) => compute(originalBytesMd5, bytes)),
+      // None in the Play build, which has no Photo Coverage.
+      coverage: photoLibraryInBuild
+          ? CoverageAuditor(
+              library: photoLibrary,
+              dao: dao,
+              // compute(): the audit hashes up to 2000 originals
+              // back-to-back — synchronous md5 on the UI isolate would
+              // freeze scrolling for the whole sweep.
+              hasher: (bytes) => compute(originalBytesMd5, bytes))
+          : null,
       // The audit's log/retry actions share the pipeline's global FIFO —
       // enqueue() chains onto the tail; process() would race it.
       processPhoto: pipeline.enqueue,
       announceOutcome: announce,
       sharedPhotoConsent: shareConsent,
-      photoLibrary: photoLibrary,
+      photoLibrary: photoLibraryInBuild ? photoLibrary : null,
       startClaudeAuth: serverAnalyzer.startClaudeAuth,
       completeClaudeAuth: serverAnalyzer.completeClaudeAuth,
       serverLoginState: serverAnalyzer.serverLoginState,

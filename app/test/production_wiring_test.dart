@@ -1069,6 +1069,23 @@ void main() {
         ),
       );
       expect(body, contains('requestPhotoPermission: requestPhotos,'));
+      // No library for the screens either: no meal thumbnails looked up,
+      // no coverage auditor, no library handed to Settings or Log.
+      expect(
+        body,
+        _wired(
+          r'MealThumbResolver\( dao: dao, '
+          r'library: photoLibraryInBuild \? photoLibrary : null\)',
+        ),
+      );
+      expect(
+        body,
+        _wired(r'coverage: photoLibraryInBuild \? CoverageAuditor\('),
+      );
+      expect(
+        body,
+        _wired(r'photoLibrary: photoLibraryInBuild \? photoLibrary : null,'),
+      );
     });
 
     test('the job is never wanted there, and the launch sync cancels it', () {
