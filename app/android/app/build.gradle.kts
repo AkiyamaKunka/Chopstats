@@ -1,3 +1,4 @@
+import java.util.Base64
 import java.util.Properties
 
 plugins {
@@ -54,6 +55,30 @@ if (!hasUploadKeystore && releaseRequested) {
 val arm64OnlyApk =
     project.findProperty("target-platform")?.toString() == "android-arm64" &&
         project.findProperty("split-per-abi")?.toString()?.toBoolean() != true
+
+// The Google Play build (owner decision 1, 2026-11-13; docs/RELEASING.md
+// § 6): `flutter build appbundle --dart-define=CHOPSTATS_CHANNEL=play`.
+// The ONE switch: the Dart side reads it as lib/core/app_channel.dart, and
+// here it merges src/playChannel/AndroidManifest.xml into every variant,
+// which strips the three photo permissions (the GitHub APK keeps them).
+// Flutter hands its dart-defines to Gradle as the `dart-defines` project
+// property: comma-separated, each entry base64(utf8("KEY=VALUE"))
+// (flutter_tools build_info.dart encodeDartDefines, read by FlutterPlugin.kt).
+// An entry that does not decode is skipped; Flutter itself would fail on it.
+val dartDefines: Map<String, String> =
+    project.findProperty("dart-defines")?.toString().orEmpty()
+        .split(',')
+        .mapNotNull { entry ->
+            runCatching {
+                String(Base64.getDecoder().decode(entry.trim()), Charsets.UTF_8)
+            }.getOrNull()
+        }
+        .mapNotNull { define ->
+            val eq = define.indexOf('=')
+            if (eq > 0) define.substring(0, eq) to define.substring(eq + 1) else null
+        }
+        .toMap()
+val playChannel = dartDefines["CHOPSTATS_CHANNEL"] == "play"
 
 android {
     namespace = "dev.calorietracker.calorie_tracker"
@@ -131,6 +156,22 @@ android {
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
+            )
+        }
+    }
+}
+
+// The Play build's manifest: added to EVERY variant (debug, profile and
+// release alike) as one more manifest above the main one, so its
+// tools:node="remove" entries strip the photo permissions from the main
+// manifest and from every library's (photo_manager declares
+// READ_EXTERNAL_STORAGE). The debug and profile source-set manifests, which
+// carry INTERNET for the Flutter tool, stay as they are.
+androidComponents {
+    onVariants { variant ->
+        if (playChannel) {
+            variant.sources.manifests.addStaticManifestFile(
+                "src/playChannel/AndroidManifest.xml",
             )
         }
     }

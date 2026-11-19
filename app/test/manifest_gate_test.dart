@@ -1297,6 +1297,98 @@ void main() {
     expect(gradle, contains('testImplementation("junit:junit:'));
   });
 
+  // The Google Play build ships WITHOUT broad photo access (owner decision
+  // 1, 2026-11-13); the GitHub APK keeps everything. ONE switch makes it,
+  // `--dart-define=CHOPSTATS_CHANNEL=play`: the Dart side reads it
+  // (lib/core/app_channel.dart), and Gradle merges this overlay into every
+  // variant from the same define. Each entry is a tools:node="remove": it
+  // strips the main manifest's permission and any library's (photo_manager
+  // declares READ_EXTERNAL_STORAGE itself).
+  const playRemoved = {
+    'android.permission.READ_MEDIA_IMAGES',
+    'android.permission.READ_MEDIA_VISUAL_USER_SELECTED',
+    'android.permission.READ_EXTERNAL_STORAGE',
+  };
+
+  test("the Play build's overlay removes exactly the three photo permissions",
+      () {
+    final overlay = File(
+        '${_appRoot().path}/android/app/src/playChannel/AndroidManifest.xml');
+    expect(overlay.existsSync(), isTrue, reason: overlay.path);
+    final xml = overlay.readAsStringSync();
+    expect(_permissions(xml), {for (final p in playRemoved) p: true},
+        reason: 'each a tools:node="remove", and nothing else removed');
+    // Nothing but those entries: no component, no other element. A
+    // permission or component added here would ship in the Play build only.
+    final elements = RegExp(r'<([a-zA-Z-]+)')
+        .allMatches(_uncommented(xml))
+        .map((m) => m.group(1))
+        .toSet();
+    expect(elements, {'manifest', 'uses-permission'});
+    expect(xml, contains('xmlns:tools="http://schemas.android.com/tools"'));
+    // The GitHub APK keeps all three: the main manifest still declares them.
+    expect(_declared(_manifest()), containsAll(playRemoved));
+  });
+
+  test('Gradle merges the overlay into every variant of the Play build, '
+      'from the define Flutter hands it', () {
+    final gradle = _kotlinCode(
+        File('${_appRoot().path}/android/app/build.gradle.kts')
+            .readAsStringSync());
+    // Flutter's dart-defines, decoded: the `dart-defines` property, each
+    // entry base64(utf8("KEY=VALUE")), comma-separated.
+    expect(gradle, contains('project.findProperty("dart-defines")'));
+    expect(gradle, contains(".split(',')"));
+    expect(gradle,
+        contains('String(Base64.getDecoder().decode(entry.trim()), '
+            'Charsets.UTF_8)'));
+    expect(gradle,
+        contains('val playChannel = dartDefines["CHOPSTATS_CHANNEL"] == "play"'));
+    // Every variant (no selector), through the variant API: the debug and
+    // profile source-set manifests (INTERNET) are not replaced.
+    expect(
+        RegExp(r'androidComponents \{ onVariants \{ variant -> '
+                r'if \(playChannel\) \{ variant\.sources\.manifests\.'
+                r'addStaticManifestFile\( "src/playChannel/AndroidManifest\.xml",? \) '
+                r'\} \} \}')
+            .hasMatch(gradle),
+        isTrue,
+        reason: 'the overlay must be added to every variant when playChannel');
+    expect(gradle, isNot(contains('manifest.srcFile')));
+    expect(gradle, isNot(contains('selector()')));
+    for (final variant in ['debug', 'profile']) {
+      expect(
+          _declared(File('${_appRoot().path}/android/app/src/$variant/'
+                  'AndroidManifest.xml')
+              .readAsStringSync()),
+          {'android.permission.INTERNET'},
+          reason: variant);
+    }
+    // The Dart side reads the same define, at compile time.
+    expect(File('${_appRoot().path}/lib/core/app_channel.dart')
+            .readAsStringSync(),
+        contains("String.fromEnvironment('CHOPSTATS_CHANNEL')"));
+  });
+
+  // The decoding above is Flutter's contract, not ours: should a Flutter
+  // upgrade change how dart-defines reach Gradle, the Play build would
+  // silently keep the photo permissions (release.yml's check would stop the
+  // release, late). Read from the SDK pub resolved.
+  test("Flutter still hands dart-defines to Gradle as base64 entries", () {
+    final tools = '${_pluginRoot('flutter')}/../flutter_tools';
+    final buildInfo =
+        File('$tools/lib/src/build_info.dart').readAsStringSync();
+    expect(buildInfo,
+        contains('_defineEncoder = utf8.encoder.fuse(base64.encoder)'));
+    expect(buildInfo,
+        contains("return defines.map(_defineEncoder.convert).join(',');"));
+    expect(buildInfo,
+        contains(r"'-Pdart-defines=${encodeDartDefines(dartDefines)}'"));
+    final plugin = File('$tools/gradle/src/main/kotlin/FlutterPlugin.kt')
+        .readAsStringSync();
+    expect(plugin, contains('project.findProperty("dart-defines")'));
+  });
+
   // The daily summary is armed with the OS on Android too (background
   // lane): flutter_local_notifications' zonedSchedule posts it from
   // ScheduledNotificationReceiver, and alarms die at shutdown, so the boot

@@ -1,0 +1,22 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <!-- The Google Play build (owner decision 1, 2026-11-13): no broad
+         photo access. build.gradle.kts merges this file into EVERY variant
+         (debug, profile, release) of a build made with the dart define
+         CHOPSTATS_CHANNEL=play, and only then; the GitHub APK never sees
+         it. Each entry strips that permission from the merged
+         manifest: the main manifest declares all three, and photo_manager's
+         library manifest READ_EXTERNAL_STORAGE. The app built from the same
+         define never reads the library (lib/core/app_channel.dart): photos
+         come in through the system photo picker and the share sheet, which
+         need no permission. docs/RELEASING.md § 6. -->
+    <uses-permission
+        android:name="android.permission.READ_MEDIA_IMAGES"
+        tools:node="remove"/>
+    <uses-permission
+        android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED"
+        tools:node="remove"/>
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        tools:node="remove"/>
+</manifest>
