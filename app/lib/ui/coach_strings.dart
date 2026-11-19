@@ -8,6 +8,7 @@ library;
 
 import 'dart:ui' show PlatformDispatcher;
 
+import '../core/app_channel.dart' show photoLibraryInBuild;
 import '../l10n/app_localizations.dart';
 import '../l10n/app_localizations_en.dart';
 import '../l10n/app_localizations_zh.dart';
@@ -20,8 +21,11 @@ CoachStrings coachStringsFor(String appLanguage) {
   return CoachStrings(
     title: l.coachTitle,
     titleYesterday: l.coachTitleYesterday,
-    empty: l.coachEmpty,
-    emptyYesterday: l.coachEmptyYesterday,
+    // The Play build logs nothing on its own (core/app_channel.dart): no
+    // "it lands here automatically" there.
+    empty: photoLibraryInBuild ? l.coachEmpty : l.coachEmptyPlay,
+    emptyYesterday:
+        photoLibraryInBuild ? l.coachEmptyYesterday : l.coachEmptyYesterdayPlay,
     underGoal: l.coachUnderGoal,
     underTypical: l.coachUnderTypical,
     partialGoal: l.coachPartialGoal,
@@ -43,7 +47,7 @@ SummaryDayNaming summaryDayNamingFor(String appLanguage) {
   return SummaryDayNaming(
     dayName: (day) => l.coachWeekday(keys[day.weekday - 1]),
     title: l.coachTitleOnDay,
-    empty: l.coachEmptyOnDay,
+    empty: photoLibraryInBuild ? l.coachEmptyOnDay : l.coachEmptyOnDayPlay,
   );
 }
 

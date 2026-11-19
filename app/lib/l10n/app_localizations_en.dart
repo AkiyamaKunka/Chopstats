@@ -3785,4 +3785,58 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get watcherLimitedFooterIos =>
       'Chopstats can\'t see all your photos, so new photos are not logged automatically. Allow access to all photos in the Settings app.';
+
+  @override
+  String get watchRetiredTitle => 'Watch Camera Roll is off';
+
+  @override
+  String get watchRetiredBody =>
+      'Automatic camera-roll logging isn\'t in the Google Play version of Chopstats, so Watch Camera Roll has been turned off. Your meals and settings are all still here.\n\nTo log a meal photo, tap \"Log\" › From recent photos, or share the photo to Chopstats from your gallery app.';
+
+  @override
+  String get diagChannelPlay =>
+      'Build: Google Play. It has no access to your photo library: photos come in only through Android\'s photo picker and photos shared to Chopstats.';
+
+  @override
+  String get diagChannelGithub => 'Build: GitHub (the full app).';
+
+  @override
+  String get todayEmptyHintPlay =>
+      'Tap \"Log\" below to add one from a photo, a description or by hand — or share a food photo to Chopstats from your gallery app.';
+
+  @override
+  String get settingsWelcomeBodyPlay =>
+      'Pick a provider and paste its API key (it saves as you type), then tap Test This Provider.\nThen tap \"Log\" on Today to add a meal from a photo, or share a food photo to Chopstats from your gallery app.';
+
+  @override
+  String aiStopSharingBodyPlay(String provider) {
+    return 'Chopstats stops sending photos and meal text to $provider. Meals already logged stay on this phone. The next time you use AI analysis, Chopstats asks again.';
+  }
+
+  @override
+  String aiStopSharingBodyWithLookupsPlay(String provider) {
+    return 'Chopstats stops sending photos, meal text and restaurant lookups to $provider. Restaurant lookups turn off, and pending lookups are cancelled. Meals already logged stay on this phone. Chopstats asks again before it sends anything to $provider.';
+  }
+
+  @override
+  String errServerFailedFinalPlay(String reason) {
+    return 'Your server could not analyze this photo: $reason. To try again, log the photo again from \"Log\" or share it once more.';
+  }
+
+  @override
+  String errServerRejectedPlay(String code) {
+    return 'Your server rejected this request ($code). Update the app and the server to matching versions, then log the photo again.';
+  }
+
+  @override
+  String get coachEmptyPlay =>
+      'Nothing logged today. Log your next meal from a photo, a description or by hand.';
+
+  @override
+  String get coachEmptyYesterdayPlay =>
+      'Nothing logged yesterday. Log your next meal from a photo, a description or by hand.';
+
+  @override
+  String get coachEmptyOnDayPlay =>
+      'Nothing logged that day. Log your next meal from a photo, a description or by hand.';
 }

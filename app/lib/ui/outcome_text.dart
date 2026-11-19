@@ -8,6 +8,7 @@
 /// not recognise falls back to the raw message rather than a wrong guess.
 library;
 
+import '../core/app_channel.dart' show photoLibraryInBuild;
 import '../core/chain_match.dart' show chainByKey;
 import '../core/coerce.dart' show calendarDaysBetween;
 import '../core/outcome_kind.dart';
@@ -111,8 +112,11 @@ String outcomeBody(AppLocalizations l, PhotoOutcome o,
         AnalysisErrorKind.serverError => o.retryable
             ? l.errServerFailed
             : _serverFinal(l, o.message),
-        AnalysisErrorKind.serverRejected =>
-          l.errServerRejected(rejectionCode(o.message)),
+        // The Play build has no Photo Coverage to retry from: the photo
+        // is logged again instead (core/app_channel.dart).
+        AnalysisErrorKind.serverRejected => photoLibraryInBuild
+            ? l.errServerRejected(rejectionCode(o.message))
+            : l.errServerRejectedPlay(rejectionCode(o.message)),
         AnalysisErrorKind.leftoverUnsure => l.errLeftoverUnsure,
         AnalysisErrorKind.none || AnalysisErrorKind.unknown => o.message,
       };
@@ -262,7 +266,11 @@ String _serverFinal(AppLocalizations l, String message) {
   if (reason != null && reason.toLowerCase().contains('credit')) {
     return l.errServerModelRefused(reason);
   }
-  return l.errServerFailedFinal(serverReasonText(l, message));
+  final why = serverReasonText(l, message);
+  // The Play build has no Photo Coverage to retry from.
+  return photoLibraryInBuild
+      ? l.errServerFailedFinal(why)
+      : l.errServerFailedFinalPlay(why);
 }
 
 /// [message] without its trailing periods, to sit inside parentheses.

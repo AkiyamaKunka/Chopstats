@@ -5,6 +5,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:calorie_tracker/core/app_channel.dart';
 import 'package:calorie_tracker/core/contracts.dart';
 import 'package:calorie_tracker/core/server_transport.dart';
 import 'package:calorie_tracker/l10n/app_localizations.dart';
@@ -1075,6 +1076,24 @@ void main() {
       expect(system.picks, [1]);
       expect(listing.loadedOriginals, isEmpty,
           reason: 'the picked photo, not a grid photo');
+      expect(find.byKey(const Key('leftoverResultLine')), findsOneWidget);
+    });
+
+    // The Google Play build (core/app_channel.dart): the picker is the one
+    // way in, broad access is never even read, and a grant left by the
+    // GitHub APK does not bring the grid back.
+    testWidgets('the Google Play build: the picker, never the grid, with a '
+        'full grant left from the GitHub APK', (tester) async {
+      debugAppChannelOverride = AppChannel.play;
+      addTearDown(() => debugAppChannelOverride = null);
+      dao.put(_meal(1, '13:34', 965, hash: 'orig-hash'));
+      final system = FakeSystemPicker(broad: true, replies: [picked()]);
+      await pumpPicker(tester, system);
+      await chooseMeal(tester);
+      expect(system.broadAsks, 0, reason: 'not even read in this build');
+      expect(system.picks, [1]);
+      expect(find.byKey(const Key('leftoverPhoto-lp1')), findsNothing);
+      expectNoLibraryAsked();
       expect(find.byKey(const Key('leftoverResultLine')), findsOneWidget);
     });
 

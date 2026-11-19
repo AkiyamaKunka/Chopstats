@@ -172,10 +172,17 @@ final _placeholderRe = RegExp(r'\{(\w+)\}');
 /// background lane's block (summaryBatteryRestrictedHint,
 /// notificationsAllowAction, notificationMealChannelName/Description,
 /// watcherAllowAllPhotos, coachWeekday, coachTitleOnDay, coachEmptyOnDay,
-/// diagBgRunNotFinished, watcherLimitedFooterIos); and the Android push's
+/// diagBgRunNotFinished, watcherLimitedFooterIos); the Android push's
 /// ui lane: the discard-changes question (discardChangesTitle, Body, Keep,
-/// Discard).
-const _keyCount = 931;
+/// Discard); and the Google Play build's block, 13: its one notice
+/// (watchRetiredTitle, watchRetiredBody), Diagnostics' build line
+/// (diagChannelPlay, diagChannelGithub), and the Play variants of the copy
+/// that names Watch Camera Roll or Photo Coverage (todayEmptyHintPlay,
+/// settingsWelcomeBodyPlay, aiStopSharingBodyPlay,
+/// aiStopSharingBodyWithLookupsPlay, errServerFailedFinalPlay,
+/// errServerRejectedPlay, coachEmptyPlay, coachEmptyYesterdayPlay,
+/// coachEmptyOnDayPlay).
+const _keyCount = 944;
 
 Directory _appRoot() {
   var dir = Directory.current;

@@ -13,8 +13,11 @@
 /// one level down. Shared constants for both pages live here.
 library;
 
+import 'dart:io' show Platform;
+
 import 'package:flutter/material.dart';
 
+import '../../../core/app_channel.dart' show appChannel;
 import '../../../core/contracts.dart';
 import '../../ai_consent.dart';
 import '../../diagnostics.dart';
@@ -317,6 +320,9 @@ class _ProviderSettingsPageState extends State<ProviderSettingsPage> {
                       analyzer: widget.analyzer,
                       l10n: context.l10n,
                     ),
+                    // Which Android build this is: the GitHub APK or the
+                    // Google Play one (core/app_channel.dart).
+                    channel: Platform.isAndroid ? appChannel : null,
                     loadRestaurantLookups:
                         widget.restaurantAssist?.lookupsDiagnostics,
                     loadConfidence: widget.dao == null
