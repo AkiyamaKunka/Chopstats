@@ -197,6 +197,15 @@ Set<String> _declared(String manifest) => {
         if (!e.value) e.key,
     };
 
+/// What the Google Play build's manifest overlay removes
+/// (android/app/src/playChannel/AndroidManifest.xml): the three photo
+/// permissions. The GitHub APK keeps them.
+const _playRemoved = {
+  'android.permission.READ_MEDIA_IMAGES',
+  'android.permission.READ_MEDIA_VISUAL_USER_SELECTED',
+  'android.permission.READ_EXTERNAL_STORAGE',
+};
+
 /// Release-manifest drift gate.
 ///
 /// Flutter auto-injects INTERNET into the DEBUG and PROFILE manifests (for
@@ -1266,24 +1275,56 @@ void main() {
     _expectJvmTests(['openFirst']);
   });
 
-  // The JVM unit tests run on CI (mobile-build.yml), and the built APK's
+  // The JVM unit tests run on CI (mobile-build.yml), and the built APKs'
   // permissions are checked there against an allowlist: the merged
   // manifest, which this file cannot see, is what Play reviews. Every
   // permission the main manifest declares must be on that list, so a new
-  // one needs a deliberate edit in both places.
+  // one needs a deliberate edit in both places. The Play build's APK is
+  // checked against the same list without the three its overlay removes.
   test('CI runs the JVM unit tests and checks the APK permissions', () {
     final root = _appRoot().parent.path;
     final workflow =
         File('$root/.github/workflows/mobile-build.yml').readAsStringSync();
     expect(workflow, contains('./gradlew :app:testDebugUnitTest'));
     expect(workflow, contains('flutter build apk --release'));
-    expect(workflow, contains('dump permissions'));
+    // aapt2 reads each APK through the one script (release.yml uses it too).
+    final script = File('$root/scripts/android_permissions.sh');
+    expect(script.existsSync(), isTrue, reason: script.path);
+    expect(script.readAsStringSync(), contains('dump permissions'));
+    expect(workflow, contains('got=\$(scripts/android_permissions.sh "\$2")'));
+    expect(
+        workflow,
+        contains('flutter build apk --release --target-platform android-arm64 '
+            '--dart-define=CHOPSTATS_CHANNEL=play'));
+    expect(
+        workflow,
+        contains('check app-release.apk "\$RUNNER_TEMP/app-github.apk" '
+            '"\$allowed"'));
+    expect(
+        workflow,
+        contains('check "the Play build\'s APK" "\$RUNNER_TEMP/app-play.apk" '
+            '"\$play_allowed"'));
+    final lists = {
+      for (final m in RegExp(
+              r"(\w+)=\$\(sed .*?<<'LIST'.*?\n(.*?)\n\s*LIST\n",
+              dotAll: true)
+          .allMatches(workflow))
+        m.group(1)!: {
+          for (final line in m.group(2)!.split('\n'))
+            if (line.trim().isNotEmpty) line.trim(),
+        },
+    };
+    expect(lists.keys, {'allowed', 'play_removed'});
+    expect(lists['play_removed'], _playRemoved,
+        reason: 'the Play build is checked without exactly what its overlay '
+            'removes');
     final allowed = RegExp(r'^\s+(android\.permission\.[A-Z_]+|'
             r'dev\.calorietracker\.calorie_tracker\.[A-Z_]+)\s*$',
             multiLine: true)
         .allMatches(workflow)
         .map((m) => m.group(1)!)
         .toSet();
+    expect(lists['allowed'], allowed);
     expect(allowed, containsAll(_declared(_manifest())));
     for (final banned in [
       'android.permission.FOREGROUND_SERVICE',
@@ -1304,19 +1345,13 @@ void main() {
   // variant from the same define. Each entry is a tools:node="remove": it
   // strips the main manifest's permission and any library's (photo_manager
   // declares READ_EXTERNAL_STORAGE itself).
-  const playRemoved = {
-    'android.permission.READ_MEDIA_IMAGES',
-    'android.permission.READ_MEDIA_VISUAL_USER_SELECTED',
-    'android.permission.READ_EXTERNAL_STORAGE',
-  };
-
   test("the Play build's overlay removes exactly the three photo permissions",
       () {
     final overlay = File(
         '${_appRoot().path}/android/app/src/playChannel/AndroidManifest.xml');
     expect(overlay.existsSync(), isTrue, reason: overlay.path);
     final xml = overlay.readAsStringSync();
-    expect(_permissions(xml), {for (final p in playRemoved) p: true},
+    expect(_permissions(xml), {for (final p in _playRemoved) p: true},
         reason: 'each a tools:node="remove", and nothing else removed');
     // Nothing but those entries: no component, no other element. A
     // permission or component added here would ship in the Play build only.
@@ -1327,7 +1362,7 @@ void main() {
     expect(elements, {'manifest', 'uses-permission'});
     expect(xml, contains('xmlns:tools="http://schemas.android.com/tools"'));
     // The GitHub APK keeps all three: the main manifest still declares them.
-    expect(_declared(_manifest()), containsAll(playRemoved));
+    expect(_declared(_manifest()), containsAll(_playRemoved));
   });
 
   test('Gradle merges the overlay into every variant of the Play build, '
