@@ -181,8 +181,9 @@ final _placeholderRe = RegExp(r'\{(\w+)\}');
 /// settingsWelcomeBodyPlay, aiStopSharingBodyPlay,
 /// aiStopSharingBodyWithLookupsPlay, errServerFailedFinalPlay,
 /// errServerRejectedPlay, coachEmptyPlay, coachEmptyYesterdayPlay,
-/// coachEmptyOnDayPlay).
-const _keyCount = 951;
+/// coachEmptyOnDayPlay); and the Android lows lane's
+/// outcomeShareFixAddressMsg (a share refused for the server address).
+const _keyCount = 952;
 
 Directory _appRoot() {
   var dir = Directory.current;

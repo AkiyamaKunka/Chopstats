@@ -2128,6 +2128,11 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
+  String outcomeShareFixAddressMsg(String reason) {
+    return '分享的照片没有分析。$reason改好后请重新分享。';
+  }
+
+  @override
   String get reasonRateLimited => '服务正在限流';
 
   @override

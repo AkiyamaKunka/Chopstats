@@ -3,6 +3,8 @@
 // pin it); Chinese must never leak English for a recognised kind; anything
 // unrecognised falls back to the raw line rather than a wrong guess.
 import 'package:calorie_tracker/core/outcome_kind.dart';
+import 'package:calorie_tracker/core/server_transport.dart'
+    show kServerNeedsHttpsMessage;
 import 'package:calorie_tracker/l10n/app_localizations.dart';
 import 'package:calorie_tracker/l10n/app_localizations_en.dart';
 import 'package:calorie_tracker/l10n/app_localizations_zh.dart';
@@ -342,6 +344,55 @@ void main() {
       expect(outcomeSnackbar(en, raw),
           'The shared photo was not analyzed this time (Odd failure) — share '
           'it again later.');
+    });
+
+    // Android QA Q5: a share the app refused because the saved server
+    // address is http:// said "share it again later", but every later
+    // share fails the same way until the address changes. Not retryable,
+    // as the add flow's dialog already treats it: what to change, then
+    // share again.
+    test('a share refused for the server address says what to change, '
+        'never "later"', () {
+      PhotoOutcome shared(String message) => PhotoOutcome(
+          PhotoOutcomeKind.failed, message,
+          retryable: true,
+          errorKind: classifyAnalysisError(message),
+          detail: message,
+          shared: true);
+      final http = shared(kServerNeedsHttpsMessage);
+      expect(http.errorKind, AnalysisErrorKind.noServerKey);
+      expect(
+          outcomeSnackbar(en, http),
+          'The shared photo was not analyzed. Your server address does not '
+          'start with https:// — Chopstats sends nothing to it. Change it to '
+          'an https:// address in Settings. Then share it again.');
+      expect(
+          outcomeSnackbar(zh, http),
+          '分享的照片没有分析。你的服务器地址不是以 https:// 开头的 —— 筷拍不会向它'
+          '发送任何内容。请在设置里把它改成 https:// 地址。改好后请重新分享。');
+      // An address that is not a web address at all: the same, with its
+      // own line.
+      final typo = shared('Check your server address in Settings — it is '
+          'not a valid web address.');
+      expect(typo.errorKind, AnalysisErrorKind.noServerKey);
+      expect(outcomeSnackbar(en, typo),
+          'The shared photo was not analyzed. ${en.errBadServerAddress} '
+          'Then share it again.');
+      expect(outcomeSnackbar(zh, typo),
+          '分享的照片没有分析。${zh.errBadServerAddress}改好后请重新分享。');
+      for (final l in [en, zh]) {
+        for (final o in [http, typo]) {
+          final line = outcomeSnackbar(l, o);
+          expect(line, isNot(contains('later')));
+          expect(line, isNot(contains('稍后')));
+        }
+      }
+      // A missing address or key keeps the re-share line it had.
+      final unset = shared(
+          'No server address or upload key is set — add them in Settings.');
+      expect(unset.errorKind, AnalysisErrorKind.noServerKey);
+      expect(outcomeSnackbar(en, unset),
+          en.outcomeShareRetryMsg(en.reasonNoServerKey));
     });
 
     test('a PICKED photo whose add flow was closed asks for a re-pick, not '

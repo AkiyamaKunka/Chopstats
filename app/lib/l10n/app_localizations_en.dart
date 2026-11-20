@@ -2312,6 +2312,11 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String outcomeShareFixAddressMsg(String reason) {
+    return 'The shared photo was not analyzed. $reason Then share it again.';
+  }
+
+  @override
   String get reasonRateLimited => 'the provider is rate-limiting';
 
   @override

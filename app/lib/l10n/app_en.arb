@@ -1838,6 +1838,15 @@
       }
     }
   },
+  "outcomeShareFixAddressMsg": "The shared photo was not analyzed. {reason} Then share it again.",
+  "@outcomeShareFixAddressMsg": {
+    "description": "Snackbar for a photo shared into the app that was not sent because the saved server address cannot be used: it is not https:// (errServerNeedsHttps) or not a valid web address (errBadServerAddress). {reason} is that full line, which ends by saying what to change in Settings. Sharing again fails the same way until the address is changed, so unlike outcomeShareRetryMsg it never says 'later'; the shared copy is gone, so the photo has to be shared again.",
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
   "reasonRateLimited": "the provider is rate-limiting",
   "reasonQuotaPaused": "the daily quota was hit",
   "reasonBilling": "the provider account is out of balance — top it up first",

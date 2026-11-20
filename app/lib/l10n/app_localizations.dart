@@ -3582,6 +3582,12 @@ abstract class AppLocalizations {
   /// **'This photo was not analyzed ({reason}) — pick it again later.'**
   String outcomePickRetryMsg(String reason);
 
+  /// Snackbar for a photo shared into the app that was not sent because the saved server address cannot be used: it is not https:// (errServerNeedsHttps) or not a valid web address (errBadServerAddress). {reason} is that full line, which ends by saying what to change in Settings. Sharing again fails the same way until the address is changed, so unlike outcomeShareRetryMsg it never says 'later'; the shared copy is gone, so the photo has to be shared again.
+  ///
+  /// In en, this message translates to:
+  /// **'The shared photo was not analyzed. {reason} Then share it again.'**
+  String outcomeShareFixAddressMsg(String reason);
+
   /// No description provided for @reasonRateLimited.
   ///
   /// In en, this message translates to:

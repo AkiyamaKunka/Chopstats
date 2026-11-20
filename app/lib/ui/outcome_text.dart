@@ -136,8 +136,18 @@ String outcomeBody(AppLocalizations l, PhotoOutcome o,
 /// retry" would be untrue (2026-10-12). A [PhotoOutcome.picked] one (the
 /// add flow closed mid-analysis) asks for a re-pick, and the refusals
 /// above are said for it too.
+///
+/// A share refused because the saved server address cannot be used (not
+/// https://, or not a web address: [isUnusableServerAddress]) is not
+/// "share it again later": a later share fails the same way until the
+/// address is changed (Android QA Q5). It says what to change, then to
+/// share again, as the add flow's dialog offers no Retry for it.
 String outcomeSnackbar(AppLocalizations l, PhotoOutcome o) {
   if (o.shared && o.kind == PhotoOutcomeKind.failed && o.retryable) {
+    if (o.errorKind == AnalysisErrorKind.noServerKey &&
+        isUnusableServerAddress(o.message)) {
+      return l.outcomeShareFixAddressMsg(outcomeBody(l, o));
+    }
     return l.outcomeShareRetryMsg(retryReason(l, o) ?? _bare(o.message));
   }
   // The same for a photo picked in the add flow and backed out of

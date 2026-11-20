@@ -633,6 +633,7 @@
       }
     }
   },
+  "outcomeShareFixAddressMsg": "分享的照片没有分析。{reason}改好后请重新分享。",
   "outcomePickRetryMsg": "这张照片没能分析（{reason}）—— 请稍后重新选择它。",
   "@outcomePickRetryMsg": {
     "placeholders": {
