@@ -22,8 +22,9 @@
 /// instead: a line in the consent text and a warning under the address.
 ///
 /// The upload key is bound the same way to the host it was saved for
-/// ([serverKeyHostOf]): a request carrying it to any other host never
-/// reaches the network (services/server_http_client.dart).
+/// ([serverKeyHostOf]): a request carrying its text to any other host never
+/// reaches the network (services/server_http_client.dart), and the server
+/// page's key field shows it only at that host ([serverKeyShownAt]).
 library;
 
 import 'package:flutter/foundation.dart' show kDebugMode, visibleForTesting;
@@ -114,6 +115,16 @@ bool serverKeyForOtherHost(String? keyHost, String url) {
   final host = serverKeyHostOf(url);
   return host != null && keyHost != host;
 }
+
+/// Whether the upload key bound to [keyHost] is the server address [url]'s
+/// to show and to edit (the server page's key field): bound to its host,
+/// or to none yet (a key typed before any address; it binds to the first
+/// one saved). Not while it is bound to another host, nor to any host while
+/// [url] names none ('' or 'https://'): the text of a key saved for one
+/// host is never in the field to be edited into another's key (review of
+/// PR 74).
+bool serverKeyShownAt(String? keyHost, String url) =>
+    keyHost == null || keyHost == serverKeyHostOf(url);
 
 /// What a send whose upload key was saved for another server address
 /// reports, in English like the analyzers' other lines. It names the

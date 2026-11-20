@@ -131,7 +131,7 @@ class ServerLookupClient implements LookupClient {
     LookupBudget? budget,
     this.perCallDeadline = kServerLookupHttpDeadline,
   })  : _client = HttpsOnlyServerClient.wrap(client,
-            keyHost: () => _settings.serverKeyHost),
+            keyFor: _settings.serverKeyFor),
         _budget = budget ?? const UnlimitedLookupBudget();
 
   final AppSettings _settings;

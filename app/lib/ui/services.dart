@@ -119,6 +119,30 @@ abstract class SettingsStore {
   /// (core/server_transport.dart serverKeyForOtherHost).
   String? get serverKeyHost;
 
+  /// The own server's upload key as its key field shows it at the saved
+  /// address (AppSettings.serverKeyForAddress): the key while it is bound
+  /// to the address's host, or to none yet; '' while it is bound to another
+  /// host, or to one while the address names none.
+  String get serverKeyForAddress;
+
+  /// The text of the upload key that may go to [host] (AppSettings
+  /// .serverKeyFor), or null: what HttpsOnlyServerClient checks each
+  /// X-API-Key against.
+  String? serverKeyFor(String host);
+
+  /// The server page's key field, edited (AppSettings
+  /// .setServerKeyFromField): what it holds is the key for the address it
+  /// was filled at, [filledAt]. False, and nothing written, when the saved
+  /// address has moved to another host since.
+  Future<bool> setServerKeyFromField(String value,
+      {required String filledAt});
+
+  /// Fires on every change to these settings (the store notifies on each
+  /// write). The server page refreshes its fields from it: a setup link
+  /// confirmed with the page open replaced the address and the key under
+  /// fields that still showed the previous server's (review of PR 74).
+  Listenable get changes;
+
   /// Settings › Your own server › "Use this key for …": the saved
   /// upload key is the current address's too (AppSettings
   /// .bindServerKeyToAddress). Only on the user's tap.

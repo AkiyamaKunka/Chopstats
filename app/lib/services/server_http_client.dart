@@ -11,13 +11,18 @@
 /// what the user sees.
 ///
 /// It is the choke point for the upload key too: a request carrying
-/// X-API-Key goes only to the host the key was saved for
-/// (AppSettings.serverKeyHost, read at each request). Each request reads
-/// the saved address and key as it is built, so with the address changed
-/// before the key (the address field saves as the key field is tapped,
-/// and the Restaurant nutrition group asks the new address what it
-/// supports at once) the previous server's key went to the new host
-/// (review of PR 74). Now it never does, whichever path sends.
+/// X-API-Key goes only to the host the key is saved for, and only with
+/// that key's text as it is saved at the moment of the request
+/// (AppSettings.serverKeyFor). Each request reads the saved address and key
+/// as it is built, so with the address changed before the key (the address
+/// field saves as the key field is tapped, and the Restaurant nutrition
+/// group asks the new address what it supports at once) the previous
+/// server's key went to the new host (review of PR 74). Checking the host
+/// alone still let a request built with the previous key, whose address was
+/// read after a wait (a leftover estimate decoding, or waiting out a busy
+/// server, as a setup link was confirmed), go to the new host once the new
+/// key was bound there. The text of a key saved for one host now goes to no
+/// other, whichever path sends and whenever it read the key.
 ///
 /// It also turns redirects off. dart:io follows a 3xx by itself and
 /// copies every header but Authorization and Cookie onto the next
@@ -52,22 +57,23 @@ class ServerKeyOtherHostException extends http.ClientException {
 }
 
 class HttpsOnlyServerClient extends http.BaseClient {
-  HttpsOnlyServerClient(this._inner, {required this.keyHost});
+  HttpsOnlyServerClient(this._inner, {required this.keyFor});
 
   /// [client] (a new http.Client when null) behind the https rule and the
   /// key's host; one that already is an [HttpsOnlyServerClient] as it is.
   static HttpsOnlyServerClient wrap(http.Client? client,
-          {required String? Function() keyHost}) =>
+          {required String? Function(String host) keyFor}) =>
       client is HttpsOnlyServerClient
           ? client
-          : HttpsOnlyServerClient(client ?? http.Client(), keyHost: keyHost);
+          : HttpsOnlyServerClient(client ?? http.Client(), keyFor: keyFor);
 
   final http.Client _inner;
 
-  /// Reads the host the upload key was saved for (AppSettings
-  /// .serverKeyHost; null: no key, or not bound yet), at each request.
-  /// Required, so no call site can leave the key unbound.
-  final String? Function() keyHost;
+  /// Reads the text of the upload key that may go to a host (AppSettings
+  /// .serverKeyFor: the saved key while it is bound to that host; null when
+  /// none may: no key, another host's, or one not bound yet), at each
+  /// request. Required, so no call site can leave the key unchecked.
+  final String? Function(String host) keyFor;
 
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) async {
@@ -76,9 +82,13 @@ class HttpsOnlyServerClient extends http.BaseClient {
     }
     // Any spelling of the header (package:http's own map ignores case; a
     // request type with another map might not).
-    if (request.headers.keys.any((k) => k.toLowerCase() == 'x-api-key')) {
-      final bound = keyHost();
-      if (bound == null || bound != request.url.host.toLowerCase()) {
+    final sent = [
+      for (final MapEntry(:key, :value) in request.headers.entries)
+        if (key.toLowerCase() == 'x-api-key') value,
+    ];
+    if (sent.isNotEmpty) {
+      final allowed = keyFor(request.url.host.toLowerCase());
+      if (allowed == null || sent.any((v) => v != allowed)) {
         throw ServerKeyOtherHostException(request.url);
       }
     }

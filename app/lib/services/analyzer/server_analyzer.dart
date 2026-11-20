@@ -31,7 +31,7 @@ class ServerAnalyzer extends _HttpVisionAnalyzer {
       {http.Client? client, super.sleep, super.normalizer})
       : super(
             client: HttpsOnlyServerClient.wrap(client,
-                keyHost: () => settings.serverKeyHost));
+                keyFor: settings.serverKeyFor));
 
   @override
   String? get apiKey => settings.serverApiKey;

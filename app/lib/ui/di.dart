@@ -10,7 +10,8 @@ import 'dart:typed_data';
 import 'dart:ui' show PlatformDispatcher;
 
 import 'package:app_links/app_links.dart';
-import 'package:flutter/foundation.dart' show compute, visibleForTesting;
+import 'package:flutter/foundation.dart'
+    show Listenable, compute, visibleForTesting;
 
 import 'package:path_provider/path_provider.dart' show getTemporaryDirectory;
 import 'package:permission_handler/permission_handler.dart';
@@ -721,6 +722,16 @@ class _AppSettingsStore implements SettingsStore {
   String get serverBaseUrl => _s.serverBaseUrl;
   @override
   String? get serverKeyHost => _s.serverKeyHost;
+  @override
+  String get serverKeyForAddress => _s.serverKeyForAddress ?? '';
+  @override
+  String? serverKeyFor(String host) => _s.serverKeyFor(host);
+  @override
+  Future<bool> setServerKeyFromField(String value,
+          {required String filledAt}) =>
+      _s.setServerKeyFromField(value, filledAt: filledAt);
+  @override
+  Listenable get changes => _s;
   @override
   Future<void> bindServerKeyToAddress() => _s.bindServerKeyToAddress();
   @override

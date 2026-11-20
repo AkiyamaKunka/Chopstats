@@ -13,12 +13,17 @@
 /// address is saved and the footer says it travels unencrypted.
 ///
 /// The upload key is sent only to the host it was saved for
-/// (services/server_http_client.dart). With the address changed to another
-/// host and the key left as it was, the key field is empty and says which
-/// host the key was saved for, and one tap makes it the new address's key
-/// (the same server at a new IP, domain or port). What the user types or
-/// pastes into the empty field is the new address's key, alone: the
-/// previous server's key is never in the field to be edited in place.
+/// (services/server_http_client.dart). The key field shows the saved key
+/// only at that host (SettingsStore.serverKeyForAddress): at an address on
+/// another host, or one naming none ('' or 'https://'), it is empty and
+/// says which host the key was saved for, and at another host one tap makes
+/// it the new address's key (the same server at a new IP, domain or port).
+/// What the user types or pastes into the empty field is the key for the
+/// address it was entered at, alone (SettingsStore.setServerKeyFromField):
+/// the previous server's key is never in the field to be edited in place,
+/// and an edit of a field filled at another host than the saved address's
+/// is refused. A change from elsewhere while the page is open (a setup link
+/// confirmed over it) refills both fields.
 library;
 
 import 'dart:async';
@@ -70,6 +75,17 @@ class _SubscriptionProviderPageState
   late final TextEditingController _serverUrlController;
   final FocusNode _serverUrlFocus = FocusNode();
 
+  /// The saved address the key field was last filled at, or found to show
+  /// what the store does at ([_syncKeyField]): what an edit of the field
+  /// is the key for. The store refuses the edit once the saved address is
+  /// on another host (SettingsStore.setServerKeyFromField).
+  late String _keyFilledAt;
+
+  /// The saved address as this page last saw it. Any other one in the
+  /// store was saved from elsewhere while the page is open (a setup link
+  /// confirmed over it): the address field shows it ([_onSettingsChanged]).
+  late String _addressSeen;
+
   /// The address field holds an edit that is not saved yet.
   bool _serverUrlEdited = false;
 
@@ -80,9 +96,7 @@ class _SubscriptionProviderPageState
 
   /// The key field holds an edit of the user's (typed, pasted, deleted)
   /// since the page last filled it ([_fillKeyField]). Done and a tap
-  /// outside save the field only then: the field left empty because the
-  /// saved key is another host's ([_keyFieldText]), saved as it is, would
-  /// delete that key, its host and the row that makes it this address's.
+  /// outside save the field again only then.
   bool _keyEdited = false;
   bool _authBusy = false;
 
@@ -94,38 +108,86 @@ class _SubscriptionProviderPageState
 
   bool get _planActive => widget.settings.provider == 'server';
 
-  /// What the key field shows: the saved upload key while it is this
-  /// address's, and nothing while it was saved for another host. In the
-  /// field, the obscured key was edited in place: a paste at the cursor
-  /// (iOS's Paste in the focused field, a keyboard's clipboard chip,
-  /// Android's long-press past the dots) or one backspace made a new key
-  /// out of the previous server's, bound to the address above and sent
-  /// there (review of PR 74). The line under the field names the host it
-  /// was saved for; the row under that makes it this address's.
-  String get _keyFieldText =>
-      _planActive && !serverKeyForOtherAddress(widget.settings)
-          ? widget.settings.apiKey
-          : '';
-
-  /// Fills the key field from the store ([_keyFieldText]), the caret at
-  /// the end; no edit of the user's until the next keystroke.
+  /// Fills the key field with what the store shows at the saved address
+  /// (SettingsStore.serverKeyForAddress: the saved key at its own host,
+  /// nothing at any other or at an address naming none), the caret at the
+  /// end; no edit of the user's until the next keystroke. In the field, the
+  /// obscured key was edited in place: a paste at the cursor (iOS's Paste
+  /// in the focused field, a keyboard's clipboard chip, Android's
+  /// long-press past the dots) or one backspace made a new key out of the
+  /// previous server's, bound to the address above and sent there (review
+  /// of PR 74). The line under the field names the host it was saved for;
+  /// the row under that makes it this address's.
   void _fillKeyField() {
-    final text = _keyFieldText;
+    final settings = widget.settings;
+    final text = settings.serverKeyForAddress;
     _keyController.value = TextEditingValue(
         text: text, selection: TextSelection.collapsed(offset: text.length));
+    _keyFilledAt = settings.serverBaseUrl;
     _keyEdited = false;
+  }
+
+  /// The key field after the store changed: filled again ([_fillKeyField])
+  /// unless it already shows what the store does at the saved address,
+  /// spaces aside (the user's own edit, which the store took as it was
+  /// made). So an address on another host, or naming none, empties a field
+  /// that held the previous host's key, the key's own host puts it back,
+  /// and a setup link puts its key in. Run straight after each change the
+  /// page makes, and at each one the store reports.
+  void _syncKeyField() {
+    final settings = widget.settings;
+    if (_keyController.text.trim() == settings.serverKeyForAddress) {
+      _keyFilledAt = settings.serverBaseUrl;
+    } else {
+      _fillKeyField();
+    }
+  }
+
+  /// The store changed: by this page (its own saves read the store back as
+  /// they make them) or by something else while the page is open. A setup
+  /// link confirmed over the page replaces the address and the key: both
+  /// fields show them, so the key field never keeps the previous server's
+  /// key at the link's address, and the address field drops an edit not
+  /// saved yet, which leaving the page would have saved over the link's
+  /// address.
+  void _onSettingsChanged() {
+    if (!mounted) return;
+    final address = widget.settings.serverBaseUrl;
+    setState(() {
+      if (address != _addressSeen) {
+        _addressSeen = address;
+        _serverUrlEdited = false;
+        _refusedEdit = false;
+        if (_serverUrlController.text != address) {
+          _serverUrlController.text = address;
+        }
+      }
+      _syncKeyField();
+    });
   }
 
   @override
   void initState() {
     super.initState();
-    _keyController = TextEditingController(text: _keyFieldText);
-    _serverUrlController =
-        TextEditingController(text: widget.settings.serverBaseUrl);
+    final settings = widget.settings;
+    _keyController = TextEditingController();
+    _fillKeyField();
+    _serverUrlController = TextEditingController(text: settings.serverBaseUrl);
+    _addressSeen = settings.serverBaseUrl;
+    settings.changes.addListener(_onSettingsChanged);
     _serverUrlFocus.addListener(() {
       if (!_serverUrlFocus.hasFocus && _serverUrlEdited) _saveServerUrl();
     });
     _refreshLoginState();
+  }
+
+  @override
+  void didUpdateWidget(SubscriptionProviderPage old) {
+    super.didUpdateWidget(old);
+    if (old.settings.changes != widget.settings.changes) {
+      old.settings.changes.removeListener(_onSettingsChanged);
+      widget.settings.changes.addListener(_onSettingsChanged);
+    }
   }
 
   /// Saves what the address field holds as the server's address — only
@@ -142,10 +204,12 @@ class _SubscriptionProviderPageState
   /// stays in the field under "Needs https://", and the saved address is
   /// left as it was. False = refused.
   ///
-  /// An address on another host than the one the upload key was saved for
-  /// empties the key field, and the key's own host puts the key back
-  /// ([_keyFieldText]): this save runs as the key field is tapped, so the
-  /// field is emptied before anything can be typed or pasted into it.
+  /// The key field then shows what the store does at the new address
+  /// ([_syncKeyField]): an address on another host than the one the upload
+  /// key was saved for, or one naming no host, empties it, and the key's
+  /// own host puts the key back. This save runs as the key field is
+  /// tapped, so the field is emptied before anything can be typed or
+  /// pasted into it.
   bool _saveServerUrl() {
     final url = _serverUrlController.text.trim();
     if (serverAddressRefused(url)) {
@@ -154,15 +218,21 @@ class _SubscriptionProviderPageState
     }
     _serverUrlEdited = false;
     final settings = widget.settings;
-    final keyWasForOther = serverKeyForOtherAddress(settings);
+    // This page's own save, not one from elsewhere: the field keeps what
+    // was typed, should the store report it within the call
+    // ([_onSettingsChanged]).
+    _addressSeen = url;
     settings.update(serverBaseUrl: url);
+    if (!mounted) return true;
     // Read straight after the call, not after it completes: the store
     // takes the address (and binds a key saved before any address to it)
-    // before its first await (AppSettings.setServerBaseUrl).
-    if (mounted && serverKeyForOtherAddress(settings) != keyWasForOther) {
-      _fillKeyField();
-    }
-    if (mounted) setState(() => _refusedEdit = false);
+    // before its first await (AppSettings.setServerBaseUrl), in its own
+    // form of it (trailing slashes dropped).
+    _addressSeen = settings.serverBaseUrl;
+    setState(() {
+      _refusedEdit = false;
+      _syncKeyField();
+    });
     return true;
   }
 
@@ -208,6 +278,7 @@ class _SubscriptionProviderPageState
 
   @override
   void dispose() {
+    widget.settings.changes.removeListener(_onSettingsChanged);
     // Leaving the page with an edit not saved yet saves it, once this
     // frame is done: a store notifying from here would rebuild its
     // listeners while the tree is locked.
@@ -246,7 +317,7 @@ class _SubscriptionProviderPageState
       await widget.settings.update(provider: 'server');
     }
     if (!mounted) return;
-    setState(_fillKeyField);
+    setState(_syncKeyField);
   }
 
   /// The phone half of the server's Claude OAuth re-connect: fetch the
@@ -415,25 +486,21 @@ class _SubscriptionProviderPageState
   }
 
   /// Saves the user's edit of the key field (per keystroke, as before; on
-  /// Done and a tap outside only after an edit, [_keyEdited]). A new key
-  /// is bound to the address above (AppSettings.setServerApiKey); the
-  /// page rebuilds so the line under the field follows. An unchanged one
-  /// keeps the host it was saved for, except here: the saved key itself,
+  /// Done and a tap outside only after an edit, [_keyEdited]) as the key
+  /// for the address the field was filled at (SettingsStore
+  /// .setServerKeyFromField): bound to its host, even the saved key itself
   /// pasted into the field left empty because it was saved for another
-  /// host, is the user saying it is this address's key (the same server at
-  /// a new address), as the row under the field does.
+  /// host (the same server at a new address, as the row under the field
+  /// makes it). Refused when the saved address is on another host than
+  /// that one by now: the field is filled again. The page rebuilds so the
+  /// line under the field follows.
   Future<void> _saveKey(String value) async {
-    final settings = widget.settings;
-    final key = value.trim();
-    final address = settings.serverBaseUrl;
-    await settings.update(apiKey: key);
-    if (key.isNotEmpty &&
-        key == settings.apiKey.trim() &&
-        settings.serverBaseUrl == address &&
-        serverKeyForOtherAddress(settings)) {
-      await settings.bindServerKeyToAddress();
-    }
-    if (mounted) setState(() {});
+    final saved = await widget.settings
+        .setServerKeyFromField(value, filledAt: _keyFilledAt);
+    if (!mounted) return;
+    setState(() {
+      if (!saved) _syncKeyField();
+    });
   }
 
   void _keyChanged(String value) {
@@ -446,12 +513,14 @@ class _SubscriptionProviderPageState
     if (_keyEdited) unawaited(_saveKey(value));
   }
 
-  /// The host the saved upload key was saved for, when that is not the
-  /// saved address's: shown under the key field, with the row that makes
-  /// the key this address's. Null otherwise.
+  /// The host the saved upload key was saved for, while the key field does
+  /// not show it: another host than the saved address's, or any host while
+  /// the address names none. Shown under the field, with the row that
+  /// makes the key this address's (at an address naming a host). Null
+  /// otherwise.
   String? get _keySavedForOtherHost {
     final s = widget.settings;
-    return serverKeyForOtherAddress(s) ? s.serverKeyHost : null;
+    return s.serverKeyForAddress.isEmpty ? s.serverKeyHost : null;
   }
 
   /// "Needs https://" under the field: a refused save, or the saved
@@ -560,7 +629,7 @@ class _SubscriptionProviderPageState
                   onTap: () async {
                     await settings.bindServerKeyToAddress();
                     // The key is this address's now: back in the field.
-                    if (mounted) setState(_fillKeyField);
+                    if (mounted) setState(_syncKeyField);
                   },
                 ),
             ],

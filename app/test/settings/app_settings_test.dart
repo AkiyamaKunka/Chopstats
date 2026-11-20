@@ -841,6 +841,172 @@ void main() {
       await s.bindServerKeyToAddress();
       expect(s.canAutoAnalyze, isTrue);
     });
+
+    // Recheck of the binding: the server page's key field still held the
+    // key saved for a.example at an address naming no host ('' or
+    // 'https://'), and after a setup link confirmed with the page open;
+    // edited there, it became the next host's key. One rule, here: the
+    // field shows a key only at its own host (serverKeyForAddress), an edit
+    // is the key for the address the field was filled at
+    // (setServerKeyFromField, refused at any other host), and a request
+    // carries a key's text only to the host it is saved for (serverKeyFor).
+    test('the key field shows the key only at its own host, or while it is '
+        'bound to none yet', () async {
+      final (s, _, _) = await freshSettings();
+      await s.setProvider(AiProvider.server);
+      expect(s.serverKeyForAddress, isNull, reason: 'no key');
+      await s.setServerApiKey('early');
+      expect(s.serverKeyForAddress, 'early', reason: 'typed before an address');
+      await s.setServerBaseUrl('https://a.example');
+      expect(s.serverKeyForAddress, 'early');
+      for (final other in ['https://b.example', '', 'https://']) {
+        await s.setServerBaseUrl(other);
+        expect(s.serverKeyForAddress, isNull, reason: '"$other"');
+        expect(s.serverKeyHost, 'a.example');
+      }
+      await s.setServerBaseUrl('https://A.example:8443');
+      expect(s.serverKeyForAddress, 'early', reason: 'the same host');
+    });
+
+    test('the text of a key goes only to the host it is saved for', () async {
+      final (s, _, _) = await freshSettings();
+      await s.setProvider(AiProvider.server);
+      await s.setServerApiKey('early');
+      expect(s.serverKeyFor('a.example'), isNull, reason: 'bound to none');
+      await s.setServerBaseUrl('https://a.example');
+      expect(s.serverKeyFor('a.example'), 'early');
+      expect(s.serverKeyFor('A.Example'), 'early');
+      expect(s.serverKeyFor('b.example'), isNull);
+      await s.setServerBaseUrl('https://b.example');
+      expect(s.serverKeyFor('b.example'), isNull);
+      expect(s.serverKeyFor('a.example'), 'early');
+      await s.setServerApiKey('');
+      expect(s.serverKeyFor('a.example'), isNull);
+    });
+
+    test('an edit of the key field filled at another host than the saved '
+        'address\'s is refused, nothing written', () async {
+      final (s, prefs, keys) = await freshSettings();
+      await s.setProvider(AiProvider.server);
+      await s.setServerBaseUrl('https://a.example');
+      await s.setServerApiKey('key-a');
+      var notified = 0;
+      s.addListener(() => notified++);
+      for (final moved in ['https://b.example', '', 'https://']) {
+        await s.setServerBaseUrl(moved);
+        notified = 0;
+        for (final edit in ['key-a-x', 'key-', 'x', '']) {
+          expect(
+              await s.setServerKeyFromField(edit,
+                  filledAt: 'https://a.example'),
+              isFalse,
+              reason: '"$moved" "$edit"');
+        }
+        expect((s.serverApiKey, s.serverKeyHost), ('key-a', 'a.example'));
+        expect(keys.data['server_api_key'], 'key-a');
+        expect(prefs.getString('settings.server_key_host'), 'a.example');
+        expect(notified, 0);
+      }
+      // The same host on another port is the field's own.
+      await s.setServerBaseUrl('https://a.example:8443');
+      expect(
+          await s.setServerKeyFromField('key-a2',
+              filledAt: 'https://a.example'),
+          isTrue);
+      expect((s.serverApiKey, s.serverKeyHost), ('key-a2', 'a.example'));
+      expect(keys.data['server_api_key'], 'key-a2');
+    });
+
+    test('a field filled at another host showed nothing: what is entered '
+        'there is that address\'s key, and empty deletes nothing', () async {
+      final (s, prefs, keys) = await freshSettings();
+      await s.setProvider(AiProvider.server);
+      await s.setServerBaseUrl('https://a.example');
+      await s.setServerApiKey('key-a');
+      await s.setServerBaseUrl('https://b.example');
+      final at = s.serverBaseUrl;
+      // A space typed, or Done on the empty field: key-a stays a.example's.
+      expect(await s.setServerKeyFromField(' ', filledAt: at), isTrue);
+      expect((s.serverApiKey, s.serverKeyHost), ('key-a', 'a.example'));
+      // The saved key itself, pasted: the same server at a new address.
+      expect(await s.setServerKeyFromField('key-a', filledAt: at), isTrue);
+      expect((s.serverApiKey, s.serverKeyHost), ('key-a', 'b.example'));
+      expect(prefs.getString('settings.server_key_host'), 'b.example');
+      // Shown here now: empty deletes it.
+      expect(await s.setServerKeyFromField('', filledAt: at), isTrue);
+      expect((s.serverApiKey, s.serverKeyHost), (null, null));
+      expect(keys.data['server_api_key'], isNull);
+      expect(prefs.getString('settings.server_key_host'), isNull);
+      // Typed: bound here in the same step, before the first await.
+      final typed = s.setServerKeyFromField('key-b', filledAt: at);
+      expect((s.serverApiKey, s.serverKeyHost), ('key-b', 'b.example'));
+      await typed;
+      expect(keys.data['server_api_key'], 'key-b');
+    });
+
+    test('a key entered at an address naming no host is bound to none, then '
+        'to the first address saved; until then the saved key stays its '
+        'host\'s', () async {
+      for (final none in ['', 'https://']) {
+        final (s, _, _) = await freshSettings();
+        await s.setProvider(AiProvider.server);
+        await s.setServerBaseUrl('https://a.example');
+        await s.setServerApiKey('key-a');
+        await s.setServerBaseUrl(none);
+        expect(s.serverKeyForAddress, isNull, reason: '"$none"');
+        expect(s.serverKeyHost, 'a.example');
+        final typed = s.setServerKeyFromField('key-b', filledAt: none);
+        expect((s.serverApiKey, s.serverKeyHost, s.serverKeyForAddress),
+            ('key-b', null, 'key-b'));
+        expect(await typed, isTrue);
+        expect(s.serverKeyFor('a.example'), isNull);
+        await s.setServerBaseUrl('https://b.example');
+        expect(s.serverKeyHost, 'b.example');
+        expect(s.serverKeyFor('b.example'), 'key-b');
+      }
+    });
+
+    test('a key edit landing after a setup link\'s write, from the field '
+        'filled before it, is refused', () async {
+      final (s, _, _) = await freshSettings();
+      await s.setProvider(AiProvider.server);
+      await s.setServerBaseUrl('https://a.example');
+      await s.setServerApiKey('key-a');
+      final filledAt = s.serverBaseUrl;
+      final link = s.applyServerSetup(
+          backend: 'claude', baseUrl: 'https://b.example', key: 'key-link');
+      expect(await s.setServerKeyFromField('key-a-x', filledAt: filledAt),
+          isFalse);
+      await link;
+      expect((s.serverApiKey, s.serverKeyHost), ('key-link', 'b.example'));
+      expect(s.serverKeyFor('b.example'), 'key-link');
+      // The field filled again at the link's address edits the link's key.
+      expect(
+          await s.setServerKeyFromField('key-link2',
+              filledAt: s.serverBaseUrl),
+          isTrue);
+      expect((s.serverApiKey, s.serverKeyHost), ('key-link2', 'b.example'));
+    });
+
+    test('from the field: a changed key lifts the quota pause; the same key '
+        'made another address\'s keeps it; a re-save counts as an edit',
+        () async {
+      final (s, _, _) = await freshSettings();
+      await s.setProvider(AiProvider.server);
+      await s.setServerBaseUrl('https://a.example');
+      await s.setServerApiKey('key-a');
+      final until = DateTime.now().add(const Duration(hours: 2));
+      await s.setQuotaPauseUntil(until);
+      await s.setServerBaseUrl('https://b.example');
+      await s.setServerKeyFromField('key-a', filledAt: s.serverBaseUrl);
+      expect(s.serverKeyHost, 'b.example');
+      expect(s.quotaPauseUntil, isNotNull, reason: 'the same key');
+      final rev = s.credentialRevision;
+      await s.setServerKeyFromField('key-a', filledAt: s.serverBaseUrl);
+      expect(s.credentialRevision, greaterThan(rev));
+      await s.setServerKeyFromField('key-b', filledAt: s.serverBaseUrl);
+      expect(s.quotaPauseUntil, isNull);
+    });
   });
 
   group('restaurant assist settings', () {

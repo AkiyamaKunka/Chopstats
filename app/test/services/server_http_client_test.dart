@@ -51,6 +51,24 @@ class _Recording extends http.BaseClient {
   }
 }
 
+/// Answers every request as a server whose CLI is busy (503, retry), and
+/// records 'host <- key' for each.
+class _Busy extends http.BaseClient {
+  _Busy(this.seen);
+  final List<String> seen;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    seen.add('${request.url.host} <- ${request.headers['X-API-Key']}');
+    return http.StreamedResponse(
+        Stream.value(
+            utf8.encode(jsonEncode({'reason': 'busy', 'retry': true}))),
+        503,
+        headers: {'content-type': 'application/json'},
+        request: request);
+  }
+}
+
 Future<AppSettings> _server(String url) async {
   SharedPreferences.setMockInitialValues({});
   final s = await AppSettings.load(
@@ -100,7 +118,8 @@ void main() {
           '${require ? 'never reaches the network' : 'is sent'}', () async {
         debugRequireHttpsServerOverride = require;
         final inner = _Recording();
-        final c = HttpsOnlyServerClient(inner, keyHost: () => '10.0.0.5');
+        final c = HttpsOnlyServerClient(inner,
+            keyFor: (host) => host == '10.0.0.5' ? 'upload-key' : null);
         final send = c.post(Uri.parse('http://10.0.0.5/api/anything'),
             headers: {'X-API-Key': 'upload-key'});
         if (require) {
@@ -117,7 +136,7 @@ void main() {
         'redirects off', () async {
       debugRequireHttpsServerOverride = true;
       final inner = _Recording();
-      final c = HttpsOnlyServerClient(inner, keyHost: () => null);
+      final c = HttpsOnlyServerClient(inner, keyFor: (_) => null);
       await c.get(Uri.parse('https://h.example/api/auth_check'));
       await c.get(Uri.parse('http://127.0.0.1:5000/api/auth_check'));
       expect(inner.seen.map((r) => r.url.host), ['h.example', '127.0.0.1']);
@@ -132,10 +151,10 @@ void main() {
     });
 
     test('wrap is idempotent', () {
-      String? host() => 'h.example';
-      final once = HttpsOnlyServerClient.wrap(_Recording(), keyHost: host);
-      expect(HttpsOnlyServerClient.wrap(once, keyHost: host), same(once));
-      expect(HttpsOnlyServerClient.wrap(null, keyHost: host),
+      String? key(String host) => host == 'h.example' ? 'k' : null;
+      final once = HttpsOnlyServerClient.wrap(_Recording(), keyFor: key);
+      expect(HttpsOnlyServerClient.wrap(once, keyFor: key), same(once));
+      expect(HttpsOnlyServerClient.wrap(null, keyFor: key),
           isA<HttpsOnlyServerClient>());
     });
 
@@ -146,7 +165,9 @@ void main() {
     test('the upload key goes only to the host it was saved for', () async {
       final inner = _Recording();
       var bound = 'a.example';
-      final c = HttpsOnlyServerClient(inner, keyHost: () => bound);
+      var saved = 'key-for-a';
+      final c = HttpsOnlyServerClient(inner,
+          keyFor: (host) => host == bound ? saved : null);
       for (final header in ['X-API-Key', 'x-api-key', 'X-API-KEY']) {
         await expectLater(
             c.post(Uri.parse('https://b.example/api/auth_check'),
@@ -163,6 +184,7 @@ void main() {
       expect(inner.seen.map((r) => r.url.host), ['a.example', 'b.example']);
       // Read at each request: bound to b, the key goes to b only.
       bound = 'b.example';
+      saved = 'key-for-b';
       await c.post(Uri.parse('https://b.example/api/auth_check'),
           headers: {'X-API-Key': 'key-for-b'});
       await expectLater(
@@ -174,12 +196,36 @@ void main() {
 
     test('a key bound to no host goes nowhere', () async {
       final inner = _Recording();
-      final c = HttpsOnlyServerClient(inner, keyHost: () => null);
+      final c = HttpsOnlyServerClient(inner, keyFor: (_) => null);
       await expectLater(
           c.post(Uri.parse('https://h.example/api/auth_check'),
               headers: {'X-API-Key': 'k'}),
           throwsA(isA<ServerKeyOtherHostException>()));
       expect(inner.seen, isEmpty);
+    });
+
+    // Recheck of the above: the host alone was checked. A request built
+    // with the previous server's key, whose address was read after a wait
+    // (a leftover estimate decoding, a busy server waited out) as a setup
+    // link moved the address and bound its own key there, went to the new
+    // host with the previous key. Only the text saved for that host goes.
+    test('only the text of the key saved for the host goes there', () async {
+      final inner = _Recording();
+      final c = HttpsOnlyServerClient(inner,
+          keyFor: (host) => host == 'b.example' ? 'key-for-b' : null);
+      for (final header in ['X-API-Key', 'x-api-key']) {
+        for (final sent in ['key-for-a', 'key-for-b2', 'key-for-', '']) {
+          await expectLater(
+              c.post(Uri.parse('https://b.example/api/auth_check'),
+                  headers: {header: sent}),
+              throwsA(isA<ServerKeyOtherHostException>()),
+              reason: '$header: $sent');
+        }
+      }
+      expect(inner.seen, isEmpty);
+      await c.post(Uri.parse('https://B.example/api/auth_check'),
+          headers: {'X-API-Key': 'key-for-b'});
+      expect(inner.seen.single.headers['X-API-Key'], 'key-for-b');
     });
 
     test('the key refusal is a ClientException carrying its own line', () {
@@ -233,6 +279,46 @@ void main() {
               .map((r) => r.headers['X-API-Key'])
               .toSet(),
           {'key-b'});
+    });
+
+    // The same, as the analyzer does it: the leftover estimate reads the
+    // key, decodes the photo, then reads the address; and waits out a busy
+    // server before asking again. A setup link confirmed meanwhile moved
+    // the address to b.example with its own key: the request built with
+    // a.example's key is not sent there.
+    test('a leftover estimate that read the key before a setup link: '
+        'nothing goes to the link\'s host with the previous key', () async {
+      debugRequireHttpsServerOverride = true;
+      final inner = _Recording();
+      final s = await _server('https://a.example');
+      final a = ServerAnalyzer(s, client: inner, sleep: (_) async {},
+          normalizer: (b) async {
+        await s.applyServerSetup(
+            backend: 'claude', baseUrl: 'https://b.example', key: 'key-b');
+        return b;
+      });
+      expect(await a.leftoverIntent(Uint8List.fromList([1, 2, 3]), '{}'),
+          isNull);
+      expect(inner.seen, isEmpty);
+      // Asked again from the start, it reads the link's key.
+      final b = ServerAnalyzer(s, client: inner, normalizer: (b) async => b);
+      await b.leftoverIntent(Uint8List.fromList([1, 2, 3]), '{}');
+      expect(inner.seen.map((r) => '${r.url.host} <- ${r.headers['X-API-Key']}'),
+          ['b.example <- key-b']);
+    });
+
+    test('a busy server waited out across a setup link: the next attempt '
+        'does not take the previous key to the link\'s host', () async {
+      debugRequireHttpsServerOverride = true;
+      final seen = <String>[];
+      final inner = _Busy(seen);
+      final s = await _server('https://a.example');
+      final a = ServerAnalyzer(s, client: inner, normalizer: (b) async => b,
+          sleep: (_) => s.applyServerSetup(
+              backend: 'claude', baseUrl: 'https://b.example', key: 'key-b'));
+      expect(await a.leftoverIntent(Uint8List.fromList([1, 2, 3]), '{}'),
+          isNull);
+      expect(seen, ['a.example <- upload-key']);
     });
 
     test('http:// with the switch on: nothing reaches the network', () async {

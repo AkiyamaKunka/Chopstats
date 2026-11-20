@@ -15,7 +15,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/ai_consent.dart';
 import '../../core/server_transport.dart'
-    show serverAddressRefused, serverKeyForOtherHost, serverKeyHostOf;
+    show
+        serverAddressRefused,
+        serverKeyForOtherHost,
+        serverKeyHostOf,
+        serverKeyShownAt;
 import '../../core/shared_generated.dart';
 
 /// Narrow seam over the secure-storage plugin so tests can substitute an
@@ -734,8 +738,8 @@ class AppSettings extends ChangeNotifier {
   String? get serverApiKey => _serverApiKey;
 
   /// The host the upload key was saved for (lowercased), or null: no key,
-  /// or a key saved before any address (it binds to the next address
-  /// saved). Every request to the server goes through
+  /// or a key saved before any address, or at one naming no host (it binds
+  /// to the next address saved). Every request to the server goes through
   /// HttpsOnlyServerClient, which sends the key to this host only, so a
   /// key saved for one server never goes to an address typed for another.
   String? get serverKeyHost => _serverApiKey == null ? null : _serverKeyHost;
@@ -749,33 +753,112 @@ class AppSettings extends ChangeNotifier {
       _serverApiKey != null &&
       serverKeyForOtherHost(serverKeyHost, _serverBaseUrl);
 
+  /// The text of the upload key that may go to [host]: the saved key while
+  /// it is bound to that host, else null. HttpsOnlyServerClient sends an
+  /// X-API-Key only when its text is this at the moment of the request, so
+  /// the text of a key bound to one host goes to no other: not with a
+  /// request built before the address and key changed (a leftover estimate
+  /// still decoding as a setup link is confirmed), nor as a key edited out
+  /// of another host's ([setServerKeyFromField]).
+  String? serverKeyFor(String host) {
+    final key = _serverApiKey;
+    final bound = _serverKeyHost;
+    return key != null && bound != null && bound == host.toLowerCase()
+        ? key
+        : null;
+  }
+
+  /// The upload key as the server page's key field shows it at the saved
+  /// address: the saved key while it is bound to the address's host, or to
+  /// none yet (serverKeyShownAt); null, an empty field, while it is bound
+  /// to another host, or to one while the address names none ('' or
+  /// 'https://'). The field shows this and nothing else, and what it holds
+  /// is saved with [setServerKeyFromField]: the text of a key saved for
+  /// one host is never in it to be edited into another's (review of PR 74).
+  String? get serverKeyForAddress =>
+      _serverApiKey != null && serverKeyShownAt(_serverKeyHost, _serverBaseUrl)
+          ? _serverApiKey
+          : null;
+
+  /// The server page's key field, edited: [value] is what the field holds,
+  /// [filledAt] the saved address the field was filled at
+  /// ([serverKeyForAddress]).
+  ///
+  /// False, and nothing written, when the saved address has moved to
+  /// another host since (a setup link confirmed with the page open, before
+  /// the page heard of it): the field may still hold the key saved for the
+  /// host it was filled at, and nothing edited out of it is this address's
+  /// key. The page fills the field again.
+  ///
+  /// Otherwise what the field holds is the key for the address it was
+  /// entered at, bound to that address's host in the same synchronous step;
+  /// while the address names none, to none yet, and then to the first
+  /// address saved (as a key typed before any address is). Since the field
+  /// showed only this address's key, or nothing, that text carries no part
+  /// of another host's key unless the user typed or pasted it there:
+  /// - a key is saved and bound here, even the saved key itself (pasted at
+  ///   the same server's new address, as Use this key makes it);
+  /// - empty deletes the key when the field showed it; when the field
+  ///   showed nothing (the key is another host's), nothing changes.
+  Future<bool> setServerKeyFromField(String value,
+      {required String filledAt}) async {
+    final host = serverKeyHostOf(_serverBaseUrl);
+    if (serverKeyHostOf(filledAt) != host) return false;
+    final v = value.trim();
+    if (v.isEmpty) {
+      if (serverKeyForAddress != null) await _saveServerKey(null, null);
+    } else if (v != _serverApiKey || host != _serverKeyHost) {
+      await _saveServerKey(v, host);
+    } else {
+      // The same key saved again (Done after an edit back to it): a
+      // re-save, which counts as any key's does ([_credentialsEdited]).
+      await _credentialsEdited();
+      notifyListeners();
+    }
+    return true;
+  }
+
   /// A CHANGED key is bound to the address it is saved for, in the same
   /// synchronous step as the key itself: no request ever sees the new key
-  /// with the old host. An unchanged one keeps its host: the page saves
-  /// the field again on a tap outside it and on Done, and that must not
-  /// bind the old server's key to a new address.
+  /// with the old host. An unchanged one keeps its host: a save of the same
+  /// text must not bind the old server's key to a new address. The server
+  /// page saves its field with [setServerKeyFromField].
   Future<void> setServerApiKey(String? value) async {
     final v = (value ?? '').trim();
     if (v == (_serverApiKey ?? '')) {
       return _setProviderKey(value, _kServerKey, (x) => _serverApiKey = x,
           () => _serverApiKey, AiProvider.server);
     }
-    final host = v.isEmpty ? null : serverKeyHostOf(_serverBaseUrl);
-    final rebind = host != _serverKeyHost;
-    _serverApiKey = v.isEmpty ? null : v;
+    await _saveServerKey(v.isEmpty ? null : v,
+        v.isEmpty ? null : serverKeyHostOf(_serverBaseUrl));
+  }
+
+  /// Saves the upload key and the host it is bound to, both assigned
+  /// before anything is awaited (no request sees the one without the
+  /// other), and stored so that no write cut short leaves a key bound to a
+  /// host it was not saved for ([_storeServerKey]).
+  Future<void> _saveServerKey(String? key, String? host) async {
+    final keyChanged = key != _serverApiKey;
+    final hostChanged = host != _serverKeyHost;
+    _serverApiKey = key;
     _serverKeyHost = host;
-    if (rebind) {
-      await _storeServerKey(_serverApiKey, host);
-    } else if (v.isEmpty) {
+    if (keyChanged && hostChanged) {
+      await _storeServerKey(key, host);
+    } else if (hostChanged) {
+      // The same key, made this address's (as bindServerKeyToAddress).
+      await _saveServerKeyHost(host);
+    } else if (key == null) {
       await _keys.delete(_kServerKey);
-    } else {
+    } else if (keyChanged) {
       // The same host (the key typed for the address it is bound to):
       // updated in place, never absent between keystrokes.
-      await _keys.write(_kServerKey, v);
+      await _keys.write(_kServerKey, key);
     }
     // As _setProviderKey: a changed key on the ACTIVE provider does not
     // inherit the previous key's quota pause.
-    if (_provider == AiProvider.server && _quotaPauseUntil != null) {
+    if (keyChanged &&
+        _provider == AiProvider.server &&
+        _quotaPauseUntil != null) {
       _quotaPauseUntil = null;
       await _prefs.remove(_kQuotaPauseUntil);
     }

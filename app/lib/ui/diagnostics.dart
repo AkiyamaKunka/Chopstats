@@ -154,7 +154,7 @@ class ProviderDiagnostics {
         // request sent there, and the stage went by that address's answer
         // (Android review 2026-11-19).
         await HttpsOnlyServerClient.wrap(client,
-                keyHost: () => settings.serverKeyHost)
+                keyFor: settings.serverKeyFor)
             .get(Uri.parse(probeUrl))
             .timeout(const Duration(seconds: 10));
         yield DiagResult(

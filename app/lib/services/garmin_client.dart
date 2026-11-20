@@ -48,7 +48,7 @@ typedef GarminDailyFetch = Future<GarminDaily?> Function(String date);
 GarminDailyFetch makeGarminDailyFetch(AppSettings settings,
     {http.Client? client}) {
   final http.Client c = HttpsOnlyServerClient.wrap(client,
-      keyHost: () => settings.serverKeyHost);
+      keyFor: settings.serverKeyFor);
   return (String date) async {
     final base = settings.serverBaseUrl.trim();
     final key = settings.serverApiKey?.trim() ?? '';

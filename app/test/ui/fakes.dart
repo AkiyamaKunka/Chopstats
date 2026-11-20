@@ -5,14 +5,19 @@ library;
 import 'dart:async';
 import 'dart:typed_data';
 
-import 'package:flutter/foundation.dart' show ChangeNotifier, ValueNotifier;
+import 'package:flutter/foundation.dart'
+    show ChangeNotifier, Listenable, ValueNotifier;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:calorie_tracker/core/ai_consent.dart'
     show aiConsentWordingVersion, allAiConsentRoutes;
 import 'package:calorie_tracker/core/contracts.dart';
 import 'package:calorie_tracker/core/server_transport.dart'
-    show serverAddressRefused, serverKeyForOtherHost, serverKeyHostOf;
+    show
+        serverAddressRefused,
+        serverKeyForOtherHost,
+        serverKeyHostOf,
+        serverKeyShownAt;
 import 'package:calorie_tracker/services/backup/save_file_channel.dart'
     show SaveFileStatus;
 import 'package:calorie_tracker/services/photo/photo_library.dart';
@@ -252,6 +257,48 @@ class FakeSettings with ChangeNotifier implements SettingsStore {
   String? get serverKeyHost => (keysByProvider['server'] ?? '').trim().isEmpty
       ? null
       : keySavedFor ?? serverKeyHostOf(serverBaseUrl);
+  @override
+  String get serverKeyForAddress {
+    final key = (keysByProvider['server'] ?? '').trim();
+    return key.isNotEmpty && serverKeyShownAt(serverKeyHost, serverBaseUrl)
+        ? key
+        : '';
+  }
+
+  @override
+  String? serverKeyFor(String host) {
+    final key = (keysByProvider['server'] ?? '').trim();
+    final bound = serverKeyHost;
+    return key.isNotEmpty && bound != null && bound == host.toLowerCase()
+        ? key
+        : null;
+  }
+
+  /// Every [setServerKeyFromField] call: (value, filledAt, accepted).
+  final List<(String, String, bool)> keyFieldWrites = [];
+
+  /// As AppSettings.setServerKeyFromField: refused once the address moved
+  /// to another host than the one the field was filled at; else the field
+  /// is the address's key (empty deletes it only when the field showed it).
+  @override
+  Future<bool> setServerKeyFromField(String value,
+      {required String filledAt}) async {
+    final accepted =
+        serverKeyHostOf(filledAt) == serverKeyHostOf(serverBaseUrl);
+    keyFieldWrites.add((value, filledAt, accepted));
+    if (!accepted) return false;
+    final v = value.trim();
+    if (v.isNotEmpty || serverKeyForAddress.isNotEmpty) {
+      keysByProvider['server'] = v;
+      keySavedFor = null; // bound here, or to the first address saved
+      notifyListeners();
+    }
+    return true;
+  }
+
+  @override
+  Listenable get changes => this;
+
   int bindServerKeyCalls = 0;
   @override
   Future<void> bindServerKeyToAddress() async {
