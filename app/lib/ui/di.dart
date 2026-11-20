@@ -265,17 +265,9 @@ class AppServices {
         dao: dao,
         analyzer: analyzer,
         notify: announce,
-        // Open screens re-query instead of showing pre-save data. Android
-        // 13+: the first meal saved with the app in front is the moment to
-        // ask for the notification permission, once — while the summary or
-        // the watcher's cards would use it (notification_permission.dart).
-        onMealSaved: () {
-          signalMealsChanged();
-          if (appEngineInForeground() &&
-              (settings.summaryEnabled || settings.watcherEnabled)) {
-            unawaited(askNotificationPermissionOnce());
-          }
-        },
+        // Open screens re-query instead of showing pre-save data (the
+        // signal also asks for the notification permission, below).
+        onMealSaved: signalMealsChanged,
         // A rejected key / blocked region parks the automatic scan.
         latch: autoScanLatchFor(settings),
         // B14's previous-night candidates, under the consent that says so.
@@ -310,6 +302,15 @@ class AppServices {
         includeGlasses: () => settings.watchGlasses,
         foodCheck: Platform.isIOS ? foodScoreViaImageIO : null,
         glassesCheckLog: recordGlassesCheckLocally);
+    // Android 13+: the first meal saved with the app in front is the moment
+    // to ask for the notification permission, once — while the summary or
+    // the watcher's cards would use it (notification_permission.dart). On
+    // the meals-changed signal, which every save path sends: Describe,
+    // manual entry, Log manually and usual foods never reach the pipeline.
+    mealsChangedSignal.addListener(() => unawaited(
+        askNotificationPermissionAfterMealSaved(
+            notifies: () => settings.summaryEnabled || settings.watcherEnabled,
+            hasMeal: () async => (await dao.backupCounts()).meals > 0)));
 
     // Held by the editor, a leftover selection and a pending fix-meal
     // request (design R6a); app engine only — background_glue builds none.

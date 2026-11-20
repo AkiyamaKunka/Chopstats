@@ -26,16 +26,20 @@
 ///   * titles name the day ('Thu: 1,850 kcal'), since a card can come late;
 ///   * a card still pending past its slot (a late inexact alarm, or one a
 ///     force stop took) is posted before the set replaces it — once, by
-///     whichever engine gets there first;
-///   * the first arm after the update posts today's summary if its slot
-///     passed and the old scheme had not posted it.
+///     whichever engine gets there first; so is today's card when the time
+///     is moved to before now, which the set for the new time would
+///     replace before it came. A day whose card the app posted is not
+///     armed again (the time moved later that evening);
+///   * the first arm after the update posts the last slot's summary if it
+///     passed within the grace window and the old scheme had not posted
+///     it.
 library;
 
 import 'dart:async';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../core/coerce.dart' show addCalendarDays;
+import '../core/coerce.dart' show addCalendarDays, calendarDaysBetween;
 import '../core/contracts.dart';
 import '../services/report/coach_summary.dart' show CoachStrings, CoachSummary;
 import '../services/report/daily_summary.dart';
@@ -45,8 +49,10 @@ import 'coach_strings.dart';
 import 'format.dart' show isoDate;
 
 /// The slot (UTC instant) of the last daily card the app posted itself —
-/// an overdue one, or the update day's. Both engines read it fresh before
-/// posting and write it first, so the two never post the same slot.
+/// an overdue one, today's when the time is moved to before now, or the
+/// update day's. Both engines read it fresh before posting and write it
+/// first, so the two never post the same slot; an arm does not arm that
+/// card's day again.
 const String summaryLastPostedSlotPrefsKey = 'summary.last_posted_slot';
 
 /// Set by the first Android arm of this scheme; until then the update-day
@@ -145,8 +151,9 @@ Future<void> _armOnce({
   // 1. A card for a slot that has passed, to post: the update day's, or
   //    one the OS still holds past its time. Built, not posted yet.
   ({DateTime slot, PendingDailyCard? pending, CoachSummary card})? toPost;
+  SharedPreferences? p;
   if (android) {
-    final p = await _freshPrefs(prefs);
+    p = await _freshPrefs(prefs);
     if (p != null && !(p.getBool(summaryOsSchemePrefsKey) ?? false)) {
       toPost = await _updateDayCard(dao, settings, strings, naming!, time, at);
     }
@@ -160,12 +167,36 @@ Future<void> _armOnce({
       at,
       p,
     );
+    toPost ??= await _unsaidCard(
+      dao,
+      settings,
+      notifier,
+      strings,
+      naming!,
+      time,
+      at,
+      p,
+    );
   }
 
   // 2. The cards to arm: the next slot with the day as it stands, and on
-  //    Android the 7 after it with the empty-day text (no meal can be in a
-  //    day that has not started; logging re-arms and rebuilds them).
-  final first = ReportNotifier.nextDailyOccurrence(time, at);
+  //    Android the 7 after it with the empty-day text — for a day not
+  //    begun yet (no meal can be in it; logging re-arms and rebuilds
+  //    them). A slot before 04:00 armed between midnight and the slot
+  //    describes on its next night the day already begun: built as it
+  //    stands too (review 2026-11-19). On Android a day whose card this
+  //    app has posted itself is not armed again: the time moved to before
+  //    now, then later again that evening, would say it twice. The set
+  //    starts the night after — one card a day.
+  final today = DateTime(at.year, at.month, at.day);
+  final next = ReportNotifier.nextDailyOccurrence(time, at);
+  final first =
+      android && _postedDay(p, summaryDayFor(next, slotHour: time.hour))
+      ? (() {
+          final d = addCalendarDays(next, 1);
+          return DateTime(d.year, d.month, d.day, time.hour, time.minute);
+        })()
+      : next;
   final slots = [
     for (var k = 0; k < (android ? ReportNotifier.dailySetSize : 1); k++)
       k == 0
@@ -180,7 +211,7 @@ Future<void> _armOnce({
     // The day the card DESCRIBES is the day it fires on, or for a slot
     // before 04:00 the day that just ended (C16/C40).
     final day = summaryDayFor(slot, slotHour: time.hour);
-    final card = k == 0
+    final card = k == 0 || calendarDaysBetween(day, today) >= 0
         ? await summaryForDay(
             dao: dao,
             day: day,
@@ -285,12 +316,61 @@ _overdueCard(
   );
 }
 
-/// The first Android arm after the update: if today's slot (or last
-/// night's, within the grace window) passed and the old scheme's watermark
-/// does not have it, its card — the old scheme posted from a Timer or the
-/// background job, and nothing of the new one is armed yet. Only for an
-/// install the old scheme had already posted on: a fresh install says
-/// nothing until its first slot.
+/// A card the OS still holds for a later slot whose day no card of the
+/// new set describes: the time was moved to before now (Settings), so the
+/// set re-armed for it starts with a later day, and would replace the
+/// card of a day still unsaid — today's, armed for the old, later time.
+/// The old scheme's 30-minute job posted the passed slot that evening
+/// (review 2026-11-19); it is posted now, claimed like an overdue card,
+/// with the day's meals as they stand.
+Future<({DateTime slot, PendingDailyCard? pending, CoachSummary card})?>
+_unsaidCard(
+  MealsDao dao,
+  AppSettings settings,
+  ReportNotifier notifier,
+  CoachStrings strings,
+  SummaryDayNaming naming,
+  ({int hour, int minute}) time,
+  DateTime at,
+  SharedPreferences? p,
+) async {
+  final firstDay = summaryDayFor(
+    ReportNotifier.nextDailyOccurrence(time, at),
+    slotHour: time.hour,
+  );
+  DateTime dayOf(PendingDailyCard c) => c.day ?? summaryDayFor(c.slot);
+  final unsaid = [
+    for (final c in await notifier.pendingDailyCards())
+      if (c.slot.isAfter(at) && calendarDaysBetween(dayOf(c), firstDay) > 0) c,
+  ];
+  if (unsaid.isEmpty) return null;
+  final card = unsaid.last; // the latest day
+  if (!await _claim(p, card.slot)) return null;
+  return (
+    slot: card.slot,
+    pending: card,
+    card: await summaryForDay(
+      dao: dao,
+      day: dayOf(card),
+      calorieGoal: settings.calorieGoal,
+      strings: strings,
+      onDay: naming,
+    ),
+  );
+}
+
+/// The first Android arm after the update: if the last slot passed within
+/// the grace window and the old scheme's watermark does not have it, its
+/// card — the old scheme posted from a Timer or the background job, and
+/// nothing of the new one is armed yet. Only for an install the old scheme
+/// had already posted on: a fresh install says nothing until its first
+/// slot.
+///
+/// The old scheme's watermark is the slot's own date: before the night
+/// rule a 00:30 summary was 'Today', so for a slot before 04:00 it never
+/// equals the day the card describes (review 2026-11-19: a card about the
+/// day before at whatever hour the app first ran, after the old build's
+/// own 00:30 card). It is read, and written, in those terms.
 Future<({DateTime slot, PendingDailyCard? pending, CoachSummary card})?>
 _updateDayCard(
   MealsDao dao,
@@ -308,13 +388,14 @@ _updateDayCard(
   }
   if (posted.isEmpty) return null;
   final slot = lastSlotWithinGrace(time.hour, time.minute, at);
-  if (slot == null) return null;
+  // lastSlotWithinGrace bounds yesterday's slot only.
+  if (slot == null || at.difference(slot) > kSummaryGraceWindow) return null;
+  if (isoDate(slot) == posted) return null;
   final day = summaryDayFor(slot, slotHour: time.hour);
-  if (isoDate(day) == posted) return null;
   final p = await _freshPrefs(SharedPreferences.getInstance);
   if (!await _claim(p, slot)) return null;
   try {
-    await settings.markSummaryPosted(isoDate(day));
+    await settings.markSummaryPosted(isoDate(slot));
   } catch (_) {}
   return (
     slot: slot,
@@ -327,6 +408,14 @@ _updateDayCard(
       onDay: naming,
     ),
   );
+}
+
+/// Whether [day] is the one the card this app last posted itself (either
+/// engine, [_claim]) described: the claimed slot read as its card's day.
+bool _postedDay(SharedPreferences? p, DateTime day) {
+  final mark = p?.getString(summaryLastPostedSlotPrefsKey);
+  final slot = mark == null ? null : DateTime.tryParse(mark)?.toLocal();
+  return slot != null && calendarDaysBetween(summaryDayFor(slot), day) == 0;
 }
 
 /// Claims [slot] for this engine's post: false when either engine already

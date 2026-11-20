@@ -26,6 +26,7 @@ import '../../services/report/notification_permission.dart';
 import '../ai_consent.dart';
 import '../photo_pipeline.dart';
 import '../outcome_text.dart' show autoScanPausedLine, dayTimeLabel;
+import '../refresh_signal.dart' show signalMealsChanged;
 import '../restaurant_assist_controls.dart';
 import '../widgets/restaurant_consent_sheet.dart'
     show restaurantAssistStopFor, stopRestaurantAssistFor;
@@ -966,16 +967,22 @@ class _SettingsScreenState extends State<SettingsScreen>
                     ensureConsent: (ctx) =>
                         ensureAiConsent(ctx, widget.settings),
                     library: widget.photoLibrary,
-                    logManually: (photo) async =>
-                        await Navigator.of(context)
-                            .push<bool>(MaterialPageRoute(
-                          builder: (_) => MealEditorScreen(
-                            dao: widget.dao,
-                            fromPhoto: photo,
-                            makeThumb: makeMealThumbAny,
-                          ),
-                        )) ==
-                        true,
+                    logManually: (photo) async {
+                      final saved = await Navigator.of(context)
+                              .push<bool>(MaterialPageRoute(
+                            builder: (_) => MealEditorScreen(
+                              dao: widget.dao,
+                              fromPhoto: photo,
+                              makeThumb: makeMealThumbAny,
+                            ),
+                          )) ==
+                          true;
+                      // As every save path does: Today, History and the
+                      // armed summary re-query, and Android's first-meal
+                      // notification ask runs (di.dart).
+                      if (saved) signalMealsChanged();
+                      return saved;
+                    },
                   ),
                 )),
               ),

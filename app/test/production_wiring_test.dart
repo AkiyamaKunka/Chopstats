@@ -772,21 +772,27 @@ void main() {
 
     // Android 13+ asks for the notification permission once, in context:
     // the first meal saved with the app in front is one of the moments
-    // (notification_permission.dart). Never in a background run.
-    test('di.dart asks after a meal saved, while the summary or the '
-        'watcher would notify', () {
+    // (notification_permission.dart). Never in a background run. On the
+    // meals-changed signal, which every save path sends (review
+    // 2026-11-19: Describe, manual entry and usual foods never reached the
+    // pipeline's hook); notification_ask_on_save_test drives those paths.
+    test('di.dart asks after a meal saved, by any path, while the summary '
+        'or the watcher would notify', () {
       final init = _body(
         _source('lib/ui/di.dart'),
         'static Future<AppServices> init(',
         indent: '  ',
       );
+      expect(init, _wired(r'onMealSaved: signalMealsChanged,'));
       expect(
         init,
         _wired(
-          r'onMealSaved: \(\) \{ signalMealsChanged\(\); '
-          r'if \(appEngineInForeground\(\) && '
-          r'\(settings\.summaryEnabled \|\| settings\.watcherEnabled\)\) \{ '
-          r'unawaited\(askNotificationPermissionOnce\(\)\);',
+          r'mealsChangedSignal\.addListener\(\(\) => unawaited\( '
+          r'askNotificationPermissionAfterMealSaved\( '
+          r'notifies: \(\) => '
+          r'settings\.summaryEnabled \|\| settings\.watcherEnabled, '
+          r'hasMeal: \(\) async => '
+          r'\(await dao\.backupCounts\(\)\)\.meals > 0\)\)\);',
         ),
       );
       // An upgrader counts as asked: settled right after the settings
@@ -952,14 +958,19 @@ void main() {
 
     // Review, 2026-10-19: without these the run admits a photo that cannot
     // finish, and every deadline cut counts against the photo, so a slow
-    // patch of the server passes photos over for good.
-    test('iOS: a photo that cannot finish by the deadline is not started, '
-        'and a cut counts only for a photo that had the full window', () {
+    // patch of the server passes photos over for good. Review 2026-11-19:
+    // Android's window is its own (one full own-server attempt); iOS's
+    // 15 s counted every Android cut.
+    test('a photo that cannot finish by the deadline is not started, and a '
+        'cut counts only for a photo that had the platform\'s full window',
+        () {
       expect(
         launch(),
         _wired(
           r'final inFlight = RunInFlight\( deadline: '
-          r'startedAt\.add\(runDeadline\), clock: clock\);',
+          r'startedAt\.add\(runDeadline\), '
+          r'window: ios \? slowPhotoWindow : androidSlowPhotoWindow, '
+          r'clock: clock\);',
         ),
       );
       expect(after(), _wired(r'\n\s*finishBy: inFlight\.deadline,'));

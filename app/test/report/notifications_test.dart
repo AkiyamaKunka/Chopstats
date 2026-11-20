@@ -773,6 +773,46 @@ void main() {
     expect(await notifier.scheduledDailyAt(), isNull);
   });
 
+  // Review 2026-11-19 (R8): an Android arm holds 8 nights, and the card
+  // the OS delivered tonight leaves 7 — the row read "Not scheduled".
+  test('scheduledDailyAt is the earliest card of the set the OS holds, '
+      'whichever engine armed it', () async {
+    final pending = <int, String?>{};
+    final notifier = ReportNotifier(
+      scheduler: (id, _, _, _, payload) async => pending[id] = payload,
+      pendingPayloads: () async => pending,
+    );
+    for (var k = 0; k < 3; k++) {
+      await notifier.scheduleDailyAt(
+          id: ReportNotifier.dailyReportNotificationId + k,
+          when: DateTime(2026, 11, 13 + k, 21, 30),
+          title: 't',
+          body: 'b');
+    }
+    expect(await notifier.scheduledDailyAt(), DateTime(2026, 11, 13, 21, 30));
+    pending.remove(ReportNotifier.dailyReportNotificationId); // delivered
+    expect(await notifier.scheduledDailyAt(), DateTime(2026, 11, 14, 21, 30));
+    // Another engine's arm: this one never armed.
+    final other = ReportNotifier(
+      scheduler: (_, _, _, _, _) async {},
+      pendingPayloads: () async => pending,
+    );
+    expect(await other.scheduledDailyAt(), DateTime(2026, 11, 14, 21, 30));
+    pending.clear();
+    expect(await notifier.scheduledDailyAt(), isNull);
+  });
+
+  test('scheduledDailyAt trusts what was armed when the OS will not say',
+      () async {
+    final notifier = ReportNotifier(
+      scheduler: (_, _, _, _, _) async {},
+      pendingPayloads: () async => throw PlatformException(code: 'x'),
+    );
+    final when = DateTime(2026, 11, 13, 21, 30);
+    await notifier.scheduleDailyAt(when: when, title: 't', body: 'b');
+    expect(await notifier.scheduledDailyAt(), when);
+  });
+
   // The daily summary off switch (2026-10-10): cancelDaily only stops this
   // process's Timer; the card already handed to the OS (iOS one-shot, or
   // an unread Android card) has to be withdrawn by id.

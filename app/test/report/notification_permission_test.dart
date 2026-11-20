@@ -216,4 +216,59 @@ void main() {
       expect(fallbacks, 2);
     });
   });
+
+  // Review 2026-11-19 (R2/R3): the first meal saved, whatever saved it —
+  // di.dart calls this on the meals-changed signal
+  // (notification_ask_on_save_test drives the save paths).
+  group('askNotificationPermissionAfterMealSaved', () {
+    final binding = TestWidgetsFlutterBinding.instance;
+    tearDown(() =>
+        binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed));
+
+    Future<bool?> saved({bool notifies = true, bool hasMeal = true}) =>
+        askNotificationPermissionAfterMealSaved(
+            notifies: () => notifies, hasMeal: () async => hasMeal);
+
+    test('asks once the store holds a meal, and only once', () async {
+      expect(await saved(hasMeal: false), isNull);
+      expect(requests, 0, reason: 'a screen opened, nothing saved');
+      expect(await saved(), isFalse);
+      expect(await saved(), isNull);
+      expect(requests, 1);
+    });
+
+    test('not while neither the summary nor the watcher would notify',
+        () async {
+      expect(await saved(notifies: false), isNull);
+      expect(requests, 0);
+      expect(await notificationPermissionAsked(), isFalse);
+    });
+
+    test('not with the app in the background', () async {
+      binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      expect(await saved(), isNull);
+      expect(requests, 0);
+      expect(await notificationPermissionAsked(), isFalse);
+    });
+
+    test('never in a background run, never on iOS', () async {
+      isHeadlessEngine = true;
+      expect(await saved(), isNull);
+      isHeadlessEngine = false;
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      expect(await saved(), isNull);
+      expect(requests, 0);
+    });
+
+    test('a store that cannot say asks nothing, and keeps the one ask',
+        () async {
+      expect(
+          await askNotificationPermissionAfterMealSaved(
+              notifies: () => true,
+              hasMeal: () async => throw StateError('db closed')),
+          isNull);
+      expect(requests, 0);
+      expect(await notificationPermissionAsked(), isFalse);
+    });
+  });
 }
