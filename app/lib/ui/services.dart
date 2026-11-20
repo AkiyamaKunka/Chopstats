@@ -189,6 +189,15 @@ abstract class RecentPhotoPicker {
   Future<IntakePhoto?> loadOriginal(RecentAsset asset);
 }
 
+/// A notice the app shell owes the user once: shown while [pending] says
+/// so, and forgotten through [shown] once dismissed. The Google Play
+/// build's word that it turned Watch Camera Roll off (play_channel.dart).
+class OwedNotice {
+  const OwedNotice({required this.pending, required this.shown});
+  final bool Function() pending;
+  final Future<void> Function() shown;
+}
+
 /// One camera-roll entry, bytes NOT read.
 class RecentAsset {
   const RecentAsset(this.id, this.fileName, this.createdAt);
@@ -306,6 +315,11 @@ class UiServices {
   /// most tests.
   final BackupCoordinator? cloudBackup;
 
+  /// The Google Play build's one notice after it turned off the Watch
+  /// Camera Roll a GitHub install left on (play_channel.dart); the shell
+  /// shows it over the first frame. Null elsewhere and in most tests.
+  final OwedNotice? watchRetiredNotice;
+
   const UiServices({
     required this.dao,
     required this.analyzer,
@@ -338,5 +352,6 @@ class UiServices {
     this.restaurantAssist,
     this.usualFoods,
     this.cloudBackup,
+    this.watchRetiredNotice,
   });
 }

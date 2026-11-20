@@ -47,7 +47,10 @@ class ReportNotifier {
     ({String name, String description}) Function()? mealChannelStrings,
     int? mealCardIdSeed,
     Future<Map<int, String?>> Function()? pendingPayloads,
+    bool mealCards = true,
   })  : _plugin = plugin ?? FlutterLocalNotificationsPlugin(),
+        // ignore: prefer_initializing_formals
+        _mealCards = mealCards,
         _clock = clock ?? DateTime.now,
         // ignore: prefer_initializing_formals
         _presenter = presenter,
@@ -161,6 +164,14 @@ class ReportNotifier {
   ({String name, String description}) _mealChannel() =>
       _mealChannelStrings?.call() ?? _englishMealChannel;
 
+  /// Whether this build posts meal cards at all: false in the Google Play
+  /// build, which logs nothing on its own (core/app_channel.dart). There
+  /// the meal-card channel, whose description promises meals logged from
+  /// the camera roll, is never created, and one a GitHub install left is
+  /// deleted ([_syncChannel]); anything posted as a meal card would go on
+  /// the summary's channel.
+  final bool _mealCards;
+
   /// Set when Android would not create the meal-card channel (or could not
   /// say whether the summary's is blocked): meal cards then go on the
   /// summary's channel, as they did before the split, so a user's mute
@@ -232,6 +243,19 @@ class ReportNotifier {
       ));
     } catch (_) {
       // The post's createIfNotExists still creates a missing channel.
+    }
+    if (!_mealCards) {
+      _mealsOnSummaryChannel = true;
+      try {
+        final existing = await android.getNotificationChannels() ??
+            const <AndroidNotificationChannel>[];
+        if (existing.any((c) => c.id == mealChannelId)) {
+          await android.deleteNotificationChannel(channelId: mealChannelId);
+        }
+      } catch (_) {
+        // Left as it is: nothing posts on it in this build.
+      }
+      return;
     }
     try {
       final existing =

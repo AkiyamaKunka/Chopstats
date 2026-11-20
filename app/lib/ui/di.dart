@@ -16,6 +16,7 @@ import 'package:path_provider/path_provider.dart' show getTemporaryDirectory;
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../core/app_channel.dart' show photoLibraryInBuild;
 import '../core/contracts.dart';
 import '../data/meals_dao_impl.dart';
 import '../services/analyzer/platform_decode.dart' show isEngineBackgrounded;
@@ -60,6 +61,7 @@ import 'os_summary.dart';
 import 'meal_in_use.dart';
 import 'meal_thumbs.dart';
 import 'photo_pipeline.dart';
+import 'play_channel.dart';
 import 'refresh_signal.dart';
 import 'restaurant_assist_controls.dart';
 import 'services.dart';
@@ -100,6 +102,17 @@ class AppServices {
     // Any 'processing' ledger row at launch is a crashed run — reclaim it
     // before services start (spec §2.3 single-process simplification).
     await dao.reclaimStaleProcessing();
+    // The Google Play build (core/app_channel.dart) has no Watch Camera
+    // Roll: one a GitHub install left on is turned off here, before
+    // anything below reads it, and the shell owes the user one notice
+    // (play_channel.dart). The job sync at the end cancels its job.
+    final prefs = await SharedPreferences.getInstance();
+    try {
+      await retireWatchCameraRoll(settings, prefs);
+    } catch (_) {
+      // A repair must never block startup; the next launch tries again,
+      // and nothing below starts the watcher in that build anyway.
+    }
     if (Platform.isIOS) {
       // This engine's GPU goes off whenever the app is in the background:
       // no dart:ui decode may start there (platform_decode.dart).
@@ -174,6 +187,8 @@ class AppServices {
       channelStrings: () => notificationChannelFor(settings.appLanguage),
       mealChannelStrings: () =>
           mealNotificationChannelFor(settings.appLanguage),
+      // The Play build posts no meal cards: no channel for them.
+      mealCards: photoLibraryInBuild,
       dailyBody: (slotDate) async {
         await postSummary();
         // NULL, not '': postSummary has ALREADY presented the coach summary
@@ -409,14 +424,20 @@ class AppServices {
     // auto-DENIES with no dialog, dead-ending both photo flows on the
     // cheap end of the friend cohort. PhotoManager.requestPermissionExtend
     // handles every version and reports limited vs full.
-    Future<bool> requestPhotos() => photoLibrary.requestPermission();
+    // The Google Play build declares no photo permission and never asks
+    // for one (core/app_channel.dart): no, without a call to the plugin.
+    Future<bool> requestPhotos() async =>
+        photoLibraryInBuild && await photoLibrary.requestPermission();
     final store = _AppSettingsStore(settings, notifier,
         // A slot edit must re-arm the OS card for the new time.
         onReportTimeChanged: osSchedulesSummary ? armOsSummary : null);
     // A shared photo waits for the AI consent (App Store 5.1.2(i)) until
     // the app shell can ask; an allowed recipient passes straight through.
     final shareConsent = SharedPhotoConsentGate(store);
-    final thumbs = MealThumbResolver(dao: dao, library: photoLibrary);
+    // The Play build reads no photo library (core/app_channel.dart): a meal
+    // logged without a thumbnail keeps its placeholder there.
+    final thumbs = MealThumbResolver(
+        dao: dao, library: photoLibraryInBuild ? photoLibrary : null);
     // The photos an iCloud Backup hold kept back (the launch or resume
     // catch-up asked while it held; the pipeline let the live watcher's
     // go): caught up as soon as the offer is answered or dismissed, or the
@@ -468,19 +489,22 @@ class AppServices {
       picker: _ShareIntakePicker(photoLibrary),
       requestPhotoPermission: requestPhotos,
       thumbs: thumbs,
-      coverage: CoverageAuditor(
-          library: photoLibrary,
-          dao: dao,
-          // compute(): the audit hashes up to 2000 originals back-to-back —
-          // synchronous md5 on the UI isolate would freeze scrolling for
-          // the whole sweep.
-          hasher: (bytes) => compute(originalBytesMd5, bytes)),
+      // None in the Play build, which has no Photo Coverage.
+      coverage: photoLibraryInBuild
+          ? CoverageAuditor(
+              library: photoLibrary,
+              dao: dao,
+              // compute(): the audit hashes up to 2000 originals
+              // back-to-back — synchronous md5 on the UI isolate would
+              // freeze scrolling for the whole sweep.
+              hasher: (bytes) => compute(originalBytesMd5, bytes))
+          : null,
       // The audit's log/retry actions share the pipeline's global FIFO —
       // enqueue() chains onto the tail; process() would race it.
       processPhoto: pipeline.enqueue,
       announceOutcome: announce,
       sharedPhotoConsent: shareConsent,
-      photoLibrary: photoLibrary,
+      photoLibrary: photoLibraryInBuild ? photoLibrary : null,
       startClaudeAuth: serverAnalyzer.startClaudeAuth,
       completeClaudeAuth: serverAnalyzer.completeClaudeAuth,
       serverLoginState: serverAnalyzer.serverLoginState,
@@ -514,6 +538,13 @@ class AppServices {
       restaurantAssist: restaurantAssist,
       usualFoods: usualFoods,
       cloudBackup: cloudBackup,
+      // The Play build's one notice after it turned a GitHub install's
+      // Watch Camera Roll off (play_channel.dart); none elsewhere.
+      watchRetiredNotice: photoLibraryInBuild
+          ? null
+          : OwedNotice(
+              pending: () => watchRetiredNoticeOwed(prefs),
+              shown: () => watchRetiredNoticeShown(prefs)),
     );
     pipeline.bind(photoIntake); // automated watch (deliberate=false)
     // Share sheet (deliberate), each photo held until its AI recipient is
@@ -522,7 +553,8 @@ class AppServices {
         shareConsent.gate(shareIntake.photos(), deliveries: shareIntake));
     mealAssist.start();
     var catchingUp = false;
-    if (settings.watcherEnabled) {
+    // Never in the Play build, whatever the setting (core/app_channel.dart).
+    if (settings.watcherEnabled && photoLibraryInBuild) {
       await photoIntake.start();
       // Launch catch-up over the FULL lookback window: change-notify only
       // fires while the process lives, and EMUI-class OS freezing kills it

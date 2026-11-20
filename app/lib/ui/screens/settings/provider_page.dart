@@ -13,8 +13,12 @@
 /// one level down. Shared constants for both pages live here.
 library;
 
+import 'dart:io' show Platform;
+
 import 'package:flutter/material.dart';
 
+import '../../../core/app_channel.dart'
+    show appChannel, photoLibraryInBuild;
 import '../../../core/contracts.dart';
 import '../../ai_consent.dart';
 import '../../diagnostics.dart';
@@ -171,6 +175,23 @@ const List<(String, String, String)> kPlanChoices = [
   ('doubao', 'Doubao Agent Plan', 'doubao'),
 ];
 
+/// The quota-pause banner's text, with the time the pause lifts when it is
+/// known. The Google Play build keeps no photo for later and retries none
+/// on its own (no Watch Camera Roll, no Photo Coverage;
+/// core/app_channel.dart), so its words say to add the photo again.
+String _quotaPauseText(BuildContext context, DateTime? until) {
+  final l = context.l10n;
+  if (until == null) {
+    return photoLibraryInBuild
+        ? l.providerQuotaPaused
+        : l.providerQuotaPausedPlay;
+  }
+  final time = TimeOfDay.fromDateTime(until.toLocal()).format(context);
+  return photoLibraryInBuild
+      ? l.providerQuotaPausedUntil(time)
+      : l.providerQuotaPausedUntilPlay(time);
+}
+
 class ProviderSettingsPage extends StatefulWidget {
   const ProviderSettingsPage({
     super.key,
@@ -229,12 +250,7 @@ class _ProviderSettingsPageState extends State<ProviderSettingsPage> {
                   // Its own key, not settingsAiFooterPaused: that one
                   // points the reader AT this page.
                   child: Text(
-                    settings.quotaPauseUntil != null
-                        ? context.l10n.providerQuotaPausedUntil(
-                            TimeOfDay.fromDateTime(
-                                    settings.quotaPauseUntil!.toLocal())
-                                .format(context))
-                        : context.l10n.providerQuotaPaused,
+                    _quotaPauseText(context, settings.quotaPauseUntil),
                     style: theme.textTheme.bodyMedium
                         ?.copyWith(color: context.colors.label),
                   ),
@@ -317,6 +333,9 @@ class _ProviderSettingsPageState extends State<ProviderSettingsPage> {
                       analyzer: widget.analyzer,
                       l10n: context.l10n,
                     ),
+                    // Which Android build this is: the GitHub APK or the
+                    // Google Play one (core/app_channel.dart).
+                    channel: Platform.isAndroid ? appChannel : null,
                     loadRestaurantLookups:
                         widget.restaurantAssist?.lookupsDiagnostics,
                     loadConfidence: widget.dao == null

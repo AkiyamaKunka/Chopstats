@@ -11,6 +11,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:calorie_tracker/core/app_channel.dart';
 import 'package:calorie_tracker/core/contracts.dart';
 import 'package:calorie_tracker/core/coerce.dart' show isoDate;
 import 'package:calorie_tracker/core/outcome_kind.dart' show AnalysisErrorKind;
@@ -531,6 +532,44 @@ void main() {
       await tester.pumpAndSettle();
       expect(system.picks, [1]);
       expect(_screen, findsOneWidget);
+      expect(find.byKey(const Key('recentPhoto0')), findsOneWidget);
+    });
+  });
+
+  // The Google Play build (core/app_channel.dart) declares no photo
+  // permission: the picker is its ONE way in, and it never even reads
+  // whether broad access exists. An upgraded GitHub install's old grant
+  // does not bring the grid back.
+  group('the Google Play build', () {
+    setUp(() => debugAppChannelOverride = AppChannel.play);
+    tearDown(() => debugAppChannelOverride = null);
+
+    testWidgets('the picker, never the grid, even with a full grant left '
+        'from the GitHub APK; nothing asked of the library', (tester) async {
+      final w = _World(full: true);
+      w.picker.photos = [_gridPhoto('a0')];
+      final system = FakeSystemPicker(broad: true, replies: [_ok()]);
+      await _open(tester,
+          AddPhotoScreen(services: w.services, systemPicker: system));
+
+      expect(system.broadAsks, 0, reason: 'not even read in this build');
+      expect(system.picks, [1], reason: 'the picker opens at once');
+      expect(find.byKey(const Key('recentPhoto0')), findsNothing);
+      w.expectNoPermissionAsked();
+      expect(w.library.fullAccessAsks, 0);
+      expect(w.processed.single.assetId, '');
+      expect(w.processed.single.deliberate, isTrue);
+    });
+
+    testWidgets('the GitHub APK with the same grant keeps its grid',
+        (tester) async {
+      debugAppChannelOverride = AppChannel.github;
+      final w = _World(full: true);
+      w.picker.photos = [_gridPhoto('a0')];
+      final system = FakeSystemPicker(broad: true);
+      await _open(tester,
+          AddPhotoScreen(services: w.services, systemPicker: system));
+      expect(system.broadAsks, 1);
       expect(find.byKey(const Key('recentPhoto0')), findsOneWidget);
     });
   });

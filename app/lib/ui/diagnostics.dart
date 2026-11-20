@@ -14,6 +14,7 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'package:image/image.dart' as img;
 
+import '../core/app_channel.dart' show photoLibraryInBuild;
 import '../core/coerce.dart'
     show EstimateConfidence, isFoodTruthy, mealContextFields;
 import '../core/contracts.dart';
@@ -92,6 +93,10 @@ class ProviderDiagnostics {
     final l = l10n;
     final provider = settings.provider;
     final isServer = provider == 'server';
+    // The Google Play build keeps no photo for later and retries none on
+    // its own (no Watch Camera Roll, no Photo Coverage;
+    // core/app_channel.dart): its fix lines say to add the photo again.
+    final keepsPhotos = photoLibraryInBuild;
 
     // 1 ── Configuration ────────────────────────────────────────────────
     if (isServer && settings.serverBaseUrl.isEmpty) {
@@ -182,7 +187,10 @@ class ProviderDiagnostics {
       case KeyProbeResult.rateLimited:
         yield DiagResult(
             l.diagStageAuth, DiagStatus.warn, l.diagRateLimited,
-            detail: probe.message, fix: l.diagFixWaitRateLimit);
+            detail: probe.message,
+            fix: keepsPhotos
+                ? l.diagFixWaitRateLimit
+                : l.diagFixWaitRateLimitPlay);
       case KeyProbeResult.modelNotFound:
         // The key is fine; the text and photo stages would fail on the
         // same model id, so stop here with the one fix that helps.
@@ -247,9 +255,11 @@ class ProviderDiagnostics {
           DiagStatus.fail,
           photo.retryable ? l.diagPhotoTempFail : l.diagPhotoPermFail,
           detail: photo.error,
-          fix: photo.retryable
-              ? l.diagFixPhotoTemp
-              : l.diagFixPhotoPerm);
+          fix: !photo.retryable
+              ? l.diagFixPhotoPerm
+              : keepsPhotos
+                  ? l.diagFixPhotoTemp
+                  : l.diagFixPhotoTempPlay);
     }
 
     // 6 ── Quota state ──────────────────────────────────────────────────
@@ -260,7 +270,7 @@ class ProviderDiagnostics {
           detail: until != null
               ? l.diagQuotaPausedUntil(localStamp(until))
               : null,
-          fix: l.diagFixQuota);
+          fix: keepsPhotos ? l.diagFixQuota : l.diagFixQuotaPlay);
     } else {
       yield DiagResult(
           l.diagStageQuota, DiagStatus.pass, l.diagQuotaOk);

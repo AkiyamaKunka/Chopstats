@@ -10,6 +10,7 @@ import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 
+import 'package:calorie_tracker/core/app_channel.dart';
 import 'package:calorie_tracker/core/contracts.dart';
 import 'package:calorie_tracker/core/outcome_kind.dart' show AnalysisErrorKind;
 import 'package:calorie_tracker/services/analyzer/gemini_analyzer.dart'
@@ -34,6 +35,8 @@ import 'package:calorie_tracker/ui/background_glue.dart';
 import 'package:calorie_tracker/ui/coach_strings.dart' show localizationsFor;
 import 'package:calorie_tracker/ui/outcome_text.dart' show autoScanPausedLine;
 import 'package:calorie_tracker/ui/photo_pipeline.dart';
+import 'package:calorie_tracker/ui/play_channel.dart'
+    show watchRetiredNoticeOwed;
 import 'package:calorie_tracker/ui/services.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show PlatformException;
@@ -1646,6 +1649,45 @@ void main() {
       expect(prefs.getString(backgroundWatermarkPrefsKey), isNull);
     });
 
+    // The Google Play build installed over a GitHub install with Watch
+    // Camera Roll on: WorkManager keeps the old periodic job across the
+    // update, and may run it before the app is first opened. That run
+    // scans nothing (no photo permission either): it turns the setting off
+    // as the first launch would, owes the app's one notice, and cancels its
+    // own job.
+    test('the Play build: the old job turns Watch Camera Roll off, owes the '
+        'notice, cancels itself, and scans nothing', () async {
+      debugAppChannelOverride = AppChannel.play;
+      final scheduler = RecordingScheduler();
+      debugSchedulerOverride = scheduler;
+      debugIsAndroidOverride = true;
+      addTearDown(() {
+        debugAppChannelOverride = null;
+        debugSchedulerOverride = null;
+        debugIsAndroidOverride = null;
+        isHeadlessEngine = false;
+      });
+      final settings = await settingsWith(key: 'k', watcher: true);
+      // The store the settings were loaded from: one view of it.
+      final store = await SharedPreferences.getInstance();
+      final ok = await runHeadlessBackfill(
+        isIOS: false,
+        loadPrefs: () async => store,
+        clock: () => DateTime.utc(2026, 11, 19, 3),
+        loadSettings: () async => settings,
+      );
+      expect(ok, isTrue, reason: 'success: no retry storm');
+      expect(settings.watcherEnabled, isFalse);
+      expect(store.getBool('settings.watcher_enabled'), isFalse);
+      expect(watchRetiredNoticeOwed(store), isTrue);
+      expect(scheduler.calls, ['cancel:$photoBackfillUniqueName']);
+      final run =
+          decodeBackgroundRuns(store.getString(backgroundRunsPrefsKey)).single;
+      expect(run.stopReason, BackgroundStop.watcherOff);
+      expect(run.offered, 0);
+      expect(store.getString(backgroundWatermarkPrefsKey), isNull);
+    });
+
     test('does nothing without an API key (photos must not burn to failed)',
         () async {
       final settings = await settingsWith(key: null);
@@ -2213,6 +2255,18 @@ void main() {
       ]);
     });
 
+    // The Google Play build has no Watch Camera Roll (core/app_channel.dart):
+    // the job a GitHub install registered is cancelled, and none is ever
+    // registered, whatever the stored setting says.
+    test('the Play build, watcher setting on → cancelled, never registered',
+        () async {
+      debugAppChannelOverride = AppChannel.play;
+      addTearDown(() => debugAppChannelOverride = null);
+      final settings = await settingsWith(key: 'k', watcher: true);
+      await syncBackgroundScan(settings);
+      expect(scheduler.calls, ['cancel:$photoBackfillUniqueName']);
+    });
+
     test('iOS, watcher off → the job STAYS registered: its background '
         'refresh also carries iCloud Backup', () async {
       debugIsAndroidOverride = false;
@@ -2497,6 +2551,23 @@ void main() {
           .handleAppLifecycleStateChanged(AppLifecycleState.resumed);
       await tester.pump();
       expect(intake.backfillScans, before);
+    });
+
+    // The Google Play build has no Watch Camera Roll (core/app_channel.dart):
+    // no resume catch-up, even with the setting a GitHub install left on.
+    testWidgets('the Play build: no scan on resume, whatever the setting',
+        (tester) async {
+      debugAppChannelOverride = AppChannel.play;
+      addTearDown(() => debugAppChannelOverride = null);
+      final intake = FakeIntake();
+      await tester.pumpWidget(
+          MaterialApp(home: HomeShell(services: services(intake, watcher: true))));
+      final before = intake.backfillScans;
+      tester.binding
+          .handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump();
+      expect(intake.backfillScans, before);
+      expect(intake.started, isFalse);
     });
 
     testWidgets('paused/inactive states never scan', (tester) async {
