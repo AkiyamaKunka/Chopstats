@@ -8,7 +8,8 @@
 import 'dart:async';
 
 import 'package:calorie_tracker/core/contracts.dart';
-import 'package:calorie_tracker/ui/screens/add_flow.dart' show AddTextScreen;
+import 'package:calorie_tracker/ui/screens/add_flow.dart'
+    show AddTextScreen, openAddFlow;
 import 'package:calorie_tracker/ui/screens/body_screen.dart';
 import 'package:calorie_tracker/ui/screens/fix_meal_screen.dart';
 import 'package:calorie_tracker/ui/screens/meal_editor_screen.dart';
@@ -365,6 +366,58 @@ void main() {
       reply.complete(const [NlReply('✏️ Corrected.', applied: true)]);
       await tester.pumpAndSettle();
     });
+
+    // Android QA Q3: the fix still landed after Back, but the Log sheet
+    // reloaded Today as the screen closed, before it landed, so Today
+    // showed the old totals until a tab switch. It reloads again when a
+    // request left that way has changed a meal.
+    for (final (applied, reloads) in const [(true, 2), (false, 1)]) {
+      testWidgets('a request left with Back ${applied ? 'reloads Today again '
+          'when its fix lands' : 'that changed nothing reloads nothing more'}',
+          (tester) async {
+        tester.view.physicalSize = const Size(1200, 2600);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.reset);
+        final reply = Completer<List<NlReply>>();
+        final services =
+            makeServices(executor: _SlowExecutor(reply.future));
+        var reloaded = 0;
+        await tester.pumpWidget(MaterialApp(
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: Center(
+                child: TextButton(
+                  key: _open,
+                  // As the Today FAB opens it: the meals signal on close.
+                  onPressed: () => openAddFlow(context, services,
+                      onChanged: () async => reloaded++),
+                  child: const Text('open'),
+                ),
+              ),
+            ),
+          ),
+        ));
+        await tester.tap(find.byKey(_open));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('addFixMeal')));
+        await tester.pumpAndSettle();
+        await tester.enterText(
+            find.byKey(const Key('fixMealField')), 'the latte was oat milk');
+        await tester.tap(find.byKey(const Key('fixMealSend')));
+        await tester.pump();
+        await _systemBack(tester);
+        expect(find.byType(FixMealScreen), findsNothing);
+        expect(reloaded, 1, reason: 'reloaded as the screen closed');
+
+        reply.complete([
+          applied
+              ? const NlReply('✏️ Corrected.', applied: true)
+              : const NlReply('❌ Could not reach the AI. Try again.'),
+        ]);
+        await tester.pumpAndSettle();
+        expect(reloaded, reloads);
+      });
+    }
 
     testWidgets('an applied request clears the field: back leaves at once',
         (tester) async {
