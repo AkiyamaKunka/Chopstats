@@ -477,7 +477,13 @@ void main() {
           check,
           contains(r'grep -qx android.permission.READ_MEDIA_IMAGES '
               r'<<<"$in_apk"'));
-      expect('exit 1'.allMatches(check), hasLength(2));
+      // A listing with nothing in it never passes the deny-list by default:
+      // the bundle must list INTERNET first (review, 2026-11-19).
+      const readable = r'grep -qx android.permission.INTERNET <<<"$in_aab"';
+      expect(check, contains(readable));
+      expect(check.indexOf(readable),
+          lessThan(check.indexOf('for p in READ_MEDIA_IMAGES')));
+      expect('exit 1'.allMatches(check), hasLength(3));
       final at = workflow.indexOf(check);
       expect(at,
           lessThan(workflow.indexOf('uses: r0adkll/upload-google-play')));

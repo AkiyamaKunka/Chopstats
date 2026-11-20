@@ -1286,8 +1286,10 @@ cd app && flutter build appbundle --release --dart-define=CHOPSTATS_CHANNEL=play
   `app/android/app/src/playChannel/AndroidManifest.xml` into every variant;
   its `tools:node="remove"` entries strip `READ_MEDIA_IMAGES`,
   `READ_MEDIA_VISUAL_USER_SELECTED` and `READ_EXTERNAL_STORAGE` (the main
-  manifest's and photo_manager's). The bundle then asks for `INTERNET`,
-  `POST_NOTIFICATIONS`, `RECEIVE_BOOT_COMPLETED`, `VIBRATE`, `WAKE_LOCK`,
+  manifest's and photo_manager's), as `<uses-permission>` and as
+  `<uses-permission-sdk-23>`, which the merger keeps apart. The bundle
+  then asks for `INTERNET`, `POST_NOTIFICATIONS`,
+  `RECEIVE_BOOT_COMPLETED`, `VIBRATE`, `WAKE_LOCK`,
   `ACCESS_NETWORK_STATE` and the app's own
   `DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION`, nothing else.
 - **The app** (`app/lib/core/app_channel.dart`). Settings has no Photos
@@ -1319,7 +1321,7 @@ cd app && flutter build appbundle --release --dart-define=CHOPSTATS_CHANNEL=play
 build**: it declares none of those permissions
 (`app/android/store/app_content.md`). Before uploading a bundle by hand,
 check it: `scripts/android_permissions.sh app-release.aab` (aapt2, from
-the bundle's own manifest) must list no `READ_MEDIA_*` and no
+the bundle's own manifest, both forms) must list no `READ_MEDIA_*` and no
 `READ_EXTERNAL_STORAGE`; `bundletool dump manifest --bundle
 app-release.aab` says the same.
 

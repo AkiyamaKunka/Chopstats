@@ -761,6 +761,12 @@ jobs:
           apk=app/build/app/outputs/flutter-apk/app-release.apk
           in_aab=$(scripts/android_permissions.sh "$aab")
           in_apk=$(scripts/android_permissions.sh "$apk")
+          # A listing with nothing in it would pass the check below: the
+          # bundle asks for INTERNET, so its listing must name it.
+          if ! grep -qx android.permission.INTERNET <<<"$in_aab"; then
+            echo "::error::no android.permission.INTERNET in the permissions read from app-release.aab; aapt2's listing (in the log above) was not read"
+            exit 1
+          fi
           for p in READ_MEDIA_IMAGES READ_MEDIA_VISUAL_USER_SELECTED READ_EXTERNAL_STORAGE; do
             if grep -qx "android.permission.$p" <<<"$in_aab"; then
               echo "::error::app-release.aab (the Google Play build) asks for android.permission.$p; it must be built with --dart-define=CHOPSTATS_CHANNEL=play (docs/RELEASING.md § 6)"

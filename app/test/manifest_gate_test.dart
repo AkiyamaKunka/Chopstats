@@ -181,14 +181,30 @@ String _manifest() =>
 String _uncommented(String xml) =>
     xml.replaceAll(RegExp(r'<!--.*?-->', dotAll: true), '');
 
-/// Every `<uses-permission>` in [manifest], by name: true when the entry is
-/// a `tools:node="remove"` (it strips a library's permission from the
-/// merged manifest rather than declaring one).
+/// The two forms a manifest asks for a permission with:
+/// `<uses-permission>`, and `<uses-permission-sdk-23>` (asked for on
+/// Android 6 and later only). The manifest merger and aapt2 tell them
+/// apart: a tools:node="remove" on one form leaves the other in.
+const _permissionForms = ['uses-permission', 'uses-permission-sdk-23'];
+
+/// Every permission entry in [xml] in either form: (form, name, whether it
+/// is a `tools:node="remove"`).
+Set<(String, String, bool)> _permissionEntries(String xml) => {
+      for (final m in RegExp(r'<(uses-permission(?:-sdk-23)?)\s([^>]*)>')
+          .allMatches(_uncommented(xml)))
+        (
+          m.group(1)!,
+          RegExp(r'android:name="([^"]+)"').firstMatch(m.group(2)!)!.group(1)!,
+          m.group(2)!.contains('tools:node="remove"'),
+        ),
+    };
+
+/// Every permission in [manifest], in either form, by name: true when the
+/// entry is a `tools:node="remove"` (it strips a library's permission from
+/// the merged manifest rather than declaring one).
 Map<String, bool> _permissions(String manifest) => {
-      for (final m in RegExp(r'<uses-permission\b([^>]*)>')
-          .allMatches(_uncommented(manifest)))
-        RegExp(r'android:name="([^"]+)"').firstMatch(m.group(1)!)!.group(1)!:
-            m.group(1)!.contains('tools:node="remove"'),
+      for (final (_, name, remove) in _permissionEntries(manifest))
+        name: remove,
     };
 
 /// The permissions [manifest] declares (removals left out).
@@ -1338,28 +1354,93 @@ void main() {
     expect(gradle, contains('testImplementation("junit:junit:'));
   });
 
+  // Every permission check (mobile-build's allowlists, release.yml's Play
+  // bundle check, the hand check in docs/RELEASING.md § 6) reads aapt2's
+  // listing through scripts/android_permissions.sh. aapt2 prints a
+  // permission asked for through <uses-permission-sdk-23> as its own line
+  // form, which a parse of `uses-permission:` lines alone let past every
+  // gate (review, 2026-11-19). The script's own parse, run on a listing
+  // with both forms, as aapt2 36 prints them.
+  test('the permission script lists the permissions aapt2 prints in both '
+      'forms, and nothing else', () async {
+    final script =
+        File('${_appRoot().parent.path}/scripts/android_permissions.sh');
+    final dir = Directory.systemTemp.createTempSync('aapt2-listing');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final listing = File('${dir.path}/permissions.txt')
+      ..writeAsStringSync([
+        'package: dev.calorietracker.calorie_tracker',
+        "uses-permission: name='android.permission.INTERNET'",
+        "uses-permission-sdk-23: name='android.permission.READ_MEDIA_IMAGES'",
+        "uses-permission: name='android.permission.READ_EXTERNAL_STORAGE' "
+            "maxSdkVersion='32'",
+        'uses-permission-sdk-23: '
+            "name='android.permission.READ_MEDIA_VISUAL_USER_SELECTED' "
+            "maxSdkVersion='34'",
+        'permission: dev.calorietracker.calorie_tracker.'
+            'DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION',
+        'uses-permission: name=\'dev.calorietracker.calorie_tracker.'
+            'DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION\'',
+        "uses-permission: name='android.permission.INTERNET'",
+        '',
+      ].join('\n'));
+    // $0 stays 'bash': the script runs its main only when it is $0.
+    final result = await Process.run('bash', [
+      '-c',
+      r'source "$1" && permission_names < "$2"',
+      'bash',
+      script.path,
+      listing.path,
+    ]);
+    expect(result.exitCode, 0, reason: '${result.stderr}');
+    expect(
+        const LineSplitter().convert(result.stdout as String),
+        [
+          'android.permission.INTERNET',
+          'android.permission.READ_EXTERNAL_STORAGE',
+          'android.permission.READ_MEDIA_IMAGES',
+          'android.permission.READ_MEDIA_VISUAL_USER_SELECTED',
+          'dev.calorietracker.calorie_tracker.'
+              'DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION',
+        ],
+        reason: 'sorted, unique, both forms; a declared <permission> is no '
+            'request');
+    // Sourced, it only defines: nothing ran aapt2 or wanted a file.
+    expect(result.stderr, isEmpty);
+    // What the script prints for an APK or bundle is that parse.
+    expect(script.readAsStringSync(), contains('permission_names <<<"\$dump"'));
+  });
+
   // The Google Play build ships WITHOUT broad photo access (owner decision
   // 1, 2026-11-13); the GitHub APK keeps everything. ONE switch makes it,
   // `--dart-define=CHOPSTATS_CHANNEL=play`: the Dart side reads it
   // (lib/core/app_channel.dart), and Gradle merges this overlay into every
   // variant from the same define. Each entry is a tools:node="remove": it
   // strips the main manifest's permission and any library's (photo_manager
-  // declares READ_EXTERNAL_STORAGE itself).
+  // declares READ_EXTERNAL_STORAGE itself), in both forms: a library that
+  // asks through <uses-permission-sdk-23> would keep it past a
+  // <uses-permission> removal (review, 2026-11-19).
   test("the Play build's overlay removes exactly the three photo permissions",
       () {
     final overlay = File(
         '${_appRoot().path}/android/app/src/playChannel/AndroidManifest.xml');
     expect(overlay.existsSync(), isTrue, reason: overlay.path);
     final xml = overlay.readAsStringSync();
-    expect(_permissions(xml), {for (final p in _playRemoved) p: true},
-        reason: 'each a tools:node="remove", and nothing else removed');
+    expect(
+        _permissionEntries(xml),
+        {
+          for (final p in _playRemoved)
+            for (final form in _permissionForms) (form, p, true),
+        },
+        reason: 'each a tools:node="remove" in both forms, and nothing else '
+            'removed');
     // Nothing but those entries: no component, no other element. A
     // permission or component added here would ship in the Play build only.
-    final elements = RegExp(r'<([a-zA-Z-]+)')
+    final elements = RegExp(r'<([a-zA-Z0-9-]+)')
         .allMatches(_uncommented(xml))
         .map((m) => m.group(1))
         .toSet();
-    expect(elements, {'manifest', 'uses-permission'});
+    expect(elements, {'manifest', ..._permissionForms});
     expect(xml, contains('xmlns:tools="http://schemas.android.com/tools"'));
     // The GitHub APK keeps all three: the main manifest still declares them.
     expect(_declared(_manifest()), containsAll(_playRemoved));
