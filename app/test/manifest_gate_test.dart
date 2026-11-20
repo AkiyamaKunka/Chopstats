@@ -1030,6 +1030,40 @@ void main() {
     _expectJvmTests(['isRedelivery', 'ShareHold']);
   });
 
+  // Decision 6.1 (Q9): Back at the root moves the task to the back, so the
+  // engine lives on: FlutterActivity's default finished the activity,
+  // destroying its engine, and a shared photo still being analyzed was
+  // never saved. Flutter's PlatformPlugin runs its default (finish(), or
+  // the OnBackPressedDispatcher) only when popSystemNavigator returns
+  // false. The launch mode stays singleTask (decision 6.4), and nothing
+  // else finishes the activity by hand.
+  test('Back at the root moves the task to the back, never finishes it', () {
+    final code = _kotlinCode(_mainActivity());
+    expect(_kotlinFunction(code, 'override fun popSystemNavigator('),
+        '{ moveTaskToBack(true) return true }');
+    expect(code, contains('override fun popSystemNavigator(): Boolean {'));
+    expect(code, isNot(contains('finish()')));
+    // Flutter 3.44's embedding, where the SDK carries its sources: the
+    // hook, and that the default runs only when the hook says no.
+    final embedding = '${_pluginRoot('flutter')}/../../engine/src/flutter/'
+        'shell/platform/android/io/flutter';
+    final activity =
+        File('$embedding/embedding/android/FlutterActivity.java');
+    final plugin = File('$embedding/plugin/platform/PlatformPlugin.java');
+    if (activity.existsSync() && plugin.existsSync()) {
+      expect(activity.readAsStringSync(),
+          contains('public boolean popSystemNavigator() {'));
+      expect(
+          plugin.readAsStringSync().replaceAll(RegExp(r'\s+'), ' '),
+          contains('if (platformPluginDelegate != null && '
+              'platformPluginDelegate.popSystemNavigator()) { '));
+    }
+    final manifest = File('${_appRoot().path}/android/app/src/main/'
+            'AndroidManifest.xml')
+        .readAsStringSync();
+    expect(manifest, contains('android:launchMode="singleTask"'));
+  });
+
   // Chopstats is a target in its own sharesheet: Today's day image and the
   // Export file go out through share_plus's FileProvider. Picked there,
   // the report image would come back in as a meal photo and go to the AI.

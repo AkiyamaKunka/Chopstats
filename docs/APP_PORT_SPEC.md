@@ -406,8 +406,11 @@ between user-initiated and automated intake. The 6-hour stale-processing reclaim
 30 minutes on the phone (`appProcessingStaleAge`; the longest live analysis is ~15 min, and iOS
 kills runs mid-analysis — reclaiming a run that is only suspended, or whose zone-less `last_seen_at`
 reads an hour old after a DST fall-back, is safe because of the ownership stamp below), plus a
-cold-launch sweep of `processing` rows older than 20 minutes — not every row, since a background
-isolate may own a fresher one. A run is not dead just because its row went stale (a suspended
+cold-launch sweep of automatic `processing` rows older than 20 minutes — not every row, since a
+background isolate may own a fresher one. Deliberate (`app_photo`) rows are only ever the app
+engine's own, so that sweep fails them at any age: the engine that held one is gone, and a
+shared photo's copy, kept until its verdict is written, comes back at that start and reclaims
+the failed row (2026-11-20). A run is not dead just because its row went stale (a suspended
 process wakes up later), so `reservePhotoHash` returns the `last_seen_at` stamp it wrote and every
 settling write (save / mark / release) checks the row still carries it; a run that lost its row
 drops its verdict silently (`ReservationLost`).
@@ -1063,7 +1066,7 @@ one SQLite file). Each is pinned by tests named alongside.
 | Divergence | Server behavior | App behavior | Why | Pinned by |
 |---|---|---|---|---|
 | Transient analysis failure | mark `failed` | RELEASE the reservation (`AnalysisOutcome.retryable`) | automated intake never reclaims `failed`; a 12 h quota latch would silently drop photos forever | `photo_pipeline_test` retryable-release |
-| Launch reclaim sweep | all `processing` → `failed` | `app_watch` rows RELEASED, only >15 min stale rows touched | EMUI kills mid-analysis routinely; a live background isolate may own fresh rows | `meals_dao_reclaim_test` |
+| Launch reclaim sweep | all `processing` → `failed` | `app_watch` rows RELEASED, only >20 min stale rows touched; `app_photo` rows `failed` at any age (only the app engine reserves them, and it is starting) | EMUI kills mid-analysis routinely; a live background isolate may own fresh automatic rows; a shared photo kept on disk comes back and reclaims its row | `meals_dao_reclaim_test`, `share_resume_test` |
 | Backfill cadence | nightly `--sync` | 30-min WorkManager + launch/resume full-window catch-up + `safeFrontier` watermark | the app cannot rely on cron; watermark keeps 48 scans/day cheap | `background_glue_test` watermark suite |
 | Photo intake concurrency | sequential bot loop | backpressured sink (`PhotoIntake.attachSink`), one photo's bytes resident | 200-photo backlog ≈ 1 GB resident otherwise (OOM) | `watcher_test` backpressure |
 | Key checking (rewritten 2026-07-31) | n/a (server key assumed valid) | keys persist ON TYPE (no validate-to-save step; the Validate button is deleted); the one test action is the diagnostics page, whose auth stage uses `AnalyzerService.probeKey` — a four-way classification (ok / outOfCredit / rateLimited / rejected) that validateKey cannot express because quota-class responses count as ACCEPTED there (a 429 proves auth; refusing to save locked onboarding for hours). ServerAnalyzer's probeKey uses the free /api/auth_check, never a CLI run | an empty account must be distinguishable from a healthy one, and a paste-then-tab-away must configure the app | `settings_store_adapter_test`, `server_analyzer_test` probeKey, `diagnostics_test` |

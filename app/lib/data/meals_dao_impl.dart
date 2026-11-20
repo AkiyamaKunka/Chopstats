@@ -569,9 +569,11 @@ class SqfliteMealsDao implements MealsDao {
     if (rows.isEmpty) throw const ReservationLost();
   }
 
-  /// A 'processing' row younger than this may belong to a LIVE run in the
-  /// other isolate (the periodic background job vs. the foreground app) —
-  /// sweeping it would double-analyze and double-log the photo. Worst-case
+  /// An automatic 'processing' row younger than this may belong to a LIVE
+  /// run in the other isolate (the periodic background job vs. the
+  /// foreground app) — sweeping it would double-analyze and double-log the
+  /// photo. (A deliberate row is the app engine's own: swept at any age,
+  /// see [reclaimStaleProcessing].) Worst-case
   /// legitimate hold is ~15.3 min (ServerAnalyzer: 3 attempts × its 5-min
   /// deadline + backoffs). Warm paths reclaim on their own after
   /// appProcessingStaleAge (meals_logic.dart).
@@ -611,7 +613,21 @@ class SqfliteMealsDao implements MealsDao {
       ],
     );
     // DELIBERATE rows (picker/share) keep the spec behavior: mark 'failed'
-    // so the user-visible retry path owns them.
+    // so the user-visible retry path owns them — the app's own (app_photo)
+    // whatever their age. Only the app's engine reserves those (the
+    // background run takes automatic photos only), and this sweep runs as
+    // that engine starts, so the run that held one is gone: Back finished
+    // its activity, or Android or iOS stopped its process, mid-analysis.
+    // Left 'processing' it answered "still being analyzed" to every
+    // deliberate add for half an hour (appProcessingStaleAge), and a
+    // shared photo whose copy the share intake kept (it deletes a copy
+    // only once its photo's verdict is written) came back at this start
+    // only to be told so. A failed row is reclaimed by any deliberate
+    // add: that photo, offered again by the start-up sweep, goes through
+    // as before (Q1, Q9). One whose copy is gone stays failed, for Photo
+    // Coverage's retry or a share again. A run that was in fact alive
+    // loses its stamp and drops its verdict (ReservationLost): never a
+    // second meal.
     await _db.update(
       'photo_ingestions',
       {
@@ -619,8 +635,13 @@ class SqfliteMealsDao implements MealsDao {
         'meal_id': null,
         'last_seen_at': _clock().toIso8601String(),
       },
-      where: 'chat_id = ? AND status = ? AND last_seen_at < ?',
-      whereArgs: [localChatId, IngestionStatus.processing.name, cutoff],
+      where: 'chat_id = ? AND status = ? AND (source = ? OR last_seen_at < ?)',
+      whereArgs: [
+        localChatId,
+        IngestionStatus.processing.name,
+        MealSource.appPhoto,
+        cutoff,
+      ],
     );
   }
 

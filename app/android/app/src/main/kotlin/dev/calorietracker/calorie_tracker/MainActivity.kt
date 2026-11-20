@@ -66,11 +66,12 @@ class MainActivity : FlutterActivity() {
         // activity was recreated for too: Android delivers it in this same
         // launch, after onStart, before Dart has run, so onNewIntent holds
         // a share until share intake listens (ShareHold). The launch
-        // intent is not re-delivered, but copies of a several-photo share
-        // cut short by the stop that were never read stay in shared_photos:
-        // share intake (Dart) picks those up at its next start, within a
-        // day, through the same consent gate (reading a copy deletes it, so
-        // nothing is sent twice).
+        // intent is not re-delivered, but the copies of a share cut short
+        // by the stop stay in shared_photos, those never read and those
+        // whose photo had no verdict written yet (share intake deletes a
+        // copy only then): share intake (Dart) picks them up at its next
+        // start, within a day, through the same consent gate, and the
+        // photo ledger keeps one already logged from being logged twice.
         val replay = IntakeRules.isRedelivery(savedInstanceState != null, intent?.flags ?: 0)
         if (replay) {
             intent?.let { setIntent(emptyShare(it)) }
@@ -84,6 +85,23 @@ class MainActivity : FlutterActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         pendingSaveSource?.let { outState.putString(STATE_SAVE_SOURCE, it.path) }
+    }
+
+    /// Back at the root (Flutter's navigator has nothing left to pop) moves
+    /// the task to the back instead of finishing the activity (decision
+    /// 6.1). Finishing destroyed the engine with it: a shared photo still
+    /// being analyzed was never saved (Q9), and every reopen started Dart
+    /// cold on Today. Also what SystemNavigator.pop() does from Dart.
+    /// Android 13+ with predictive back on (enableOnBackInvokedCallback,
+    /// the default on Android 16 for targetSdk 36) does not call this for
+    /// Back at the root: Flutter hands that Back to Android, which moves a
+    /// task the home screen started with the launcher intent to the back
+    /// and finishes any other (a task a share started); the photo such a
+    /// finish cuts off is offered again at the next start, since its copy
+    /// is kept until its verdict is written (share_intake.dart).
+    override fun popSystemNavigator(): Boolean {
+        moveTaskToBack(true)
+        return true
     }
 
     /// A share (withSafeShares made copies: a new SEND) goes to the plugins
@@ -269,7 +287,7 @@ class MainActivity : FlutterActivity() {
         "file".equals(uri.scheme, ignoreCase = true) &&
             IntakeRules.liesIn(File(applicationInfo.dataDir), uri.path)
 
-    /// Folders whose copy Dart has read and deleted.
+    /// Folders whose copy Dart has deleted (its photo settled).
     private fun clearEmptyShareFolders() {
         File(cacheDir, SHARE_FOLDER).listFiles()?.forEach {
             if (it.isDirectory && it.list()?.isEmpty() == true) it.delete()

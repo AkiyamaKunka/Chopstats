@@ -82,6 +82,59 @@ void main() {
             'launch sweep (double-log race otherwise)');
   });
 
+  // Q1, Q9 (2026-11-20): only the app's own engine reserves deliberate
+  // (app_photo) rows, and the launch sweep runs as that engine starts: the
+  // one that held such a row is gone (Back finished the activity, the
+  // process was killed), whatever the row's age. Left 'processing' it said
+  // "still being analyzed" for 30 minutes, and blocked the shared photo
+  // the start-up sweep offers again.
+  test('a FRESH deliberate row is failed at launch: its engine is gone, and '
+      'a deliberate add reclaims it at once', () async {
+    await seedProcessing('p' * 32, MealSource.appPhoto,
+        age: const Duration(seconds: 30));
+    await seedProcessing('w' * 32, MealSource.appWatch,
+        age: const Duration(seconds: 30));
+    await dao.reclaimStaleProcessing();
+    expect((await dao.photoStatus('p' * 32))?.status, IngestionStatus.failed);
+    expect((await dao.photoStatus('w' * 32))?.status,
+        IngestionStatus.processing,
+        reason: 'an automatic row may still be the background run\'s');
+    // Failed is the user-visible retry state: the automatic path counts it
+    // settled, a deliberate add (a share again, the sweep's copy) takes it.
+    expect((await dao.reservePhotoHash('p' * 32, source: MealSource.appWatch))
+            .kind,
+        PhotoReservation.claimed);
+    final again = await dao.reservePhotoHash('p' * 32,
+        source: MealSource.appPhoto, reclaimDeliberate: true);
+    expect(again.kind, PhotoReservation.reserved);
+    expect(again.stamp, isNotNull);
+  });
+
+  test('the launch sweep leaves deliberate rows that are no longer '
+      'processing alone', () async {
+    for (final status in [
+      IngestionStatus.saved,
+      IngestionStatus.skipped,
+      IngestionStatus.failed,
+      IngestionStatus.deleted,
+    ]) {
+      final hash = status.index.toString() * 32;
+      await seedProcessing(hash, MealSource.appPhoto,
+          age: const Duration(seconds: 30));
+      await dao.markPhotoHash(hash, status);
+    }
+    await dao.reclaimStaleProcessing();
+    for (final status in [
+      IngestionStatus.saved,
+      IngestionStatus.skipped,
+      IngestionStatus.failed,
+      IngestionStatus.deleted,
+    ]) {
+      expect((await dao.photoStatus(status.index.toString() * 32))?.status,
+          status);
+    }
+  });
+
   test('a FRESH processing row is IN FLIGHT for both paths until released',
       () async {
     // The iOS case (2026-10-07): BGAppRefresh expired mid-analysis, the
