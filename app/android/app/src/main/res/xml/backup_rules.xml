@@ -5,12 +5,48 @@
      flutter_secure_storage's shared_prefs files (the API keys, encrypted
      with a Keystore key that never leaves this phone) out of Auto Backup
      and device-to-device transfer; data_extraction_rules.xml says why.
-     Exclude-only on purpose: with no <include>, everything else is backed
-     up exactly as before. -->
+
+     A cloud backup only when it is end-to-end encrypted (owner decision 5,
+     2026-11-20). Each <include> takes a whole domain (path ".", so the
+     includes together take what Auto Backup takes with no rules), but
+     only for the transfer its requireFlags names (Android 9 and later):
+     clientSideEncryption, a cloud backup encrypted with the phone's
+     screen lock (PIN, pattern or password); deviceToDeviceTransfer, a
+     transfer straight to a new phone, which stays as it was. A cloud
+     backup from a phone without a screen lock matches no <include> and
+     carries none of the app's files. The excludes hold for both.
+
+     Android 8.1 and lower cannot read requireFlags: there the rules fail
+     to parse and Android skips the app's backup ("adding requirements to
+     the XML prevents backups from working on previous Android versions",
+     developer.android.com/identity/data/autobackup, read 2026-11-20).
+     Those versions cannot encrypt a backup end to end anyway. The
+     excludes stay first, so they are read before the parse stops: a
+     backup that went ahead regardless would still leave them out. -->
 <full-backup-content>
     <exclude domain="file" path="bitewise_local/"/>
     <exclude domain="sharedpref" path="FlutterSecureStorage.xml"/>
     <exclude domain="sharedpref" path="FlutterSecureKeyStorage.xml"/>
     <exclude domain="sharedpref" path="FlutterSecureStorageConfiguration.xml"/>
     <exclude domain="sharedpref" path="FlutterSecureStorageConfiguration:FlutterSecureStorage.xml"/>
+
+    <include domain="root" path="." requireFlags="clientSideEncryption"/>
+    <include domain="file" path="." requireFlags="clientSideEncryption"/>
+    <include domain="database" path="." requireFlags="clientSideEncryption"/>
+    <include domain="sharedpref" path="." requireFlags="clientSideEncryption"/>
+    <include domain="external" path="." requireFlags="clientSideEncryption"/>
+    <include domain="device_root" path="." requireFlags="clientSideEncryption"/>
+    <include domain="device_file" path="." requireFlags="clientSideEncryption"/>
+    <include domain="device_database" path="." requireFlags="clientSideEncryption"/>
+    <include domain="device_sharedpref" path="." requireFlags="clientSideEncryption"/>
+
+    <include domain="root" path="." requireFlags="deviceToDeviceTransfer"/>
+    <include domain="file" path="." requireFlags="deviceToDeviceTransfer"/>
+    <include domain="database" path="." requireFlags="deviceToDeviceTransfer"/>
+    <include domain="sharedpref" path="." requireFlags="deviceToDeviceTransfer"/>
+    <include domain="external" path="." requireFlags="deviceToDeviceTransfer"/>
+    <include domain="device_root" path="." requireFlags="deviceToDeviceTransfer"/>
+    <include domain="device_file" path="." requireFlags="deviceToDeviceTransfer"/>
+    <include domain="device_database" path="." requireFlags="deviceToDeviceTransfer"/>
+    <include domain="device_sharedpref" path="." requireFlags="deviceToDeviceTransfer"/>
 </full-backup-content>

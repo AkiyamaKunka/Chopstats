@@ -4154,7 +4154,7 @@ abstract class AppLocalizations {
   /// Footer line on Android, where the photo location is never read.
   ///
   /// In en, this message translates to:
-  /// **'On Android, lookups use printed brands only for now.'**
+  /// **'On Android, lookups use printed brands only.'**
   String get restaurantLocationAndroidHint;
 
   /// Footer line when the own server's address is http:// — chain names found from the photo location are never sent over plain http.
@@ -5039,10 +5039,10 @@ abstract class AppLocalizations {
   /// **'Nothing is being copied to iCloud Drive, so your meals would not come back after a reinstall, or on a new iPhone that does not get this iPhone\'s data from a backup or a transfer. Before either, export a file, then import it afterwards. API keys are never included, and the developer receives nothing.'**
   String get backupICloudFooterOff;
 
-  /// Footer of Settings › Your Data on Android (there is no automatic backup file on Android). Says Android's own Auto Backup can restore the food log from the Google account but not the keys, and that Export Data › Save to Device… is how to move phones. The keys part holds together with the backup rules that keep flutter_secure_storage's preference files out of cloud backup and device transfer (res/xml/data_extraction_rules.xml and backup_rules.xml, the native lane's PR #62): on a build without them those encrypted files do travel, though another phone cannot decrypt them. Keep this text and those rules in step.
+  /// Footer of Settings › Your Data on Android (there is no automatic backup file on Android). Says Android's own Auto Backup can restore the food log from the Google account but not the keys, and that Export Data › Save to Device… is how to move phones. The keys part holds together with the backup rules that keep flutter_secure_storage's preference files out of cloud backup and device transfer (res/xml/data_extraction_rules.xml and backup_rules.xml, the native lane's PR #62): on a build without them those encrypted files do travel, though another phone cannot decrypt them. The screen-lock sentence holds together with the same files' end-to-end-only rules (owner decision 5, 2026-11-20): disableIfNoEncryptionCapabilities on the cloud-backup section for Android 12 and later, requireFlags clientSideEncryption on the includes below it; a transfer to a new phone is not affected. Keep this text and those rules in step.
   ///
   /// In en, this message translates to:
-  /// **'Android\'s own backup can keep your food log in your Google account, but not your API keys or server upload key: on a new phone you enter them again. To move to a new phone, use Export Data, then Save to Device, and import that file on the new phone. Import merges: meals already here are left alone.'**
+  /// **'Android\'s own backup can keep your food log in your Google account, but not your API keys or server upload key: on a new phone you enter them again. That backup is end-to-end encrypted with this phone\'s screen lock (PIN, pattern or password): without a screen lock, your log is not backed up. To move to a new phone, use Export Data, then Save to Device, and import that file on the new phone. Import merges: meals already here are left alone.'**
   String get backupAndroidFooter;
 
   /// Status line under the iCloud Backup switch: the user turned it off.
@@ -5824,6 +5824,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Photo analysis failed. {reason}'**
   String outcomeFailedKeptMsgPlay(String reason);
+
+  /// Last line of the Settings › Photos footer, Android only (owner decision 8, 2026-11-20): why the 'Meta glasses photos' switch (settingsRowWatchGlasses) is off until the user turns it on there. An iPhone checks each glasses photo for food on the phone before sending it; Android has no such check. 'starts off' stays true after the user turns it on. Not shown in the Google Play build, which has no Photos section.
+  ///
+  /// In en, this message translates to:
+  /// **'On Android, the Meta glasses photos switch starts off: these photos can\'t be checked for food on the phone first, so each one would go to the AI service unchecked.'**
+  String get watchGlassesAndroidNote;
 }
 
 class _AppLocalizationsDelegate

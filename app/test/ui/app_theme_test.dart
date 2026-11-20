@@ -7,11 +7,15 @@ library;
 
 import 'package:calorie_tracker/ui/app.dart';
 import 'package:calorie_tracker/ui/theme/app_theme.dart';
+import 'package:calorie_tracker/ui/widgets/grouped.dart' show GroupedPage;
+import 'package:flutter/cupertino.dart'
+    show CupertinoPageTransition, CupertinoPageTransitionsBuilder;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../support/app_theme_harness.dart';
+import '../support/back_gesture.dart';
 import 'fakes.dart';
 
 Color _materialColorIn(WidgetTester tester, Finder of) => tester
@@ -219,17 +223,31 @@ void main() {
       expect(text.headlineSmall?.fontFamily, 'CupertinoSystemDisplay');
     });
 
-    test('Apple sizes, line heights and tracking (Latin)', () {
-      final text = AppTheme.build(Brightness.light).textTheme;
-      for (final (style, size, line, weight, tracking) in [
-        (text.headlineMedium, 34.0, 41.0, FontWeight.w700, 0.40),
-        (text.titleLarge, 17.0, 22.0, FontWeight.w600, -0.43),
-        (text.titleSmall, 15.0, 20.0, FontWeight.w600, -0.23),
-        (text.bodyLarge, 17.0, 22.0, FontWeight.w400, -0.43),
-        (text.bodyMedium, 15.0, 20.0, FontWeight.w400, -0.23),
-        (text.bodySmall, 13.0, 18.0, FontWeight.w400, -0.08),
-        (text.labelSmall, 12.0, 16.0, FontWeight.w500, 0.0),
-      ]) {
+    // The Latin roles: (style, size, line height, weight, Apple tracking).
+    List<(TextStyle?, double, double, FontWeight, double)> latinRoles(
+            ThemeData t) =>
+        [
+          (t.textTheme.headlineMedium, 34.0, 41.0, FontWeight.w700, 0.40),
+          (t.textTheme.titleLarge, 17.0, 22.0, FontWeight.w600, -0.43),
+          (t.textTheme.titleSmall, 15.0, 20.0, FontWeight.w600, -0.23),
+          (t.textTheme.bodyLarge, 17.0, 22.0, FontWeight.w400, -0.43),
+          (t.textTheme.bodyMedium, 15.0, 20.0, FontWeight.w400, -0.23),
+          (t.textTheme.bodySmall, 13.0, 18.0, FontWeight.w400, -0.08),
+          (t.textTheme.labelSmall, 12.0, 16.0, FontWeight.w500, 0.0),
+          (t.extension<AppTypography>()!.title2, 22.0, 28.0, FontWeight.w700,
+              0.35),
+          (t.extension<AppTypography>()!.callout, 16.0, 21.0,
+              FontWeight.w400, -0.31),
+          (t.extension<AppNumerals>()!.hero, 34.0, 41.0, FontWeight.w700,
+              0.40),
+          (t.extension<AppNumerals>()!.value, 17.0, 22.0, FontWeight.w600,
+              -0.43),
+        ];
+
+    test('iOS: Apple sizes, line heights and tracking (Latin)', () {
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      for (final (style, size, line, weight, tracking)
+          in latinRoles(AppTheme.build(Brightness.light))) {
         expect(style?.fontSize, size);
         expect(style!.height! * size, closeTo(line, 0.001));
         expect(style.fontWeight, weight);
@@ -238,7 +256,30 @@ void main() {
       }
     });
 
+    // Owner decision 6 (2026-11-20): Apple's tracking table is for SF.
+    // Android sets Roboto at its own spacing (letterSpacing 0); the sizes
+    // and line heights stay the same on both.
+    test('Android: the same sizes and line heights, Roboto at its own '
+        'spacing (no tracking)', () {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      for (final b in Brightness.values) {
+        for (final (style, size, line, weight, _)
+            in latinRoles(AppTheme.build(b))) {
+          expect(style?.fontSize, size);
+          expect(style!.height! * size, closeTo(line, 0.001));
+          expect(style.fontWeight, weight);
+          expect(style.letterSpacing, 0, reason: '$b ${style.fontSize}');
+          expect(style.leadingDistribution, TextLeadingDistribution.even);
+        }
+      }
+      final t = AppTheme.build(Brightness.light, highContrast: true);
+      expect(t.extension<AppNumerals>()!.chip.letterSpacing, 0);
+      expect(t.extension<AppTypography>()!.caption2.letterSpacing, 0);
+      expect(t.textTheme.titleMedium!.letterSpacing, 0);
+    });
+
     test('Chinese takes no tracking anywhere', () {
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
       final t = AppTheme.build(Brightness.light, cjk: true);
       final text = t.textTheme;
       for (final s in [
@@ -404,5 +445,139 @@ void main() {
             of: find.text('Retry'), matching: find.byType(FilledButton)),
         findsOneWidget);
     expect(find.byKey(const Key('startupRetry')), findsOneWidget);
+  });
+
+  // Owner decision 6 (2026-11-20): Android moves and scrolls like Android
+  // (predictive back, stretch overscroll; the spacing is under 'type
+  // scale'). iOS keeps exactly what it had.
+  group('the platform split', () {
+    tearDown(() => debugDefaultTargetPlatformOverride = null);
+    final both = TargetPlatformVariant(
+        {TargetPlatform.android, TargetPlatform.iOS});
+    bool onAndroid() => defaultTargetPlatform == TargetPlatform.android;
+
+    test('page transitions: the predictive-back builder on Android, the '
+        'Cupertino slide on iOS', () {
+      for (final platform in [TargetPlatform.android, TargetPlatform.iOS]) {
+        debugDefaultTargetPlatformOverride = platform;
+        for (final b in Brightness.values) {
+          final t = AppTheme.build(b);
+          final builders = t.pageTransitionsTheme.builders;
+          expect(builders[TargetPlatform.iOS],
+              isA<CupertinoPageTransitionsBuilder>());
+          final android = builders[TargetPlatform.android];
+          expect(android, isA<PredictiveBackPageTransitionsBuilder>());
+          // Behind the fade, the page tone (the default is the cell's).
+          expect((android! as PredictiveBackPageTransitionsBuilder)
+              .fallbackColor, AppColors.forBrightness(b).page);
+          expect(builders[t.platform],
+              same(platform == TargetPlatform.android ? android
+                  : builders[TargetPlatform.iOS]));
+        }
+      }
+    });
+
+    Widget pushB(BuildContext c) => const Scaffold(body: Text('page b'));
+
+    Future<void> openB(WidgetTester tester) async {
+      await pumpApp(
+          tester,
+          _launcher((c) => Navigator.of(c)
+              .push(MaterialPageRoute<void>(builder: pushB))));
+      await tester.tap(find.byKey(const Key('open')));
+      await tester.pumpAndSettle();
+      expect(find.text('page b'), findsOneWidget);
+    }
+
+    testWidgets('Android: the back gesture shows the page underneath as it '
+        'moves, and its end pops', (tester) async {
+      await openB(tester);
+      expect(find.byType(CupertinoPageTransition), findsNothing);
+      await backGestureStart(tester);
+      await backGestureProgress(tester, 0.35);
+      expect(predictiveBackTransition, findsWidgets,
+          reason: 'the preview follows the gesture');
+      expect(tester.getTopLeft(find.text('page b')).dx, greaterThan(0));
+      expect(find.byKey(const Key('open')), findsOneWidget,
+          reason: 'the page underneath shows');
+      await backGestureCommit(tester);
+      expect(find.text('page b'), findsNothing);
+      expect(find.byKey(const Key('open')), findsOneWidget);
+    }, variant: TargetPlatformVariant.only(TargetPlatform.android));
+
+    testWidgets('Android: a gesture let go early leaves the page where it was',
+        (tester) async {
+      await openB(tester);
+      await backGestureStart(tester);
+      await backGestureProgress(tester, 0.2);
+      await backGestureCancel(tester);
+      expect(find.text('page b'), findsOneWidget);
+      expect(tester.getTopLeft(find.text('page b')).dx, 0);
+    }, variant: TargetPlatformVariant.only(TargetPlatform.android));
+
+    testWidgets('iOS: the Cupertino slide, and the edge swipe pops',
+        (tester) async {
+      await openB(tester);
+      expect(find.byType(CupertinoPageTransition), findsWidgets);
+      await tester.dragFrom(const Offset(4, 400), const Offset(380, 0));
+      await tester.pumpAndSettle();
+      expect(find.text('page b'), findsNothing);
+    }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
+
+    /// The physics of the first CustomScrollView under [of], parent last.
+    List<Type> physicsChain(WidgetTester tester, Finder of) {
+      final scrollable = find
+          .descendant(
+              of: find.descendant(
+                  of: of, matching: find.byType(CustomScrollView)).first,
+              matching: find.byType(Scrollable))
+          .first;
+      return [
+        for (ScrollPhysics? p =
+                tester.state<ScrollableState>(scrollable).position.physics;
+            p != null;
+            p = p.parent)
+          p.runtimeType,
+      ];
+    }
+
+    testWidgets('scrolling in the app: Android clamps and stretches at the '
+        'ends; iOS bounces, with no indicator', (tester) async {
+      await tester.pumpWidget(
+          CalorieTrackerApp(services: makeServices(settings: FakeSettings())));
+      await tester.pumpAndSettle();
+      final chain = physicsChain(tester, find.byType(HomeShell));
+      if (onAndroid()) {
+        expect(chain, contains(ClampingScrollPhysics));
+        expect(chain, isNot(contains(BouncingScrollPhysics)));
+        expect(find.byType(StretchingOverscrollIndicator), findsWidgets);
+      } else {
+        expect(chain, contains(BouncingScrollPhysics));
+        expect(chain, contains(AlwaysScrollableScrollPhysics));
+        expect(find.byType(StretchingOverscrollIndicator), findsNothing);
+      }
+      expect(find.byType(GlowingOverscrollIndicator), findsNothing);
+    }, variant: both);
+
+    testWidgets('a grouped subpage scrolls as the app does: no bounce on '
+        'Android', (tester) async {
+      await tester.pumpWidget(
+          CalorieTrackerApp(services: makeServices(settings: FakeSettings())));
+      await tester.pumpAndSettle();
+      Navigator.of(tester.element(find.byType(HomeShell))).push(
+          MaterialPageRoute<void>(
+              builder: (_) => const GroupedPage(
+                  title: 'Sub', children: [SizedBox(height: 40)])));
+      await tester.pumpAndSettle();
+      final chain = physicsChain(tester, find.byType(GroupedPage));
+      if (onAndroid()) {
+        expect(chain, contains(ClampingScrollPhysics));
+        expect(chain, isNot(contains(BouncingScrollPhysics)));
+      } else {
+        expect(chain.first, BouncingScrollPhysics,
+            reason: "the grouped table's own bounce");
+        expect(chain, contains(AlwaysScrollableScrollPhysics));
+      }
+    }, variant: both);
   });
 }

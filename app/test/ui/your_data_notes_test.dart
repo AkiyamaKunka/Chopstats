@@ -60,6 +60,21 @@ void main() {
       expect(z, contains('导入会合并'));
     });
 
+    // Owner decision 5 (2026-11-20): Android's cloud backup only when it
+    // is end-to-end encrypted, which needs a screen lock
+    // (res/xml/data_extraction_rules.xml and backup_rules.xml).
+    test('it says the backup is end-to-end encrypted and needs a screen '
+        'lock, without which the log is not backed up', () {
+      final e = en.backupAndroidFooter;
+      expect(e, contains('end-to-end encrypted'));
+      expect(e, contains('screen lock (PIN, pattern or password)'));
+      expect(e, contains('without a screen lock, your log is not backed up'));
+      final z = zh.backupAndroidFooter;
+      expect(z, contains('端到端加密'));
+      expect(z, contains('屏幕锁定（PIN 码、图案或密码）'));
+      expect(z, contains('没有设置屏幕锁定时，饮食记录不会被备份'));
+    });
+
     testWidgets('shown on Android', (tester) async {
       await pump(tester);
       expect(find.text(en.backupAndroidFooter), findsOneWidget);

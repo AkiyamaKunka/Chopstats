@@ -783,10 +783,12 @@ void main() {
   });
 
   // Android: exclusion rules by path for both backup schemes, referenced
-  // from <application>. Exclude-only: an <include> would silently stop
-  // backing up everything else the app keeps.
+  // from <application>. Android 12+'s rules are exclude-only: an <include>
+  // there would silently stop backing up everything else the app keeps.
+  // The Android 11-and-lower rules include every domain, each under a
+  // transfer flag (the end-to-end test below).
   test('Android excludes the local store from cloud backup and device '
-      'transfer, and includes nothing', () {
+      'transfer', () {
     final main = '${_appRoot().path}/android/app/src/main';
     final manifest = File('$main/AndroidManifest.xml').readAsStringSync();
     final application =
@@ -825,7 +827,6 @@ void main() {
     final full = section(legacy.readAsStringSync(), 'full-backup-content');
     expect(exclude.hasMatch(full), isTrue,
         reason: 'fullBackupContent does not exclude $localStoreDirName/');
-    expect(full, isNot(contains('<include')));
   });
 
   // flutter_secure_storage's files hold the API keys encrypted with a key
@@ -835,8 +836,7 @@ void main() {
   // one of its shared_prefs files stays out of both backup schemes and the
   // Android 11-and-lower rules, so a restored phone starts with no keys
   // and asks for them (AndroidSecureKeyStore covers a copy that already
-  // got through). Paths take no wildcards, hence each file by name. No
-  // disableIfNoEncryptionCapabilities: an owner decision of its own.
+  // got through). Paths take no wildcards, hence each file by name.
   test("Android keeps flutter_secure_storage's files out of backup and "
       'device transfer', () {
     final main = '${_appRoot().path}/android/app/src/main';
@@ -871,9 +871,7 @@ void main() {
             isTrue,
             reason: '$name does not exclude $file');
       }
-      expect(body, isNot(contains('<include')), reason: name);
     });
-    expect(extraction, isNot(contains('disableIfNoEncryptionCapabilities')));
 
     // The names, in the plugin version pub resolved: the data and the
     // wrapped-key files (FlutterSecureStorageConfig.java), the saved
@@ -891,6 +889,128 @@ void main() {
         contains('LEGACY_GLOBAL_CONFIG_NAME = "FlutterSecureStorageConfiguration";'));
     expect(source,
         contains('return "FlutterSecureStorageConfiguration:" + sharedPreferencesName;'));
+  });
+
+  // Owner decision 5 (2026-11-20): the log goes to the cloud only end-to-end
+  // encrypted, which Android does with the phone's screen lock; a
+  // transfer to a new phone stays as it was (developer.android.com/
+  // identity/data/autobackup, read 2026-11-20). Android 12+:
+  // disableIfNoEncryptionCapabilities on <cloud-backup> alone. Android 11
+  // and lower: every <include> takes a whole domain under one transfer
+  // flag; one without requireFlags would back up unencrypted, and a
+  // domain left out would silently stop being backed up or transferred.
+  // The excludes come first: Android 8.1 and lower stop parsing at the
+  // first requireFlags, and what they read by then still holds.
+  test('Android backs up to the cloud only end-to-end encrypted; a transfer '
+      'to a new phone is unchanged', () {
+    final main = '${_appRoot().path}/android/app/src/main';
+    final extraction = _uncommented(
+        File('$main/res/xml/data_extraction_rules.xml').readAsStringSync());
+    Map<String, String> attributes(String tag) => {
+          for (final m in RegExp(r'([\w:]+)="([^"]*)"').allMatches(tag))
+            m.group(1)!: m.group(2)!,
+        };
+    String? openTag(String xml, String tag) =>
+        RegExp('<$tag(?:\\s[^>]*)?>').firstMatch(xml)?.group(0);
+
+    final cloud = openTag(extraction, 'cloud-backup');
+    expect(cloud, isNotNull);
+    expect(attributes(cloud!), {'disableIfNoEncryptionCapabilities': 'true'});
+    final transfer = openTag(extraction, 'device-transfer');
+    expect(transfer, '<device-transfer>',
+        reason: 'a transfer goes phone to phone: no encryption condition');
+    expect(extraction, isNot(contains('<include')),
+        reason: 'Android 12+ stays exclude-only');
+
+    const domains = {
+      'root',
+      'file',
+      'database',
+      'sharedpref',
+      'external',
+      'device_root',
+      'device_file',
+      'device_database',
+      'device_sharedpref',
+    };
+    const flags = {'clientSideEncryption', 'deviceToDeviceTransfer'};
+    final legacy = _uncommented(
+        File('$main/res/xml/backup_rules.xml').readAsStringSync());
+    final rules = [
+      for (final m in RegExp(r'<(include|exclude)\s([^>]*?)/?>')
+          .allMatches(legacy))
+        (m.group(1)!, attributes(m.group(2)!)),
+    ];
+    final includes = [
+      for (final (kind, a) in rules)
+        if (kind == 'include') a,
+    ];
+    for (final a in includes) {
+      expect(a.keys.toSet(), {'domain', 'path', 'requireFlags'},
+          reason: 'every include under a transfer flag: $a');
+      expect(a['path'], '.', reason: 'a whole domain: $a');
+      expect(flags, contains(a['requireFlags']), reason: '$a');
+    }
+    expect({for (final a in includes) (a['domain'], a['requireFlags'])}, {
+      for (final d in domains)
+        for (final f in flags) (d, f),
+    });
+    expect(includes, hasLength(domains.length * flags.length));
+    final firstInclude = rules.indexWhere((r) => r.$1 == 'include');
+    final lastExclude = rules.lastIndexWhere((r) => r.$1 == 'exclude');
+    expect(lastExclude, isNonNegative);
+    expect(lastExclude, lessThan(firstInclude),
+        reason: 'the excludes come before the first include');
+    for (final (kind, a) in rules) {
+      if (kind == 'exclude') {
+        expect(a.keys.toSet(), {'domain', 'path'}, reason: '$a');
+      }
+    }
+  });
+
+  // Owner decisions 6 and 7 (2026-11-20): back reaches the app through
+  // Android's back callback (the predictive-back page transition follows
+  // the gesture from Android 14), and phones stay upright as the iPhone
+  // app does (Android 16 ignores the lock at 600 dp and wider, where the
+  // width-capped layout applies). Nothing else sets either: not the
+  // debug, profile or Play manifests, and not MainActivity's code.
+  test('Android: back goes through the back callback, and MainActivity is '
+      'portrait', () {
+    final manifest = _uncommented(_manifest());
+    final application =
+        RegExp(r'<application\b[^>]*>').firstMatch(manifest)?.group(0);
+    expect(application,
+        contains('android:enableOnBackInvokedCallback="true"'));
+    final activities = RegExp(r'<activity\b[^>]*>')
+        .allMatches(manifest)
+        .map((m) => m.group(0)!)
+        .toList();
+    expect(activities, hasLength(1));
+    expect(activities.single, contains('android:name=".MainActivity"'));
+    expect(activities.single,
+        contains('android:screenOrientation="portrait"'));
+    expect(
+        RegExp('screenOrientation|enableOnBackInvokedCallback')
+            .allMatches(manifest)
+            .length,
+        2,
+        reason: 'set once each');
+
+    final src = '${_appRoot().path}/android/app/src';
+    for (final variant in ['debug', 'profile', 'playChannel']) {
+      final xml =
+          _uncommented(File('$src/$variant/AndroidManifest.xml').readAsStringSync());
+      for (final word in [
+        '<application',
+        '<activity',
+        'screenOrientation',
+        'enableOnBackInvokedCallback',
+      ]) {
+        expect(xml, isNot(contains(word)), reason: '$variant: $word');
+      }
+    }
+    expect(_kotlinCode(_mainActivity()),
+        isNot(contains('requestedOrientation')));
   });
 
   // Design R7a: while restaurant lookup uses the photo location, the app

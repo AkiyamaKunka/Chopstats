@@ -215,7 +215,7 @@ bool _githubTagMatches(String pattern, String tag) {
 /// "Effective date:" line must say the same. Whoever merges a branch that
 /// changes the policy sets both to the merge date (docs/RELEASING.md § 6.8);
 /// this pin can only check that they agree, not that the date is new.
-const kPolicyEffectiveDate = '2026-11-19';
+const kPolicyEffectiveDate = '2026-11-20';
 
 void main() {
   group('R-F8: App Privacy answer B in the manifests', () {
@@ -662,7 +662,11 @@ void main() {
       // The Google Play release (android/release, 2026-11-13) changed it
       // again: Who we are, adults only, https only, and Android's backup
       // leaving the keys out. If that branch merges on a later day, set the
-      // date and kPolicyEffectiveDate to the merge date.
+      // date and kPolicyEffectiveDate to the merge date. The Android
+      // look-and-defaults branch (android/feel-and-defaults, 2026-11-20)
+      // changed it again: Android's cloud backup only end-to-end encrypted
+      // (a screen lock), and Meta glasses photos off by default on Android;
+      // if it merges on a later day, the same applies.
       expect(
           RegExp(r'^Effective date: (\S+)$', multiLine: true)
               .allMatches(policy)
@@ -1208,8 +1212,11 @@ void main() {
         'FlutterSecureStorageConfiguration.xml',
         'FlutterSecureStorageConfiguration:FlutterSecureStorage.xml',
       ];
+      // The section's tag may carry attributes (<cloud-backup
+      // disableIfNoEncryptionCapabilities="true">, owner decision 5).
       String section(String xml, String tag) {
-        final m = RegExp('<$tag>(.*?)</$tag>', dotAll: true).firstMatch(xml);
+        final m = RegExp('<$tag(?:\\s[^>]*)?>(.*?)</$tag>', dotAll: true)
+            .firstMatch(xml);
         expect(m, isNotNull, reason: tag);
         return m!.group(1)!;
       }
@@ -1226,6 +1233,33 @@ void main() {
               reason: '$name $file');
         }
       }
+    });
+
+    // Owner decision 5 (2026-11-20): the policy and Settings › Your Data
+    // say Android's cloud backup needs a screen lock; the backup rules are
+    // what makes that true (manifest_gate_test checks them in full).
+    test("Android's cloud backup needs a screen lock: the policy and the "
+        'footer say so, the backup rules do it', () {
+      final policy = _readRepo('docs/PRIVACY.md').replaceAll(RegExp(r'\s+'), ' ');
+      expect(policy, contains('only when it is end-to-end encrypted'));
+      expect(policy, contains('screen lock (PIN, pattern or password)'));
+      expect(policy, contains('只有在端到端加密时'));
+      expect(policy, contains('屏幕锁定（PIN 码、图案或密码）'));
+      expect(policy,
+          contains('<!-- gated: release_decisions_test (disableIfNoEncryptionCapabilities and requireFlags in res/xml) -->'));
+      expect(AppLocalizationsEn().backupAndroidFooter, contains('screen lock'));
+      expect(AppLocalizationsZh().backupAndroidFooter, contains('屏幕锁定'));
+
+      final rules = _read('android/app/src/main/res/xml/data_extraction_rules.xml');
+      expect(rules,
+          contains('<cloud-backup disableIfNoEncryptionCapabilities="true">'));
+      final legacy = _read('android/app/src/main/res/xml/backup_rules.xml')
+          .replaceAll(RegExp(r'<!--.*?-->', dotAll: true), '');
+      expect(legacy, contains('requireFlags="clientSideEncryption"'));
+      expect(
+          RegExp(r'<include\b(?![^>]*requireFlags=)[^>]*>').hasMatch(legacy),
+          isFalse,
+          reason: 'an include without requireFlags backs up unencrypted');
     });
 
     test('the app reminds users to consult a healthcare professional '

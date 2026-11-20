@@ -2728,7 +2728,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get restaurantLocationAndroidHint =>
-      'On Android, lookups use printed brands only for now.';
+      'On Android, lookups use printed brands only.';
 
   @override
   String get restaurantLocationHttpHint =>
@@ -3281,7 +3281,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get backupAndroidFooter =>
-      'Android\'s own backup can keep your food log in your Google account, but not your API keys or server upload key: on a new phone you enter them again. To move to a new phone, use Export Data, then Save to Device, and import that file on the new phone. Import merges: meals already here are left alone.';
+      'Android\'s own backup can keep your food log in your Google account, but not your API keys or server upload key: on a new phone you enter them again. That backup is end-to-end encrypted with this phone\'s screen lock (PIN, pattern or password): without a screen lock, your log is not backed up. To move to a new phone, use Export Data, then Save to Device, and import that file on the new phone. Import merges: meals already here are left alone.';
 
   @override
   String get backupStatusOff => 'Off';
@@ -3869,4 +3869,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String outcomeFailedKeptMsgPlay(String reason) {
     return 'Photo analysis failed. $reason';
   }
+
+  @override
+  String get watchGlassesAndroidNote =>
+      'On Android, the Meta glasses photos switch starts off: these photos can\'t be checked for food on the phone first, so each one would go to the AI service unchecked.';
 }

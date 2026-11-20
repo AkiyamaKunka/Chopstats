@@ -10,10 +10,17 @@
      Auto Backup"). Paths take no wildcards: each file by name, from
      FlutterSecureStorageConfig.java and NamespacedConfigSource.java.
      Exclude-only on purpose: with no <include>, everything else is backed
-     up and transferred exactly as before. backup_rules.xml says the same
-     for Android 11 and lower. -->
+     up and transferred exactly as before. backup_rules.xml keeps the same
+     files out on Android 11 and lower.
+     disableIfNoEncryptionCapabilities (owner decision 5, 2026-11-20): the
+     log goes to the cloud only end-to-end encrypted, which Android does
+     when the phone has a screen lock (PIN, pattern or password). Without
+     one there is no cloud backup at all; Export Data › Save to Device
+     still keeps a copy. A transfer to a new phone goes from phone to
+     phone, so it stays as it was (developer.android.com/identity/data/
+     autobackup, read 2026-11-20). -->
 <data-extraction-rules>
-    <cloud-backup>
+    <cloud-backup disableIfNoEncryptionCapabilities="true">
         <exclude domain="file" path="bitewise_local/"/>
         <exclude domain="sharedpref" path="FlutterSecureStorage.xml"/>
         <exclude domain="sharedpref" path="FlutterSecureKeyStorage.xml"/>

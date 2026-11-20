@@ -181,8 +181,10 @@ final _placeholderRe = RegExp(r'\{(\w+)\}');
 /// settingsWelcomeBodyPlay, aiStopSharingBodyPlay,
 /// aiStopSharingBodyWithLookupsPlay, errServerFailedFinalPlay,
 /// errServerRejectedPlay, coachEmptyPlay, coachEmptyYesterdayPlay,
-/// coachEmptyOnDayPlay).
-const _keyCount = 951;
+/// coachEmptyOnDayPlay); then the Android look-and-defaults branch
+/// (android/feel-and-defaults): the Photos footer's line on why Meta
+/// glasses photos starts off on Android (watchGlassesAndroidNote).
+const _keyCount = 952;
 
 Directory _appRoot() {
   var dir = Directory.current;
