@@ -13,6 +13,8 @@ import 'package:calorie_tracker/core/ai_consent.dart'
 import 'package:calorie_tracker/core/contracts.dart';
 import 'package:calorie_tracker/core/server_transport.dart'
     show serverAddressRefused;
+import 'package:calorie_tracker/services/analysis_keep_alive.dart'
+    show AnalysisKeepAlive;
 import 'package:calorie_tracker/services/photo/photo_library.dart';
 import 'package:calorie_tracker/services/usual/usual_foods.dart'
     show UsualChoices, UsualFoods;
@@ -453,6 +455,7 @@ UiServices makeServices({
   MealInUseRegistry? mealInUse,
   RestaurantAssistControls? restaurantAssist,
   UsualFoods? usualFoods,
+  AnalysisKeepAlive? analysisKeepAlive,
 }) {
   final s = settings ?? FakeSettings();
   return UiServices(
@@ -473,6 +476,7 @@ UiServices makeServices({
     mealInUse: mealInUse,
     restaurantAssist: restaurantAssist,
     usualFoods: usualFoods,
+    analysisKeepAlive: analysisKeepAlive,
   );
 }
 

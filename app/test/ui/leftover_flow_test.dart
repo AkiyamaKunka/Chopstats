@@ -11,6 +11,7 @@ import 'package:calorie_tracker/core/server_transport.dart';
 import 'package:calorie_tracker/l10n/app_localizations.dart';
 import 'package:calorie_tracker/l10n/app_localizations_en.dart';
 import 'package:calorie_tracker/l10n/app_localizations_zh.dart';
+import 'package:calorie_tracker/services/analysis_keep_alive.dart';
 import 'package:calorie_tracker/services/analyzer/gemini_analyzer.dart';
 import 'package:calorie_tracker/services/photo/photo_hash.dart';
 import 'package:calorie_tracker/services/photo/system_photo_picker.dart';
@@ -22,6 +23,7 @@ import 'package:calorie_tracker/ui/services.dart'
 import 'package:calorie_tracker/ui/theme/app_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show SemanticsAction;
+import 'package:flutter/services.dart' show MethodChannel;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -909,6 +911,92 @@ void main() {
       expect(find.byKey(const Key('leftoverMeal-1')), findsOneWidget,
           reason: 'once it is done, Change works again');
       expect(registry.isInUse(2), isFalse);
+    });
+  });
+
+  // Owner decision 9 (2026-11-20): on Android the leftover estimate keeps
+  // the app running and online while it is on its way, should the user
+  // leave the app (AnalysisKeepAlive), begun with the call and ended with
+  // its answer whatever it is: an end never sent would keep the process up
+  // for the full cap.
+  group('Android: the estimate is kept alive', () {
+    late List<String> native;
+    late AnalysisKeepAlive keepAlive;
+    const channel = MethodChannel(keepAliveChannelName);
+
+    setUp(() {
+      native = [];
+      keepAlive = AnalysisKeepAlive();
+    });
+
+    Future<void> start(WidgetTester tester, _HeldAnalyzer estimator) async {
+      final messenger = tester.binding.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        native.add('${call.method}:${(call.arguments as Map)['id']}');
+        return true;
+      });
+      addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+      dao.put(_meal(1, '13:34', 965, hash: 'orig-hash'));
+      await pump(tester,
+          services: makeServices(
+              dao: dao,
+              analyzer: estimator,
+              picker: picker,
+              analysisKeepAlive: keepAlive));
+      await tester.tap(find.byKey(const Key('leftoverMeal-1')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('leftoverPhoto-lp1')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+
+    testWidgets('from the call to its answer, then the confirm as before',
+        (tester) async {
+      final held = _HeldAnalyzer();
+      await start(tester, held);
+      expect(held.calls, 1);
+      expect(native, ['begin:1']);
+      expect(keepAlive.inFlight.value, isTrue);
+      held.gate.complete(analyzer.nextLeftover);
+      await tester.pumpAndSettle();
+      expect(native, ['begin:1', 'end:1']);
+      expect(keepAlive.inFlight.value, isFalse,
+          reason: 'the confirm dialog waits for the user, not the AI');
+      expect(find.byKey(const Key('leftoverResultLine')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('leftoverConfirm')));
+      await tester.pumpAndSettle();
+      expect(native, ['begin:1', 'end:1'], reason: 'the write sends nothing');
+    });
+
+    testWidgets('no usable answer: begun and ended', (tester) async {
+      final held = _HeldAnalyzer();
+      await start(tester, held);
+      held.gate.complete(null);
+      await tester.pumpAndSettle();
+      expect(find.text(AppLocalizationsEn().leftoverFailed), findsOneWidget);
+      expect(native, ['begin:1', 'end:1']);
+    });
+
+    testWidgets('a call that throws: begun and ended', (tester) async {
+      final held = _HeldAnalyzer();
+      await start(tester, held);
+      held.gate.completeError(StateError('socket closed'));
+      await tester.pumpAndSettle();
+      expect(native, ['begin:1', 'end:1']);
+      expect(keepAlive.inFlight.value, isFalse);
+    });
+
+    testWidgets('the user backs out mid-estimate: still ended when the answer '
+        'lands', (tester) async {
+      final held = _HeldAnalyzer();
+      await start(tester, held);
+      await tester.pumpWidget(const MaterialApp(home: Text('Today')));
+      await tester.pump();
+      expect(native, ['begin:1'], reason: 'the call is still on its way');
+      held.gate.complete(analyzer.nextLeftover);
+      await tester.pumpAndSettle();
+      expect(native, ['begin:1', 'end:1']);
+      expect(keepAlive.openCount, 0);
     });
   });
 

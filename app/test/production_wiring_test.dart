@@ -671,6 +671,45 @@ void main() {
         ),
       );
     });
+
+    // Owner decision 9 (2026-11-20): on Android an analysis the user
+    // started keeps the process running and online until it settles
+    // (test/services/analysis_keep_alive_test.dart and the leftover and
+    // shell tests build their own). Without one of these lines, that
+    // request freezes with the app again, with every behavioural test still
+    // green: the pipeline's deliberate photos, typed meals and Fix meals
+    // requests (the executor every screen gets), and the leftover estimate
+    // and the shell's Back guard (UiServices). One instance: its id space
+    // and the shell's in-flight flag are the engine's.
+    test('analyses the user starts keep the app alive, on Android only', () {
+      final source = init();
+      expect(
+        source,
+        _wired(
+          r'\n\s*final keepAlive = Platform\.isAndroid \? '
+          r'AnalysisKeepAlive\(\) : null;',
+        ),
+      );
+      expect(RegExp(r'AnalysisKeepAlive\(').allMatches(source), hasLength(1));
+      expect(
+        source,
+        _wired(
+          r'\n\s*final textExecutor = createExecutor\(dao, analyzer, settings\);'
+          r'\s*final executor = keepAlive == null \? textExecutor : '
+          r'KeptAliveExecutor\(textExecutor, keepAlive\);',
+        ),
+      );
+      expect(_call(source, 'PhotoPipeline('),
+          _wired(r'\n\s*keepAlive: keepAlive,'));
+      final services = _call(source, 'UiServices(');
+      expect(services, _wired(r'\n\s*executor: executor,'));
+      expect(services, _wired(r'\n\s*analysisKeepAlive: keepAlive,'));
+      // The background engine never keeps itself alive this way: its job
+      // has its own time.
+      final glue = _source('lib/ui/background_glue.dart');
+      expect(glue, isNot(contains('AnalysisKeepAlive')));
+      expect(glue, isNot(contains('keepAlive')));
+    });
   });
 
   // Release-candidate review of 1.6.0: an admitted photo can still be

@@ -10,6 +10,7 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show Listenable, ValueListenable;
 
 import '../core/contracts.dart';
+import '../services/analysis_keep_alive.dart' show AnalysisKeepAlive;
 import '../services/backup/backup_coordinator.dart';
 import '../services/garmin_client.dart';
 import '../services/photo/coverage.dart';
@@ -257,6 +258,14 @@ class UiServices {
   /// (SharedPhotosBackGuard). Null on iPhone and in most tests.
   final ValueListenable<bool>? sharedPhotosPending;
 
+  /// Android: keeps the app running while an analysis the user started is
+  /// in flight (owner decision 9): the pipeline keeps its
+  /// deliberate photos, [executor] its typed meals and Fix meals requests,
+  /// and the leftover flow its estimate. Its [AnalysisKeepAlive.inFlight]
+  /// also holds the shell's Back at the root, as [sharedPhotosPending]
+  /// does (SharedPhotosBackGuard). Null on iPhone and in most tests.
+  final AnalysisKeepAlive? analysisKeepAlive;
+
   /// Library access for coverage thumbnails; null in tests.
   final PhotoLibrary? photoLibrary;
 
@@ -343,6 +352,7 @@ class UiServices {
     this.announceOutcome,
     this.sharedPhotoConsent,
     this.sharedPhotosPending,
+    this.analysisKeepAlive,
     this.photoLibrary,
     this.startClaudeAuth,
     this.completeClaudeAuth,

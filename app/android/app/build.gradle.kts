@@ -192,7 +192,14 @@ dependencies {
     // The system Photo Picker contracts (MainActivity.pickImages) need
     // 1.7.0 or later; 1.9.0 is what the plugins already resolve.
     implementation("androidx.activity:activity-ktx:1.9.0")
-    // IntakeRulesTest (src/test): MainActivity's decisions on the JVM,
-    // `./gradlew :app:testDebugUnitTest` (mobile-build.yml).
+    // The analysis keep-alive's job (AnalysisKeepAlive.kt): the WorkManager
+    // the workmanager plugin already brings, at the version it builds with
+    // (workmanager_android's build.gradle, work_version), so neither the
+    // dependency graph nor the merged manifest changes: no new permission,
+    // and the foreground service stays stripped (AndroidManifest.xml).
+    implementation("androidx.work:work-runtime:2.10.2")
+    // IntakeRulesTest and KeepAliveRulesTest (src/test): MainActivity's and
+    // the keep-alive's decisions on the JVM, `./gradlew :app:testDebugUnitTest`
+    // (mobile-build.yml).
     testImplementation("junit:junit:4.13.2")
 }

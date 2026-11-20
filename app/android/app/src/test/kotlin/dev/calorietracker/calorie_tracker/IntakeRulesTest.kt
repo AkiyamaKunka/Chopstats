@@ -1,6 +1,7 @@
 package dev.calorietracker.calorie_tracker
 
 import android.content.Intent
+import android.os.Build
 import java.io.File
 import java.io.IOException
 import java.nio.file.Files
@@ -125,6 +126,21 @@ class IntakeRulesTest {
         // Nothing saved (the first create): the intent decides.
         assertTrue(IntakeRules.launcherTask(saved = null, fromIntent = true))
         assertFalse(IntakeRules.launcherTask(saved = null, fromIntent = false))
+    }
+
+    // --- The navigation bar's colour: the app sets it from Android 15,
+    // where Flutter no longer does and Android forced dark buttons on a
+    // window that started light (A36-1).
+
+    @Test
+    fun theAppColorsTheNavigationBarFromAndroid15() {
+        assertEquals(35, Build.VERSION_CODES.VANILLA_ICE_CREAM)
+        for (sdk in listOf(24, 29, 33, 34)) {
+            assertFalse(IntakeRules.colorsNavigationBar(sdk))
+        }
+        for (sdk in listOf(35, 36, 37)) {
+            assertTrue(IntakeRules.colorsNavigationBar(sdk))
+        }
     }
 
     // --- A share that comes before share intake listens waits for it

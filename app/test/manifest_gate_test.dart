@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:calorie_tracker/services/analysis_keep_alive.dart'
+    show keepAliveChannelName;
 import 'package:calorie_tracker/services/analyzer/platform_decode.dart'
     show imageIOChannelName;
 import 'package:calorie_tracker/services/local_store.dart'
@@ -12,6 +14,7 @@ import 'package:calorie_tracker/services/photo/photo_changes.dart'
 import 'package:calorie_tracker/services/places/places.dart'
     show placesChannelName;
 import 'package:calorie_tracker/services/report/notifications.dart';
+import 'package:calorie_tracker/ui/app.dart' show systemBarsChannelName;
 import 'package:calorie_tracker/ui/background_glue.dart'
     show backgroundNativeLaunchPrefsKey;
 import 'package:flutter_test/flutter_test.dart';
@@ -61,6 +64,16 @@ String _mainActivity() => File('${_appRoot().path}/android/app/src/main/'
 String _intakeRules() => File('${_appRoot().path}/android/app/src/main/'
         'kotlin/dev/calorietracker/calorie_tracker/IntakeRules.kt')
     .readAsStringSync();
+
+/// The app's own Kotlin sources (android/app/src/main), by file name.
+Map<String, String> _appKotlin() => {
+      for (final f in Directory('${_appRoot().path}/android/app/src/main/'
+              'kotlin/dev/calorietracker/calorie_tracker')
+          .listSync()
+          .whereType<File>()
+          .where((f) => f.path.endsWith('.kt')))
+        f.uri.pathSegments.last: f.readAsStringSync(),
+    };
 
 /// [kotlin] with its comments removed (string literals kept) and every run
 /// of whitespace collapsed to one space, so a pin matches code only: a
@@ -143,14 +156,15 @@ String _kotlinFunction(String code, String declaration) {
   fail('$declaration has no closing brace');
 }
 
-/// The JVM tests (android/app/src/test) exercise each of [rules].
-void _expectJvmTests(List<String> rules) {
+/// The JVM tests (android/app/src/test) exercise each of [rules], in
+/// [suite] (IntakeRulesTest unless named).
+void _expectJvmTests(List<String> rules, {String suite = 'IntakeRulesTest'}) {
   final test = File('${_appRoot().path}/android/app/src/test/kotlin/dev/'
-      'calorietracker/calorie_tracker/IntakeRulesTest.kt');
+      'calorietracker/calorie_tracker/$suite.kt');
   expect(test.existsSync(), isTrue, reason: test.path);
   final source = test.readAsStringSync();
   for (final rule in rules) {
-    expect(source, contains(rule), reason: 'IntakeRulesTest never runs $rule');
+    expect(source, contains(rule), reason: '$suite never runs $rule');
   }
 }
 
@@ -1981,8 +1995,10 @@ void main() {
   // WorkManager's library manifest brings FOREGROUND_SERVICE and its
   // SystemForegroundService (no type), which it only uses for expedited
   // work on Android 11 and lower or for setForeground. The app registers
-  // one periodic task and nothing else, so both are stripped from the
-  // merged manifest. Expedited or one-off work would need them back.
+  // one periodic task from Dart, and the analysis keep-alive's one-time
+  // job from Kotlin, expedited only on Android 12 and later (the test of
+  // the keep-alive below), so both are stripped from the merged manifest.
+  // Expedited work below Android 12, or setForeground, would need them back.
   // hasFragileUserData: on Android 10+ the uninstall dialog offers to keep
   // the app's data, and the meal log lives only on the phone. Should the
   // kept key store lose its Keystore key, AndroidSecureKeyStore turns it
@@ -2007,7 +2023,9 @@ void main() {
     expect(application, contains('android:hasFragileUserData="true"'));
 
     // Nothing in Dart asks WorkManager for expedited or one-off work,
-    // which on Android 11 and lower runs as that foreground service.
+    // which on Android 11 and lower runs as that foreground service (the
+    // workmanager plugin's worker gives no foreground info). The one
+    // one-time job is the keep-alive's, in Kotlin.
     final dart = Directory('${_appRoot().path}/lib')
         .listSync(recursive: true)
         .whereType<File>()
@@ -2087,5 +2105,223 @@ void main() {
     expect(note, contains('never change applicationId'),
         reason: 'the note above applicationId says it is permanent');
     expect(_mainActivity(), startsWith('package $package\n'));
+  });
+
+  // Owner decision 9 (2026-11-20): Android froze an app the user left for
+  // another one about 10 s later, so an analysis still on its way waited
+  // in the frozen process (QA on API 35 and 36). While one the user started
+  // is in flight, a WorkManager job keeps the process running and online
+  // (AnalysisKeepAlive.kt). Dart drives it over this engine's own channel;
+  // an engine that dies takes its requests with it, or the job would keep
+  // the process up for the full cap after they were gone.
+  test('the analysis keep-alive: each engine drives it over its own channel, '
+      'and its requests end with the engine', () {
+    final code = _kotlinCode(_mainActivity());
+    expect(code,
+        contains('const val KEEP_ALIVE_CHANNEL = "$keepAliveChannelName"'));
+    expect(
+        _kotlinFunction(code, 'override fun configureFlutterEngine('),
+        contains('val session = AnalysisKeepAlive.newSession() '
+            'keepAliveSession = session MethodChannel('
+            'flutterEngine.dartExecutor.binaryMessenger, KEEP_ALIVE_CHANNEL) '
+            '.setMethodCallHandler { call, result -> val id = '
+            '(call.argument<Any?>("id") as? Number)?.toLong() when { '
+            'id == null -> result.success(false) call.method == "begin" -> '
+            'result.success(AnalysisKeepAlive.begin(applicationContext, '
+            'session, id)) call.method == "end" -> result.success('
+            'AnalysisKeepAlive.end(applicationContext, session, id)) '
+            'else -> result.notImplemented() } }'));
+    expect(_kotlinFunction(code, 'override fun cleanUpFlutterEngine('),
+        '{ AnalysisKeepAlive.drop(applicationContext, keepAliveSession) '
+        'super.cleanUpFlutterEngine(flutterEngine) }');
+    expect(code, contains('private var keepAliveSession = 0L'));
+    expect(RegExp(r'\bkeepAliveSession = (?!=)').allMatches(code),
+        hasLength(2),
+        reason: 'declared 0, then set once per engine, in '
+            'configureFlutterEngine');
+    // Flutter 3.44's embedding, where the SDK carries its sources: the hook
+    // runs as the activity lets go of its engine, before it is destroyed.
+    final delegate = File('${_pluginRoot('flutter')}/../../engine/src/'
+        'flutter/shell/platform/android/io/flutter/embedding/android/'
+        'FlutterActivityAndFragmentDelegate.java');
+    if (delegate.existsSync()) {
+      final java =
+          delegate.readAsStringSync().replaceAll(RegExp(r'\s+'), ' ');
+      final detach = java.substring(java.indexOf('void onDetach() {'));
+      expect(detach.indexOf('host.cleanUpFlutterEngine(flutterEngine);'),
+          lessThan(detach.indexOf('flutterEngine.destroy();')));
+    }
+  });
+
+  // The job itself: one time, a network (JobScheduler then lets its
+  // process use one), expedited from Android 12 only, where JobScheduler
+  // runs it with no foreground service and no notification, and out of
+  // quota as a plain job. Below Android 12 WorkManager would run expedited
+  // work as its stripped foreground service and ask the worker for
+  // foreground info it does not give: a plain job there. It is cancelled
+  // as soon as nothing is live, and its worker only waits and succeeds,
+  // for 2 minutes 45 seconds at most: never retried, never a foreground
+  // service.
+  test('the keep-alive job: one time, needs a network, expedited only on '
+      'Android 12 and later; its worker only waits', () {
+    final kotlin = _appKotlin();
+    final glue = _kotlinCode(kotlin['AnalysisKeepAlive.kt']!);
+    expect(
+        _kotlinFunction(glue, 'private fun request('),
+        '{ val builder = OneTimeWorkRequest.Builder('
+        'AnalysisKeepAliveWorker::class.java) .setConstraints( '
+        'Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED)'
+        '.build(), ) if (KeepAliveRules.expedited(Build.VERSION.SDK_INT)) { '
+        'builder.setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST) '
+        '} return builder.build() }');
+    final begin = _kotlinFunction(glue, 'fun begin(');
+    expect(begin,
+        contains('val added = ledger.begin(session, id, SystemClock.elapsedRealtime())'));
+    expect(
+        begin,
+        contains('WorkManager.getInstance(context) .enqueueUniqueWork('
+            'KeepAliveRules.WORK_NAME, ExistingWorkPolicy.KEEP, request())'));
+    expect(_kotlinFunction(glue, 'fun end('),
+        '{ val removed = ledger.end(session, id) if (removed) '
+        'settle(context) return removed }');
+    expect(_kotlinFunction(glue, 'fun drop('),
+        '{ if (ledger.drop(session) > 0) settle(context) }');
+    expect(
+        _kotlinFunction(glue, 'private fun settle('),
+        '{ if (ledger.live(SystemClock.elapsedRealtime())) return try { '
+        'WorkManager.getInstance(context).cancelUniqueWork('
+        'KeepAliveRules.WORK_NAME) } catch (e: Exception) { } }');
+    expect(
+        glue,
+        contains('class AnalysisKeepAliveWorker(context: Context, params: '
+            'WorkerParameters) : CoroutineWorker(context, params) { override '
+            'suspend fun doWork(): Result { '
+            'AnalysisKeepAlive.runJob(applicationContext) '
+            'return Result.success() } }'));
+    // Android counts an expedited job of 3 minutes or more as timed out
+    // however it ends, and more than 10 timeouts a day restrict the app
+    // (JobSchedulerService.maybeProcessBuggyJob): each job stops at its
+    // cap, and a request still live gets a follow-up job after it.
+    expect(
+        _kotlinFunction(glue, 'suspend fun runJob('),
+        '{ val stillLive = ledger.awaitIdleOrCap(KeepAliveRules.JOB_CAP_MS) '
+        '{ SystemClock.elapsedRealtime() } if (!stillLive) return try { '
+        'WorkManager.getInstance(context).enqueueUniqueWork( '
+        'KeepAliveRules.WORK_NAME, ExistingWorkPolicy.APPEND_OR_REPLACE, '
+        'request(), ) } catch (e: Exception) { } }');
+
+    final rules = _kotlinCode(kotlin['KeepAliveRules.kt']!);
+    expect(rules, contains('const val CAP_MS = 3L * 60 * 1000'));
+    expect(rules, contains('const val JOB_CAP_MS = 165L * 1000'));
+    expect(rules,
+        contains('fun expedited(sdk: Int): Boolean = sdk >= Build.VERSION_CODES.S'));
+    expect(rules, isNot(contains('import android.content')),
+        reason: 'the rules stay free of Android objects, for the JVM tests');
+    _expectJvmTests([
+      'KeepAliveRules.expedited(',
+      'KeepAliveRules.CAP_MS',
+      'KeepAliveRules.JOB_CAP_MS',
+      'ledger.drop(',
+      'ledger.awaitIdle(',
+      'awaitIdleOrCap(',
+      'aStrayEndChangesNothing',
+    ], suite: 'KeepAliveRulesTest');
+
+    // One expedited request in the app, the one above; no foreground
+    // service, foreground info or retry anywhere in its Kotlin.
+    final all = kotlin.values.map(_kotlinCode).join('\n');
+    expect('setExpedited('.allMatches(all), hasLength(1));
+    for (final banned in [
+      'setForeground',
+      'ForegroundInfo',
+      'startForeground',
+      'Result.retry',
+      'FOREGROUND_SERVICE',
+    ]) {
+      expect(all, isNot(contains(banned)), reason: banned);
+    }
+    // WorkManager builds the worker by its class name: R8 keeps it.
+    final keep = File('${_appRoot().path}/android/app/proguard-rules.pro')
+        .readAsStringSync();
+    expect(keep,
+        contains('-keep class * extends androidx.work.ListenableWorker { <init>(...); }'));
+  });
+
+  // The job needs no permission of its own, so the merged manifest Play
+  // reviews (the GitHub APK and the Play build alike) asks for nothing
+  // new: the app compiles against the WorkManager the workmanager plugin
+  // already brings, at the version the plugin builds with, so the library
+  // manifest merged is the one it always was (WAKE_LOCK,
+  // ACCESS_NETWORK_STATE and RECEIVE_BOOT_COMPLETED, already on CI's
+  // allowlist; FOREGROUND_SERVICE stripped). The main manifest declares
+  // the same set as before (the test of exactly these permissions above)
+  // and no service of its own.
+  test('the keep-alive adds no permission: the WorkManager the plugin '
+      'already brings, no service, no foreground service type', () {
+    final gradle = File('${_appRoot().path}/android/app/build.gradle.kts')
+        .readAsStringSync();
+    final work = RegExp(r'implementation\("androidx\.work:([a-z-]+):([0-9.]+)"\)')
+        .allMatches(gradle)
+        .map((m) => (m.group(1)!, m.group(2)!))
+        .toList();
+    expect(work, hasLength(1));
+    expect(work.single.$1, 'work-runtime');
+    expect(RegExp(r'androidx\.work:').allMatches(gradle), hasLength(1));
+    final plugin = File('${_pluginRoot('workmanager_android')}/android/'
+            'build.gradle')
+        .readAsStringSync();
+    expect(plugin, contains('def work_version = "${work.single.$2}"'),
+        reason: 'the app and the plugin resolve one WorkManager');
+    expect(plugin,
+        contains(r'implementation "androidx.work:work-runtime:$work_version"'));
+
+    final manifest = _uncommented(_manifest());
+    expect(manifest, isNot(contains('foregroundServiceType')));
+    expect(manifest, isNot(contains('AnalysisKeepAlive')));
+    expect(_declared(manifest),
+        isNot(contains('android.permission.FOREGROUND_SERVICE')));
+    for (final variant in ['debug', 'profile', 'playChannel']) {
+      final xml = _uncommented(File('${_appRoot().path}/android/app/src/'
+              '$variant/AndroidManifest.xml')
+          .readAsStringSync());
+      expect(xml, isNot(contains('<service')), reason: variant);
+      expect(xml, isNot(contains('FOREGROUND_SERVICE')), reason: variant);
+    }
+  });
+
+  // A36-1 (QA 2026-11-20, Android 16): from Android 15 the app draws edge
+  // to edge and Flutter's engine no longer sets the navigation bar's
+  // colour, so Android took the light launch window for a light bar and
+  // forced dark buttons (APPEARANCE_FORCE_LIGHT_NAVIGATION_BARS), which a
+  // switch to dark while the app ran never undid: dark buttons on the dark
+  // 3-button bar. MainActivity sets the colour the shell hands it
+  // (lib/ui/app.dart _SystemNavBarStyle), which ends the forced buttons
+  // and tints the 3-button contrast scrim (A36-2); below Android 15 Flutter
+  // sets it as before.
+  test('MainActivity sets the navigation bar colour from Android 15 only',
+      () {
+    final code = _kotlinCode(_mainActivity());
+    expect(code,
+        contains('const val SYSTEM_BARS_CHANNEL = "$systemBarsChannelName"'));
+    expect(
+        _kotlinFunction(code, 'override fun configureFlutterEngine('),
+        contains('MethodChannel(flutterEngine.dartExecutor.binaryMessenger, '
+            'SYSTEM_BARS_CHANNEL) .setMethodCallHandler { call, result -> '
+            'when (call.method) { "navigationBarColor" -> result.success('
+            'colorNavigationBar((call.argument<Any?>("color") as? Number)'
+            '?.toLong())) else -> result.notImplemented() } }'));
+    expect(
+        _kotlinFunction(code, 'private fun colorNavigationBar('),
+        '{ if (argb == null || !IntakeRules.colorsNavigationBar('
+        'Build.VERSION.SDK_INT)) return false window.navigationBarColor = '
+        'argb.toInt() return true }');
+    expect('navigationBarColor ='.allMatches(code), hasLength(1));
+    expect(code, isNot(contains('setSystemBarsAppearance')),
+        reason: 'the buttons stay Flutter\'s to set');
+    expect(
+        _kotlinCode(_intakeRules()),
+        contains('fun colorsNavigationBar(sdk: Int): Boolean = '
+            'sdk >= Build.VERSION_CODES.VANILLA_ICE_CREAM'));
+    _expectJvmTests(['IntakeRules.colorsNavigationBar(']);
   });
 }

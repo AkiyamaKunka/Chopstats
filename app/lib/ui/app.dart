@@ -2,7 +2,7 @@
 /// FAB → add flow. Also the startup-failure screen used by main.dart.
 library;
 
-import 'dart:async' show StreamSubscription, unawaited;
+import 'dart:async' show StreamSubscription, scheduleMicrotask, unawaited;
 import 'dart:io' show File, Platform;
 
 import '../core/ai_consent.dart' show aiConsentRoute, aiRoutesInMainlandChina;
@@ -16,7 +16,7 @@ import 'package:path_provider/path_provider.dart'
     show getApplicationDocumentsDirectory;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show SystemUiOverlayStyle;
+import 'package:flutter/services.dart' show MethodChannel, SystemUiOverlayStyle;
 
 import '../services/backup/backup_coordinator.dart';
 import '../services/photo/background_time.dart' show appEngineInForeground;
@@ -65,6 +65,22 @@ ScrollBehavior appScrollBehavior(TargetPlatform platform) =>
         ? const MaterialScrollBehavior()
         : const _AppleScrollBehavior();
 
+/// MainActivity.SYSTEM_BARS_CHANNEL.
+const String systemBarsChannelName = 'dev.calorietracker/systembars';
+
+/// Hands MainActivity the navigation bar's colour, which it sets on Android
+/// 15 and later, where Flutter's engine no longer does
+/// (MainActivity.colorNavigationBar); below that it changes nothing.
+/// Never throws: without the channel (iPhone, tests) nothing happens.
+@visibleForTesting
+Future<void> sendNavigationBarColor(Color color,
+    [MethodChannel channel = const MethodChannel(systemBarsChannelName)]) async {
+  try {
+    await channel.invokeMethod<Object?>(
+        'navigationBarColor', {'color': color.toARGB32()});
+  } catch (_) {}
+}
+
 /// Android's navigation bar styled for the theme the app SHOWS (Android
 /// push, 2026-11-13). MainActivity handles uiMode changes itself
 /// (AndroidManifest configChanges), so a light/dark switch while the app
@@ -72,30 +88,63 @@ ScrollBehavior appScrollBehavior(TargetPlatform platform) =>
 /// under the dark app and dark buttons on a dark bar after switching back
 /// (UX run screenshots 57-59). Only the navigation-bar fields are set; the
 /// status-bar ones stay null, so the app bars keep them. The bar takes the
-/// tab bar's own opaque colour (chrome), with the buttons in its contrast
-/// and the system's contrast scrim off. Not transparent: below Android 15
-/// the app does not draw under the bar, so a transparent one showed the
-/// window colour fixed at launch under buttons that followed the new theme
-/// (review 2026-11-13); Android 15+ draws edge to edge and ignores the
-/// colour. iPhone has no such bar: nothing is set there.
-class _SystemNavBarStyle extends StatelessWidget {
+/// tab bar's own colour (chrome), with the buttons in its contrast. Below
+/// Android 15 that colour is the bar's own, opaque: the app does not draw
+/// under the bar there, so a transparent one showed the window colour fixed
+/// at launch under buttons that followed the new theme (review 2026-11-13),
+/// and the contrast setting changes nothing on an opaque bar.
+///
+/// Android 15 and later draw the app edge to edge and Flutter leaves the
+/// colour alone, so the colour also goes to MainActivity, which sets it on
+/// the window (sendNavigationBarColor, MainActivity.colorNavigationBar):
+/// - Until the app set one, Android took the light launch window for a
+///   light bar and forced dark buttons, whatever the app asked for, and
+///   never let go while the app ran (it handles uiMode itself): with
+///   3-button navigation, a switch to dark left dark buttons on the dark
+///   bar on Android 16 (A36-1). With the colour set the buttons follow
+///   [SystemUiOverlayStyle.systemNavigationBarIconBrightness].
+/// - With the contrast scrim on, Android draws that colour at 80% behind
+///   the 3-button bar only (the gesture bar suppresses the scrim, so it
+///   stays transparent, edge to edge): a screen with no tab bar no longer
+///   shows its fields under the buttons at rest (A36-2), and the tab bar's
+///   own colour runs on under them.
+/// Sent after the frame, behind Flutter's own style, so the buttons'
+/// light/dark is set before Android stops forcing it. iPhone has no such
+/// bar: nothing is set there.
+class _SystemNavBarStyle extends StatefulWidget {
   const _SystemNavBarStyle({required this.child});
   final Widget child;
 
   @override
+  State<_SystemNavBarStyle> createState() => _SystemNavBarStyleState();
+}
+
+class _SystemNavBarStyleState extends State<_SystemNavBarStyle> {
+  /// The colour last handed to MainActivity: each change is sent once.
+  Color? _sent;
+
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    if (theme.platform != TargetPlatform.android) return child;
+    if (theme.platform != TargetPlatform.android) return widget.child;
     final dark = theme.brightness == Brightness.dark;
+    final chrome = context.colors.chrome;
+    if (chrome != _sent) {
+      _sent = chrome;
+      // Flutter sends the style below in a microtask queued while this
+      // frame is composited; this one is queued after it.
+      WidgetsBinding.instance.addPostFrameCallback((_) => scheduleMicrotask(
+          () => unawaited(sendNavigationBarColor(chrome))));
+    }
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle(
-        systemNavigationBarColor: context.colors.chrome,
+        systemNavigationBarColor: chrome,
         systemNavigationBarDividerColor: Colors.transparent,
         systemNavigationBarIconBrightness:
             dark ? Brightness.light : Brightness.dark,
-        systemNavigationBarContrastEnforced: false,
+        systemNavigationBarContrastEnforced: true,
       ),
-      child: child,
+      child: widget.child,
     );
   }
 }
@@ -798,16 +847,19 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
           _tellWatchRetiredWhenIdle();
         },
         child: shell);
-    // Android: while a shared photo is on its way to a meal, Back at the
-    // root moves the app to the back in every task. Android 14 and later
-    // would finish a task the launcher intent started from somewhere other
-    // than the home screen (Play's Open button), and its engine with it
-    // (Q9); MainActivity keeps that Back in Flutter in the other tasks
-    // Android would finish.
+    // Android: while a shared photo is on its way to a meal, or any
+    // analysis the user started is in flight (owner decision 9), Back at
+    // the root moves the app to the back in every task. Android 14 and
+    // later would finish a task the launcher intent started from somewhere
+    // other than the home screen (Play's Open button), and its engine with
+    // it, mid-request (Q9); MainActivity keeps that Back in Flutter in the
+    // other tasks Android would finish.
     final sharing = s.sharedPhotosPending;
-    return sharing == null
+    final analyzing = s.analysisKeepAlive?.inFlight;
+    return sharing == null && analyzing == null
         ? page
-        : SharedPhotosBackGuard(pending: sharing, child: page);
+        : SharedPhotosBackGuard(
+            pending: sharing, analyzing: analyzing, child: page);
   }
 }
 

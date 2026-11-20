@@ -258,8 +258,15 @@ class _LeftoverScreenState extends State<LeftoverScreen> {
         }
       }
       final compact = compactOriginalAnalysis(meal.analysis);
-      final reply =
-          await services.analyzer.leftoverIntent(photo.bytes, compact);
+      // Android: the estimate keeps the app running until it answers,
+      // should the user leave meanwhile (owner decision 9).
+      final bytes = photo.bytes;
+      Future<Map<String, dynamic>?> estimate() =>
+          services.analyzer.leftoverIntent(bytes, compact);
+      final keepAlive = services.analysisKeepAlive;
+      final reply = keepAlive == null
+          ? await estimate()
+          : await keepAlive.guard(estimate);
       if (!mounted) return;
       if (reply == null) {
         // leftoverIntent gives no reason, but a call that used up the daily
