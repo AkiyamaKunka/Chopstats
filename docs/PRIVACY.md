@@ -126,8 +126,9 @@ HTTPS connection.
   unavailable, fails or takes too long), the photo is handled like any
   camera photo and sent to the AI. **Meta glasses photos** (Settings › Photos)
   turns automatic logging of these photos off; photos you pick or share
-  are still sent. On Android, which has no such check, that switch is off
-  until you turn it on.
+  are still sent. From version 1.7.1, on Android, which has no such check,
+  that switch is off until you turn it on. (Earlier versions on Android
+  had it on until you turned it off.)
 
 **What is sent with a photo:**
 
@@ -300,14 +301,17 @@ server holding it, Chopstats copies it to **your own iCloud Drive**.
   again on the new phone. (Earlier versions copied the encrypted key files
   as well; a copy cannot be decrypted on another phone.)
   <!-- gated: release_decisions_test checks the FlutterSecureStorage exclusions in res/xml/data_extraction_rules.xml and backup_rules.xml -->
-  On Android, the app's data goes into the backup in your Google account
-  only when it is end-to-end encrypted, which Android does with your
-  phone's screen lock (PIN, pattern or password) on Android 9 and later:
-  without a screen lock, the app's data is not backed up to your Google
-  account. On Android 9 and later, a transfer straight to a new phone is
-  not affected. On Android 8.1 and earlier, which cannot encrypt a backup
-  end to end, the app's data goes neither to your Google account nor to a
-  new phone in a transfer. In every case, an export still keeps a copy.
+  From version 1.7.1, on Android, the app's data goes into the backup in
+  your Google account only when it is end-to-end encrypted, which Android
+  does with your phone's screen lock (PIN, pattern or password) on
+  Android 9 and later: without a screen lock, the app's data is not
+  backed up to your Google account. On Android 9 and later, a transfer
+  straight to a new phone is not affected. On Android 8.1 and earlier,
+  which cannot encrypt a backup end to end, the app's data goes neither to
+  your Google account nor to a new phone in a transfer. In every case, an
+  export still keeps a copy. (Earlier versions backed it up whether or
+  not it was end-to-end encrypted, and a transfer carried it on every
+  Android version.)
   <!-- gated: release_decisions_test (disableIfNoEncryptionCapabilities in res/xml, requireFlags in res/xml-v28, nothing included for Android 8.1 and earlier) -->
 
 ### Deleting your data
@@ -428,7 +432,7 @@ date. Questions: see *Who we are* above, or open an issue at
 
 - 你手动选择或分享到应用里的照片。
 - 仅当你打开「**监控相册**」时：相册里的每一张新照片，以及开启那一刻回溯窗口内（默认最近 2 天，可在设置里调整）已经拍下的照片，包括不是食物的照片——由 AI 判断照片是否为食物，非食物照片不会被记录。
-- Meta AI App 导入相册的 **Meta 眼镜**照片，与相机照片同等对待，遵循同样的「监控相册」规则。应用在手机上根据文件名、Meta AI App 存放它们的相簿，或照片里记录的相机型号识别这些照片。在 iPhone 上，只要苹果系统自带的图像分类器能够运行，每一张都会先由它在手机上检查一遍，它认为不含食物的照片不会被发送；如果检查无法进行（分类器不可用、出错或耗时过长），这张照片就和普通相机照片一样处理，会发送给 AI。「**包括 Meta 眼镜拍的照片**」（设置 › 照片）可以关闭对这类照片的自动记录；你手动选择或分享的照片仍会发送。Android 上没有这项检查，所以这个开关在 Android 上默认关闭，需要时可以自己打开。
+- Meta AI App 导入相册的 **Meta 眼镜**照片，与相机照片同等对待，遵循同样的「监控相册」规则。应用在手机上根据文件名、Meta AI App 存放它们的相簿，或照片里记录的相机型号识别这些照片。在 iPhone 上，只要苹果系统自带的图像分类器能够运行，每一张都会先由它在手机上检查一遍，它认为不含食物的照片不会被发送；如果检查无法进行（分类器不可用、出错或耗时过长），这张照片就和普通相机照片一样处理，会发送给 AI。「**包括 Meta 眼镜拍的照片**」（设置 › 照片）可以关闭对这类照片的自动记录；你手动选择或分享的照片仍会发送。从 1.7.1 版本起，由于 Android 上没有这项检查，这个开关在 Android 上默认关闭，需要时可以自己打开。（更早的版本在 Android 上默认打开。）
 
 **随照片一起发送的内容：**
 
@@ -480,7 +484,7 @@ date. Questions: see *Who we are* above, or open an issue at
 - 只有在你点击时才会导出或导入。导出的是一份记录文件（餐食、体重、身体围度、运动记录、活动、健身档案和已处理照片列表；不包含 API Key）和餐食图片（相机可能写入其中的数据会被删除），由你通过系统分享面板发送到你选择的地方。导入会把你选择的文件或粘贴的文字合并进手机。
 - 手机自身的备份可能包含应用数据：iPhone 上的 iCloud 或电脑备份，以及 Android 的系统备份（可能会在你自己的 Google 账户中保存一份副本）。上文说明不会进入备份的记录（Meta 眼镜记录和餐厅查询的文件）不在其中，也不在「iCloud 备份」里。从 1.7.0 版本起，在 Android 上，API Key 和你自己服务器的上传密钥也不会进入 Android 的备份，也不会在换新手机时转移过去，所以在新手机上需要重新填写。（更早的版本也会复制加密后的密钥文件；这份副本在另一台手机上无法解密。）
   <!-- gated: release_decisions_test checks the FlutterSecureStorage exclusions in res/xml/data_extraction_rules.xml and backup_rules.xml -->
-  在 Android 上，只有在端到端加密时，应用数据才会进入你 Google 账户中的备份；Android 9 及以上版本会用手机的屏幕锁定（PIN 码、图案或密码）进行这种加密：没有设置屏幕锁定时，应用数据不会备份到你的 Google 账户。在 Android 9 及以上版本上，直接转移到新手机不受影响。Android 8.1 及更早的版本无法对备份进行端到端加密，在这些版本上，应用数据既不会备份到你的 Google 账户，也不会在转移时带到新手机。无论哪种情况，导出的文件仍可保留一份副本。
+  从 1.7.1 版本起，在 Android 上，只有在端到端加密时，应用数据才会进入你 Google 账户中的备份；Android 9 及以上版本会用手机的屏幕锁定（PIN 码、图案或密码）进行这种加密：没有设置屏幕锁定时，应用数据不会备份到你的 Google 账户。在 Android 9 及以上版本上，直接转移到新手机不受影响。Android 8.1 及更早的版本无法对备份进行端到端加密，在这些版本上，应用数据既不会备份到你的 Google 账户，也不会在转移时带到新手机。无论哪种情况，导出的文件仍可保留一份副本。（更早的版本无论是否端到端加密都会备份应用数据，在所有 Android 版本上转移时也会带上。）
   <!-- gated: release_decisions_test (disableIfNoEncryptionCapabilities in res/xml, requireFlags in res/xml-v28, nothing included for Android 8.1 and earlier) -->
 
 ### 删除数据

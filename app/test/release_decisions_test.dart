@@ -787,6 +787,90 @@ void main() {
           isNot(contains('over `http://` lookups use printed brands only')));
     });
 
+    // Owner decisions 8 and 5 (2026-11-20) narrow what Android sends: Meta
+    // glasses photos are off until turned on, and the Google backup takes
+    // the app's data only end-to-end encrypted. The published
+    // android-v1.7.0 (b207) does neither, and every build opens this
+    // policy from main, so both say from which version, as M1's do
+    // (review of #72).
+    test("Android's glasses default and end-to-end-only backup are from "
+        '1.7.1, in English and 中文', () {
+      final flat = policy.replaceAll(RegExp(r'\s+'), ' ');
+      expect(
+          flat,
+          contains('From version 1.7.1, on Android, which has no such check, '
+              'that switch is off until you turn it on. (Earlier versions on '
+              'Android had it on until you turned it off.)'));
+      expect(
+          flat,
+          contains('从 1.7.1 版本起，由于 Android 上没有这项检查，这个开关在 '
+              'Android 上默认关闭，需要时可以自己打开。（更早的版本在 Android '
+              '上默认打开。）'));
+      expect(
+          flat,
+          contains("From version 1.7.1, on Android, the app's data goes into "
+              'the backup in your Google account only when it is end-to-end '
+              'encrypted'));
+      expect(
+          flat,
+          contains('(Earlier versions backed it up whether or not it was '
+              'end-to-end encrypted, and a transfer carried it on every '
+              'Android version.)'));
+      expect(
+          flat,
+          contains('从 1.7.1 版本起，在 Android 上，只有在端到端加密时，应用数据才'
+              '会进入你 Google 账户中的备份'));
+      expect(
+          flat,
+          contains('（更早的版本无论是否端到端加密都会备份应用数据，在所有 Android '
+              '版本上转移时也会带上。）'));
+      // Neither sentence without its version.
+      expect(flat, isNot(contains('still sent. On Android, which has no such')));
+      expect(flat, isNot(contains("--> On Android, the app's data goes")));
+      expect(flat, isNot(contains('--> 在 Android 上，只有在端到端加密时')));
+    });
+
+    // android-v1.7.0 (b207) already carries the name 1.7.0. Whatever
+    // version the policy names last must be the next build's, so while
+    // pubspec is behind it, docs/RELEASING.md § 6.6 tells whoever builds
+    // next to bump first (review of #72).
+    test('the newest version the policy names is pubspec\'s, or RELEASING.md '
+        'says to bump to it before the next build', () {
+      List<int> parse(String v) => [for (final p in v.split('.')) int.parse(p)];
+      int compare(String a, String b) {
+        final (x, y) = (parse(a), parse(b));
+        for (var i = 0; i < 3; i++) {
+          if (x[i] != y[i]) return x[i] - y[i];
+        }
+        return 0;
+      }
+
+      final named = [
+        for (final m in RegExp(r'From version (\d+\.\d+\.\d+)')
+            .allMatches(policy))
+          m.group(1)!,
+        for (final m in RegExp(r'从 (\d+\.\d+\.\d+) 版本起').allMatches(policy))
+          m.group(1)!,
+      ];
+      expect(named, contains('1.7.1'));
+      final newest =
+          named.reduce((a, b) => compare(a, b) >= 0 ? a : b);
+      final pubspec = RegExp(r'^version:\s*(\d+\.\d+\.\d+)\+', multiLine: true)
+          .firstMatch(_read('pubspec.yaml'))!
+          .group(1)!;
+      if (compare(pubspec, newest) < 0) {
+        final releasing =
+            _readRepo('docs/RELEASING.md').replaceAll(RegExp(r'\s+'), ' ');
+        expect(
+            releasing.contains('set `version:` in `app/pubspec.yaml` and '
+                '`kAppVersion` (`lib/services/backup/backup_files.dart`) to '
+                '`$newest` or later'),
+            isTrue,
+            reason: 'pubspec says $pubspec and the policy names $newest: '
+                'RELEASING.md § 6.6 must say to bump before the next build');
+      }
+    });
+
     test('Describe sends no meals; Fix sends the last 7 days', () {
       expect(policy, contains('today\'s date. No other meals are sent.'));
       expect(policy, contains('不发送其他餐食'));

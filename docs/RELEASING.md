@@ -1549,6 +1549,19 @@ that APK on the `v1.7.0` release and, with `PLAY_SERVICE_ACCOUNT_JSON`
 set, sends the bundle to the internal track. Both are harmless (an
 upgrade for anyone who installs them).
 
+**The next Android build is 1.7.1.** `android-v1.7.0` (b207) went out as
+1.7.0, and the privacy policy dates two Android changes from 1.7.1: Meta
+glasses photos off until turned on, and the Google backup only
+end-to-end encrypted (owner decisions 8 and 5). So before the next build
+of `main` that includes Android, by lane `play` or by any `v*` tag, set
+`version:` in `app/pubspec.yaml` and `kAppVersion`
+(`lib/services/backup/backup_files.dart`) to `1.7.1` or later: a build
+still named 1.7.0 would not do what the policy says 1.7.0 does. The tag
+must match pubspec, so this also makes the next iPhone release from
+`main` 1.7.1, not the 1.7.0 decision 4 kept free for it: ask the owner
+before bumping. `release_decisions_test` keeps this paragraph while
+pubspec is behind the newest version the policy names.
+
 **Developer verification and the GitHub APK.** Because the package
 shipped as GitHub APKs before it existed on Play, Play Console may ask,
 once, for proof that you own the key that signed them: an APK signed with
