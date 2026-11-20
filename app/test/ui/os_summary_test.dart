@@ -285,6 +285,37 @@ void main() {
       });
     });
 
+    // Review 2026-11-19 (R8): Settings' Next summary row read only the
+    // first id, and this engine's own note of what it armed.
+    group('the next summary Settings shows', () {
+      test('tonight\'s card came: the next armed night, not "Not scheduled"',
+          () async {
+        await arm(await settingsAt(), fri19);
+        os.deliverDue(DateTime(2026, 11, 13, 21, 40));
+        expect(os.pending.keys, isNot(contains(_id)));
+        expect(await notifier.scheduledDailyAt(),
+            DateTime(2026, 11, 14, 21, 30));
+      });
+
+      test('the other engine re-armed past the slot: its next card, not '
+          'this engine\'s passed one', () async {
+        final s = await settingsAt();
+        await arm(s, fri19);
+        os.deliverDue(DateTime(2026, 11, 13, 21, 40));
+        await arm(s, DateTime(2026, 11, 13, 21, 45), via: os.notifier());
+        expect(await notifier.scheduledDailyAt(),
+            DateTime(2026, 11, 14, 21, 30));
+      });
+
+      test('while an arm replaces the set (its own note cleared first): '
+          'what the OS still holds', () async {
+        await arm(await settingsAt(), fri19);
+        notifier.cancelDaily(); // as the arm does before re-arming
+        expect(await notifier.scheduledDailyAt(),
+            DateTime(2026, 11, 13, 21, 30));
+      });
+    });
+
     // Review 2026-11-19 (R7): the set re-armed for a time already passed
     // today starts tomorrow, and replaced today's card, armed for the old
     // time and not come yet: that day had no summary. The 30-minute job of

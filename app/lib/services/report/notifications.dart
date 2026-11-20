@@ -457,27 +457,57 @@ class ReportNotifier {
     return app;
   }
 
-  /// The slot the daily summary is armed for, as far as this process can
-  /// tell: the live Timer's next fire (Android), or — on the OS path — the
-  /// last armed slot IF the OS still lists the card as pending. Null means
-  /// nothing is armed, which Settings shows as "not scheduled" so a silent
-  /// no-show has a visible cause instead of a shrug (2026-09-30).
+  /// The slot the daily summary is armed for: the live Timer's next fire
+  /// (a host with no OS scheduler), or — on the OS path — the earliest
+  /// card of the daily set the OS still holds. Null means nothing is
+  /// armed, which Settings shows as "not scheduled" so a silent no-show
+  /// has a visible cause instead of a shrug (2026-09-30).
+  ///
+  /// The OS's own list, not this process's note of what it armed: on
+  /// Android an arm holds 8 nights, so once tonight's card came the next
+  /// is tomorrow's, on another id; the background engine may have re-armed
+  /// meanwhile; and an arm clears the note before it re-arms (review
+  /// 2026-11-19: "Not scheduled" in red with 7 cards armed).
   Future<DateTime?> scheduledDailyAt() async {
     if (_dailyTimer != null) return _nextDailyFire;
     final next = _nextDailyFire;
-    if (next == null) return null;
-    final probe = _pendingIds;
-    if (probe == null && _scheduler != null) return next; // seam-only tests
+    final Map<int, String?>? pending;
     try {
-      final ids = probe != null
-          ? await probe()
-          : (await _plugin.pendingNotificationRequests())
-              .map((p) => p.id)
-              .toList();
-      return ids.contains(dailyReportNotificationId) ? next : null;
+      pending = await _pendingRequests();
     } catch (_) {
       return next; // the OS would not say: trust what was armed
     }
+    if (pending == null) return next; // seam-only tests
+    final cards = _dailyCards(pending);
+    if (cards.isNotEmpty) return cards.first.slot;
+    // A pending card with no slot payload (the ids-only test seam): the
+    // slot this process armed, while the OS lists its id.
+    return pending.containsKey(dailyReportNotificationId) ? next : null;
+  }
+
+  /// What the OS holds pending, id → payload. Null with only the scheduler
+  /// seam (tests: no OS). Throws when the OS would not say.
+  Future<Map<int, String?>?> _pendingRequests() async {
+    final payloads = _pendingPayloads;
+    if (payloads != null) return payloads();
+    final ids = _pendingIds;
+    if (ids != null) return {for (final id in await ids()) id: null};
+    if (_scheduler != null) return null;
+    return {
+      for (final p in await _plugin.pendingNotificationRequests())
+        p.id: p.payload,
+    };
+  }
+
+  /// The daily cards in [pending], earliest slot first.
+  static List<PendingDailyCard> _dailyCards(Map<int, String?> pending) {
+    final ids = dailySetIds;
+    return <PendingDailyCard>[
+      for (final e in pending.entries)
+        if (ids.contains(e.key))
+          if (_parsePayload(e.value) case final parsed?)
+            (id: e.key, slot: parsed.slot, day: parsed.day),
+    ]..sort((a, b) => a.slot.compareTo(b.slot));
   }
 
   /// The payload of the card [scheduleDailyAt] hands the OS: its slot, as
@@ -522,26 +552,9 @@ class ReportNotifier {
   /// record of it). Never throws.
   Future<List<PendingDailyCard>> pendingDailyCards() async {
     try {
-      final Map<int, String?> pending;
-      final probe = _pendingPayloads;
-      if (probe != null) {
-        pending = await probe();
-      } else if (_scheduler != null) {
-        return const []; // seam-only tests: no OS
-      } else {
-        pending = {
-          for (final p in await _plugin.pendingNotificationRequests())
-            p.id: p.payload,
-        };
-      }
-      final ids = dailySetIds;
-      final cards = <PendingDailyCard>[
-        for (final e in pending.entries)
-          if (ids.contains(e.key))
-            if (_parsePayload(e.value) case final parsed?)
-              (id: e.key, slot: parsed.slot, day: parsed.day),
-      ]..sort((a, b) => a.slot.compareTo(b.slot));
-      return cards;
+      final pending = await _pendingRequests();
+      // Null: seam-only tests, no OS.
+      return pending == null ? const [] : _dailyCards(pending);
     } catch (_) {
       return const []; // no platform plugin (tests), or the OS would not say
     }
