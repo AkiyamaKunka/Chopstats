@@ -3490,4 +3490,32 @@ class AppLocalizationsZh extends AppLocalizations {
   String outcomeFailedKeptMsgPlay(String reason) {
     return '照片分析失败。$reason';
   }
+
+  @override
+  String get errServerKeyOtherHost =>
+      '你的服务器上传密钥是为另一个服务器地址保存的，筷拍只会把它发送到那里。请到「AI 服务」›「你自己的服务器」粘贴这台服务器的密钥，或把已保存的密钥用于它。';
+
+  @override
+  String get reasonServerKeyOtherHost => '上传密钥是为另一个服务器地址保存的';
+
+  @override
+  String serverKeyOtherHostField(String host) {
+    return '为 $host 保存：不会发送到上面的地址。';
+  }
+
+  @override
+  String serverKeyUseHere(String host) {
+    return '将此密钥用于 $host';
+  }
+
+  @override
+  String get autoScanServerKeyOtherHost =>
+      '自动记录没有运行：你的服务器上传密钥是为另一个服务器地址保存的，筷拍只会把它发送到那里。请到「AI 服务」›「你自己的服务器」修改。';
+
+  @override
+  String get diagServerKeyOtherHost => '上传密钥是为另一个服务器地址保存的，所以不会发送给这台服务器。';
+
+  @override
+  String get diagFixServerKeyOtherHost =>
+      '在设置 ›「AI 服务」›「你自己的服务器」里粘贴这台服务器的上传密钥，或把已保存的密钥用于它。';
 }

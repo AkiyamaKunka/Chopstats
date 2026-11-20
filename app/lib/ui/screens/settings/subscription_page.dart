@@ -11,6 +11,12 @@
 /// saved before (an older app, the switch off) shows the same line and a
 /// footer saying nothing is sent to it. With the switch off, an http://
 /// address is saved and the footer says it travels unencrypted.
+///
+/// The upload key is sent only to the host it was saved for
+/// (services/server_http_client.dart). With the address changed to another
+/// host and the key left as it was, the key field says which host the key
+/// was saved for, and one tap makes it the new address's key (the same
+/// server at a new IP, domain or port); pasting that server's key does too.
 library;
 
 import 'dart:async';
@@ -19,9 +25,13 @@ import 'package:flutter/services.dart' show HapticFeedback;
 import 'package:url_launcher/url_launcher.dart' as launcher;
 
 import '../../../core/server_transport.dart'
-    show isCleartextServerUrl, requireHttpsServer, serverAddressRefused;
+    show
+        isCleartextServerUrl,
+        requireHttpsServer,
+        serverAddressRefused,
+        serverKeyHostOf;
 import '../../ai_consent.dart';
-import '../../services.dart' show SettingsStore;
+import '../../services.dart' show SettingsStore, serverKeyForOtherAddress;
 import '../../l10n.dart';
 import '../../provider_names.dart' show serverPlanName;
 import '../../widgets/grouped.dart';
@@ -229,6 +239,12 @@ class _SubscriptionProviderPageState
           SnackBar(content: Text(context.l10n.errServerNeedsHttps)));
       return;
     }
+    // A key saved for another server is sent nowhere else: said here.
+    if (serverKeyForOtherAddress(widget.settings)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(context.l10n.errServerKeyOtherHost)));
+      return;
+    }
     // Busy from the question on, so a second tap stacks no second dialog.
     setState(() => _authBusy = true);
     try {
@@ -357,6 +373,23 @@ class _SubscriptionProviderPageState
     return note == null ? l.serverFooter : '${l.serverFooter}\n\n$note';
   }
 
+  /// Saves what the key field holds (per keystroke, as before). A new key
+  /// is bound to the address above (AppSettings.setServerApiKey); the
+  /// page rebuilds so the line under the field follows. An unchanged one
+  /// keeps the host it was saved for.
+  Future<void> _saveKey(String value) async {
+    await widget.settings.update(apiKey: value.trim());
+    if (mounted) setState(() {});
+  }
+
+  /// The host the saved upload key was saved for, when that is not the
+  /// saved address's: shown under the key field, with the row that makes
+  /// the key this address's. Null otherwise.
+  String? get _keySavedForOtherHost {
+    final s = widget.settings;
+    return serverKeyForOtherAddress(s) ? s.serverKeyHost : null;
+  }
+
   /// "Needs https://" under the field: a refused save, or the saved
   /// address (shown while the field holds it unedited).
   bool get _showNeedsHttps =>
@@ -368,6 +401,8 @@ class _SubscriptionProviderPageState
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final settings = widget.settings;
+    final keySavedFor = _keySavedForOtherHost;
+    final addressHost = serverKeyHostOf(settings.serverBaseUrl);
     return GroupedPage(
       title: context.l10n.subPageTitle,
       children: [
@@ -435,15 +470,34 @@ class _SubscriptionProviderPageState
                 controller: _keyController,
                 obscureText: true,
                 autocorrect: false,
-                onChanged: (v) => settings.update(apiKey: v.trim()),
-                onSubmitted: (v) => settings.update(apiKey: v.trim()),
-                onTapOutside: (_) =>
-                    settings.update(apiKey: _keyController.text.trim()),
+                onChanged: _saveKey,
+                onSubmitted: _saveKey,
+                onTapOutside: (_) => _saveKey(_keyController.text),
                 decoration: cellFieldDecoration(
                   context,
                   labelText: context.l10n.serverUploadKeyLabel,
-                ),
+                ).copyWith(
+                    // Saved for another server: nothing is sent with it to
+                    // the address above until it is that server's.
+                    errorText: keySavedFor == null
+                        ? null
+                        : context.l10n.serverKeyOtherHostField(keySavedFor),
+                    errorMaxLines: 3,
+                    errorBorder: InputBorder.none,
+                    focusedErrorBorder: InputBorder.none),
               )),
+              if (keySavedFor != null && addressHost != null)
+                GroupedRow(
+                  key: const Key('serverKeyUseHereRow'),
+                  icon: Icons.key_outlined,
+                  iconColor: scheme.primary,
+                  title: context.l10n.serverKeyUseHere(addressHost),
+                  showChevron: false,
+                  onTap: () async {
+                    await settings.bindServerKeyToAddress();
+                    if (mounted) setState(() {});
+                  },
+                ),
             ],
           ),
           if (settings.serverBackend == 'claude')

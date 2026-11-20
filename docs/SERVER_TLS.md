@@ -423,8 +423,12 @@ lookup order in SERVER_DEPLOY.md.
 
 In the app: **Settings → AI Provider → Your own server → Server
 address** → `https://$HOST` (no port, no trailing slash). Keep the same
-upload key. Go back one page, tap **Test This Provider** and then **Run
-the checks**. The test must reach the server, accept the key and get an
+upload key. The app sends the key only to the host it was saved for: on
+route A the host stays the same, so nothing more is needed; on route B
+it changes from the address to the name, and the key field says the key
+was saved for the old address. Tap **Use this key for $HOST** under it
+(or paste the key again). Go back one page, tap **Test This Provider**
+and then **Run the checks**. The test must reach the server, accept the key and get an
 answer for its test picture; it spends one text run and one photo run on
 your plan. Then take one food photo and check that it analyzes.
 
@@ -460,8 +464,10 @@ nothing is sent to it. To move over:
 1. Put https on the server: sections 1–4 above (route A keeps the same
    host).
 2. On the phone, change the server address to `https://$HOST` and keep
-   the upload key — or open a new setup link whose `server=` is
-   `https://$HOST`. A setup link with `http://` is refused.
+   the upload key (on route B, also tap **Use this key for $HOST** under
+   it: the key goes only to the host it was saved for) — or open a new
+   setup link whose `server=` is `https://$HOST`. A setup link with
+   `http://` is refused.
 3. **Test This Provider** → **Run the checks**, as above.
 
 Automatic logging did not run in between; the first scan after the

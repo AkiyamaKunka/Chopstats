@@ -709,6 +709,18 @@ class _AppSettingsStore implements SettingsStore {
   @override
   String get serverBaseUrl => _s.serverBaseUrl;
   @override
+  String? get serverKeyHost => _s.serverKeyHost;
+  @override
+  Future<void> bindServerKeyToAddress() => _s.bindServerKeyToAddress();
+  @override
+  Future<void> applyServerSetup({
+    required String serverBackend,
+    required String serverBaseUrl,
+    required String apiKey,
+  }) =>
+      _s.applyServerSetup(
+          backend: serverBackend, baseUrl: serverBaseUrl, key: apiKey);
+  @override
   String get serverBackend => _s.serverBackend;
   @override
   String get appLanguage => _s.appLanguage;

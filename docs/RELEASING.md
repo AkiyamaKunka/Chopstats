@@ -335,7 +335,7 @@ When merging #22 after this PR:
 - **Never hand-merge the generated `app_localizations*.dart`.** Take
   either side, then run `flutter gen-l10n` in `app/`.
 - `app/test/ui/usual_copy_test.dart` pins the number of keys in each ARB
-  file: 809 on `main` since #22 merged, 952 on the iCloud Backup branch
+  file: 809 on `main` since #22 merged, 959 on the iCloud Backup branch
   merged with #33, the review-171 fixes, the Android photos, privacy,
   background and ui lanes, the Play channel and the Android lows lane
   (`feat/icloud-backup` adds 72 `backup*` and `import*` keys, #33's
@@ -350,7 +350,8 @@ When merging #22 after this PR:
   Diagnostics' build line and the `*Play` variants of the copy that names
   Watch Camera Roll or Photo Coverage or says a photo is kept or retried),
   the Android lows lane's `outcomeShareFixAddressMsg` 1 (a share refused
-  for the server address), none shared; review r171 deleted
+  for the server address) and its review's seven lines for an upload key
+  saved for another server address 7, none shared; review r171 deleted
   `bodyEmptyHintImperial`, the same text as `bodyEmptyHint`). If either
   side adds keys before both merge, change the number in that test to the
   merged count, and here too (the test checks this line); both files must

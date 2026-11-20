@@ -3874,4 +3874,34 @@ class AppLocalizationsEn extends AppLocalizations {
   String outcomeFailedKeptMsgPlay(String reason) {
     return 'Photo analysis failed. $reason';
   }
+
+  @override
+  String get errServerKeyOtherHost =>
+      'Your server upload key was saved for another server address, and Chopstats sends it only there. In AI Provider › Your own server, paste this server\'s key or use the saved one for it.';
+
+  @override
+  String get reasonServerKeyOtherHost =>
+      'the upload key was saved for another server address';
+
+  @override
+  String serverKeyOtherHostField(String host) {
+    return 'Saved for $host: not sent to the address above.';
+  }
+
+  @override
+  String serverKeyUseHere(String host) {
+    return 'Use this key for $host';
+  }
+
+  @override
+  String get autoScanServerKeyOtherHost =>
+      'Automatic logging is not running: your server upload key was saved for another server address, and Chopstats sends it only there. Fix it in AI Provider › Your own server.';
+
+  @override
+  String get diagServerKeyOtherHost =>
+      'The upload key was saved for another server address, so it is not sent to this one.';
+
+  @override
+  String get diagFixServerKeyOtherHost =>
+      'In Settings › AI Provider › Your own server, paste this server\'s upload key, or use the saved key for it.';
 }

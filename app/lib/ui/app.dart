@@ -525,12 +525,13 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     // that recipient, saved before anything can be sent to it.
     await s.setAiConsent(aiConsentRoute('server', link.backend),
         granted: true);
-    // Provider FIRST: the store routes apiKey to the active provider's slot.
-    await s.update(
-        provider: 'server',
+    // The address and its key together, bound to each other and notified
+    // once: written one after the other, a frame between them saw the
+    // link's address with the previous server's key (review of PR 74).
+    await s.applyServerSetup(
         serverBackend: link.backend,
-        serverBaseUrl: link.server);
-    await s.update(apiKey: link.key);
+        serverBaseUrl: link.server,
+        apiKey: link.key);
     if (!mounted) return;
     setState(() => _index = 3); // land on Settings, where the result shows
     ScaffoldMessenger.of(context)

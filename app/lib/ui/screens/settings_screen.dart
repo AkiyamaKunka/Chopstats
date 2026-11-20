@@ -843,11 +843,15 @@ class _SettingsScreenState extends State<SettingsScreen>
 
   /// Why the automatic scan is latched, with its next try; null when not.
   /// Or that it does not run at all: the own server's address is not
-  /// https://, so nothing is sent to it (AppSettings.canAutoAnalyze).
+  /// https://, or its upload key was saved for another address, so nothing
+  /// is sent to it (AppSettings.canAutoAnalyze).
   String? _autoScanPausedText() {
     final s = widget.settings;
     if (s.provider == 'server' && serverAddressRefused(s.serverBaseUrl)) {
       return context.l10n.autoScanNeedsHttps;
+    }
+    if (serverKeyForOtherAddress(s)) {
+      return context.l10n.autoScanServerKeyOtherHost;
     }
     final until = s.autoScanBlockedUntil;
     if (until == null) return null;

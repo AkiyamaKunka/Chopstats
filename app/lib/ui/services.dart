@@ -10,6 +10,7 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show Listenable;
 
 import '../core/contracts.dart';
+import '../core/server_transport.dart' show serverKeyForOtherHost;
 import '../services/backup/backup_coordinator.dart';
 import '../services/backup/save_file_channel.dart' show SaveFileStatus;
 import '../services/garmin_client.dart';
@@ -111,6 +112,27 @@ abstract class SettingsStore {
   /// Base URL of the user's own server (AiProvider.server); '' when unset.
   String get serverBaseUrl;
 
+  /// The host the own server's upload key was saved for
+  /// (AppSettings.serverKeyHost, lowercased); null: no key, or one saved
+  /// before any address. The key is sent to that host only
+  /// (core/server_transport.dart serverKeyForOtherHost).
+  String? get serverKeyHost;
+
+  /// Settings › Your own server › "Use this key for …": the saved
+  /// upload key is the current address's too (AppSettings
+  /// .bindServerKeyToAddress). Only on the user's tap.
+  Future<void> bindServerKeyToAddress();
+
+  /// A confirmed setup link: the own server on [serverBackend] at
+  /// [serverBaseUrl] with [apiKey], set together and notified once
+  /// (AppSettings.applyServerSetup), so nothing sees the new address with
+  /// the previous key.
+  Future<void> applyServerSetup({
+    required String serverBackend,
+    required String serverBaseUrl,
+    required String apiKey,
+  });
+
   /// Whose subscription pays on the server: 'claude' | 'glm' | 'doubao'
   /// (AppSettings.serverBackends). Plan keys live in the server's .env.
   String get serverBackend;
@@ -174,6 +196,15 @@ abstract class SettingsStore {
     int? calorieGoal,
   });
 }
+
+/// Whether [s] is on the own server with an upload key saved for another
+/// host than its address (core/server_transport.dart): nothing is sent
+/// with that key until the user pastes this server's key or uses the saved
+/// one for it (SettingsStore.bindServerKeyToAddress).
+bool serverKeyForOtherAddress(SettingsStore s) =>
+    s.provider == 'server' &&
+    s.apiKey.trim().isNotEmpty &&
+    serverKeyForOtherHost(s.serverKeyHost, s.serverBaseUrl);
 
 /// Recent-photo picking for the Add flow grid. The photo module exposes
 /// pickFromRecent; di.dart adapts it here. Returned photos MUST carry

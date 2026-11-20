@@ -14,7 +14,8 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/ai_consent.dart';
-import '../../core/server_transport.dart' show serverAddressRefused;
+import '../../core/server_transport.dart'
+    show serverAddressRefused, serverKeyForOtherHost, serverKeyHostOf;
 import '../../core/shared_generated.dart';
 
 /// Narrow seam over the secure-storage plugin so tests can substitute an
@@ -383,6 +384,8 @@ class AppSettings extends ChangeNotifier {
   static const String _kOpenaiModel = 'settings.openai_model';
   static const String _kAnthropicModel = 'settings.anthropic_model';
   static const String _kServerBaseUrl = 'settings.server_base_url';
+  // The host the server upload key was saved for ([serverKeyHost]).
+  static const String _kServerKeyHost = 'settings.server_key_host';
   static const String _kServerBackend = 'settings.server_backend';
   static const String _kQwenModel = 'settings.qwen_model';
   static const String _kDoubaoModel = 'settings.doubao_model';
@@ -443,6 +446,7 @@ class AppSettings extends ChangeNotifier {
   String? _xaiApiKey;
   String? _openrouterApiKey;
   String _serverBaseUrl = '';
+  String? _serverKeyHost;
   String _serverBackend = 'claude';
   AiProvider _provider = AiProvider.gemini;
   String _openaiModel = defaultOpenaiModel;
@@ -501,6 +505,17 @@ class AppSettings extends ChangeNotifier {
     final orKey = (await k.read(_kOpenrouterKey))?.trim();
     s._openrouterApiKey = (orKey == null || orKey.isEmpty) ? null : orKey;
     s._serverBaseUrl = (p.getString(_kServerBaseUrl) ?? '').trim();
+    final keyHost = (p.getString(_kServerKeyHost) ?? '').trim();
+    s._serverKeyHost = keyHost.isEmpty ? null : keyHost;
+    // A key saved before keys were bound to a host (an update from 1.7.0
+    // or earlier) is bound to the address saved with it, once.
+    if (s._serverApiKey != null && s._serverKeyHost == null) {
+      final host = serverKeyHostOf(s._serverBaseUrl);
+      if (host != null) {
+        s._serverKeyHost = host;
+        await p.setString(_kServerKeyHost, host);
+      }
+    }
     final backend = (p.getString(_kServerBackend) ?? '').trim();
     s._serverBackend =
         serverBackends.contains(backend) ? backend : 'claude';
@@ -718,23 +733,146 @@ class AppSettings extends ChangeNotifier {
   /// watcher uses). Secure storage — never shared_preferences.
   String? get serverApiKey => _serverApiKey;
 
-  Future<void> setServerApiKey(String? value) =>
-      _setProviderKey(value, _kServerKey, (v) => _serverApiKey = v,
+  /// The host the upload key was saved for (lowercased), or null: no key,
+  /// or a key saved before any address (it binds to the next address
+  /// saved). Every request to the server goes through
+  /// HttpsOnlyServerClient, which sends the key to this host only, so a
+  /// key saved for one server never goes to an address typed for another.
+  String? get serverKeyHost => _serverApiKey == null ? null : _serverKeyHost;
+
+  /// Whether the own server is the provider and its upload key was saved
+  /// for another host than its address: nothing is sent with it until the
+  /// user pastes this server's key or binds the saved one to it
+  /// ([bindServerKeyToAddress]).
+  bool get serverKeyForOtherAddress =>
+      _provider == AiProvider.server &&
+      _serverApiKey != null &&
+      serverKeyForOtherHost(serverKeyHost, _serverBaseUrl);
+
+  /// A CHANGED key is bound to the address it is saved for, in the same
+  /// synchronous step as the key itself: no request ever sees the new key
+  /// with the old host. An unchanged one keeps its host: the page saves
+  /// the field again on a tap outside it and on Done, and that must not
+  /// bind the old server's key to a new address.
+  Future<void> setServerApiKey(String? value) async {
+    final v = (value ?? '').trim();
+    if (v == (_serverApiKey ?? '')) {
+      return _setProviderKey(value, _kServerKey, (x) => _serverApiKey = x,
           () => _serverApiKey, AiProvider.server);
+    }
+    final host = v.isEmpty ? null : serverKeyHostOf(_serverBaseUrl);
+    final rebind = host != _serverKeyHost;
+    _serverApiKey = v.isEmpty ? null : v;
+    _serverKeyHost = host;
+    if (rebind) {
+      await _storeServerKey(_serverApiKey, host);
+    } else if (v.isEmpty) {
+      await _keys.delete(_kServerKey);
+    } else {
+      // The same host (the key typed for the address it is bound to):
+      // updated in place, never absent between keystrokes.
+      await _keys.write(_kServerKey, v);
+    }
+    // As _setProviderKey: a changed key on the ACTIVE provider does not
+    // inherit the previous key's quota pause.
+    if (_provider == AiProvider.server && _quotaPauseUntil != null) {
+      _quotaPauseUntil = null;
+      await _prefs.remove(_kQuotaPauseUntil);
+    }
+    await _credentialsEdited();
+    notifyListeners();
+  }
+
+  /// Stores the upload key and the host it is bound to so that no write
+  /// cut short leaves a key bound to a host it was not saved for: the
+  /// previous key goes first, then the host is written, then the new key.
+  Future<void> _storeServerKey(String? key, String? host) async {
+    await _keys.delete(_kServerKey);
+    await _saveServerKeyHost(host);
+    if (key != null) await _keys.write(_kServerKey, key);
+  }
+
+  Future<void> _saveServerKeyHost(String? host) => host == null
+      ? _prefs.remove(_kServerKeyHost)
+      : _prefs.setString(_kServerKeyHost, host);
+
+  /// Settings › Your own server › "Use this key for …": the saved key
+  /// is this address's too (the same server at a new IP, domain or port).
+  /// Only ever on the user's tap.
+  Future<void> bindServerKeyToAddress() async {
+    final host = serverKeyHostOf(_serverBaseUrl);
+    if (_serverApiKey == null || host == null || host == _serverKeyHost) {
+      return;
+    }
+    _serverKeyHost = host;
+    await _saveServerKeyHost(host);
+    await _credentialsEdited();
+    notifyListeners();
+  }
+
+  /// A confirmed setup link: the own server on [backend] at [baseUrl]
+  /// with [key], bound to that address. Everything is assigned before
+  /// anything is awaited and notified once, so no listener (the Restaurant
+  /// nutrition group's server check) and no request in flight ever sees the
+  /// new address with the previous key. The key and its host are stored
+  /// before the address ([_storeServerKey]): an address stored ahead of
+  /// them could bind the previous key to it at the next load.
+  Future<void> applyServerSetup(
+      {required String backend,
+      required String baseUrl,
+      required String key}) async {
+    final url = _trimServerUrl(baseUrl);
+    final k = key.trim();
+    final b = serverBackends.contains(backend) ? backend : 'claude';
+    final providerChanged = _provider != AiProvider.server;
+    final keyChanged = k != (_serverApiKey ?? '');
+    final host = k.isEmpty ? null : serverKeyHostOf(url);
+    _provider = AiProvider.server;
+    _serverBackend = b;
+    _serverBaseUrl = url;
+    _serverApiKey = k.isEmpty ? null : k;
+    _serverKeyHost = host;
+    await _storeServerKey(_serverApiKey, host);
+    await _prefs.setString(_kServerBaseUrl, url);
+    await _prefs.setString(_kServerBackend, b);
+    await _prefs.setString(_kProvider, AiProvider.server.name);
+    // As setProvider and the key setter: the pause belonged to the
+    // previous provider's or key's quota.
+    if ((providerChanged || keyChanged) && _quotaPauseUntil != null) {
+      _quotaPauseUntil = null;
+      await _prefs.remove(_kQuotaPauseUntil);
+    }
+    await _credentialsEdited();
+    notifyListeners();
+  }
 
   /// Base URL of the user's server, e.g. http://1.2.3.4 — trailing slashes
   /// trimmed so path joins never double up.
   String get serverBaseUrl => _serverBaseUrl;
 
+  /// The upload key stays bound to the host it was saved for
+  /// ([serverKeyHost]); only a key saved before any address binds to the
+  /// first one saved, in the same step as the address.
   Future<void> setServerBaseUrl(String value) async {
+    final v = _trimServerUrl(value);
+    _serverBaseUrl = v;
+    final bind = _serverApiKey != null && _serverKeyHost == null
+        ? serverKeyHostOf(v)
+        : null;
+    if (bind != null) _serverKeyHost = bind;
+    await _prefs.setString(_kServerBaseUrl, v);
+    if (bind != null) await _saveServerKeyHost(bind);
+    await _credentialsEdited();
+    notifyListeners();
+  }
+
+  /// Trimmed, trailing slashes dropped, so path joins never double up.
+  static String _trimServerUrl(String value) {
     var v = value.trim();
     while (v.endsWith('/')) {
       v = v.substring(0, v.length - 1);
     }
-    _serverBaseUrl = v;
-    await _prefs.setString(_kServerBaseUrl, v);
-    await _credentialsEdited();
-    notifyListeners();
+    return v;
   }
 
   /// Wire values of /api/analyze_photo's `backend` field — whose
@@ -1287,11 +1425,16 @@ class AppSettings extends ChangeNotifier {
 
   /// [canAnalyze] for the AUTOMATIC scan (watcher, launch/resume catch-up,
   /// background run): also false while the automatic-analysis latch below
-  /// is armed, and while [autoAnalysisNeedsHttps]. Deliberate adds (picker,
-  /// share, 照片覆盖检查) keep using [canAnalyze] — a deliberate photo is
-  /// how the user checks the fix, and it is told why.
+  /// is armed, while [autoAnalysisNeedsHttps], and while the upload key was
+  /// saved for another address ([serverKeyForOtherAddress]: each photo
+  /// would be read only to be refused, as for an http:// address).
+  /// Deliberate adds (picker, share, 照片覆盖检查) keep using [canAnalyze] —
+  /// a deliberate photo is how the user checks the fix, and it is told why.
   bool get canAutoAnalyze =>
-      canAnalyze && !isAnalysisBlocked && !autoAnalysisNeedsHttps;
+      canAnalyze &&
+      !isAnalysisBlocked &&
+      !autoAnalysisNeedsHttps &&
+      !serverKeyForOtherAddress;
 
   /// The own server is the provider and its saved address is one the app
   /// sends nothing to (core/server_transport.dart: not https:// while the

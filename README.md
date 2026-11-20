@@ -354,6 +354,7 @@ The repository root holds a Python server that you run on your own machine. When
 The server runs the analysis through the Claude Code CLI. It uses the AI plan that is signed in on that server: Claude, GLM Coding Plan or Doubao Agent Plan. Check your plan's acceptable-use terms before you route app traffic through it.
 
 - The phone holds one upload key. The plan's credentials stay on the server.
+- The phone sends that key only to the server it was saved for. After you change the address to another server, paste that server's key; for the same server at a new address, tap **Use this key** under the key field.
 - For a photo, the server writes the analysis prompt itself. The phone supplies only data for it: your dietary profile, that day's meal summaries, and your choice of plan, model, effort and reply language.
 - A text request carries its prompt from the phone, and the server runs it with tools off.
 - Each reply names which AI answered, and the app rejects a mismatch.

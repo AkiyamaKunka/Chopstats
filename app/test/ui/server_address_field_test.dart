@@ -397,6 +397,17 @@ void main() {
     await tester.pumpAndSettle();
     await tester.runAsync(() async {}); // the store's save finishes
     expect(app.serverBaseUrl, 'https://10.0.0.55');
+    // The key was saved for .7, and goes nowhere else (review of PR 74):
+    // nothing is sent to .55 with it, and the field says so.
+    await automaticPhoto();
+    expect(uploads, hasLength(4));
+    expect(find.text('Saved for 10.0.0.7: not sent to the address above.'),
+        findsOneWidget);
+    // The same server at its new address: one tap makes the key its own.
+    await tester.tap(find.text('Use this key for 10.0.0.55'));
+    await tester.runAsync(() async {}); // the store's save finishes
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Saved for 10.0.0.7'), findsNothing);
     await automaticPhoto();
     expect(uploads.last, '10.0.0.55 <- upload-key');
   });

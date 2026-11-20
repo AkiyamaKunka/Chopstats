@@ -182,8 +182,12 @@ final _placeholderRe = RegExp(r'\{(\w+)\}');
 /// aiStopSharingBodyWithLookupsPlay, errServerFailedFinalPlay,
 /// errServerRejectedPlay, coachEmptyPlay, coachEmptyYesterdayPlay,
 /// coachEmptyOnDayPlay); and the Android lows lane's
-/// outcomeShareFixAddressMsg (a share refused for the server address).
-const _keyCount = 952;
+/// outcomeShareFixAddressMsg (a share refused for the server address) and,
+/// after its review, the seven lines for an upload key saved for another
+/// server address (errServerKeyOtherHost, reasonServerKeyOtherHost,
+/// serverKeyOtherHostField, serverKeyUseHere, autoScanServerKeyOtherHost,
+/// diagServerKeyOtherHost, diagFixServerKeyOtherHost).
+const _keyCount = 959;
 
 Directory _appRoot() {
   var dir = Directory.current;

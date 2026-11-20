@@ -23,7 +23,11 @@ import '../../core/contracts.dart';
 import '../../core/leftover_logic.dart' show formatRecentMealsBlock;
 import '../../core/prompts.dart';
 import '../../core/server_transport.dart'
-    show kServerNeedsHttpsMessage, serverAddressRefused;
+    show
+        kServerKeyOtherHostMessage,
+        kServerNeedsHttpsMessage,
+        serverAddressRefused,
+        serverKeyForOtherHost;
 import '../server_http_client.dart' show HttpsOnlyServerClient;
 import '../assist/clients/http_failure.dart'
     show

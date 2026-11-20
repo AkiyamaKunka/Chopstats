@@ -100,7 +100,7 @@ void main() {
           '${require ? 'never reaches the network' : 'is sent'}', () async {
         debugRequireHttpsServerOverride = require;
         final inner = _Recording();
-        final c = HttpsOnlyServerClient(inner);
+        final c = HttpsOnlyServerClient(inner, keyHost: () => '10.0.0.5');
         final send = c.post(Uri.parse('http://10.0.0.5/api/anything'),
             headers: {'X-API-Key': 'upload-key'});
         if (require) {
@@ -117,7 +117,7 @@ void main() {
         'redirects off', () async {
       debugRequireHttpsServerOverride = true;
       final inner = _Recording();
-      final c = HttpsOnlyServerClient(inner);
+      final c = HttpsOnlyServerClient(inner, keyHost: () => null);
       await c.get(Uri.parse('https://h.example/api/auth_check'));
       await c.get(Uri.parse('http://127.0.0.1:5000/api/auth_check'));
       expect(inner.seen.map((r) => r.url.host), ['h.example', '127.0.0.1']);
@@ -132,9 +132,61 @@ void main() {
     });
 
     test('wrap is idempotent', () {
-      final once = HttpsOnlyServerClient.wrap(_Recording());
-      expect(HttpsOnlyServerClient.wrap(once), same(once));
-      expect(HttpsOnlyServerClient.wrap(null), isA<HttpsOnlyServerClient>());
+      String? host() => 'h.example';
+      final once = HttpsOnlyServerClient.wrap(_Recording(), keyHost: host);
+      expect(HttpsOnlyServerClient.wrap(once, keyHost: host), same(once));
+      expect(HttpsOnlyServerClient.wrap(null, keyHost: host),
+          isA<HttpsOnlyServerClient>());
+    });
+
+    // Review of PR 74: each request reads the saved address and key as it
+    // is built, so an address changed before the key sent the previous
+    // server's key to the new host. The key goes only to the host it was
+    // saved for, whatever sends it.
+    test('the upload key goes only to the host it was saved for', () async {
+      final inner = _Recording();
+      var bound = 'a.example';
+      final c = HttpsOnlyServerClient(inner, keyHost: () => bound);
+      for (final header in ['X-API-Key', 'x-api-key', 'X-API-KEY']) {
+        await expectLater(
+            c.post(Uri.parse('https://b.example/api/auth_check'),
+                headers: {header: 'key-for-a'}),
+            throwsA(isA<ServerKeyOtherHostException>()),
+            reason: header);
+      }
+      expect(inner.seen, isEmpty);
+      // Its own host passes (any letter case), and so does a request with
+      // no key (the reachability probe).
+      await c.post(Uri.parse('https://A.Example:8443/api/auth_check'),
+          headers: {'X-API-Key': 'key-for-a'});
+      await c.get(Uri.parse('https://b.example/'));
+      expect(inner.seen.map((r) => r.url.host), ['a.example', 'b.example']);
+      // Read at each request: bound to b, the key goes to b only.
+      bound = 'b.example';
+      await c.post(Uri.parse('https://b.example/api/auth_check'),
+          headers: {'X-API-Key': 'key-for-b'});
+      await expectLater(
+          c.post(Uri.parse('https://a.example/api/auth_check'),
+              headers: {'X-API-Key': 'key-for-b'}),
+          throwsA(isA<ServerKeyOtherHostException>()));
+      expect(inner.seen, hasLength(3));
+    });
+
+    test('a key bound to no host goes nowhere', () async {
+      final inner = _Recording();
+      final c = HttpsOnlyServerClient(inner, keyHost: () => null);
+      await expectLater(
+          c.post(Uri.parse('https://h.example/api/auth_check'),
+              headers: {'X-API-Key': 'k'}),
+          throwsA(isA<ServerKeyOtherHostException>()));
+      expect(inner.seen, isEmpty);
+    });
+
+    test('the key refusal is a ClientException carrying its own line', () {
+      final e = ServerKeyOtherHostException(Uri.parse('https://b.example'));
+      expect(e, isA<http.ClientException>());
+      expect(e.message, kServerKeyOtherHostMessage);
+      expect(isServerKeyOtherHostMessage(e.message), isTrue);
     });
   });
 
@@ -160,6 +212,27 @@ void main() {
       for (final r in inner.seen) {
         expect(r.followRedirects, isFalse, reason: '${r.url}');
       }
+    });
+
+    // Review of PR 74: a new address saved before its key got the previous
+    // server's key with every request. Not one of them carries it now.
+    test('a key saved for another address: no request of the three clients '
+        'carries it there; that server\'s own key goes', () async {
+      debugRequireHttpsServerOverride = true;
+      final inner = _Recording();
+      final s = await _server('https://a.example');
+      await s.setServerBaseUrl('https://b.example');
+      await _everything(s, inner);
+      expect(inner.seen, isEmpty);
+      await s.setServerApiKey('key-b');
+      await _everything(s, inner);
+      expect(inner.seen.map((r) => r.url.host).toSet(), {'b.example'});
+      expect(
+          inner.seen
+              .where((r) => r.url.path != '/api/auth_check')
+              .map((r) => r.headers['X-API-Key'])
+              .toSet(),
+          {'key-b'});
     });
 
     test('http:// with the switch on: nothing reaches the network', () async {

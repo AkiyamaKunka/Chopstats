@@ -12,7 +12,8 @@ import '../core/app_channel.dart' show photoLibraryInBuild;
 import '../core/chain_match.dart' show chainByKey;
 import '../core/coerce.dart' show calendarDaysBetween;
 import '../core/outcome_kind.dart';
-import '../core/server_transport.dart' show isServerNeedsHttpsMessage;
+import '../core/server_transport.dart'
+    show isServerKeyOtherHostMessage, isServerNeedsHttpsMessage;
 import '../l10n/app_localizations.dart';
 import '../services/assist/meal_assist.dart' show AssistAppliedNotice;
 import 'format.dart'
@@ -89,11 +90,13 @@ String outcomeBody(AppLocalizations l, PhotoOutcome o,
     case PhotoOutcomeKind.failed:
       return switch (o.errorKind) {
         AnalysisErrorKind.noApiKey => l.errNoApiKey,
-        AnalysisErrorKind.noServerKey => isServerNeedsHttpsMessage(o.message)
-            ? l.errServerNeedsHttps
-            : isBadServerAddress(o.message)
-                ? l.errBadServerAddress
-                : l.errNoServerKey,
+        AnalysisErrorKind.noServerKey => isServerKeyOtherHostMessage(o.message)
+            ? l.errServerKeyOtherHost
+            : isServerNeedsHttpsMessage(o.message)
+                ? l.errServerNeedsHttps
+                : isBadServerAddress(o.message)
+                    ? l.errBadServerAddress
+                    : l.errNoServerKey,
         AnalysisErrorKind.rejectedKey => l.errRejectedKey,
         AnalysisErrorKind.regionBlocked =>
           l.errRegionBlocked(regionProvider(l, o.message)),
@@ -237,9 +240,11 @@ String? retryReason(AppLocalizations l, PhotoOutcome o) {
     AnalysisErrorKind.serverBusy => l.reasonServerBusy,
     AnalysisErrorKind.serverError => l.reasonServerFailed,
     AnalysisErrorKind.noApiKey => l.reasonNoApiKey,
-    AnalysisErrorKind.noServerKey => isServerNeedsHttpsMessage(o.message)
-        ? l.reasonServerNeedsHttps
-        : l.reasonNoServerKey,
+    AnalysisErrorKind.noServerKey => isServerKeyOtherHostMessage(o.message)
+        ? l.reasonServerKeyOtherHost
+        : isServerNeedsHttpsMessage(o.message)
+            ? l.reasonServerNeedsHttps
+            : l.reasonNoServerKey,
     AnalysisErrorKind.regionBlocked =>
       l.reasonRegionBlocked(regionProvider(l, o.message)),
     _ => null,
@@ -253,11 +258,15 @@ bool isBadServerAddress(String message) =>
     message.contains('not a valid web address');
 
 /// The saved server address is set but nothing is sent to it: it does not
-/// parse ([isBadServerAddress]), or it is not https:// while the https
-/// switch is on (core/server_transport.dart). Either way "check your server
-/// address", not "AI isn't set up yet", and Retry would fail the same way.
+/// parse ([isBadServerAddress]), it is not https:// while the https
+/// switch is on (core/server_transport.dart), or the upload key was saved
+/// for another address ([isServerKeyOtherHostMessage]). Either way "check
+/// your server settings", not "AI isn't set up yet", and Retry would fail
+/// the same way.
 bool isUnusableServerAddress(String message) =>
-    isBadServerAddress(message) || isServerNeedsHttpsMessage(message);
+    isBadServerAddress(message) ||
+    isServerNeedsHttpsMessage(message) ||
+    isServerKeyOtherHostMessage(message);
 
 /// Who refused the network region, out of the analyzers' "`Provider` is
 /// not available from your current network region …" (Gemini's region

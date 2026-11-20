@@ -401,8 +401,10 @@ void main() {
       final lon = point.lon.toStringAsFixed(5);
       final req = _randomRequest(r, lat: lat, lon: lon, point: point);
       for (final https in [true, false]) {
+        // One server both ways: the upload key goes only to the host it
+        // was saved for (services/server_http_client.dart).
         await settings.setServerBaseUrl(
-            https ? 'https://srv.example' : 'http://10.0.0.5:5000');
+            https ? 'https://srv.example' : 'http://srv.example:5000');
         final support = client.lookupSupport();
         expect(support.locationAllowed, https);
         final before = s.requests.length;

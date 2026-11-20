@@ -20,6 +20,10 @@
 ///
 /// Turned off, the app still sends to an http:// address and says so
 /// instead: a line in the consent text and a warning under the address.
+///
+/// The upload key is bound the same way to the host it was saved for
+/// ([serverKeyHostOf]): a request carrying it to any other host never
+/// reaches the network (services/server_http_client.dart).
 library;
 
 import 'package:flutter/foundation.dart' show kDebugMode, visibleForTesting;
@@ -92,3 +96,35 @@ const String kServerNeedsHttpsMessage =
 /// Whether [message] is [kServerNeedsHttpsMessage].
 bool isServerNeedsHttpsMessage(String? message) =>
     message != null && message.contains('sends nothing to a plain http://');
+
+/// The host an upload key saved for the server address [url] is bound to:
+/// its host, lowercased, or null when [url] names none ('', an address
+/// with no scheme). The key is only ever sent to that host
+/// (services/server_http_client.dart): a key saved for one server never
+/// goes to an address typed for another (review of PR 74).
+String? serverKeyHostOf(String url) {
+  final host = Uri.tryParse(url.trim())?.host.toLowerCase() ?? '';
+  return host.isEmpty ? null : host;
+}
+
+/// Whether the upload key, saved for [keyHost] (AppSettings.serverKeyHost),
+/// is for another host than the server address [url]: nothing is sent
+/// with it there. False when there is no address to send to.
+bool serverKeyForOtherHost(String? keyHost, String url) {
+  final host = serverKeyHostOf(url);
+  return host != null && keyHost != host;
+}
+
+/// What a send whose upload key was saved for another server address
+/// reports, in English like the analyzers' other lines. It names the
+/// 'server upload key', so classifyAnalysisError reads it as user state
+/// (the photo is kept, not burned), and outcome_text tells it apart by
+/// [isServerKeyOtherHostMessage].
+const String kServerKeyOtherHostMessage =
+    'Your server upload key was saved for another server address, and '
+    'Chopstats sends it only there. Paste this server\'s upload key in '
+    'Settings, or use the saved one for it.';
+
+/// Whether [message] is [kServerKeyOtherHostMessage].
+bool isServerKeyOtherHostMessage(String? message) =>
+    message != null && message.contains('saved for another server address');

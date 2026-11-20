@@ -1069,5 +1069,12 @@
   "diagFixWaitRateLimitPlay": "等一分钟再试。期间添加的照片可能没有被分析，之后请重新添加。",
   "diagFixPhotoTempPlay": "通常是限流或服务器繁忙 —— 一分钟后再试，没有被分析的照片请重新添加。",
   "diagFixQuotaPlay": "等暂停结束后再重新添加照片（期间照片不会被分析），或更换 Key / 服务立即恢复。",
-  "outcomeFailedKeptMsgPlay": "照片分析失败。{reason}"
+  "outcomeFailedKeptMsgPlay": "照片分析失败。{reason}",
+  "errServerKeyOtherHost": "你的服务器上传密钥是为另一个服务器地址保存的，筷拍只会把它发送到那里。请到「AI 服务」›「你自己的服务器」粘贴这台服务器的密钥，或把已保存的密钥用于它。",
+  "reasonServerKeyOtherHost": "上传密钥是为另一个服务器地址保存的",
+  "serverKeyOtherHostField": "为 {host} 保存：不会发送到上面的地址。",
+  "serverKeyUseHere": "将此密钥用于 {host}",
+  "autoScanServerKeyOtherHost": "自动记录没有运行：你的服务器上传密钥是为另一个服务器地址保存的，筷拍只会把它发送到那里。请到「AI 服务」›「你自己的服务器」修改。",
+  "diagServerKeyOtherHost": "上传密钥是为另一个服务器地址保存的，所以不会发送给这台服务器。",
+  "diagFixServerKeyOtherHost": "在设置 ›「AI 服务」›「你自己的服务器」里粘贴这台服务器的上传密钥，或把已保存的密钥用于它。"
 }

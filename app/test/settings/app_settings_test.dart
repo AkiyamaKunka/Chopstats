@@ -21,6 +21,29 @@ class MemoryKeyStore implements SecureKeyStore {
   Future<void> delete(String key) async => data.remove(key);
 }
 
+/// [MemoryKeyStore] that logs each server-key write and delete with the
+/// stored address and key host at that moment.
+class _OrderedKeyStore extends MemoryKeyStore {
+  _OrderedKeyStore(this.prefs);
+  final SharedPreferences prefs;
+  final List<String> log = [];
+
+  String get _stored => '(host ${prefs.getString('settings.server_key_host')}'
+      ', url ${prefs.getString('settings.server_base_url')})';
+
+  @override
+  Future<void> write(String key, String value) async {
+    if (key == 'server_api_key') log.add('write $value $_stored');
+    return super.write(key, value);
+  }
+
+  @override
+  Future<void> delete(String key) async {
+    if (key == 'server_api_key') log.add('delete $_stored');
+    return super.delete(key);
+  }
+}
+
 Future<(AppSettings, SharedPreferences, MemoryKeyStore)> freshSettings(
     {Map<String, Object> initial = const {}}) async {
   SharedPreferences.setMockInitialValues(initial);
@@ -597,6 +620,183 @@ void main() {
   });
 
   // Design R7a (data_contracts §9a): the restaurant assist's settings.
+  // Review of PR 74: the upload key went with every request to whatever
+  // address was saved, so a new address saved before its key got the
+  // previous server's key. The key is bound to the host it was saved for
+  // (HttpsOnlyServerClient sends it nowhere else).
+  group('the server upload key is bound to the host it was saved for', () {
+    test('a key saved for an address is bound to its host; moving the '
+        'address leaves it there', () async {
+      final (s, prefs, _) = await freshSettings();
+      await s.setProvider(AiProvider.server);
+      await s.setServerBaseUrl('https://A.example:8443/');
+      await s.setServerApiKey('key-a');
+      expect(s.serverKeyHost, 'a.example');
+      expect(prefs.getString('settings.server_key_host'), 'a.example');
+      expect(s.serverKeyForOtherAddress, isFalse);
+      await s.setServerBaseUrl('https://b.example');
+      expect(s.serverKeyHost, 'a.example');
+      expect(s.serverKeyForOtherAddress, isTrue);
+      // The page saves the field again on a tap outside it and on Done:
+      // the same key keeps its host.
+      await s.setServerApiKey('key-a');
+      expect(s.serverKeyHost, 'a.example');
+      // A new key is the address's own.
+      await s.setServerApiKey('key-b');
+      expect(s.serverKeyHost, 'b.example');
+      expect(s.serverKeyForOtherAddress, isFalse);
+      expect(prefs.getString('settings.server_key_host'), 'b.example');
+      // Another port on the same host is the same server.
+      await s.setServerBaseUrl('https://b.example:9443');
+      expect(s.serverKeyForOtherAddress, isFalse);
+    });
+
+    test('a key saved before any address binds to the first one saved',
+        () async {
+      final (s, _, _) = await freshSettings();
+      await s.setProvider(AiProvider.server);
+      await s.setServerApiKey('early-key');
+      expect(s.serverKeyHost, isNull);
+      await s.setServerBaseUrl('https://first.example');
+      expect(s.serverKeyHost, 'first.example');
+      await s.setServerBaseUrl('https://second.example');
+      expect(s.serverKeyHost, 'first.example');
+    });
+
+    test('the binding is written in the same step as the address or key',
+        () async {
+      final (s, _, _) = await freshSettings();
+      await s.setProvider(AiProvider.server);
+      await s.setServerBaseUrl('https://a.example');
+      await s.setServerApiKey('key-a');
+      // Not awaited: what a request built right now would see.
+      final address = s.setServerBaseUrl('https://b.example');
+      expect((s.serverBaseUrl, s.serverApiKey, s.serverKeyHost),
+          ('https://b.example', 'key-a', 'a.example'));
+      await address;
+      final key = s.setServerApiKey('key-b');
+      expect((s.serverApiKey, s.serverKeyHost), ('key-b', 'b.example'));
+      await key;
+    });
+
+    test('a cleared key forgets its host', () async {
+      final (s, prefs, _) = await freshSettings();
+      await s.setProvider(AiProvider.server);
+      await s.setServerBaseUrl('https://a.example');
+      await s.setServerApiKey('key-a');
+      await s.setServerApiKey('');
+      expect(s.serverKeyHost, isNull);
+      expect(prefs.getString('settings.server_key_host'), isNull);
+    });
+
+    test('an update keeps a key saved before hosts were kept with the '
+        'address saved with it, once', () async {
+      final (s, prefs, keys) = await freshSettings(initial: {
+        'settings.provider': 'server',
+        'settings.server_base_url': 'https://owner.example',
+      });
+      expect(s.serverKeyHost, isNull, reason: 'no key yet');
+      keys.data['server_api_key'] = 'old-key';
+      final updated = await AppSettings.load(prefs: prefs, keyStore: keys);
+      expect(updated.serverKeyHost, 'owner.example');
+      expect(prefs.getString('settings.server_key_host'), 'owner.example');
+      expect(updated.serverKeyForOtherAddress, isFalse);
+      // A later load reads it back, and a moved address stays refused.
+      await updated.setServerBaseUrl('https://elsewhere.example');
+      final again = await AppSettings.load(prefs: prefs, keyStore: keys);
+      expect(again.serverKeyHost, 'owner.example');
+      expect(again.serverKeyForOtherAddress, isTrue);
+    });
+
+    test('Use this key here binds it to the address, on the tap only',
+        () async {
+      final (s, prefs, _) = await freshSettings();
+      await s.setProvider(AiProvider.server);
+      await s.setServerBaseUrl('https://a.example');
+      await s.setServerApiKey('key-a');
+      await s.setServerBaseUrl('https://203.0.113.5');
+      final rev = s.credentialRevision;
+      var notified = 0;
+      s.addListener(() => notified++);
+      await s.bindServerKeyToAddress();
+      expect(s.serverKeyHost, '203.0.113.5');
+      expect(prefs.getString('settings.server_key_host'), '203.0.113.5');
+      expect(s.serverKeyForOtherAddress, isFalse);
+      expect(s.credentialRevision, greaterThan(rev));
+      expect(notified, 1);
+      await s.bindServerKeyToAddress(); // already bound: nothing
+      expect(notified, 1);
+    });
+
+    test('a setup link sets the address and its key together, notified '
+        'once, bound to the link\'s host', () async {
+      final (s, prefs, keys) = await freshSettings();
+      await s.setProvider(AiProvider.gemini);
+      await s.setServerBaseUrl('https://a.example');
+      await s.setServerApiKey('key-a');
+      final seen = <(String, String?, String?, AiProvider)>[];
+      s.addListener(() => seen.add(
+          (s.serverBaseUrl, s.serverApiKey, s.serverKeyHost, s.provider)));
+      final setup = s.applyServerSetup(
+          backend: 'glm', baseUrl: 'https://b.example/', key: ' key-b ');
+      // All of it before the first await.
+      expect((s.serverBaseUrl, s.serverApiKey, s.serverKeyHost),
+          ('https://b.example', 'key-b', 'b.example'));
+      await setup;
+      expect(seen, [('https://b.example', 'key-b', 'b.example', AiProvider.server)]);
+      expect(s.serverBackend, 'glm');
+      expect(keys.data['server_api_key'], 'key-b');
+      expect(prefs.getString('settings.server_key_host'), 'b.example');
+      final reloaded = await AppSettings.load(prefs: prefs, keyStore: keys);
+      expect((reloaded.provider, reloaded.serverBaseUrl, reloaded.serverKeyHost),
+          (AiProvider.server, 'https://b.example', 'b.example'));
+    });
+
+    // An app killed between two of these writes must never leave a key
+    // bound (or bound at the next load) to a host it was not saved for:
+    // the previous key goes first, then the host, then the new key, and a
+    // setup link stores its address last.
+    test('stored in an order no write cut short can turn into a key bound '
+        'to another host', () async {
+      SharedPreferences.setMockInitialValues({});
+      final prefs = await SharedPreferences.getInstance();
+      final keys = _OrderedKeyStore(prefs);
+      final s = await AppSettings.load(prefs: prefs, keyStore: keys);
+      await s.setProvider(AiProvider.server);
+      await s.setServerBaseUrl('https://a.example');
+      await s.setServerApiKey('key-a');
+      await s.setServerApiKey('key-a2'); // the same host: in place
+      await s.setServerBaseUrl('https://b.example');
+      await s.setServerApiKey('key-b'); // a new host
+      await s.applyServerSetup(
+          backend: 'claude', baseUrl: 'https://c.example', key: 'key-c');
+      expect(keys.log, [
+        'delete (host null, url https://a.example)',
+        'write key-a (host a.example, url https://a.example)',
+        'write key-a2 (host a.example, url https://a.example)',
+        'delete (host a.example, url https://b.example)',
+        'write key-b (host b.example, url https://b.example)',
+        'delete (host b.example, url https://b.example)',
+        'write key-c (host c.example, url https://b.example)',
+      ]);
+      expect(prefs.getString('settings.server_base_url'), 'https://c.example');
+    });
+
+    test('the automatic scan does not run with a key saved elsewhere',
+        () async {
+      final (s, _, _) = await freshSettings();
+      await s.setProvider(AiProvider.server);
+      await s.setServerBaseUrl('https://a.example');
+      await s.setServerApiKey('key-a');
+      expect(s.canAutoAnalyze, isTrue);
+      await s.setServerBaseUrl('https://b.example');
+      expect(s.canAnalyze, isTrue, reason: 'a deliberate add is told why');
+      expect(s.canAutoAnalyze, isFalse);
+      await s.bindServerKeyToAddress();
+      expect(s.canAutoAnalyze, isTrue);
+    });
+  });
+
   group('restaurant assist settings', () {
     tearDown(() => debugDefaultTargetPlatformOverride = null);
 

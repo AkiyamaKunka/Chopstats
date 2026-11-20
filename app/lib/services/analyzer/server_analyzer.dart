@@ -22,13 +22,16 @@ part of 'provider_analyzers.dart';
 ///
 /// Every request goes through an [HttpsOnlyServerClient] wrapped around
 /// [client] (services/server_http_client.dart): the choke point that
-/// refuses such an address whatever method sends, with redirects off. The
-/// [_refused] checks below are only for the words the user sees (and to
-/// skip a photo's decode).
+/// refuses such an address whatever method sends, sends the upload key
+/// only to the host it was saved for, and turns redirects off. The
+/// [_refused] and [_keyElsewhere] checks below are only for the words the
+/// user sees (and to skip a photo's decode).
 class ServerAnalyzer extends _HttpVisionAnalyzer {
   ServerAnalyzer(super.settings,
       {http.Client? client, super.sleep, super.normalizer})
-      : super(client: HttpsOnlyServerClient.wrap(client));
+      : super(
+            client: HttpsOnlyServerClient.wrap(client,
+                keyHost: () => settings.serverKeyHost));
 
   @override
   String? get apiKey => settings.serverApiKey;
@@ -142,6 +145,15 @@ class ServerAnalyzer extends _HttpVisionAnalyzer {
   bool get _allowed =>
       settings.hasAiConsent(aiConsentRoute('server', settings.serverBackend));
 
+  /// Whether the upload key was saved for another host than the saved
+  /// address (AppSettings.serverKeyHost): the client sends it nowhere
+  /// else, so nothing is sent; said as user state
+  /// ([kServerKeyOtherHostMessage], classified noServerKey: kept, not
+  /// burned). Read at every call, like the address.
+  bool get _keyElsewhere =>
+      (settings.serverApiKey ?? '').trim().isNotEmpty &&
+      serverKeyForOtherHost(settings.serverKeyHost, settings.serverBaseUrl);
+
   /// Whether the saved address parses (an empty one is reported on its
   /// own, by [buildRequest]).
   bool get _addressParses {
@@ -191,6 +203,12 @@ class ServerAnalyzer extends _HttpVisionAnalyzer {
       return const AnalysisOutcome(
           error: _badAddressMessage, retryable: true, wall: Duration.zero);
     }
+    if (_keyElsewhere) {
+      return const AnalysisOutcome(
+          error: kServerKeyOtherHostMessage,
+          retryable: true,
+          wall: Duration.zero);
+    }
     return _onPlanNow(
         () => super.analyzePhoto(originalBytes, recentMeals: recentMeals));
   }
@@ -228,7 +246,10 @@ class ServerAnalyzer extends _HttpVisionAnalyzer {
     // the server re-sanitizes it and composes the leftover prompt from
     // its own shared/ copy (same posture as analyze_photo).
     final key = (apiKey ?? '').trim();
-    if (key.isEmpty || settings.serverBaseUrl.isEmpty || _refused) {
+    if (key.isEmpty ||
+        settings.serverBaseUrl.isEmpty ||
+        _refused ||
+        _keyElsewhere) {
       return null; // refused before the decode, not only at the client
     }
     // The plan as the call starts, before the decode ([_callPlan]).
@@ -310,6 +331,11 @@ class ServerAnalyzer extends _HttpVisionAnalyzer {
     if (_refused) {
       // Kept for when the address is https://; nothing to retry in place.
       throw const _ProviderException(kServerNeedsHttpsMessage,
+          transient: true, retryInPlace: false, verbatimMessage: true);
+    }
+    if (_keyElsewhere) {
+      // Kept for when the key is this server's; nothing to retry in place.
+      throw const _ProviderException(kServerKeyOtherHostMessage,
           transient: true, retryInPlace: false, verbatimMessage: true);
     }
     final isPhoto = jpegBytes != null;
@@ -400,9 +426,10 @@ class ServerAnalyzer extends _HttpVisionAnalyzer {
       return (url: null, error: 'Set the server address and key first.');
     }
     if (_refused) return (url: null, error: kServerNeedsHttpsMessage);
-    // Connect Claude asks first (ensureAiConsent); this is the backstop,
-    // with no words of its own: the page says it could not start.
-    if (!_allowed) return (url: null, error: null);
+    // Connect Claude asks first (ensureAiConsent) and says when the key
+    // was saved for another address; these are the backstops, with no
+    // words of their own: the page says it could not start.
+    if (!_allowed || _keyElsewhere) return (url: null, error: null);
     try {
       final req = http.Request('POST', _uri('/api/claude_auth/start'))
         ..headers['content-type'] = 'application/json'
@@ -493,7 +520,9 @@ class ServerAnalyzer extends _HttpVisionAnalyzer {
   Future<String?> serverLoginState() async {
     final base = settings.serverBaseUrl;
     final key = (settings.serverApiKey ?? '').trim();
-    if (base.isEmpty || key.isEmpty || _refused || !_allowed) return null;
+    if (base.isEmpty || key.isEmpty || _refused || !_allowed || _keyElsewhere) {
+      return null;
+    }
     try {
       final req = http.Request('POST', _uri('/api/auth_check'))
         ..headers['content-type'] = 'application/json'
@@ -529,7 +558,9 @@ class ServerAnalyzer extends _HttpVisionAnalyzer {
   Future<ServerFeatures?> serverFeatures() async {
     final base = settings.serverBaseUrl;
     final key = (settings.serverApiKey ?? '').trim();
-    if (base.isEmpty || key.isEmpty || !_allowed) return null;
+    if (base.isEmpty || key.isEmpty || !_allowed || _keyElsewhere) {
+      return null;
+    }
     try {
       final req = http.Request('POST', _uri('/api/auth_check'))
         ..headers['content-type'] = 'application/json'
@@ -567,6 +598,7 @@ class ServerAnalyzer extends _HttpVisionAnalyzer {
     if (_refused) return kServerNeedsHttpsMessage;
     final key = apiKey.trim();
     if (key.isEmpty) return 'Enter your server upload key.';
+    if (_keyElsewhere) return kServerKeyOtherHostMessage;
     final Uri url;
     try {
       url = _uri('/api/auth_check');

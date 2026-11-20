@@ -1723,6 +1723,74 @@ void main() {
   // the https switch on, NOTHING reaches the address on any path: no photo,
   // no meal text, no X-API-Key. Each case counts the requests the client
   // saw. With the switch off the old behaviour holds.
+  // Review of PR 74: every call reads the saved address and key as it is
+  // built, so a new address saved before its key (the address field saves
+  // as the key field is tapped) sent the previous server's key there: the
+  // Restaurant group's free check, an automatic photo, Connect Claude.
+  // The key now goes only to the host it was saved for; each path says so
+  // as user state, and sends nothing.
+  group('an upload key saved for another server address', () {
+    test('nothing is sent on any path, each says why', () async {
+      final s = await serverSettings(url: 'https://a.example', allowed: true);
+      await s.setServerBaseUrl('https://b.example');
+      final seen = <http.BaseRequest>[];
+      var decodes = 0;
+      final a = ServerAnalyzer(s,
+          normalizer: (b) async {
+            decodes++;
+            return b;
+          },
+          client: MockClient((req) async {
+            seen.add(req);
+            return http.Response(
+                jsonEncode({'ok': true, 'url': 'https://claude.ai/oauth/x'}),
+                200);
+          }));
+      final photo = await a.analyzePhoto(jpeg());
+      expect(photo.error, kServerKeyOtherHostMessage);
+      expect(photo.retryable, isTrue, reason: 'kept for the right key');
+      expect(classifyAnalysisError(photo.error), AnalysisErrorKind.noServerKey);
+      expect(decodes, 0, reason: 'checked before the decode');
+      expect((await a.textIntentOutcome('lunch 500 kcal')).error,
+          kServerKeyOtherHostMessage);
+      expect(await a.leftoverIntent(jpeg(), '{}'), isNull);
+      expect(await a.validateKey('upload-key'), kServerKeyOtherHostMessage);
+      expect(await a.serverLoginState(), isNull);
+      expect(await a.serverFeatures(), isNull);
+      final started = await a.startClaudeAuth();
+      expect((started.url, started.error), (null, null));
+      expect(await a.completeClaudeAuth('code#state'), isNotNull);
+      await expectLater(
+          a.client.post(Uri.parse('https://b.example/api/new_endpoint'),
+              headers: {'X-API-Key': 'upload-key'}),
+          throwsA(isA<http.ClientException>()),
+          reason: 'a method added later is refused at the client');
+      expect(seen, isEmpty, reason: 'the key went nowhere');
+
+      // This server's own key: the free check goes, with it, to b only.
+      await s.setServerApiKey('key-b');
+      expect(await a.serverFeatures(), isNotNull);
+      expect(seen.single.url.host, 'b.example');
+      expect(seen.single.headers['X-API-Key'], 'key-b');
+    });
+
+    test('the same server at a new address: the saved key, bound to it, '
+        'goes there', () async {
+      final s = await serverSettings(url: 'https://a.example', allowed: true);
+      await s.setServerBaseUrl('https://203.0.113.5');
+      final seen = <http.BaseRequest>[];
+      final a = ServerAnalyzer(s, client: MockClient((req) async {
+        seen.add(req);
+        return http.Response(jsonEncode({'ok': true}), 200);
+      }));
+      expect(await a.serverFeatures(), isNull);
+      await s.bindServerKeyToAddress();
+      expect(await a.serverFeatures(), isNotNull);
+      expect(seen.single.url.host, '203.0.113.5');
+      expect(seen.single.headers['X-API-Key'], 'upload-key');
+    });
+  });
+
   group('a plain http:// server address', () {
     // Each case sets the switch itself, so flipping kRequireHttpsServer
     // changes no result here (server_transport_test pins the value).

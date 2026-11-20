@@ -65,6 +65,12 @@ void main() {
     expect(settings.serverBackend, 'claude');
     expect(settings.serverBaseUrl, 'https://10.0.0.7');
     expect(settings.apiKey, key);
+    // Address and key in one change (review of PR 74): written one after
+    // the other, a frame between them saw the link's address with the
+    // previous server's key.
+    expect(settings.serverSetups, [('claude', 'https://10.0.0.7', key)]);
+    expect(settings.updateCalls, 0);
+    expect(settings.aiConsentWrites, [('server:claude', true)]);
     await links.close();
   });
 

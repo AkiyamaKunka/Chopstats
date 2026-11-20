@@ -4,7 +4,7 @@
 // unrecognised falls back to the raw line rather than a wrong guess.
 import 'package:calorie_tracker/core/outcome_kind.dart';
 import 'package:calorie_tracker/core/server_transport.dart'
-    show kServerNeedsHttpsMessage;
+    show kServerKeyOtherHostMessage, kServerNeedsHttpsMessage;
 import 'package:calorie_tracker/l10n/app_localizations.dart';
 import 'package:calorie_tracker/l10n/app_localizations_en.dart';
 import 'package:calorie_tracker/l10n/app_localizations_zh.dart';
@@ -393,6 +393,50 @@ void main() {
       expect(unset.errorKind, AnalysisErrorKind.noServerKey);
       expect(outcomeSnackbar(en, unset),
           en.outcomeShareRetryMsg(en.reasonNoServerKey));
+    });
+
+    // Review of PR 74: the upload key goes only to the host it was saved
+    // for. A photo refused for that is user state with its own line, in
+    // both languages, and a share says to fix it, then share again.
+    test('a key saved for another address: its own line, kept, and a '
+        'share says to fix it first', () {
+      PhotoOutcome failed({bool shared = false, bool picked = false}) =>
+          PhotoOutcome(PhotoOutcomeKind.failed, kServerKeyOtherHostMessage,
+              retryable: true,
+              errorKind: classifyAnalysisError(kServerKeyOtherHostMessage),
+              detail: kServerKeyOtherHostMessage,
+              shared: shared,
+              picked: picked);
+      final o = failed();
+      expect(o.errorKind, AnalysisErrorKind.noServerKey);
+      expect(outcomeBody(en, o),
+          'Your server upload key was saved for another server address, and '
+          'Chopstats sends it only there. In AI Provider › Your own server, '
+          "paste this server's key or use the saved one for it.");
+      expect(outcomeBody(zh, o), zh.errServerKeyOtherHost);
+      expect(outcomeBody(en, o, deliberate: true), en.errServerKeyOtherHost,
+          reason: 'no "retried later": it waits for the key');
+      expect(retryReason(zh, o), zh.reasonServerKeyOtherHost);
+      expect(outcomeSnackbar(en, failed(shared: true)),
+          'The shared photo was not analyzed. ${en.errServerKeyOtherHost} '
+          'Then share it again.');
+      expect(outcomeSnackbar(zh, failed(shared: true)),
+          '分享的照片没有分析。${zh.errServerKeyOtherHost}改好后请重新分享。');
+      expect(outcomeSnackbar(zh, failed(picked: true)),
+          zh.outcomePickRetryMsg(zh.reasonServerKeyOtherHost));
+      for (final s in [
+        zh.errServerKeyOtherHost,
+        zh.reasonServerKeyOtherHost,
+        zh.serverKeyOtherHostField('10.0.0.7'),
+        zh.serverKeyUseHere('10.0.0.55'),
+        zh.autoScanServerKeyOtherHost,
+        zh.diagServerKeyOtherHost,
+        zh.diagFixServerKeyOtherHost,
+      ]) {
+        expect(RegExp('[A-Za-z]{4,}').hasMatch(s.replaceAll('https', '')),
+            isFalse,
+            reason: 'no English in zh: $s');
+      }
     });
 
     test('a PICKED photo whose add flow was closed asks for a re-pick, not '

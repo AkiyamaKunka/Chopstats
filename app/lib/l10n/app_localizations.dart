@@ -3582,7 +3582,7 @@ abstract class AppLocalizations {
   /// **'This photo was not analyzed ({reason}) — pick it again later.'**
   String outcomePickRetryMsg(String reason);
 
-  /// Snackbar for a photo shared into the app that was not sent because the saved server address cannot be used: it is not https:// (errServerNeedsHttps) or not a valid web address (errBadServerAddress). {reason} is that full line, which ends by saying what to change in Settings. Sharing again fails the same way until the address is changed, so unlike outcomeShareRetryMsg it never says 'later'; the shared copy is gone, so the photo has to be shared again.
+  /// Snackbar for a photo shared into the app that was not sent because the saved server address cannot be used: it is not https:// (errServerNeedsHttps), not a valid web address (errBadServerAddress), or the upload key was saved for another server address (errServerKeyOtherHost). {reason} is that full line, which ends by saying what to change in Settings. Sharing again fails the same way until that is changed, so unlike outcomeShareRetryMsg it never says 'later'; the shared copy is gone, so the photo has to be shared again.
   ///
   /// In en, this message translates to:
   /// **'The shared photo was not analyzed. {reason} Then share it again.'**
@@ -5830,6 +5830,48 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Photo analysis failed. {reason}'**
   String outcomeFailedKeptMsgPlay(String reason);
+
+  /// A photo, a typed meal or a leftover was not analyzed because the server upload key was saved for another server address than the one now saved: the key is only ever sent to the server it was saved for, so nothing was sent. The photo is kept. Says where to fix it.
+  ///
+  /// In en, this message translates to:
+  /// **'Your server upload key was saved for another server address, and Chopstats sends it only there. In AI Provider › Your own server, paste this server\'s key or use the saved one for it.'**
+  String get errServerKeyOtherHost;
+
+  /// Short reason inside parentheses, like reasonNoServerKey: the server upload key was saved for another server address, so nothing was sent.
+  ///
+  /// In en, this message translates to:
+  /// **'the upload key was saved for another server address'**
+  String get reasonServerKeyOtherHost;
+
+  /// Line under the Server upload key field when the saved key was saved for another server address than the one above. {host} is the host it was saved for (e.g. 203.0.113.5 or my.server.example). Nothing is sent with the key to the address above until the user pastes that server's key or taps serverKeyUseHere.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved for {host}: not sent to the address above.'**
+  String serverKeyOtherHostField(String host);
+
+  /// Row shown with serverKeyOtherHostField under the Server upload key field: one tap makes the saved key the key for the address above (the same server at a new IP address, domain or port). {host} is the host of the address above.
+  ///
+  /// In en, this message translates to:
+  /// **'Use this key for {host}'**
+  String serverKeyUseHere(String host);
+
+  /// Settings line, like autoScanNeedsHttps: the automatic scan does not run because the server upload key was saved for another server address, so nothing could be sent.
+  ///
+  /// In en, this message translates to:
+  /// **'Automatic logging is not running: your server upload key was saved for another server address, and Chopstats sends it only there. Fix it in AI Provider › Your own server.'**
+  String get autoScanServerKeyOtherHost;
+
+  /// Test This Provider, configuration stage: the server upload key was saved for another server address, so nothing is sent with it to the address now saved.
+  ///
+  /// In en, this message translates to:
+  /// **'The upload key was saved for another server address, so it is not sent to this one.'**
+  String get diagServerKeyOtherHost;
+
+  /// Test This Provider: the fix line under diagServerKeyOtherHost.
+  ///
+  /// In en, this message translates to:
+  /// **'In Settings › AI Provider › Your own server, paste this server\'s upload key, or use the saved key for it.'**
+  String get diagFixServerKeyOtherHost;
 }
 
 class _AppLocalizationsDelegate
