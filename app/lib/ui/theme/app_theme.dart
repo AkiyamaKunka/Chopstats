@@ -34,23 +34,30 @@ abstract final class AppTheme {
   /// [highContrast]: iOS Increase Contrast (MaterialApp.highContrastTheme).
   /// [debugFontFamily]/[debugFontFallback]: tests measure with the
   /// iPhone's real fonts loaded under a test family name.
+  /// [debugAppleTracking]: tests set Apple's tracking (true) or none
+  /// (false) whatever the platform, which otherwise decides it; the
+  /// iPhone layout harness measures with Apple's tracking under
+  /// flutter_test's default platform, Android. The app never sets it.
   static ThemeData build(
     Brightness brightness, {
     bool cjk = false,
     bool highContrast = false,
     @visibleForTesting String? debugFontFamily,
     @visibleForTesting List<String>? debugFontFallback,
+    @visibleForTesting bool? debugAppleTracking,
   }) {
-    if (debugFontFamily != null || debugFontFallback != null) {
+    if (debugFontFamily != null ||
+        debugFontFallback != null ||
+        debugAppleTracking != null) {
       return _build(brightness, cjk, highContrast, defaultTargetPlatform,
-          debugFontFamily, debugFontFallback);
+          debugFontFamily, debugFontFallback, debugAppleTracking);
     }
     // One instance per combination: the app rebuilds MaterialApp on every
     // settings change, and an unequal ThemeData (the extensions compare by
     // identity) would restart AnimatedTheme's lerp each time.
     final platform = defaultTargetPlatform;
     return _cache[(brightness, cjk, highContrast, platform)] ??=
-        _build(brightness, cjk, highContrast, platform, null, null);
+        _build(brightness, cjk, highContrast, platform, null, null, null);
   }
 
   static final Map<(Brightness, bool, bool, TargetPlatform), ThemeData>
@@ -63,6 +70,7 @@ abstract final class AppTheme {
     TargetPlatform platform,
     String? debugFontFamily,
     List<String>? debugFontFallback,
+    bool? debugAppleTracking,
   ) {
     final c = AppColors.forBrightness(brightness, highContrast: highContrast);
     final scheme = colorSchemeFor(c);
@@ -87,7 +95,7 @@ abstract final class AppTheme {
     // Apple's tracking table is for SF: on Android, Roboto keeps its own
     // spacing, letterSpacing 0 (owner decision 6, 2026-11-20). Sizes and
     // line heights stay Apple's on both.
-    final appleTracking = ios;
+    final appleTracking = debugAppleTracking ?? ios;
     TextStyle role(TextStyle? s, double size, double line, FontWeight w,
             double tracking) =>
         appTextRole(s, size, line, w, tracking,

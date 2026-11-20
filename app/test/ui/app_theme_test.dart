@@ -278,6 +278,41 @@ void main() {
       expect(t.textTheme.titleMedium!.letterSpacing, 0);
     });
 
+    // The iPhone layout harness (support/app_theme_harness.dart) measures
+    // what the iPhone draws, SF with Apple's tracking, whatever platform
+    // the test runs: flutter_test's default is Android, where the app sets
+    // no tracking. The platform's behaviour stays the test's own.
+    test("the iPhone layout harness keeps Apple's tracking on any test "
+        'platform', () {
+      for (final platform in [
+        null, // flutter_test's default: Android
+        TargetPlatform.android,
+        TargetPlatform.iOS,
+      ]) {
+        debugDefaultTargetPlatformOverride = platform;
+        for (final b in Brightness.values) {
+          final t = iphoneAppTheme(b);
+          expect(t.platform, platform ?? TargetPlatform.android);
+          for (final (style, _, _, _, tracking) in latinRoles(t)) {
+            expect(style!.letterSpacing, tracking,
+                reason: '$platform $b ${style.fontSize}');
+          }
+          expect(t.textTheme.headlineMedium!.letterSpacing, 0.40);
+          expect(t.extension<AppNumerals>()!.hero.letterSpacing, 0.40);
+          final zh = iphoneAppTheme(b, cjk: true);
+          for (final s in [
+            zh.textTheme.headlineMedium,
+            zh.textTheme.titleLarge,
+            zh.textTheme.bodyLarge,
+            zh.extension<AppTypography>()!.title2,
+            zh.extension<AppNumerals>()!.hero,
+          ]) {
+            expect(s!.letterSpacing, 0, reason: '$platform $b zh');
+          }
+        }
+      }
+    });
+
     test('Chinese takes no tracking anywhere', () {
       debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
       final t = AppTheme.build(Brightness.light, cjk: true);
