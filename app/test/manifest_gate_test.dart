@@ -1375,12 +1375,12 @@ void main() {
   // any task the launcher's own intent did not start: the test above). At
   // an idle root Android answers Back itself: Android 13 moves a task
   // whose root is a launcher activity (MainActivity is one) to the back,
-  // Android 14 and later one the home screen started, and they finish a
-  // launcher-intent start from anywhere else (Play's Open button). While a
-  // shared photo is pending the shell's guard keeps that Back in Flutter
-  // in every task (test/ui/shared_photos_back_test.dart). The launch mode
-  // stays singleTask (decision 6.4), and nothing else finishes the
-  // activity by hand.
+  // and Android 14 and later move back one the home screen started and
+  // finish a launcher-intent start from anywhere else (Play's Open
+  // button). While a shared photo is pending the shell's guard keeps that
+  // Back in Flutter in every task (test/ui/shared_photos_back_test.dart).
+  // The launch mode stays singleTask (decision 6.4), and nothing else
+  // finishes the activity by hand.
   test('SystemNavigator.pop moves the task to the back, never finishes it',
       () {
     final code = _kotlinCode(_mainActivity());

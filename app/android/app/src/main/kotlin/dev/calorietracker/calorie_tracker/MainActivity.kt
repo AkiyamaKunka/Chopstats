@@ -154,18 +154,19 @@ class MainActivity : FlutterActivity() {
     /// to Android (setFrameworkHandlesBack(false)): Android 13 moves a task
     /// whose root is a launcher activity, as MainActivity is, to the back,
     /// and Android 14 and later a task the home screen started with the
-    /// launcher intent. Every other task keeps the callback on Android 14
-    /// and later (setFrameworkHandlesBack above: a share, the setup link, a
-    /// notification, a plain `am start -n`), so its Back lands here. One
-    /// start is left that Android 14 and later finish on that Back: the
-    /// launcher intent sent from somewhere other than the home screen
-    /// (Play's Open button, `am start -a MAIN -c LAUNCHER`). So while a
-    /// shared photo is pending the shell keeps Back at the root in Flutter
-    /// in every task (SharedPhotosBackGuard, app.dart), and its
-    /// SystemNavigator.pop() lands here on every Android version. A photo
-    /// a finish still cuts off (a swipe from Recents, a Back before share
-    /// intake has the share) is offered again at the next start, since its
-    /// copy is kept until the photo is settled (share_intake.dart).
+    /// launcher intent. Every task the launcher intent did not start keeps
+    /// the callback on Android 14 and later (setFrameworkHandlesBack above:
+    /// a share, the setup link, a notification, a plain `am start -n`), so
+    /// its Back lands here. One start is left that Android 14 and later
+    /// finish on a Back at an idle root: the launcher intent sent from
+    /// somewhere other than the home screen (Play's Open button,
+    /// `am start -a MAIN -c LAUNCHER`). So while a shared photo is pending
+    /// the shell keeps Back at the root in Flutter in every task
+    /// (SharedPhotosBackGuard, app.dart), and its SystemNavigator.pop()
+    /// lands here on every Android version. A photo a finish still cuts off
+    /// (a swipe from Recents, a Back before share intake has the share) is
+    /// offered again at the next start, since its copy is kept until the
+    /// photo is settled (share_intake.dart).
     override fun popSystemNavigator(): Boolean {
         moveTaskToBack(true)
         return true

@@ -669,10 +669,10 @@ class IntakePhoto {
   /// in flight), and a save as soon as the meal row is; the consent gate
   /// for a photo it drops unsent — and the share intake deletes the copy
   /// then. Until then the copy stays, so a photo whose engine stopped
-  /// mid-analysis (Back finished the activity, Android stopped the
-  /// process) is offered again at the next start rather than lost. A
-  /// second call does nothing. Null: nothing waits (iOS deletes its copy
-  /// as it reads it; picked and watched photos have none).
+  /// mid-analysis (a swipe from Recents, Android stopped the process) is
+  /// offered again at the next start rather than lost. A second call does
+  /// nothing. Null: nothing waits (iOS deletes its copy as it reads it;
+  /// picked and watched photos have none).
   final void Function()? onSettled;
   const IntakePhoto(this.bytes, this.assetId, this.fileName,
       {this.capturedAt,

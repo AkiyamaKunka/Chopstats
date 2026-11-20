@@ -209,8 +209,9 @@ void main() {
     final photo = copy(1);
     final hash = md5Of(photo);
     final settings = FakeSettings();
-    // Run 1: analyzing when Back finished the activity. Its reply never
-    // reaches a living engine.
+    // Run 1: analyzing when its engine died (a swipe from Recents, a
+    // stopped process; before the Back guard, a Back that finished the
+    // activity). Its reply never reaches a living engine.
     final first = analyzer(hold: Completer<void>());
     final run1 = await _Run.start(db, folder,
         settings: settings, analyzer: first.analyzer, launch: [photo.path]);

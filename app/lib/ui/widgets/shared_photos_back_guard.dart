@@ -20,16 +20,17 @@ import 'package:flutter/widgets.dart';
 /// (setFrameworkHandlesBack(false)), which answers it itself: Android 13
 /// moves a task whose root is a launcher activity, as MainActivity is, to
 /// the back, and Android 14 and later a task the home screen started with
-/// the launcher intent. Any other task keeps Flutter's callback on
-/// Android 14 and later (MainActivity.setFrameworkHandlesBack: a share,
-/// the setup link, a notification), so its Back reaches popSystemNavigator
-/// anyway. One start is left that Android 14 and later FINISH on that
-/// Back: the launcher intent sent from somewhere other than the home
-/// screen (Play's Open button), which looks like the launcher's own to the
-/// app. A photo shared into such a task (singleTask: the share reaches the
-/// running activity) would die with its engine in the middle of the
-/// analysis, and come back only at the next start, sent to the AI a
-/// second time, or never when that start was a day later.
+/// the launcher intent. Every task the launcher intent did not start keeps
+/// Flutter's callback on Android 14 and later
+/// (MainActivity.setFrameworkHandlesBack: a share, the setup link, a
+/// notification), so its Back reaches popSystemNavigator anyway. One start
+/// is left that Android 14 and later FINISH on a Back at an idle root: the
+/// launcher intent sent from somewhere other than the home screen (Play's
+/// Open button), which looks like the launcher's own to the app. A photo
+/// shared into such a task (singleTask: the share reaches the running
+/// activity) would die with its engine in the middle of the analysis, and
+/// come back only at the next start, sent to the AI a second time, or never
+/// when that start was a day later.
 ///
 /// So while [pending] is true the root route does not pop (PopScope with
 /// canPop false): Flutter keeps the Back (setFrameworkHandlesBack(true))
