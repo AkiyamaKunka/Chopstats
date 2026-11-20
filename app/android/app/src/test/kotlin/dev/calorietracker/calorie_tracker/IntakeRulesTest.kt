@@ -104,6 +104,29 @@ class IntakeRulesTest {
         }
     }
 
+    @Test
+    fun theLauncherTaskDecisionOutlivesARelaunch() {
+        // A relaunch in the same process (Bold text, theme colours) gets the
+        // intent the last instance set: the replay rewrite's has no action.
+        // The saved state keeps the first create's answer.
+        val emptied = IntakeRules.isLauncherIntent(null, launcher, false, null)
+        assertFalse(emptied)
+        assertTrue(IntakeRules.launcherTask(saved = true, fromIntent = emptied))
+        assertFalse(
+            IntakeRules.keepsBackCallbackAtRoot(
+                34,
+                IntakeRules.launcherTask(saved = true, fromIntent = emptied),
+            ),
+        )
+        // A task a share created stays one, whatever intent it has now.
+        val launcherNow = IntakeRules.isLauncherIntent(Intent.ACTION_MAIN, launcher, false, null)
+        assertTrue(launcherNow)
+        assertFalse(IntakeRules.launcherTask(saved = false, fromIntent = launcherNow))
+        // Nothing saved (the first create): the intent decides.
+        assertTrue(IntakeRules.launcherTask(saved = null, fromIntent = true))
+        assertFalse(IntakeRules.launcherTask(saved = null, fromIntent = false))
+    }
+
     // --- A share that comes before share intake listens waits for it
     // (ShareHold): the plugin tells only a listener, and Android delivers
     // the share a stopped app was started again for before Dart runs.

@@ -1127,16 +1127,24 @@ void main() {
   // that was still analyzing its photo (review of #72). Such a task keeps
   // Flutter's callback, so Back at its root goes through Flutter's
   // SystemNavigator.pop to popSystemNavigator, as on Android 12 and lower.
-  // Decided once, from the intent that created the activity (Android's
-  // own check), before the replay rewrite empties it.
+  // Decided once per activity: from the intent that created it (Android's
+  // own check) at its first create, before the replay rewrite empties it,
+  // then from the saved state. Android re-sends that intent only after
+  // process death; a relaunch in the same process (theme colours, Bold
+  // text, grammatical gender) hands the new instance whatever intent the
+  // last one set (the replay rewrite's, a notification tap's), which read
+  // a launcher task as any other (review of #72).
   test('Back at the root of a task the launcher did not start stays with '
       'Flutter on Android 14 and later', () {
     final code = _kotlinCode(_mainActivity());
     final create = _kotlinFunction(code, 'override fun onCreate(');
-    const decide = 'backCallbackAtRoot = IntakeRules.keepsBackCallbackAtRoot( '
-        'Build.VERSION.SDK_INT, launcherTask = intent?.let { '
+    const decide = 'launcherTask = IntakeRules.launcherTask( saved = '
+        'savedInstanceState?.takeIf { it.containsKey(STATE_LAUNCHER_TASK) } '
+        '?.getBoolean(STATE_LAUNCHER_TASK), fromIntent = intent?.let { '
         'IntakeRules.isLauncherIntent(it.action, it.categories, '
-        'it.data != null, it.type) } ?: false, )';
+        'it.data != null, it.type) } ?: false, ) backCallbackAtRoot = '
+        'IntakeRules.keepsBackCallbackAtRoot(Build.VERSION.SDK_INT, '
+        'launcherTask)';
     expect(create, contains(decide));
     expect(create.indexOf(decide), lessThan(create.indexOf('val replay =')),
         reason: 'read before the replay rewrite empties the intent');
@@ -1145,10 +1153,19 @@ void main() {
         contains('super.onCreate(savedInstanceState) if (backCallbackAtRoot) '
             'setFrameworkHandlesBack(true)'),
         reason: 'registered at once: the root route never asks for it');
+    expect(code, contains('private var launcherTask = false'));
     expect(code, contains('private var backCallbackAtRoot = false'));
-    expect(RegExp(r'backCallbackAtRoot = (?!=)').allMatches(code),
-        hasLength(2),
-        reason: 'declared false, then decided once, in onCreate');
+    for (final field in ['launcherTask', 'backCallbackAtRoot']) {
+      expect(RegExp('\\b$field = (?!=)').allMatches(code), hasLength(2),
+          reason: '$field: declared false, then set once per create, in '
+              'onCreate');
+    }
+    // The decision outlives a relaunch: the activity's saved state keeps
+    // it, under its own key.
+    expect(_kotlinFunction(code, 'override fun onSaveInstanceState('),
+        contains(' outState.putBoolean(STATE_LAUNCHER_TASK, launcherTask) '));
+    expect(code,
+        contains('const val STATE_LAUNCHER_TASK = "chopstats.back.launcherTask"'));
     expect(_kotlinFunction(code, 'override fun setFrameworkHandlesBack('),
         '{ super.setFrameworkHandlesBack(frameworkHandlesBack || '
         'backCallbackAtRoot) }');
@@ -1167,7 +1184,12 @@ void main() {
         contains('fun keepsBackCallbackAtRoot(sdk: Int, launcherTask: '
             'Boolean): Boolean = sdk >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE '
             '&& !launcherTask'));
-    _expectJvmTests(['isLauncherIntent', 'keepsBackCallbackAtRoot']);
+    expect(
+        rules,
+        contains('fun launcherTask(saved: Boolean?, fromIntent: Boolean): '
+            'Boolean = saved ?: fromIntent'));
+    _expectJvmTests(['isLauncherIntent', 'keepsBackCallbackAtRoot',
+        'IntakeRules.launcherTask(']);
     expect(_uncommented(_manifest()),
         contains('android:enableOnBackInvokedCallback="true"'));
 
@@ -1592,10 +1614,12 @@ void main() {
         reason: 'plain "w" may leave stale bytes; SAVE_MODES only');
     expect(_kotlinFunction(code, 'private fun discardDocument('),
         contains('DocumentsContract.deleteDocument(contentResolver, uri)'));
-    // The pending source outlives a recreated activity.
+    // The pending source outlives a recreated activity (with the launcher
+    // task decision, pinned with Back at the root).
     expect(_kotlinFunction(code, 'override fun onSaveInstanceState('),
         '{ super.onSaveInstanceState(outState) pendingSaveSource?.let { '
-        'outState.putString(STATE_SAVE_SOURCE, it.path) } }');
+        'outState.putString(STATE_SAVE_SOURCE, it.path) } '
+        'outState.putBoolean(STATE_LAUNCHER_TASK, launcherTask) }');
     final create = _kotlinFunction(code, 'override fun onCreate(');
     expect(
         create,

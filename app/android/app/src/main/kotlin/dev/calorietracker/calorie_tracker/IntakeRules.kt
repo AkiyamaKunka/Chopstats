@@ -27,6 +27,17 @@ internal object IntakeRules {
             categories != null && categories.size == 1 && Intent.CATEGORY_LAUNCHER in categories &&
             !hasData && type == null
 
+    /// Whether the activity's task is a launcher task, decided once per
+    /// activity record: what its last instance saved ([saved], null when
+    /// nothing was), else what the intent it has now says ([fromIntent],
+    /// isLauncherIntent). Android checks the intent the record was created
+    /// with, which never changes. An activity recreated after its process
+    /// died gets that intent again, but one relaunched in the same process
+    /// (theme colours, Bold text, grammatical gender) gets whatever intent
+    /// its last instance set: the replay rewrite's, with no action, or a
+    /// notification tap's.
+    fun launcherTask(saved: Boolean?, fromIntent: Boolean): Boolean = saved ?: fromIntent
+
     /// Whether Flutter's back callback stays registered at the root route
     /// on Android [sdk], for a task the launcher's own intent created
     /// ([launcherTask]) or any other (MainActivity.setFrameworkHandlesBack).
