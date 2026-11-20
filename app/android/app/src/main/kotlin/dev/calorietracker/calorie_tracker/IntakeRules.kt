@@ -88,6 +88,23 @@ internal object IntakeRules {
         }
     }
 
+    /// Removes everything under [root], whatever its age, never [root]
+    /// itself: what picks of an earlier activity left. MainActivity.onCreate
+    /// runs it before a pick of its own can open, and a pick's call dies
+    /// with the engine that made it (onPhotosPicked copies nothing without
+    /// an open call), so a copy still there has no reader: one an app
+    /// stopped mid-pick left, partial or whole, used to stay until a pick
+    /// at least a day later (tidyPickFolders), or for good.
+    fun clearPickFolders(root: File) {
+        root.listFiles()?.forEach { entry ->
+            try {
+                entry.deleteRecursively()
+            } catch (e: Exception) {
+                // The next start tries again.
+            }
+        }
+    }
+
     /// What a create-document result leads to: CANCEL when nothing was
     /// created, COPY the checked source into it, DISCARD the new (empty)
     /// document when there is no source to copy (the call that asked for

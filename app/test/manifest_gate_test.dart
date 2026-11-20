@@ -1059,6 +1059,9 @@ void main() {
   // with no registerForActivityResult, so MainActivity runs AndroidX's
   // contracts by hand: createIntent, startActivityForResult, parseResult.
   // Copies go to cacheDir/picked_photos/<uuid>/<name>, under the share cap.
+  // A pick's call dies with its engine, so what earlier picks left there
+  // when the activity starts has no reader: cleared before any pick of its
+  // own can open (review 2026-11-19, R6).
   // One call at a time, answered exactly once (SingleCall): a reply sent
   // twice crashes, and a call never answered leaves every later pick busy.
   // The ModuleDependencies entry asks Play services for the backported
@@ -1131,6 +1134,11 @@ void main() {
             'IntakeRules.tidyPickFolders(root, System.currentTimeMillis())'));
     expect(picked, isNot(contains('deleteRecursively')),
         reason: 'only tidyPickFolders clears earlier picks');
+    expect(
+        _kotlinFunction(code, 'override fun onCreate('),
+        startsWith('{ IntakeRules.clearPickFolders(File(cacheDir, '
+            'PICKED_PHOTO_FOLDER)) '),
+        reason: 'what picks of an earlier activity left goes at its start');
     expect(picked, contains('copyAtMost(uri, out, MAX_SHARE_BYTES)'));
     expect(picked, contains('val dir = File(root, UUID.randomUUID().toString())'));
     expect(picked, contains('dateTaken(uri)?.let { item["dateTakenMs"] = it }'));
@@ -1142,7 +1150,8 @@ void main() {
         reason: 'answers only through SingleCall, which answers once');
     expect('photoPicks.answer('.allMatches(picked), hasLength(2));
     expect(code, contains('MediaStore.MediaColumns.DATE_TAKEN'));
-    _expectJvmTests(['pickMax', 'firstPicks', 'tidyPickFolders', 'SingleCall']);
+    _expectJvmTests(['pickMax', 'firstPicks', 'tidyPickFolders',
+        'clearPickFolders', 'SingleCall']);
 
     final gradle = File('${_appRoot().path}/android/app/build.gradle.kts')
         .readAsStringSync();

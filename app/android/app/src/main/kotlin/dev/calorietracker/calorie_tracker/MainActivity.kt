@@ -51,6 +51,10 @@ class MainActivity : FlutterActivity() {
     private val heldShares = ShareHold<Intent>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Picked-photo copies an earlier activity left (its engine died
+        // before Dart read them) have no reader: no pick of this one is
+        // open yet.
+        IntakeRules.clearPickFolders(File(cacheDir, PICKED_PHOTO_FOLDER))
         // receive_sharing_intent reads the launch intent while
         // super.onCreate attaches it: the copies must be there already.
         // A share is delivered once. An activity Android recreates (saved
@@ -421,7 +425,8 @@ class MainActivity : FlutterActivity() {
     /// cacheDir/PICKED_PHOTO_FOLDER/<uuid>/<name>, under the share cap,
     /// with its capture time when the provider gives one. First it tidies
     /// what earlier picks left (IntakeRules.tidyPickFolders: empty or
-    /// day-old folders only). Off the UI thread; the call stays open
+    /// day-old folders only; onCreate clears what an earlier activity's
+    /// picks left). Off the UI thread; the call stays open
     /// (busy) until the answer. The grants last only while the app runs,
     /// hence the copies. With no open call (Android recreated the activity
     /// while the picker was up, and the call died with its engine) nothing

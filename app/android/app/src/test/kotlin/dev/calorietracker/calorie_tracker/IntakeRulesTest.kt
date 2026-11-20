@@ -200,6 +200,36 @@ class IntakeRulesTest {
         assertTrue(File(fresh, "IMG_1.jpg").isFile)
     }
 
+    @Test
+    fun startingClearsEveryCopyEarlierPicksLeftButNotTheFolder() {
+        val root = tmp.newFolder("picked_photos")
+        val now = System.currentTimeMillis()
+        // Seconds old: a copy whose engine died before Dart read it, which
+        // a later pick's tidy keeps for a day.
+        val young = File(root, "young").apply { mkdirs() }
+        File(young, "IMG_1.jpg").writeText("x")
+        IntakeRules.tidyPickFolders(root, now)
+        assertTrue(File(young, "IMG_1.jpg").isFile)
+        // A copy cut short, a stray file, an empty folder, a copy dated
+        // ahead of the clock: none has a reader once the activity starts.
+        File(root, "partial").mkdirs()
+        File(root, "partial/IMG_2.jpg").writeText("")
+        File(root, "stray.jpg").writeText("x")
+        File(root, "empty").mkdirs()
+        File(root, "ahead").mkdirs()
+        File(root, "ahead/IMG_3.jpg").apply {
+            writeText("x")
+            setLastModified(now + IntakeRules.DAY_MS)
+        }
+        IntakeRules.clearPickFolders(root)
+        assertTrue(root.isDirectory)
+        assertEquals(emptyList<String>(), root.list()!!.toList())
+        // Nothing left, or no folder at all, is no error.
+        IntakeRules.clearPickFolders(root)
+        IntakeRules.clearPickFolders(File(root, "missing"))
+        assertTrue(root.isDirectory)
+    }
+
     // --- A create-document result.
 
     @Test
