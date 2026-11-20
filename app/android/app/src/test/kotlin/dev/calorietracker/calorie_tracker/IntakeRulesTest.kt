@@ -264,6 +264,30 @@ class IntakeRulesTest {
     }
 
     @Test
+    fun aSaveCopyHoldsItsSourceOpenAndLeavesItsNameToLaterFiles() {
+        val (_, cache, db) = layout()
+        val export = File(cache, "chopstats-2026-11-19.json").apply { writeText("first export") }
+        val input = IntakeRules.openSaveSource(cache, export.path)!!
+        // Out of the cache as soon as the copy has it open, whatever
+        // happens to the copy, its call or the app afterwards...
+        assertFalse(export.exists())
+        // ...and the export the restarted app writes under the same name
+        // (one per day) while a slow copy still runs is not this save's:
+        // the copy still reads all of its own, and nothing deletes the new
+        // one when it ends.
+        export.writeText("second export")
+        assertEquals("first export", input.use { String(it.readBytes()) })
+        assertEquals("second export", export.readText())
+        // Never a file outside the cache, and nothing to open is no error.
+        assertNull(IntakeRules.openSaveSource(cache, db.path))
+        assertNull(IntakeRules.openSaveSource(cache, "${cache.path}/../databases/calorie_tracker.db"))
+        assertTrue(db.isFile)
+        assertNull(IntakeRules.openSaveSource(cache, null))
+        assertNull(IntakeRules.openSaveSource(cache, File(cache, "missing.json").path))
+        assertEquals("second export", export.readText())
+    }
+
+    @Test
     fun aSaveOpensOnlyTruncatingModes() {
         assertEquals(listOf("wt", "rwt"), IntakeRules.SAVE_MODES)
         val tried = mutableListOf<String>()

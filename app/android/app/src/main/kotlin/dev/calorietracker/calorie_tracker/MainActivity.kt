@@ -549,13 +549,15 @@ class MainActivity : FlutterActivity() {
     /// COPY: the checked source (checked again) goes into the new document
     /// off the UI thread, opened only in a truncating mode
     /// (IntakeRules.SAVE_MODES); a failed copy removes the document rather
-    /// than leave an empty or partial file. DISCARD: the document exists
-    /// but its source is gone, so it is removed. The open call, if any, is
+    /// than leave an empty or partial file. The copy deletes its source as
+    /// it opens it (IntakeRules.openSaveSource), so no export stays in the
+    /// cache whatever happens next. DISCARD: the document exists but its
+    /// source is gone, so it is removed. The open call, if any, is
     /// answered; with none (Android recreated the activity while the screen
     /// was up) the copy still finishes, from the source saved in the
-    /// activity's state, since the user did choose a place for it, and
-    /// the source is deleted here once copied or cancelled: its caller,
-    /// which would have, is gone (IntakeRules.dropSaveSource).
+    /// activity's state, since the user did choose a place for it, and a
+    /// cancel deletes the source here: its caller, which would have, is
+    /// gone (IntakeRules.dropSaveSource).
     private fun onSaveTargetPicked(resultCode: Int, data: Intent?) {
         val call = if (saves.isOpen) saveCall else null
         val uri = data?.data
@@ -574,14 +576,15 @@ class MainActivity : FlutterActivity() {
         }
         Thread {
             val ok = try {
-                val file = cachedFile(source.path) ?: throw IllegalStateException()
-                val out = IntakeRules.firstStream(IntakeRules.SAVE_MODES) { contentResolver.openOutputStream(uri, it) }
-                out?.use { o -> file.inputStream().use { it.copyTo(o, 64 * 1024) } } != null
+                val input = IntakeRules.openSaveSource(cacheDir, source.path) ?: throw IllegalStateException()
+                input.use { inp ->
+                    val out = IntakeRules.firstStream(IntakeRules.SAVE_MODES) { contentResolver.openOutputStream(uri, it) }
+                    out?.use { o -> inp.copyTo(o, 64 * 1024) } != null
+                }
             } catch (e: Exception) {
                 false
             }
             if (!ok) discardDocument(uri)
-            IntakeRules.dropSaveSource(cacheDir, source.path, call != null)
             runOnUiThread { call?.let { saves.answer(it, if (ok) saveAnswer("ok") else saveAnswer("failed")) } }
         }.start()
     }

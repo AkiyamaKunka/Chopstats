@@ -1192,8 +1192,11 @@ void main() {
   // copy removes it. If Android recreates the activity while the screen is
   // up, the source survives in the saved state, so the user's pick still
   // gets the file (or, with no source, the empty document is removed).
-  // With no caller left to delete it then, the native side deletes the
-  // source once the step is done (review 2026-11-19, R14).
+  // The copy takes its source out of the cache as soon as it has it open
+  // (the open file still reads in full): no export is left behind
+  // whatever happens to the call, and one written later under the same
+  // name is never deleted by an earlier copy. A cancel with no caller
+  // left to delete the source deletes it there (review 2026-11-19, R14).
   test('MainActivity serves saveFile, from the cache only', () {
     final code = _kotlinCode(_mainActivity());
     expect(
@@ -1237,14 +1240,17 @@ void main() {
             'if (step == IntakeRules.SaveStep.DISCARD || source == null) { '
             'discardDocument(uri) call?.let { saves.answer(it, '
             'saveAnswer("failed")) } return } Thread { val ok = try { val '
-            'file = cachedFile(source.path) ?: throw IllegalStateException() '
-            'val out = IntakeRules.firstStream(IntakeRules.SAVE_MODES) { '
+            'input = IntakeRules.openSaveSource(cacheDir, source.path) ?: '
+            'throw IllegalStateException() input.use { inp -> val out = '
+            'IntakeRules.firstStream(IntakeRules.SAVE_MODES) { '
             'contentResolver.openOutputStream(uri, it) } out?.use { o -> '
-            'file.inputStream().use { it.copyTo(o, 64 * 1024) } } != null } '
-            'catch (e: Exception) { false } if (!ok) discardDocument(uri) '
-            'IntakeRules.dropSaveSource(cacheDir, source.path, call != null) '
-            'runOnUiThread { call?.let { saves.answer(it, if (ok) '
-            'saveAnswer("ok") else saveAnswer("failed")) } } }.start() }'));
+            'inp.copyTo(o, 64 * 1024) } != null } } catch (e: Exception) { '
+            'false } if (!ok) discardDocument(uri) runOnUiThread { '
+            'call?.let { saves.answer(it, if (ok) saveAnswer("ok") else '
+            'saveAnswer("failed")) } } }.start() }'));
+    expect('dropSaveSource('.allMatches(saved).length, 1,
+        reason: 'only the cancel deletes by name: a copy has deleted its '
+            'source on opening it');
     expect('.success('.allMatches(saved), isEmpty,
         reason: 'answers only through SingleCall, which answers once');
     expect(code, isNot(contains('openOutputStream(uri, "w")')),
@@ -1262,7 +1268,7 @@ void main() {
             'cachedFile(savedInstanceState?.getString(STATE_SAVE_SOURCE)) }'),
         reason: 'restored through the same cache check');
     _expectJvmTests(['regularFileIn', 'saveStep', 'dropSaveSource',
-        'SAVE_MODES', 'firstStream', 'SingleCall']);
+        'openSaveSource', 'SAVE_MODES', 'firstStream', 'SingleCall']);
   });
 
   // Settings' notifications-off remedy lands on the app's own

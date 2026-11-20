@@ -2,6 +2,7 @@ package dev.calorietracker.calorie_tracker
 
 import android.content.Intent
 import java.io.File
+import java.io.InputStream
 
 /// MainActivity's decisions, kept free of Android objects so the JVM unit
 /// tests (src/test, `./gradlew :app:testDebugUnitTest`, run by
@@ -117,14 +118,15 @@ internal object IntakeRules {
         else -> SaveStep.DISCARD
     }
 
-    /// Deletes a save's source at [path] once its step is done (copied or
-    /// cancelled) when no call is left to answer ([callOpen] false). An
-    /// open call's Dart caller deletes the export itself once the call
-    /// returns; with none (Android recreated the activity while the
-    /// create-document screen was up, and the caller died with its engine)
-    /// nothing else would, and the export, the whole food log with every
-    /// picture, stayed in the cache until the next export. Only a regular
-    /// file in [cacheDir] (regularFileIn). True when one was deleted.
+    /// Deletes a cancelled save's source at [path] when no call is left to
+    /// answer ([callOpen] false). An open call's Dart caller deletes the
+    /// export itself once the call returns; with none (Android recreated
+    /// the activity while the create-document screen was up, and the
+    /// caller died with its engine) nothing else would, and the export,
+    /// the whole food log with every picture, stayed in the cache until
+    /// the next export. (A copy deletes its source as it opens it:
+    /// openSaveSource.) Only a regular file in [cacheDir] (regularFileIn).
+    /// True when one was deleted.
     fun dropSaveSource(cacheDir: File, path: String?, callOpen: Boolean): Boolean {
         if (callOpen) return false
         val file = regularFileIn(cacheDir, path) ?: return false
@@ -133,6 +135,29 @@ internal object IntakeRules {
         } catch (e: Exception) {
             false
         }
+    }
+
+    /// Opens a save's source at [path] (only a regular file in [cacheDir],
+    /// regularFileIn) for its copy, and deletes it from the cache at once:
+    /// the open stream still reads every byte. So no export is left behind
+    /// whatever happens to the copy, its call or the app meanwhile, and a
+    /// file written later under the same name is never this save's to
+    /// delete: deleting by name once a copy was done could take the export
+    /// the restarted app wrote under that name (one per day) while a slow
+    /// copy still ran. Null when there is nothing to open.
+    fun openSaveSource(cacheDir: File, path: String?): InputStream? {
+        val file = regularFileIn(cacheDir, path) ?: return null
+        val input = try {
+            file.inputStream()
+        } catch (e: Exception) {
+            return null
+        }
+        try {
+            file.delete()
+        } catch (e: Exception) {
+            // Left for the Dart caller, or the next export's sweep.
+        }
+        return input
     }
 
     /// The modes a save opens its new document with, in order. Both
