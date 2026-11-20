@@ -17,6 +17,13 @@
 # release from GitHub (or the other way round) without an uninstall. Its
 # versionCode is pubspec's +N, below every CI build (100 and up), so it also
 # cannot replace a GitHub release APK in place.
+#
+# The app declares android:hasFragileUserData, so Android 10+ offers "Keep
+# app data" when it is uninstalled, unticked. Kept data keeps the old
+# signature with it, and a build with another signature then fails to
+# install ("App not installed as package conflicts with an existing
+# package"): whoever switches must leave that box unticked. The note below
+# says so; the GitHub release notes (release.yml) do too.
 set -euo pipefail
 cd "$(dirname "$0")/.."/app
 export JAVA_HOME="${JAVA_HOME:-/opt/homebrew/opt/openjdk@17}"
@@ -33,3 +40,11 @@ echo "arm64 build ready: $DEST"
 echo "NOTE: arm64 only — correct for every phone since ~2017. Emulators"
 echo "and ancient 32-bit devices need: flutter build apk --release --split-per-abi"
 echo "(app-armeabi-v7a-release.apk; it cannot upgrade in place from this one)."
+if [ ! -f android/key.properties ]; then
+  echo
+  echo "Signed with the DEBUG key (no android/key.properties). Tell whoever gets it:"
+  echo "  Android will not install this APK over a GitHub or Google Play build of"
+  echo "  Chopstats, or those over it. To switch: export your log (Settings › Export"
+  echo "  Data), uninstall the app (if Android offers \"Keep app data\", leave it"
+  echo "  unticked), install the other APK, then import the file."
+fi

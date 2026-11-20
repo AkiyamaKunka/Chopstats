@@ -23,9 +23,10 @@ menu names as "as of this writing".
 flowchart LR
     Tag["git tag v1.6.0<br/>or Run workflow"] --> Plan["plan<br/>build name = x.y.z<br/>build number = 200 + run_number"]
     Plan --> iOS["ios (macos-26)<br/>keychain + 2 profiles<br/>flutter build ipa<br/>xcodebuild -exportArchive destination=upload"]
-    Plan --> And["android (ubuntu)<br/>key.properties<br/>flutter build appbundle + apk<br/>upload-google-play → internal"]
+    Plan --> And["android (ubuntu)<br/>key.properties<br/>flutter build appbundle + apk<br/>signer pinned, artifact kept"]
     iOS --> TF["TestFlight"]
-    And --> Play["Play internal track"]
+    And --> PlayJob["play (ubuntu)<br/>upload-google-play → internal"]
+    PlayJob --> Play["Play internal track"]
     And --> GH["GitHub Release<br/>arm64 APK for friends"]
 ```
 
@@ -699,6 +700,7 @@ for the value instead).
 | Variable (plain text, optional) | Meaning | Default |
 |---|---|---|
 | `ANDROID_KEY_ALIAS` | alias inside the keystore | `upload` |
+| `ANDROID_UPLOAD_CERT_SHA256` | the upload certificate's SHA-256 that every Android build must be signed with; set it only after a deliberate key rotation (§ 6.3) | release.yml's `env`: `d0d95f7f…6b7f9b7c`, the v1.6.0 and android-v1.7.0 signer |
 | `ASC_APP_APPLE_ID` | the app's numeric Apple ID (§ 1.4) | unset; only the altool fallback reads it |
 
 What the workflow does with them: the `.p12` goes into a throw-away
@@ -1057,6 +1059,13 @@ step. Revisit if the app is ever published with a developer-run service.
   Release workflow checks the APK's `versionCode`, ABI and signer.
 - A `vX.Y.Z+N` tag must carry an `N` above `BUILD_NUMBER_OFFSET`; the plan
   job refuses pubspec's own small `+N`. Tag plain `vX.Y.Z` normally.
+- On a tag push that `N` must also be at least `BUILD_NUMBER_OFFSET` + the
+  run's number: every earlier run numbered its build below that (Android
+  1.7.0 is 200 + run 7), so a lower `N` may already be on App Store
+  Connect, on Play or in a GitHub APK, and a GitHub APK with it may not
+  install over one already out. The plan job refuses it and names the
+  lowest `N` it takes. Run workflow on a `+N` tag that already ran (to
+  re-release that tag) gets a later run number, so there it only warns.
 
 ---
 
@@ -1230,7 +1239,10 @@ by uninstalling.
    `v1.6.0` › the Android job › *Verify the bundle is signed with the upload
    key…*). keytool prints upper case with colons, the run lower case
    without; the hex digits must be the same. If they differ, stop: that
-   keystore is not the upload key.
+   keystore is not the upload key. The Release workflow pins that
+   certificate too (`ANDROID_UPLOAD_CERT_SHA256` in release.yml's `env`,
+   `d0d95f7f…6b7f9b7c`): its Android job stops when the bundle or the APK
+   is signed by any other key, not only by the debug key.
 2. Run the exact `java -jar pepk.jar …` command the page shows, on the
    Mac, against that keystore with alias `upload`; it writes an encrypted
    zip. Upload that zip. The keystore itself never leaves the Mac.
@@ -1254,11 +1266,14 @@ by uninstalling.
 
    A separate upload key later would also need release.yml's "APK signer
    == bundle signer" check to compare the APK with the app-signing
-   certificate instead.
+   certificate instead. A deliberate key rotation sets the repository
+   variable `ANDROID_UPLOAD_CERT_SHA256` to the new certificate's SHA-256
+   (§ 3); the env default stays as the record of the old one.
 
-**Signing secrets in the protected environment (owner action).** Both
-release.yml jobs already run in the environment `release`, which today has
-no protection rules, so **nothing in the workflow changes**:
+**Signing secrets in the protected environment (owner action).** The
+release.yml jobs that read secrets (ios, android and play) already run in
+the environment `release`, which today has no protection rules, so
+**nothing in the workflow changes**:
 
 1. Repository › Settings › Environments › `release`: *Required reviewers*
    = you; *Deployment branches and tags* = selected: `main`, `release/*`,
@@ -1271,7 +1286,7 @@ no protection rules, so **nothing in the workflow changes**:
    **environment** secrets with the same names (an environment secret
    wins over a repository secret of the same name).
 3. Run Run workflow › `main` › lane `play` once and check the signer
-   lines.
+   lines (the run stops if they are not the pinned upload certificate).
 4. Only then delete the repository-level copies. In this order every run
    stays signed.
 
@@ -1371,8 +1386,9 @@ Optional, and only after the first manual release (§ 6.3).
    `gh secret set PLAY_SERVICE_ACCOUNT_JSON --env release --repo AkiyamaKunka/Chopstats < ~/Downloads/<file>.json`,
    then delete the download.
 
-From then on every run with the Android lane uploads a completed release
-with the `.aab`, the R8 `mapping.txt` and the text from
+From then on every run with the Android lane uploads, in its `play` job,
+from the android job's kept artifact, a completed release with the
+`.aab`, its R8 mapping (`aab-mapping.txt`) and the text from
 `app/android/whatsnew/whatsnew-<locale>` (500 characters at most, pinned
 by `app/test/release_decisions_test.dart`; edit it before each upload):
 
@@ -1382,6 +1398,15 @@ by `app/test/release_decisions_test.dart`; edit it before each upload):
   default closed-testing track; Google's API page does not list it, so
   check the track's name in Play Console first. If your closed track has
   another name, add it to `play_track`'s options in release.yml.
+
+A failed upload (the first run's 403, a track Play does not know) fails
+the `play` job only: the android job has already kept the artifact, and
+on a tag the GitHub Release goes out without waiting for Play. Play
+commits nothing from a failed upload, so once the cause is fixed,
+*Re-run failed jobs* sends the same build number again. The `play` job
+runs in the `release` environment too (it reads this secret there), so
+with a required reviewer (§ 6.3) it waits for its own approval once the
+android job is done.
 
 Play adds an informational "you've not uploaded debug symbols" note on
 every upload; § 9 says why and how to change that.
@@ -1564,9 +1589,12 @@ the data stays. The Play build has no Watch Camera Roll (decision 1), so
 someone who moves from the GitHub APK to Play loses it (the Play build's
 first launch turns it off and says so in one notice, § 6.3). Until
 § 6.3's check has passed, tell people to export first (Settings › Your
-Data › *Export Data…*). The notes release.yml
-writes on `v*` tags still say the two "can carry different signatures";
-make them definitive after that check.
+Data › *Export Data…*), and to leave **Keep app data** unticked when they
+uninstall: the app declares `hasFragileUserData`, and kept data keeps the
+old signature, so a differently signed build then refuses to install. The
+notes release.yml writes on `v*` tags (and `scripts/build_share_apk.sh`'s
+note for a debug-signed APK) say so, and that the two "may carry
+different signatures"; make that definitive after the check.
 
 ### 6.7 Android platform checks
 

@@ -1253,6 +1253,199 @@ void main() {
     });
   });
 
+  // The Android review of 2026-11-19, R4, R5, R15 and R16.
+  group('release.yml: the Android review\'s release items', () {
+    final workflow = _readRepo('.github/workflows/release.yml');
+
+    /// The job [name], through to the next job.
+    String job(String name) {
+      final start = workflow.indexOf('\n  $name:\n');
+      expect(start, isNonNegative, reason: name);
+      final next = RegExp(r'\n  [a-z][a-z-]*:\n').firstMatch(
+          workflow.substring(start + 1));
+      return workflow.substring(
+          start, next == null ? workflow.length : start + 1 + next.start);
+    }
+
+    /// The `needs:` of job [name], as a list.
+    List<String> needs(String name) {
+      final line = RegExp(r'^    needs: (.*)$', multiLine: true)
+          .firstMatch(job(name))!
+          .group(1)!;
+      return line.replaceAll(RegExp(r'[\[\]\s]'), '').split(',');
+    }
+
+    // R4: a failed Play upload threw away the run's bundle, APK, mappings
+    // and symbols (the Keep step after it was skipped), and the GitHub
+    // Release, which needs the android job's success, never came.
+    test('R4: the Play upload is a job of its own; the artifact is kept '
+        'first and the GitHub Release does not wait for Play', () {
+      final android = job('android');
+      expect(android, isNot(contains('upload-google-play')));
+      expect(android, contains('uses: actions/upload-artifact@'));
+      expect(android, contains(r'play: ${{ steps.secrets.outputs.play }}'));
+      final play = job('play');
+      expect(needs('play'), ['plan', 'android']);
+      expect(
+          play,
+          contains("if: needs.android.outputs.built == 'true' && "
+              "needs.android.outputs.play == 'true'"));
+      expect(play, contains('environment: release'));
+      expect(play, contains('uses: r0adkll/upload-google-play@'));
+      expect(play, contains('uses: actions/download-artifact@'));
+      // The android job's own bundle, where it built it (the artifact's
+      // root is app/build).
+      expect(play, contains('path: app/build'));
+      expect(play,
+          contains('name: android-\${{ env.BUILD_NAME }}-\${{ env.BUILD_NUMBER }}'));
+      expect(play,
+          contains('mappingFile: \${{ steps.mapping.outputs.file }}'));
+      expect('upload-google-play'.allMatches(workflow), hasLength(1));
+      expect(needs('github-release'), isNot(contains('play')));
+      expect(job('github-release'), isNot(contains('needs.play')));
+    });
+
+    // R5: the check passed for any key but the debug key, so a wrong
+    // keystore in the secrets shipped a green APK no installed copy could
+    // update to.
+    test('R5: the bundle and the APK must carry the pinned upload '
+        'certificate; a repository variable overrides it', () {
+      expect(
+          workflow,
+          contains('  ANDROID_UPLOAD_CERT_SHA256: '
+              'd0d95f7f68be408da1c5f81d3e197dedd49f3de19b35eebdfb8effec6b7f9b7c\n'));
+      final verify = job('android').substring(job('android').indexOf(
+          '- name: Verify the bundle is signed with the upload key'));
+      expect(
+          verify,
+          contains(r'UPLOAD_CERT_SHA256: ${{ vars.ANDROID_UPLOAD_CERT_SHA256 '
+              r'|| env.ANDROID_UPLOAD_CERT_SHA256 }}'));
+      expect(verify, contains(r'if [ "$aab_sha" != "$want" ]; then'));
+      expect(verify, contains(r'if [[ ! "$want" =~ ^[0-9a-f]{64}$ ]]; then'));
+      // After the APK == bundle check, so both carry it.
+      expect(verify.indexOf(r'"$apk_sha" != "$aab_sha"'),
+          lessThan(verify.indexOf(r'"$aab_sha" != "$want"')));
+      expect(
+          verify.indexOf(r'"$aab_sha" != "$want"'),
+          lessThan(verify.indexOf('- name: Keep the bundle')),
+          reason: 'a wrong key stops the run before anything is kept');
+      expect(workflow, contains('ANDROID_UPLOAD_CERT_SHA256  the upload'));
+      final releasing = _readRepo('docs/RELEASING.md');
+      expect(releasing, contains('`ANDROID_UPLOAD_CERT_SHA256`'));
+    });
+
+    // R15: a tag's +N was checked against the offset only. The plan step's
+    // own script, run as the workflow runs it.
+    group('R15: a tag\'s +N is held above every number CI has used', () {
+      String planScript() {
+        final at = workflow.indexOf('        id: plan\n');
+        final run = workflow.indexOf('        run: |\n', at);
+        final lines = <String>[];
+        for (final line in workflow
+            .substring(run + '        run: |\n'.length)
+            .split('\n')) {
+          if (line.trim().isNotEmpty && !line.startsWith('          ')) break;
+          lines.add(line.length >= 10 ? line.substring(10) : '');
+        }
+        return lines.join('\n');
+      }
+
+      final offset = RegExp(r'BUILD_NUMBER_OFFSET: (\d+)')
+          .firstMatch(workflow)!
+          .group(1)!;
+
+      Future<({int code, String log, String out})> plan(String event,
+          String ref, int run) async {
+        final dir = Directory.systemTemp.createTempSync('ct_plan');
+        addTearDown(() => dir.deleteSync(recursive: true));
+        Directory('${dir.path}/app').createSync();
+        File('${dir.path}/app/pubspec.yaml')
+            .writeAsStringSync('version: 1.7.0+9\n');
+        final script = File('${dir.path}/plan.sh')
+          ..writeAsStringSync(planScript());
+        final out = File('${dir.path}/out')..createSync();
+        final summary = File('${dir.path}/summary')..createSync();
+        final r = await Process.run('bash', [script.path],
+            workingDirectory: dir.path,
+            environment: {
+              'GITHUB_EVENT_NAME': event,
+              'GITHUB_REF': ref,
+              'GITHUB_RUN_NUMBER': '$run',
+              'BUILD_NUMBER_OFFSET': offset,
+              'GITHUB_OUTPUT': out.path,
+              'GITHUB_STEP_SUMMARY': summary.path,
+              'LANE': 'both',
+              'INTERNAL_ONLY_INPUT': 'true',
+              'PLAY_TRACK': 'internal',
+            });
+        return (
+          code: r.exitCode,
+          log: '${r.stdout}${r.stderr}',
+          out: out.readAsStringSync(),
+        );
+      }
+
+      test('a tag push below offset + run number stops, and says why',
+          () async {
+        for (final n in [205, 209]) {
+          final r = await plan('push', 'refs/tags/v1.7.0+$n', 10);
+          expect(r.code, 1, reason: '+$n at run 10');
+          expect(r.log, contains('this is Release run 10'));
+          expect(r.log, contains('up to 209'));
+          expect(r.log, contains('use 210 or more'));
+          expect(r.log, isNot(contains('not above BUILD_NUMBER_OFFSET')),
+              reason: '$n is above the offset; that message would be false');
+        }
+        // At or below the offset: the old message, still true there.
+        final low = await plan('push', 'refs/tags/v1.7.0+200', 10);
+        expect(low.code, 1);
+        expect(low.log, contains('not above BUILD_NUMBER_OFFSET'));
+      });
+
+      test('at or above it a tag push passes, plain tags as before',
+          () async {
+        for (final (ref, number) in [
+          ('refs/tags/v1.7.0+210', 210),
+          ('refs/tags/v1.7.0+215', 215),
+          ('refs/tags/v1.7.0', 210),
+        ]) {
+          final r = await plan('push', ref, 10);
+          expect(r.code, 0, reason: '$ref: ${r.log}');
+          expect(r.out, contains('build_number=$number\n'));
+        }
+      });
+
+      test('Run workflow on a +N tag that already ran still works, with a '
+          'warning', () async {
+        final r = await plan('workflow_dispatch', 'refs/tags/v1.7.0+215', 16);
+        expect(r.code, 0, reason: r.log);
+        expect(r.out, contains('build_number=215\n'));
+        expect(r.log, contains('::warning::'));
+        final main = await plan('workflow_dispatch', 'refs/heads/main', 16);
+        expect(main.code, 0);
+        expect(main.out, contains('build_number=216\n'));
+      });
+    }, skip: Platform.isWindows);
+
+    // R16: with hasFragileUserData, an uninstall that keeps the app data
+    // keeps the old signature, and a differently signed build then fails
+    // to install. The notes say to leave the box unticked, as the
+    // android-v1.7.0 notes do.
+    test('R16: the release notes and the share script say to leave "Keep '
+        'app data" unticked', () {
+      final notes = job('github-release');
+      expect(notes, contains('if Android offers **Keep app data**, leave it '
+          'unticked'));
+      expect(notes, contains('export your log (Settings › Export Data)'));
+      expect(notes, isNot(contains('needs an uninstall')));
+      final script = _readRepo('scripts/build_share_apk.sh');
+      expect(script, contains(r'if Android offers \"Keep app data\", leave it'));
+      expect(script, contains('unticked'));
+      expect(_read('android/app/src/main/AndroidManifest.xml'),
+          contains('android:hasFragileUserData="true"'));
+    });
+  });
+
   group('review fixes: release.yml, scripts and § 6', () {
     final workflow = _readRepo('.github/workflows/release.yml');
 
