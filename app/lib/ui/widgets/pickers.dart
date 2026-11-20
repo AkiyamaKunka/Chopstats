@@ -7,11 +7,15 @@
 /// 24-hour dial drew '15' and '3' as '153'. Clamping the whole dialog at
 /// 1.6x keeps every label whole on every iPhone width; the picker text is
 /// still well above the default size. Narrower Android screens clamp the
-/// date dialog lower ([datePickerMaxTextScale]).
+/// date dialog lower ([datePickerMaxTextScale]), and the date dialog's
+/// selected-date headline is made smaller where the longest date would
+/// not fit its one line ([fittedDatePickerHeadline]).
 ///
 /// Same signatures and return types as [showDatePicker] /
 /// [showTimePicker]; swap the call, keep the arguments.
 library;
+
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
@@ -35,6 +39,88 @@ const double kPickerClampPerDp = 0.01;
 double datePickerMaxTextScale(double width) =>
     (kPickerMaxTextScale - (kPickerFullClampWidth - width) * kPickerClampPerDp)
         .clamp(1.0, kPickerMaxTextScale);
+
+/// Material 3's date dialog as it lays out its selected-date header in
+/// portrait (flutter/lib/src/material/date_picker.dart, Flutter 3.44): the
+/// input mode's 328 dp, the narrower of its two widths, inside 16 dp of
+/// inset on each side; the header's 24 + 12 dp of padding and the 48 dp
+/// entry-mode button beside the date; and the header's own text-scale
+/// clamp, 1.4 with that button.
+const double _kDateDialogWidth = 328;
+const double _kDateDialogInset = 16;
+const double _kDateHeaderChrome = 24 + 12 + 48;
+const double _kDateHeaderMaxScale = 1.4;
+
+/// The selected-date header's headline at this size (Android QA Q8). The
+/// header gives the date one line and cuts it with an ellipsis: in Chinese
+/// at 320 dp and font size 2.0 the weekday went ('11月13日周…'), and from
+/// about font size 1.3 the Chinese date did not fit on wider phones
+/// either. Null keeps the theme's headline (Material 3: 32 sp), as long as
+/// the longest date of a year fits; otherwise the largest size that fits
+/// it, measured as the header lays it out. Portrait only: landscape gives
+/// the date two lines and more.
+@visibleForTesting
+TextStyle? fittedDatePickerHeadline(BuildContext context) {
+  if (!Theme.of(context).useMaterial3 ||
+      MediaQuery.orientationOf(context) != Orientation.portrait) {
+    return null;
+  }
+  final style = DatePickerTheme.of(context).headerHeadlineStyle ??
+      DatePickerTheme.defaults(context).headerHeadlineStyle;
+  final size = style?.fontSize;
+  if (style == null || size == null) return null;
+  final scaler = MediaQuery.textScalerOf(context);
+  final titleScaler = scaler.clamp(
+      maxScaleFactor: math.min(scaler.scale(14) / 14, _kDateHeaderMaxScale));
+  final room = math.min(_kDateDialogWidth,
+          MediaQuery.sizeOf(context).width - 2 * _kDateDialogInset) -
+      _kDateHeaderChrome;
+  final l = MaterialLocalizations.of(context);
+  final direction = Directionality.of(context);
+  final locale = Localizations.maybeLocaleOf(context);
+  // Every month, on seven days in a row (every weekday), two-digit days.
+  var widest = 0.0;
+  for (var month = 1; month <= 12; month++) {
+    for (var day = 22; day <= 28; day++) {
+      final painter = TextPainter(
+        text: TextSpan(
+            text: l.formatMediumDate(DateTime(2026, month, day)),
+            style: style),
+        textDirection: direction,
+        textScaler: titleScaler,
+        locale: locale,
+        maxLines: 1,
+      )..layout();
+      widest = math.max(widest, painter.width);
+      painter.dispose();
+    }
+  }
+  if (widest <= room) return null;
+  // A whole pixel under the room, for the rounding a real layout does.
+  final fitted = (size * (room - 1) / widest * 2).floorToDouble() / 2;
+  return style.copyWith(fontSize: fitted);
+}
+
+/// The date dialog under [fittedDatePickerHeadline]'s headline. Always
+/// the same widget above the dialog, so a rotation never rebuilds the
+/// dialog's state.
+class _DateHeaderFit extends StatelessWidget {
+  const _DateHeaderFit({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = DatePickerTheme.of(context);
+    final fitted = fittedDatePickerHeadline(context);
+    return DatePickerTheme(
+      data: fitted == null
+          ? theme
+          : theme.copyWith(headerHeadlineStyle: fitted),
+      child: child,
+    );
+  }
+}
 
 /// The clamp at [maxScale], with a caller's [builder] running INSIDE it
 /// (its context sees the clamped scale, so a MediaQuery copy there cannot
@@ -99,7 +185,10 @@ Future<DateTime?> showAppDatePicker({
       useRootNavigator: useRootNavigator,
       routeSettings: routeSettings,
       textDirection: textDirection,
-      builder: (context, child) => _clamped(context, child, builder,
+      // The headline fits the header ([fittedDatePickerHeadline]), under
+      // the clamp and a caller's builder, which see the dialog as before.
+      builder: (context, child) => _clamped(
+          context, _DateHeaderFit(child: child!), builder,
           maxScale: datePickerMaxTextScale(MediaQuery.sizeOf(context).width)),
       initialDatePickerMode: initialDatePickerMode,
       errorFormatText: errorFormatText,
