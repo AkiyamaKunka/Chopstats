@@ -334,7 +334,7 @@ When merging #22 after this PR:
 - **Never hand-merge the generated `app_localizations*.dart`.** Take
   either side, then run `flutter gen-l10n` in `app/`.
 - `app/test/ui/usual_copy_test.dart` pins the number of keys in each ARB
-  file: 809 on `main` since #22 merged, 944 on the iCloud Backup branch
+  file: 809 on `main` since #22 merged, 951 on the iCloud Backup branch
   merged with #33, the review-171 fixes, the Android photos, privacy,
   background and ui lanes and the Play channel (`feat/icloud-backup` adds
   72 `backup*` and `import*` keys, #33's source-link label 1, the Test AI
@@ -345,9 +345,9 @@ When merging #22 after this PR:
   `addPickerUnavailable` and `addOldPhotoLoggedToday` 4,
   `android/privacy`'s privacy and https strings 23, the Android background
   lane's block 10, the ui lane's discard-changes question 4, the Play
-  channel's block 13 (its notice, Diagnostics' build line and the `*Play`
-  variants of the copy that names Watch Camera Roll or Photo Coverage),
-  none shared; review r171 deleted
+  channel's block 20 (its notice, Diagnostics' build line and the `*Play`
+  variants of the copy that names Watch Camera Roll or Photo Coverage or
+  says a photo is kept or retried), none shared; review r171 deleted
   `bodyEmptyHintImperial`, the same text as `bodyEmptyHint`). If either
   side adds keys before both merge, change the number in that test to the
   merged count, and here too (the test checks this line); both files must
@@ -1303,8 +1303,11 @@ cd app && flutter build appbundle --release --dart-define=CHOPSTATS_CHANNEL=play
   device work as before. Text that pointed to Watch Camera Roll or Photo
   Coverage (Today's empty hint, the first-run card, Stop sharing, the
   empty-day summary, the own server's final refusals) has Play wording,
-  and there is no "Logged meals" notification channel. AI Provider › Test
-  This Provider says "Build: Google Play".
+  and so has text that said a photo is kept or retried (the quota-pause
+  footer and banner, Test This Provider's fix lines, a failed photo's
+  snackbar), since nothing keeps or retries a photo in this build. There
+  is no "Logged meals" notification channel. AI Provider › Test This
+  Provider says "Build: Google Play".
 - **A phone moving from the GitHub APK** (same signer, so it updates in
   place, data kept): if Watch Camera Roll was on, the Play build's first
   launch turns it off, cancels its background job and shows one notice

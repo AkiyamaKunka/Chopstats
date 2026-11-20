@@ -5782,6 +5782,48 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Nothing logged that day. Log your next meal from a photo, a description or by hand.'**
   String get coachEmptyOnDayPlay;
+
+  /// Google Play build: settingsAiFooterPaused without 'New photos are kept and retried automatically'. The Play version has no Watch Camera Roll, catch-up or Photo Coverage, so a photo picked or shared during the pause is not analyzed and nothing retries it; the add flow says so too (outcomeQuotaPausedPickMsg).
+  ///
+  /// In en, this message translates to:
+  /// **'Analyses are paused — Gemini\'s daily limit was reached (a free tier allows only a limited number of requests a day). A photo added now is not analyzed: log the meal yourself, or add the photo again after the pause. To resume now, turn on billing in Google AI Studio and run Test This Provider, or change the key or provider on the AI Provider page.'**
+  String get settingsAiFooterPausedPlay;
+
+  /// Google Play build: providerQuotaPaused (the banner on the AI Provider page itself) without 'New photos are kept and retried automatically', which the Play version does not do.
+  ///
+  /// In en, this message translates to:
+  /// **'Analyses are paused — Gemini\'s daily limit was reached (a free tier allows only a limited number of requests a day). A photo added now is not analyzed: log the meal yourself, or add the photo again after the pause. To resume now, turn on billing in Google AI Studio and run Test This Provider, or change the key or provider.'**
+  String get providerQuotaPausedPlay;
+
+  /// Google Play build: providerQuotaPausedUntil without 'New photos are kept and retried automatically'. {time} is the local clock time the pause lifts.
+  ///
+  /// In en, this message translates to:
+  /// **'Analyses are paused until {time} — Gemini\'s daily limit was reached (a free tier allows only a limited number of requests a day). A photo added now is not analyzed: log the meal yourself, or add the photo again after the pause. To resume now, turn on billing in Google AI Studio and run Test This Provider, or change the key or provider.'**
+  String providerQuotaPausedUntilPlay(String time);
+
+  /// Google Play build: diagFixWaitRateLimit (Test This Provider, the fix line under a rate-limited key) without 'photos are kept and retried automatically', which the Play version does not do.
+  ///
+  /// In en, this message translates to:
+  /// **'Wait a minute and re-run. A photo added meanwhile may not be analyzed: add it again afterwards.'**
+  String get diagFixWaitRateLimitPlay;
+
+  /// Google Play build: diagFixPhotoTemp (Test This Provider, the fix line under a temporary photo failure) without 'photos are kept and retried automatically'.
+  ///
+  /// In en, this message translates to:
+  /// **'Usually a rate limit or a busy server — re-run in a minute, and add again any photo that was not analyzed.'**
+  String get diagFixPhotoTempPlay;
+
+  /// Google Play build: diagFixQuota (Test This Provider, the fix line under a quota pause) without '(photos are kept)'.
+  ///
+  /// In en, this message translates to:
+  /// **'Wait it out and add photos again afterwards (they are not analyzed meanwhile), or change the key or provider to resume immediately.'**
+  String get diagFixQuotaPlay;
+
+  /// Google Play build: outcomeFailedKeptMsg (the snackbar for a shared photo, or one picked and backed out of, that failed for good) without 'kept for retry': the Play version has no Photo Coverage to retry it from. {reason} is the failure line, which says what to do when there is something to do.
+  ///
+  /// In en, this message translates to:
+  /// **'Photo analysis failed. {reason}'**
+  String outcomeFailedKeptMsgPlay(String reason);
 }
 
 class _AppLocalizationsDelegate

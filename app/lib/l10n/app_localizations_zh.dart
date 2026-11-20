@@ -3458,4 +3458,31 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get coachEmptyOnDayPlay => '当天没有记录。下一餐可以用照片、文字或手动输入来记录。';
+
+  @override
+  String get settingsAiFooterPausedPlay =>
+      '分析已暂停 — 已达 Gemini 当日上限（免费额度每天只能处理有限的请求）。现在添加的照片不会被分析：可以先手动记录这一餐，或等暂停结束后重新添加照片。想立即恢复：在 Google AI Studio 开通付费后运行「测试当前服务」，或在 AI 服务页更换 Key 或服务。';
+
+  @override
+  String get providerQuotaPausedPlay =>
+      '分析已暂停 — 已达 Gemini 当日上限（免费额度每天只能处理有限的请求）。现在添加的照片不会被分析：可以先手动记录这一餐，或等暂停结束后重新添加照片。想立即恢复：在 Google AI Studio 开通付费后运行「测试当前服务」，或更换 Key 或服务。';
+
+  @override
+  String providerQuotaPausedUntilPlay(String time) {
+    return '分析已暂停到 $time — 已达 Gemini 当日上限（免费额度每天只能处理有限的请求）。现在添加的照片不会被分析：可以先手动记录这一餐，或等暂停结束后重新添加照片。想立即恢复：在 Google AI Studio 开通付费后运行「测试当前服务」，或更换 Key 或服务。';
+  }
+
+  @override
+  String get diagFixWaitRateLimitPlay => '等一分钟再试。期间添加的照片可能没有被分析，之后请重新添加。';
+
+  @override
+  String get diagFixPhotoTempPlay => '通常是限流或服务器繁忙 —— 一分钟后再试，没有被分析的照片请重新添加。';
+
+  @override
+  String get diagFixQuotaPlay => '等暂停结束后再重新添加照片（期间照片不会被分析），或更换 Key / 服务立即恢复。';
+
+  @override
+  String outcomeFailedKeptMsgPlay(String reason) {
+    return '照片分析失败。$reason';
+  }
 }

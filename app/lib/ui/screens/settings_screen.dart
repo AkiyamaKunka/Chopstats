@@ -742,9 +742,13 @@ class _SettingsScreenState extends State<SettingsScreen>
         if (widget.settings.apiKey.trim().isEmpty) _firstRunCard(theme),
         GroupedSection(
           header: context.l10n.settingsSectionAi,
-          footer: widget.settings.isQuotaPaused
-              ? context.l10n.settingsAiFooterPaused
-              : context.l10n.settingsAiFooter,
+          // The Play build keeps no photo for later and retries none on
+          // its own (core/app_channel.dart): its words say to add it again.
+          footer: !widget.settings.isQuotaPaused
+              ? context.l10n.settingsAiFooter
+              : photoLibraryInBuild
+                  ? context.l10n.settingsAiFooterPaused
+                  : context.l10n.settingsAiFooterPausedPlay,
           children: [
             GroupedRow(
               key: const Key('aiProviderRow'),

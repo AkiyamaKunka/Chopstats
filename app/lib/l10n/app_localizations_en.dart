@@ -3839,4 +3839,34 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get coachEmptyOnDayPlay =>
       'Nothing logged that day. Log your next meal from a photo, a description or by hand.';
+
+  @override
+  String get settingsAiFooterPausedPlay =>
+      'Analyses are paused — Gemini\'s daily limit was reached (a free tier allows only a limited number of requests a day). A photo added now is not analyzed: log the meal yourself, or add the photo again after the pause. To resume now, turn on billing in Google AI Studio and run Test This Provider, or change the key or provider on the AI Provider page.';
+
+  @override
+  String get providerQuotaPausedPlay =>
+      'Analyses are paused — Gemini\'s daily limit was reached (a free tier allows only a limited number of requests a day). A photo added now is not analyzed: log the meal yourself, or add the photo again after the pause. To resume now, turn on billing in Google AI Studio and run Test This Provider, or change the key or provider.';
+
+  @override
+  String providerQuotaPausedUntilPlay(String time) {
+    return 'Analyses are paused until $time — Gemini\'s daily limit was reached (a free tier allows only a limited number of requests a day). A photo added now is not analyzed: log the meal yourself, or add the photo again after the pause. To resume now, turn on billing in Google AI Studio and run Test This Provider, or change the key or provider.';
+  }
+
+  @override
+  String get diagFixWaitRateLimitPlay =>
+      'Wait a minute and re-run. A photo added meanwhile may not be analyzed: add it again afterwards.';
+
+  @override
+  String get diagFixPhotoTempPlay =>
+      'Usually a rate limit or a busy server — re-run in a minute, and add again any photo that was not analyzed.';
+
+  @override
+  String get diagFixQuotaPlay =>
+      'Wait it out and add photos again afterwards (they are not analyzed meanwhile), or change the key or provider to resume immediately.';
+
+  @override
+  String outcomeFailedKeptMsgPlay(String reason) {
+    return 'Photo analysis failed. $reason';
+  }
 }

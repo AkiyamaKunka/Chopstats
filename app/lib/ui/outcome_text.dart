@@ -151,9 +151,13 @@ String outcomeSnackbar(AppLocalizations l, PhotoOutcome o) {
   if (o.kind == PhotoOutcomeKind.failed && o.reason == notAllowedReason) {
     return body;
   }
-  return o.kind == PhotoOutcomeKind.failed
+  if (o.kind != PhotoOutcomeKind.failed) return body;
+  // The Play build has no Photo Coverage, the list a failed photo is kept
+  // in for a retry (core/app_channel.dart): it is added again instead,
+  // which the failure line says where there is something to do.
+  return photoLibraryInBuild
       ? l.outcomeFailedKeptMsg(body)
-      : body;
+      : l.outcomeFailedKeptMsgPlay(body);
 }
 
 /// A chain's name as the app language shows it: the Chinese name our chain

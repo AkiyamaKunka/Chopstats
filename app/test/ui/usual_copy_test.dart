@@ -182,7 +182,7 @@ final _placeholderRe = RegExp(r'\{(\w+)\}');
 /// aiStopSharingBodyWithLookupsPlay, errServerFailedFinalPlay,
 /// errServerRejectedPlay, coachEmptyPlay, coachEmptyYesterdayPlay,
 /// coachEmptyOnDayPlay).
-const _keyCount = 944;
+const _keyCount = 951;
 
 Directory _appRoot() {
   var dir = Directory.current;

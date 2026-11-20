@@ -9,7 +9,11 @@
 // the build lacks. The move off Watch Camera Roll for a GitHub install it
 // replaces is play_upgrade_test.dart; Log and Leftovers' picker-only path
 // is in add_flow_system_picker_test and leftover_flow_test.
+import 'dart:typed_data';
+
 import 'package:calorie_tracker/core/app_channel.dart';
+import 'package:calorie_tracker/core/contracts.dart'
+    show AnalysisOutcome, KeyProbe, KeyProbeResult;
 import 'package:calorie_tracker/core/outcome_kind.dart' show AnalysisErrorKind;
 import 'package:calorie_tracker/l10n/app_localizations.dart';
 import 'package:calorie_tracker/l10n/app_localizations_en.dart';
@@ -21,10 +25,14 @@ import 'package:calorie_tracker/ui/diagnostics.dart';
 import 'package:calorie_tracker/ui/outcome_text.dart' show outcomeSnackbar;
 import 'package:calorie_tracker/ui/photo_pipeline.dart';
 import 'package:calorie_tracker/ui/screens/diagnostics_screen.dart';
+import 'package:calorie_tracker/ui/screens/settings/provider_page.dart'
+    show ProviderSettingsPage;
 import 'package:calorie_tracker/ui/screens/settings_screen.dart';
 import 'package:calorie_tracker/ui/screens/today_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 
 import 'fakes.dart';
 
@@ -147,6 +155,71 @@ void main() {
       expect(find.text(_en.aiStopSharingBodyPlay('Gemini')), findsOneWidget);
       expect(find.textContaining(_en.settingsRowWatch), findsNothing);
     });
+
+    // Nothing in the Play build keeps a photo or retries it on its own: no
+    // watcher, no catch-up, no Photo Coverage. A photo picked or shared
+    // during the pause is not analyzed and says so (outcome_text.dart), so
+    // the footer says to add it again (review, 2026-11-19).
+    testWidgets("the paused-analysis footer: the Play build's says to add "
+        'the photo again, not that it is kept and retried', (tester) async {
+      FakeSettings paused() => FakeSettings(apiKey: 'k')..isQuotaPaused = true;
+      await pump(tester, paused());
+      expect(find.text(_en.settingsAiFooterPaused), findsOneWidget);
+      debugAppChannelOverride = AppChannel.play;
+      await pump(tester, paused());
+      expect(find.text(_en.settingsAiFooterPausedPlay), findsOneWidget);
+      expect(find.text(_en.settingsAiFooterPaused), findsNothing);
+      await pump(tester, paused(), locale: const Locale('zh'));
+      expect(find.text(_zh.settingsAiFooterPausedPlay), findsOneWidget);
+    });
+  });
+
+  testWidgets("the AI Provider page's pause banner in the Play build, with "
+      'and without the time the pause lifts', (tester) async {
+    tester.view.physicalSize = const Size(800, 3000);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    Future<String> banner(DateTime? until, {String lang = 'en'}) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          locale: Locale(lang),
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          home: ProviderSettingsPage(
+            settings: FakeSettings(apiKey: 'k')
+              ..isQuotaPaused = true
+              ..quotaPauseUntil = until,
+            analyzer: FakeAnalyzer(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      return tester
+          .widget<Text>(
+            find.descendant(
+              of: find.byKey(const Key('quotaPauseBanner')),
+              matching: find.byType(Text),
+            ),
+          )
+          .data!;
+    }
+
+    final until = DateTime(2026, 11, 19, 23, 30);
+    expect(await banner(null), _en.providerQuotaPaused);
+    expect(await banner(until), _en.providerQuotaPausedUntil('11:30 PM'));
+    debugAppChannelOverride = AppChannel.play;
+    expect(await banner(null), _en.providerQuotaPausedPlay);
+    expect(await banner(until), _en.providerQuotaPausedUntilPlay('11:30 PM'));
+    expect(await banner(null, lang: 'zh'), _zh.providerQuotaPausedPlay);
+    final zh = await banner(until, lang: 'zh');
+    expect(zh, startsWith('分析已暂停到 '));
+    expect(zh, contains('11:30'));
+    expect(
+      zh,
+      endsWith(
+        _zh.providerQuotaPausedUntilPlay('').split(' — ').skip(1).join(' — '),
+      ),
+    );
   });
 
   testWidgets("Today's empty hint in the Play build: Log and sharing, no "
@@ -299,5 +372,107 @@ void main() {
         expect(_zh.settingsWelcomeBodyPlay, contains('中国大陆用户'));
       },
     );
+  });
+
+  // Nothing in the Play build keeps a photo for later or retries it on its
+  // own: there is no watcher, no catch-up and no Photo Coverage. The lines
+  // that said so (review, 2026-11-19) have Play wording.
+  group('no promise of a kept or retried photo in the Play build', () {
+    test("Test This Provider's fix lines: rate limit, temporary photo "
+        'failure, quota pause', () async {
+      Future<Map<String, String?>> fixes(AppLocalizations l) async {
+        final analyzer = FakeAnalyzer()
+          ..nextTextIntent = {'ok': true}
+          ..nextPhotoOutcome = const AnalysisOutcome(
+            error: 'The provider is busy.',
+            retryable: true,
+            wall: Duration.zero,
+          )
+          ..onProbeKey = (_) async => const KeyProbe(
+            KeyProbeResult.rateLimited,
+            message: 'Rate limit hit.',
+          );
+        final results = await ProviderDiagnostics(
+          settings: FakeSettings(apiKey: 'k')..isQuotaPaused = true,
+          analyzer: analyzer,
+          l10n: l,
+          client: MockClient((_) async => http.Response('ok', 404)),
+          testImage: () => Uint8List(32),
+        ).run().toList();
+        return {for (final r in results) r.stage: r.fix};
+      }
+
+      final github = await fixes(_en);
+      expect(github[_en.diagStageAuth], _en.diagFixWaitRateLimit);
+      expect(github[_en.diagStagePhoto], _en.diagFixPhotoTemp);
+      expect(github[_en.diagStageQuota], _en.diagFixQuota);
+      debugAppChannelOverride = AppChannel.play;
+      for (final l in [_en as AppLocalizations, _zh as AppLocalizations]) {
+        final play = await fixes(l);
+        expect(play[l.diagStageAuth], l.diagFixWaitRateLimitPlay);
+        expect(play[l.diagStagePhoto], l.diagFixPhotoTempPlay);
+        expect(play[l.diagStageQuota], l.diagFixQuotaPlay);
+      }
+    });
+
+    test("a shared photo's permanent failure: not 'kept for retry'", () {
+      const failed = PhotoOutcome(
+        PhotoOutcomeKind.failed,
+        'This photo could not be processed (it could not be decoded).',
+        errorKind: AnalysisErrorKind.badPhoto,
+        shared: true,
+      );
+      expect(
+        outcomeSnackbar(_en, failed),
+        _en.outcomeFailedKeptMsg(_en.errBadPhoto),
+      );
+      debugAppChannelOverride = AppChannel.play;
+      for (final l in [_en as AppLocalizations, _zh as AppLocalizations]) {
+        expect(
+          outcomeSnackbar(l, failed),
+          l.outcomeFailedKeptMsgPlay(l.errBadPhoto),
+        );
+      }
+    });
+
+    test('the Play wording promises nothing kept or retried, and the pause '
+        'lines keep everything else', () {
+      for (final (l, kept, words) in [
+        (
+          _en as AppLocalizations,
+          'New photos are kept and retried automatically.',
+          ['kept', 'retried', 'automatic'],
+        ),
+        (_zh as AppLocalizations, '新照片会保留并自动重试。', ['保留', '自动']),
+      ]) {
+        final pauses = {
+          l.settingsAiFooterPaused: l.settingsAiFooterPausedPlay,
+          l.providerQuotaPaused: l.providerQuotaPausedPlay,
+          l.providerQuotaPausedUntil('T'): l.providerQuotaPausedUntilPlay('T'),
+        };
+        for (final MapEntry(key: original, value: play) in pauses.entries) {
+          final at = original.indexOf(kept);
+          expect(at, isNonNegative, reason: original);
+          expect(play, startsWith(original.substring(0, at)), reason: play);
+          expect(
+            play,
+            endsWith(original.substring(at + kept.length)),
+            reason: play,
+          );
+        }
+        for (final text in [
+          ...pauses.values,
+          l.diagFixWaitRateLimitPlay,
+          l.diagFixPhotoTempPlay,
+          l.diagFixQuotaPlay,
+          l.outcomeFailedKeptMsgPlay('R'),
+        ]) {
+          for (final word in words) {
+            expect(text, isNot(contains(word)), reason: text);
+          }
+          expect(text, isNot(contains(l.settingsRowCoverage)), reason: text);
+        }
+      }
+    });
   });
 }
