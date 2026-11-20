@@ -121,9 +121,11 @@ class _LogBodySheetState extends State<LogBodySheet> {
   bool get _busy => _saving || _deleting;
 
   /// The stored values as the fields first show them: the baseline that
-  /// tells typed text from an untouched prefill.
-  late final String _storedWeight =
-      _fmt(widget.existingWeight, weightForDisplay);
+  /// tells typed text from an untouched prefill. A save that writes the
+  /// weight moves its baseline to the text written ('' for a delete), see
+  /// [_save]. The measurements write is a save's last: once it goes
+  /// through, the sheet closes.
+  late String _storedWeight = _fmt(widget.existingWeight, weightForDisplay);
   late final String _storedWaist =
       _fmt(widget.existing?.waistCm, girthForDisplay);
   late final String _storedChest =
@@ -230,6 +232,7 @@ class _LogBodySheetState extends State<LogBodySheet> {
 
   Future<void> _save() async {
     final l = context.l10n;
+    final weightText = _weight.text.trim();
     final (kg, e1) = _parse(_weight, l.bodyFieldWeight,
         SharedConstants.weightMinKg.toDouble(),
         SharedConstants.weightMaxKg.toDouble(),
@@ -272,6 +275,13 @@ class _LogBodySheetState extends State<LogBodySheet> {
         wrote = true;
         widget.onWrote?.call();
       }
+      // Stored now as the field shows it ('' when deleted): if the write
+      // below fails and the sheet stays open, back and the date row count
+      // only the measurements as typed. Against the day as the sheet first
+      // showed it, back asked about this weight and the date row took it
+      // to another day (Android review 2026-11-19). The text itself, not
+      // the stored value's display form: '81,6' is stored as 81.6.
+      if (wrote) _storedWeight = weightText;
       // Measurements: full-row upsert; all-empty deletes (DAO contract).
       if (waist != null || chest != null || hip != null ||
           widget.existing != null) {
