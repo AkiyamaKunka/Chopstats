@@ -215,7 +215,7 @@ bool _githubTagMatches(String pattern, String tag) {
 /// "Effective date:" line must say the same. Whoever merges a branch that
 /// changes the policy sets both to the merge date (docs/RELEASING.md § 6.8);
 /// this pin can only check that they agree, not that the date is new.
-const kPolicyEffectiveDate = '2026-11-19';
+const kPolicyEffectiveDate = '2026-11-20';
 
 void main() {
   group('R-F8: App Privacy answer B in the manifests', () {
@@ -662,7 +662,11 @@ void main() {
       // The Google Play release (android/release, 2026-11-13) changed it
       // again: Who we are, adults only, https only, and Android's backup
       // leaving the keys out. If that branch merges on a later day, set the
-      // date and kPolicyEffectiveDate to the merge date.
+      // date and kPolicyEffectiveDate to the merge date. The Android
+      // look-and-defaults branch (android/feel-and-defaults, 2026-11-20)
+      // changed it again: Android's cloud backup only end-to-end encrypted
+      // (a screen lock), and Meta glasses photos off by default on Android;
+      // if it merges on a later day, the same applies.
       expect(
           RegExp(r'^Effective date: (\S+)$', multiLine: true)
               .allMatches(policy)
@@ -781,6 +785,90 @@ void main() {
       expect(flat, contains('从 1.7.0 版本起，在 Android 上，API Key'));
       expect(flat,
           isNot(contains('over `http://` lookups use printed brands only')));
+    });
+
+    // Owner decisions 8 and 5 (2026-11-20) narrow what Android sends: Meta
+    // glasses photos are off until turned on, and the Google backup takes
+    // the app's data only end-to-end encrypted. The published
+    // android-v1.7.0 (b207) does neither, and every build opens this
+    // policy from main, so both say from which version, as M1's do
+    // (review of #72).
+    test("Android's glasses default and end-to-end-only backup are from "
+        '1.7.1, in English and 中文', () {
+      final flat = policy.replaceAll(RegExp(r'\s+'), ' ');
+      expect(
+          flat,
+          contains('From version 1.7.1, on Android, which has no such check, '
+              'that switch is off until you turn it on. (Earlier versions on '
+              'Android had it on until you turned it off.)'));
+      expect(
+          flat,
+          contains('从 1.7.1 版本起，由于 Android 上没有这项检查，这个开关在 '
+              'Android 上默认关闭，需要时可以自己打开。（更早的版本在 Android '
+              '上默认打开。）'));
+      expect(
+          flat,
+          contains("From version 1.7.1, on Android, the app's data goes into "
+              'the backup in your Google account only when it is end-to-end '
+              'encrypted'));
+      expect(
+          flat,
+          contains('(Earlier versions backed it up whether or not it was '
+              'end-to-end encrypted, and a transfer carried it on every '
+              'Android version.)'));
+      expect(
+          flat,
+          contains('从 1.7.1 版本起，在 Android 上，只有在端到端加密时，应用数据才'
+              '会进入你 Google 账户中的备份'));
+      expect(
+          flat,
+          contains('（更早的版本无论是否端到端加密都会备份应用数据，在所有 Android '
+              '版本上转移时也会带上。）'));
+      // Neither sentence without its version.
+      expect(flat, isNot(contains('still sent. On Android, which has no such')));
+      expect(flat, isNot(contains("--> On Android, the app's data goes")));
+      expect(flat, isNot(contains('--> 在 Android 上，只有在端到端加密时')));
+    });
+
+    // android-v1.7.0 (b207) already carries the name 1.7.0. Whatever
+    // version the policy names last must be the next build's, so while
+    // pubspec is behind it, docs/RELEASING.md § 6.6 tells whoever builds
+    // next to bump first (review of #72).
+    test('the newest version the policy names is pubspec\'s, or RELEASING.md '
+        'says to bump to it before the next build', () {
+      List<int> parse(String v) => [for (final p in v.split('.')) int.parse(p)];
+      int compare(String a, String b) {
+        final (x, y) = (parse(a), parse(b));
+        for (var i = 0; i < 3; i++) {
+          if (x[i] != y[i]) return x[i] - y[i];
+        }
+        return 0;
+      }
+
+      final named = [
+        for (final m in RegExp(r'From version (\d+\.\d+\.\d+)')
+            .allMatches(policy))
+          m.group(1)!,
+        for (final m in RegExp(r'从 (\d+\.\d+\.\d+) 版本起').allMatches(policy))
+          m.group(1)!,
+      ];
+      expect(named, contains('1.7.1'));
+      final newest =
+          named.reduce((a, b) => compare(a, b) >= 0 ? a : b);
+      final pubspec = RegExp(r'^version:\s*(\d+\.\d+\.\d+)\+', multiLine: true)
+          .firstMatch(_read('pubspec.yaml'))!
+          .group(1)!;
+      if (compare(pubspec, newest) < 0) {
+        final releasing =
+            _readRepo('docs/RELEASING.md').replaceAll(RegExp(r'\s+'), ' ');
+        expect(
+            releasing.contains('set `version:` in `app/pubspec.yaml` and '
+                '`kAppVersion` (`lib/services/backup/backup_files.dart`) to '
+                '`$newest` or later'),
+            isTrue,
+            reason: 'pubspec says $pubspec and the policy names $newest: '
+                'RELEASING.md § 6.6 must say to bump before the next build');
+      }
     });
 
     test('Describe sends no meals; Fix sends the last 7 days', () {
@@ -1130,6 +1218,10 @@ void main() {
       expect(s6,
           isNot(contains('Describe the camera-roll watcher as the core')));
       expect(s6, isNot(contains('the package name is taken from the first')));
+      // Decisions 5–12 were made on 2026-11-20, and this branch ships
+      // several of them.
+      expect(s6, isNot(contains('Not decided yet')));
+      expect(s6, isNot(contains('Decisions 5–12 can wait')));
     });
 
     test('carries the verified answers and the owner decisions', () {
@@ -1148,7 +1240,8 @@ void main() {
         '### 6.8 Owner checklist, in order',
         'Do not roll it out yet.',
         'Do NOT revoke the demo Gemini key',
-        'Not decided yet',
+        "The owner's decisions (2026-11-20):",
+        'Read decisions 1–12 above; they are settled.',
       ]) {
         expect(s6, contains(fact), reason: fact);
       }
@@ -1208,14 +1301,23 @@ void main() {
         'FlutterSecureStorageConfiguration.xml',
         'FlutterSecureStorageConfiguration:FlutterSecureStorage.xml',
       ];
+      // The section's tag may carry attributes (<cloud-backup
+      // disableIfNoEncryptionCapabilities="true">, owner decision 5).
       String section(String xml, String tag) {
-        final m = RegExp('<$tag>(.*?)</$tag>', dotAll: true).firstMatch(xml);
+        final m = RegExp('<$tag(?:\\s[^>]*)?>(.*?)</$tag>', dotAll: true)
+            .firstMatch(xml);
         expect(m, isNotNull, reason: tag);
         return m!.group(1)!;
       }
 
       final rules = _read('android/app/src/main/res/xml/data_extraction_rules.xml');
-      final legacy = _read('android/app/src/main/res/xml/backup_rules.xml');
+      // Android 9 to 11 read res/xml-v28. Android 8.1 and lower read
+      // res/xml, which includes one file the app never writes and so
+      // leaves the key files out with everything else.
+      final legacy = _read('android/app/src/main/res/xml-v28/backup_rules.xml');
+      final oldest = _read('android/app/src/main/res/xml/backup_rules.xml');
+      expect(section(oldest, 'full-backup-content').trim(),
+          '<include domain="file" path="no_backup_before_android_9"/>');
       for (final (name, block) in [
         ('cloud-backup', section(rules, 'cloud-backup')),
         ('device-transfer', section(rules, 'device-transfer')),
@@ -1226,6 +1328,66 @@ void main() {
               reason: '$name $file');
         }
       }
+    });
+
+    // Owner decision 5 (2026-11-20): the policy and Settings › Your Data
+    // say Android's cloud backup needs a screen lock; the backup rules are
+    // what makes that true (manifest_gate_test checks them in full).
+    // Android 8.1 and lower cannot encrypt a backup end to end or tell it
+    // from a transfer to a new phone, and their rules carry none of the
+    // app's data: the policy and the footer say so too (review of #72).
+    test("Android's cloud backup needs a screen lock: the policy and the "
+        'footer say so, the backup rules do it', () {
+      final policy = _readRepo('docs/PRIVACY.md').replaceAll(RegExp(r'\s+'), ' ');
+      expect(policy, contains('only when it is end-to-end encrypted'));
+      expect(policy, contains('screen lock (PIN, pattern or password)'));
+      expect(policy, contains('只有在端到端加密时'));
+      expect(policy, contains('屏幕锁定（PIN 码、图案或密码）'));
+      expect(
+          policy,
+          contains('On Android 9 and later, a transfer straight to a new '
+              'phone is not affected. On Android 8.1 and earlier, which '
+              'cannot encrypt a backup end to end, the app\'s data goes '
+              'neither to your Google account nor to a new phone in a '
+              'transfer.'));
+      expect(policy, isNot(contains('A transfer straight to a new phone is '
+          'not affected')), reason: 'not on Android 8.1 and earlier');
+      expect(
+          policy,
+          contains('在 Android 9 及以上版本上，直接转移到新手机不受影响。'
+              'Android 8.1 及更早的版本无法对备份进行端到端加密，在这些版本上，'
+              '应用数据既不会备份到你的 Google 账户，也不会在转移时带到新手机。'));
+      expect(
+          policy,
+          contains('<!-- gated: release_decisions_test '
+              '(disableIfNoEncryptionCapabilities in res/xml, requireFlags in '
+              'res/xml-v28, nothing included for Android 8.1 and earlier) -->'));
+      expect(AppLocalizationsEn().backupAndroidFooter,
+          contains('without a screen lock, or on Android 8.1 and earlier, '
+              'your log is not backed up'));
+      expect(AppLocalizationsZh().backupAndroidFooter,
+          contains('没有设置屏幕锁定时，或在 Android 8.1 及更早的版本上，'
+              '饮食记录不会被备份'));
+
+      final rules = _read('android/app/src/main/res/xml/data_extraction_rules.xml');
+      expect(rules,
+          contains('<cloud-backup disableIfNoEncryptionCapabilities="true">'));
+      String uncommented(String xml) =>
+          xml.replaceAll(RegExp(r'<!--.*?-->', dotAll: true), '');
+      final legacy = uncommented(
+          _read('android/app/src/main/res/xml-v28/backup_rules.xml'));
+      expect(legacy, contains('requireFlags="clientSideEncryption"'));
+      expect(
+          RegExp(r'<include\b(?![^>]*requireFlags=)[^>]*>').hasMatch(legacy),
+          isFalse,
+          reason: 'an include without requireFlags backs up unencrypted');
+      final oldest =
+          uncommented(_read('android/app/src/main/res/xml/backup_rules.xml'));
+      expect(oldest, isNot(contains('requireFlags')),
+          reason: 'Android 8.1 and lower cannot read it');
+      expect(RegExp(r'<include\b[^>]*>').allMatches(oldest).single.group(0),
+          '<include domain="file" path="no_backup_before_android_9"/>',
+          reason: 'one include, of a file the app never writes');
     });
 
     test('the app reminds users to consult a healthcare professional '

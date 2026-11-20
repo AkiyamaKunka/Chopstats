@@ -612,6 +612,10 @@ class _SummaryCard extends StatelessWidget {
               // re-analysis would log the remains as a second meal.
               if (report.leftoverApplied > 0)
                   context.l10n.covLeftoverCount(report.leftoverApplied),
+              // Kept out by the Meta glasses photos switch, not missed:
+              // no tiles and no Log all for them.
+              if (report.glassesOff.isNotEmpty)
+                  context.l10n.covGlassesOffCount(report.glassesOff.length),
               if (report.failed.isNotEmpty)
                   context.l10n.covFailedCount(report.failed.length),
               if (report.deleted > 0)

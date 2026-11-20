@@ -783,10 +783,12 @@ void main() {
   });
 
   // Android: exclusion rules by path for both backup schemes, referenced
-  // from <application>. Exclude-only: an <include> would silently stop
-  // backing up everything else the app keeps.
+  // from <application>. Android 12+'s rules are exclude-only: an <include>
+  // there would silently stop backing up everything else the app keeps.
+  // The Android 11-and-lower rules include every domain, each under a
+  // transfer flag (the end-to-end test below).
   test('Android excludes the local store from cloud backup and device '
-      'transfer, and includes nothing', () {
+      'transfer', () {
     final main = '${_appRoot().path}/android/app/src/main';
     final manifest = File('$main/AndroidManifest.xml').readAsStringSync();
     final application =
@@ -820,12 +822,20 @@ void main() {
       expect(body, isNot(contains('<include')), reason: scheme);
     }
 
-    final legacy = File('$main/res/xml/backup_rules.xml');
+    // Android 9 to 11 read res/xml-v28. Android 8.1 and lower read
+    // res/xml, which includes one file the app never writes and so
+    // nothing else: the local store stays out with the rest (the Android
+    // 8.1 test below).
+    final legacy = File('$main/res/xml-v28/backup_rules.xml');
     expect(legacy.existsSync(), isTrue, reason: legacy.path);
     final full = section(legacy.readAsStringSync(), 'full-backup-content');
     expect(exclude.hasMatch(full), isTrue,
         reason: 'fullBackupContent does not exclude $localStoreDirName/');
-    expect(full, isNot(contains('<include')));
+    final oldest = section(
+        _uncommented(File('$main/res/xml/backup_rules.xml').readAsStringSync()),
+        'full-backup-content');
+    expect(oldest.trim(),
+        '<include domain="file" path="no_backup_before_android_9"/>');
   });
 
   // flutter_secure_storage's files hold the API keys encrypted with a key
@@ -835,8 +845,7 @@ void main() {
   // one of its shared_prefs files stays out of both backup schemes and the
   // Android 11-and-lower rules, so a restored phone starts with no keys
   // and asks for them (AndroidSecureKeyStore covers a copy that already
-  // got through). Paths take no wildcards, hence each file by name. No
-  // disableIfNoEncryptionCapabilities: an owner decision of its own.
+  // got through). Paths take no wildcards, hence each file by name.
   test("Android keeps flutter_secure_storage's files out of backup and "
       'device transfer', () {
     final main = '${_appRoot().path}/android/app/src/main';
@@ -856,12 +865,18 @@ void main() {
 
     final extraction =
         File('$main/res/xml/data_extraction_rules.xml').readAsStringSync();
-    final legacy = File('$main/res/xml/backup_rules.xml').readAsStringSync();
+    String legacy(String dir) =>
+        File('$main/res/$dir/backup_rules.xml').readAsStringSync();
     final sections = {
       'cloud-backup': section(extraction, 'cloud-backup'),
       'device-transfer': section(extraction, 'device-transfer'),
-      'full-backup-content': section(legacy, 'full-backup-content'),
+      'full-backup-content (Android 9 to 11)':
+          section(legacy('xml-v28'), 'full-backup-content'),
     };
+    // Android 8.1 and lower include one file the app never writes, so the
+    // key files stay out there with everything else.
+    expect(section(legacy('xml'), 'full-backup-content').trim(),
+        '<include domain="file" path="no_backup_before_android_9"/>');
     sections.forEach((name, body) {
       for (final file in files) {
         expect(
@@ -871,9 +886,7 @@ void main() {
             isTrue,
             reason: '$name does not exclude $file');
       }
-      expect(body, isNot(contains('<include')), reason: name);
     });
-    expect(extraction, isNot(contains('disableIfNoEncryptionCapabilities')));
 
     // The names, in the plugin version pub resolved: the data and the
     // wrapped-key files (FlutterSecureStorageConfig.java), the saved
@@ -891,6 +904,325 @@ void main() {
         contains('LEGACY_GLOBAL_CONFIG_NAME = "FlutterSecureStorageConfiguration";'));
     expect(source,
         contains('return "FlutterSecureStorageConfiguration:" + sharedPreferencesName;'));
+  });
+
+  // Owner decision 5 (2026-11-20): the log goes to the cloud only end-to-end
+  // encrypted, which Android does from Android 9 with the phone's screen
+  // lock; there a transfer to a new phone stays as it was
+  // (developer.android.com/identity/data/autobackup, read 2026-11-20).
+  // Android 12+: disableIfNoEncryptionCapabilities on <cloud-backup> alone.
+  // Android 9 to 11 (res/xml-v28): every <include> takes a whole domain
+  // under one transfer flag; one without requireFlags would back up
+  // unencrypted, and a domain left out would silently stop being backed up
+  // or transferred. Android 8.1 and lower: the next test.
+  test('Android backs up to the cloud only end-to-end encrypted; from '
+      'Android 9 a transfer to a new phone is unchanged', () {
+    final main = '${_appRoot().path}/android/app/src/main';
+    final extraction = _uncommented(
+        File('$main/res/xml/data_extraction_rules.xml').readAsStringSync());
+    Map<String, String> attributes(String tag) => {
+          for (final m in RegExp(r'([\w:]+)="([^"]*)"').allMatches(tag))
+            m.group(1)!: m.group(2)!,
+        };
+    String? openTag(String xml, String tag) =>
+        RegExp('<$tag(?:\\s[^>]*)?>').firstMatch(xml)?.group(0);
+
+    final cloud = openTag(extraction, 'cloud-backup');
+    expect(cloud, isNotNull);
+    expect(attributes(cloud!), {'disableIfNoEncryptionCapabilities': 'true'});
+    final transfer = openTag(extraction, 'device-transfer');
+    expect(transfer, '<device-transfer>',
+        reason: 'a transfer goes phone to phone: no encryption condition');
+    expect(extraction, isNot(contains('<include')),
+        reason: 'Android 12+ stays exclude-only');
+
+    const domains = {
+      'root',
+      'file',
+      'database',
+      'sharedpref',
+      'external',
+      'device_root',
+      'device_file',
+      'device_database',
+      'device_sharedpref',
+    };
+    const flags = {'clientSideEncryption', 'deviceToDeviceTransfer'};
+    final legacy = _uncommented(
+        File('$main/res/xml-v28/backup_rules.xml').readAsStringSync());
+    final rules = [
+      for (final m in RegExp(r'<(include|exclude)\s([^>]*?)/?>')
+          .allMatches(legacy))
+        (m.group(1)!, attributes(m.group(2)!)),
+    ];
+    final includes = [
+      for (final (kind, a) in rules)
+        if (kind == 'include') a,
+    ];
+    for (final a in includes) {
+      expect(a.keys.toSet(), {'domain', 'path', 'requireFlags'},
+          reason: 'every include under a transfer flag: $a');
+      expect(a['path'], '.', reason: 'a whole domain: $a');
+      expect(flags, contains(a['requireFlags']), reason: '$a');
+    }
+    expect({for (final a in includes) (a['domain'], a['requireFlags'])}, {
+      for (final d in domains)
+        for (final f in flags) (d, f),
+    });
+    expect(includes, hasLength(domains.length * flags.length));
+    for (final (kind, a) in rules) {
+      if (kind == 'exclude') {
+        expect(a.keys.toSet(), {'domain', 'path'}, reason: '$a');
+      }
+    }
+  });
+
+  // Android 8.1 and lower (minSdk is 24) cannot encrypt a backup end to end
+  // and have no transfer flags: a cloud backup and a transfer read the same
+  // rules. They refuse any rule with a third attribute (requireFlags), and
+  // a parse that failed half way left the excludes alone in force for a
+  // later backup in the same process, which then took everything else,
+  // unencrypted (review of #72). Their rules (res/xml; Android 9 and later
+  // read res/xml-v28) parse there and include one file the app never
+  // writes: no backup or transfer carries the app's data, and a restore
+  // takes none. Google's page asks for such alternate rules. No exclude:
+  // one outside every included path fails lint's FullBackupContent check,
+  // which is fatal, so it stops a release build (lintVital).
+  test("Android 8.1 and lower: rules they can read, which carry none of the "
+      "app's data", () {
+    final res = '${_appRoot().path}/android/app/src/main/res';
+    Map<String, String> attributes(String tag) => {
+          for (final m in RegExp(r'([\w:]+)="([^"]*)"').allMatches(tag))
+            m.group(1)!: m.group(2)!,
+        };
+    final variants = {
+      for (final d in Directory(res).listSync().whereType<Directory>())
+        if (File('${d.path}/backup_rules.xml').existsSync())
+          d.uri.pathSegments.lastWhere((p) => p.isNotEmpty),
+    };
+    expect(variants, {'xml', 'xml-v28'},
+        reason: 'res/xml for Android 8.1 and lower, res/xml-v28 from 9');
+
+    final xml =
+        _uncommented(File('$res/xml/backup_rules.xml').readAsStringSync());
+    expect(xml, isNot(contains('requireFlags')));
+    final tags = [
+      for (final m in RegExp(r'<([\w-]+)\b([^>]*?)/?>').allMatches(xml))
+        (m.group(1)!, attributes(m.group(2)!)),
+    ];
+    expect(tags.first.$1, 'full-backup-content');
+    expect(tags.first.$2, isEmpty);
+    for (final (name, a) in tags.skip(1)) {
+      expect({'include', 'exclude'}, contains(name), reason: name);
+      expect(a.keys.toSet(), {'domain', 'path'},
+          reason: '$name $a: Android 8.1 and lower refuse a third attribute');
+    }
+    final includes = [
+      for (final (name, a) in tags)
+        if (name == 'include') a,
+    ];
+    expect(includes, hasLength(1),
+        reason: 'one include, or Android backs up everything not excluded');
+    final nothing = includes.single;
+    expect(nothing['domain'], 'file');
+    expect(nothing['path'], matches(RegExp(r'^[a-z0-9_]+$')),
+        reason: 'one plain file name, no folder');
+    // A file the app never writes: no Dart or Kotlin source names it.
+    for (final source in [
+      ...Directory('${_appRoot().path}/lib').listSync(recursive: true),
+      ...Directory('${_appRoot().path}/android/app/src/main/kotlin')
+          .listSync(recursive: true),
+    ].whereType<File>()) {
+      expect(source.readAsStringSync(), isNot(contains(nothing['path']!)),
+          reason: source.path);
+    }
+
+    expect(tags.where((t) => t.$1 == 'exclude'), isEmpty,
+        reason: 'an exclude outside every include fails lintVital');
+  });
+
+  // Lint's FullBackupContent check is fatal, so lintVital stops a release
+  // build on it: once a file has an <include>, every <exclude> must lie
+  // under an include of its domain (path "." or a folder above it).
+  test("every backup rule file passes lint's include and exclude check", () {
+    final res = '${_appRoot().path}/android/app/src/main/res';
+    Map<String, String> attributes(String tag) => {
+          for (final m in RegExp(r'(\w+)="([^"]*)"').allMatches(tag))
+            m.group(1)!: m.group(2)!,
+        };
+    for (final dir in ['xml', 'xml-v28']) {
+      final xml = _uncommented(
+          File('$res/$dir/backup_rules.xml').readAsStringSync());
+      final rules = [
+        for (final m in RegExp(r'<(include|exclude)\b([^>]*?)/?>')
+            .allMatches(xml))
+          (m.group(1)!, attributes(m.group(2)!)),
+      ];
+      final included = <String, List<String>>{};
+      for (final (kind, a) in rules) {
+        if (kind == 'include') (included[a['domain']!] ??= []).add(a['path']!);
+      }
+      if (included.isEmpty) continue;
+      for (final (kind, a) in rules) {
+        if (kind != 'exclude') continue;
+        final paths = included[a['domain']] ?? const <String>[];
+        expect(paths.any((p) => p == '.' || a['path']!.startsWith(p)), isTrue,
+            reason: "$dir: ${a['domain']} ${a['path']} is not in an included "
+                'path');
+      }
+    }
+  });
+
+  // Owner decisions 6 and 7 (2026-11-20): back reaches the app through
+  // Android's back callback (the predictive-back page transition follows
+  // the gesture from Android 14), and phones stay upright as the iPhone
+  // app does (Android 16 ignores the lock at 600 dp and wider, where the
+  // width-capped layout applies). Nothing else sets either: not the
+  // debug, profile or Play manifests, and not MainActivity's code.
+  test('Android: back goes through the back callback, and MainActivity is '
+      'portrait', () {
+    final manifest = _uncommented(_manifest());
+    final application =
+        RegExp(r'<application\b[^>]*>').firstMatch(manifest)?.group(0);
+    expect(application,
+        contains('android:enableOnBackInvokedCallback="true"'));
+    final activities = RegExp(r'<activity\b[^>]*>')
+        .allMatches(manifest)
+        .map((m) => m.group(0)!)
+        .toList();
+    expect(activities, hasLength(1));
+    expect(activities.single, contains('android:name=".MainActivity"'));
+    expect(activities.single,
+        contains('android:screenOrientation="portrait"'));
+    expect(
+        RegExp('screenOrientation|enableOnBackInvokedCallback')
+            .allMatches(manifest)
+            .length,
+        2,
+        reason: 'set once each');
+
+    final src = '${_appRoot().path}/android/app/src';
+    for (final variant in ['debug', 'profile', 'playChannel']) {
+      final xml =
+          _uncommented(File('$src/$variant/AndroidManifest.xml').readAsStringSync());
+      for (final word in [
+        '<application',
+        '<activity',
+        'screenOrientation',
+        'enableOnBackInvokedCallback',
+      ]) {
+        expect(xml, isNot(contains(word)), reason: '$variant: $word');
+      }
+    }
+    expect(_kotlinCode(_mainActivity()),
+        isNot(contains('requestedOrientation')));
+  });
+
+  // With enableOnBackInvokedCallback, Flutter unregisters its back
+  // callback at the root route and leaves Back there to Android. Android
+  // 14 and later move the task to the back only when the home screen
+  // started it with the launcher's own intent (ActivityClientController.
+  // shouldMoveTaskToBack, ActivityRecord.isMainIntent) and finish any other
+  // root: a task a share created was finished on Back, with the engine
+  // that was still analyzing its photo (review of #72). Such a task keeps
+  // Flutter's callback, so Back at its root goes through Flutter's
+  // SystemNavigator.pop to popSystemNavigator, as on Android 12 and lower.
+  // Decided once per activity: from the intent that created it (Android's
+  // own check) at its first create, before the replay rewrite empties it,
+  // then from the saved state. Android re-sends that intent only after
+  // process death; a relaunch in the same process (theme colours, Bold
+  // text, grammatical gender) hands the new instance whatever intent the
+  // last one set (the replay rewrite's, a notification tap's), which read
+  // a launcher task as any other (review of #72).
+  test('Back at the root of a task the launcher did not start stays with '
+      'Flutter on Android 14 and later', () {
+    final code = _kotlinCode(_mainActivity());
+    final create = _kotlinFunction(code, 'override fun onCreate(');
+    const decide = 'launcherTask = IntakeRules.launcherTask( saved = '
+        'savedInstanceState?.takeIf { it.containsKey(STATE_LAUNCHER_TASK) } '
+        '?.getBoolean(STATE_LAUNCHER_TASK), fromIntent = intent?.let { '
+        'IntakeRules.isLauncherIntent(it.action, it.categories, '
+        'it.data != null, it.type) } ?: false, ) backCallbackAtRoot = '
+        'IntakeRules.keepsBackCallbackAtRoot(Build.VERSION.SDK_INT, '
+        'launcherTask)';
+    expect(create, contains(decide));
+    expect(create.indexOf(decide), lessThan(create.indexOf('val replay =')),
+        reason: 'read before the replay rewrite empties the intent');
+    expect(
+        create,
+        contains('super.onCreate(savedInstanceState) if (backCallbackAtRoot) '
+            'setFrameworkHandlesBack(true)'),
+        reason: 'registered at once: the root route never asks for it');
+    expect(code, contains('private var launcherTask = false'));
+    expect(code, contains('private var backCallbackAtRoot = false'));
+    for (final field in ['launcherTask', 'backCallbackAtRoot']) {
+      expect(RegExp('\\b$field = (?!=)').allMatches(code), hasLength(2),
+          reason: '$field: declared false, then set once per create, in '
+              'onCreate');
+    }
+    // The decision outlives a relaunch: the activity's saved state keeps
+    // it, under its own key.
+    expect(_kotlinFunction(code, 'override fun onSaveInstanceState('),
+        contains(' outState.putBoolean(STATE_LAUNCHER_TASK, launcherTask) '));
+    expect(code,
+        contains('const val STATE_LAUNCHER_TASK = "chopstats.back.launcherTask"'));
+    expect(_kotlinFunction(code, 'override fun setFrameworkHandlesBack('),
+        '{ super.setFrameworkHandlesBack(frameworkHandlesBack || '
+        'backCallbackAtRoot) }');
+    expect(code, isNot(contains('registerOnBackInvokedCallback')),
+        reason: "Flutter's own callback, not a second one in front of it");
+    final rules = _kotlinCode(_intakeRules());
+    expect(
+        rules,
+        contains('fun isLauncherIntent(action: String?, categories: '
+            'Set<String>?, hasData: Boolean, type: String?): Boolean = '
+            'action == Intent.ACTION_MAIN && categories != null && '
+            'categories.size == 1 && Intent.CATEGORY_LAUNCHER in categories '
+            '&& !hasData && type == null'));
+    expect(
+        rules,
+        contains('fun keepsBackCallbackAtRoot(sdk: Int, launcherTask: '
+            'Boolean): Boolean = sdk >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE '
+            '&& !launcherTask'));
+    expect(
+        rules,
+        contains('fun launcherTask(saved: Boolean?, fromIntent: Boolean): '
+            'Boolean = saved ?: fromIntent'));
+    _expectJvmTests(['isLauncherIntent', 'keepsBackCallbackAtRoot',
+        'IntakeRules.launcherTask(']);
+    expect(_uncommented(_manifest()),
+        contains('android:enableOnBackInvokedCallback="true"'));
+
+    // Flutter 3.44, where the SDK carries its sources: FlutterActivity
+    // registers its callback through the hook and restores the saved state
+    // through it in onCreate, and a committed back gesture no route took
+    // becomes handlePopRoute, which ends in SystemNavigator.pop.
+    final flutter = _pluginRoot('flutter');
+    final activity = File('$flutter/../../engine/src/flutter/shell/platform/'
+        'android/io/flutter/embedding/android/FlutterActivity.java');
+    if (activity.existsSync()) {
+      final java = activity.readAsStringSync().replaceAll(RegExp(r'\s+'), ' ');
+      expect(
+          java,
+          contains('public void setFrameworkHandlesBack(boolean '
+              'frameworkHandlesBack) { if (frameworkHandlesBack && '
+              '!hasRegisteredBackCallback) { registerOnBackInvokedCallback();'));
+      expect(
+          java,
+          contains('setFrameworkHandlesBack(frameworkHandlesBack); } '
+              'delegate = new FlutterActivityAndFragmentDelegate(this);'));
+    }
+    final binding = File('$flutter/lib/src/widgets/binding.dart');
+    expect(binding.existsSync(), isTrue, reason: binding.path);
+    final dart = binding
+        .readAsStringSync()
+        .replaceAll(RegExp(r'//[^\n]*'), '')
+        .replaceAll(RegExp(r'\s+'), ' ');
+    expect(
+        dart,
+        contains('Future<void> _handleCommitBackGesture() async { if '
+            '(_backGestureObservers.isEmpty) { await handlePopRoute(); '
+            'return; }'));
   });
 
   // Design R7a: while restaurant lookup uses the photo location, the app
@@ -1281,16 +1613,21 @@ void main() {
         reason: 'plain "w" may leave stale bytes; SAVE_MODES only');
     expect(_kotlinFunction(code, 'private fun discardDocument('),
         contains('DocumentsContract.deleteDocument(contentResolver, uri)'));
-    // The pending source outlives a recreated activity.
+    // The pending source outlives a recreated activity (with the launcher
+    // task decision, pinned with Back at the root).
     expect(_kotlinFunction(code, 'override fun onSaveInstanceState('),
         '{ super.onSaveInstanceState(outState) pendingSaveSource?.let { '
-        'outState.putString(STATE_SAVE_SOURCE, it.path) } }');
+        'outState.putString(STATE_SAVE_SOURCE, it.path) } '
+        'outState.putBoolean(STATE_LAUNCHER_TASK, launcherTask) }');
     final create = _kotlinFunction(code, 'override fun onCreate(');
     expect(
         create,
-        endsWith('super.onCreate(savedInstanceState) pendingSaveSource = '
+        endsWith(' pendingSaveSource = '
             'cachedFile(savedInstanceState?.getString(STATE_SAVE_SOURCE)) }'),
         reason: 'restored through the same cache check');
+    expect(create.indexOf('super.onCreate(savedInstanceState)'),
+        lessThan(create.indexOf('pendingSaveSource =')),
+        reason: 'once the activity is created');
     // The open call is answered; with none (it died with its engine:
     // Android recreated the activity while the save screen was up), the
     // result waits for the restarted app, which asks once and says

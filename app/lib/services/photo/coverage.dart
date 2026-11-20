@@ -19,7 +19,11 @@ import 'filename_dates.dart';
 import 'glasses.dart' show captureMetaFor;
 import 'photo_library.dart';
 import 'watcher.dart'
-    show backfillQueryLimit, clampLookbackDays, lookbackCutoff;
+    show
+        backfillQueryLimit,
+        clampLookbackDays,
+        lookbackCutoff,
+        metaAlbumLookupTimeout;
 
 /// One photo the audit could not account for (or that needs the user).
 class CoverageItem {
@@ -49,6 +53,7 @@ class CoverageReport {
     required this.deleted,
     required this.inFlight,
     required this.missing,
+    required this.glassesOff,
     required this.unreadable,
     required this.truncated,
     required this.tooLargeToAnalyze,
@@ -94,6 +99,15 @@ class CoverageReport {
   /// feature exists.
   final List<CoverageItem> missing;
 
+  /// No ledger row either, but a Meta glasses photo while the 'Meta
+  /// glasses photos' switch is off (design G3; off until turned on on
+  /// Android, owner decision 8). Automatic intake lets such a photo go
+  /// before hashing it, without a ledger row on purpose: turning the
+  /// switch on lets the look-back pick it up. The user's setting keeps it
+  /// out, so it is not "never scanned", Log all never sends it, and it
+  /// does not hold back [fullyCovered].
+  final List<CoverageItem> glassesOff;
+
   /// Bytes could not be read (cloud-offloaded, permission edge, corrupt).
   final int unreadable;
 
@@ -129,6 +143,8 @@ class CoverageAuditor {
     required MealsDao dao,
     required PhotoHasher hasher,
     DateTime Function()? clock,
+    this.includeGlasses,
+    this.metaAlbumIds,
   })  : _library = library,
         _dao = dao,
         _hasher = hasher,
@@ -138,6 +154,19 @@ class CoverageAuditor {
   final MealsDao _dao;
   final PhotoHasher _hasher;
   final DateTime Function() _clock;
+
+  /// The 'Meta glasses photos' switch (AppSettings.watchGlasses), read
+  /// live as PhotoPipeline.includeGlasses reads it. Off, a Meta glasses
+  /// photo no ledger row or meal accounts for goes to
+  /// [CoverageReport.glassesOff] instead of [CoverageReport.missing]. Null
+  /// (tests), or a throw: included, as in the pipeline.
+  final bool Function()? includeGlasses;
+
+  /// The ids of the images created at or after `since` in the Meta glasses
+  /// albums, which the watcher also recognizes a glasses photo by
+  /// (watcher.dart metaAlbumAssetIds; iOS only). Asked once per audit, and
+  /// only when a photo needs it. Null: no album signal (Android, tests).
+  final Future<Set<String>> Function(DateTime since)? metaAlbumIds;
 
   /// Sequential sweep: one photo's bytes resident at a time (the same
   /// backpressure lesson as the intake path — a parallel map would hold the
@@ -155,7 +184,31 @@ class CoverageAuditor {
     final logged = <CoverageItem>[];
     final failed = <CoverageItem>[];
     final missing = <CoverageItem>[];
+    final glassesOff = <CoverageItem>[];
     final skipped = <CoverageItem>[];
+    // Design G3: whether automatic intake keeps [asset] out as a Meta
+    // glasses photo, switched off — the pipeline's own test
+    // (_excludesGlasses) on the capture the watcher would read. Asked only
+    // of a photo nothing else accounts for: one EXIF header read, and the
+    // album lookup at most once per audit.
+    Future<Set<String>>? albumIds;
+    Future<bool> glassesSwitchedOff(
+        Uint8List bytes, String name, LibraryAsset asset) async {
+      final include = includeGlasses;
+      if (include == null) return false;
+      try {
+        if (include()) return false;
+      } catch (_) {
+        return false;
+      }
+      final lookup = metaAlbumIds;
+      final inAlbum = lookup != null &&
+          (await (albumIds ??= _albumIds(lookup, cutoff))).contains(asset.id);
+      return captureMetaFor(bytes, name,
+              createDate: asset.createDateTime, inMetaAlbum: inAlbum)
+          .isMetaGlasses;
+    }
+
     var deleted = 0, inFlight = 0, unreadable = 0, done = 0;
     var tooLarge = 0, leftovers = 0;
     // One day before the cutoff: the manual leftover flow deducts from
@@ -207,6 +260,8 @@ class CoverageAuditor {
             createDate: asset.createDateTime,
             mealId: mealId,
           ));
+        } else if (await glassesSwitchedOff(bytes, name, asset)) {
+          glassesOff.add(item);
         } else {
           missing.add(item);
         }
@@ -246,11 +301,29 @@ class CoverageAuditor {
       deleted: deleted,
       inFlight: inFlight,
       missing: missing,
+      glassesOff: glassesOff,
       unreadable: unreadable,
       truncated: truncated,
       tooLargeToAnalyze: tooLarge,
       limitedAccess: limited,
     );
+  }
+
+  /// The Meta album members created from a minute before [since] (a
+  /// creation date rounded either way stays inside), within the watcher's
+  /// time limit; empty when the lookup fails or runs out of time.
+  static Future<Set<String>> _albumIds(
+      Future<Set<String>> Function(DateTime since) lookup,
+      DateTime since) async {
+    try {
+      // Through then<Set<String>>, as the watcher does: a lookup typed
+      // narrower would reject timeout's onTimeout.
+      return await lookup(since.subtract(const Duration(minutes: 1)))
+          .then<Set<String>>((ids) => ids)
+          .timeout(metaAlbumLookupTimeout, onTimeout: () => const <String>{});
+    } catch (_) {
+      return const <String>{};
+    }
   }
 
   /// md5s of the leftover photos recorded on meals dated [from]..[to]

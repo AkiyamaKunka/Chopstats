@@ -40,6 +40,7 @@ import '../services/photo/filename_dates.dart' show deriveCapturedAt;
 import '../services/photo/food_prefilter.dart' show foodScoreViaImageIO;
 import '../services/photo/glasses.dart' show captureMetaFor;
 import '../services/photo/glasses_check.dart' show recordGlassesCheckLocally;
+import '../services/photo/photo_changes.dart' show platformPhotoChangeSource;
 import '../services/photo/photo_hash.dart' show originalBytesMd5;
 import '../services/photo/origin_cache.dart' show pruneOriginCacheAtLaunch;
 import '../services/photo/photo_library.dart';
@@ -479,6 +480,9 @@ class AppServices {
             onCatchUpReleased: () => unawaited(catchUpAfterHold()),
           )
         : null;
+    // The Meta glasses albums, which Photo Coverage reads as the watcher
+    // does (iOS; null elsewhere).
+    final albumChanges = platformPhotoChangeSource();
     final ui = UiServices(
       dao: dao,
       analyzer: analyzer,
@@ -499,7 +503,14 @@ class AppServices {
               // compute(): the audit hashes up to 2000 originals
               // back-to-back — synchronous md5 on the UI isolate would
               // freeze scrolling for the whole sweep.
-              hasher: (bytes) => compute(originalBytesMd5, bytes))
+              hasher: (bytes) => compute(originalBytesMd5, bytes),
+              // Design G3: the switch the pipeline reads, live, and the
+              // albums: a glasses photo kept out of automatic intake is not
+              // "never scanned", and Log all never sends it.
+              includeGlasses: () => settings.watchGlasses,
+              metaAlbumIds: albumChanges == null
+                  ? null
+                  : (since) => metaAlbumAssetIds(albumChanges, since: since))
           : null,
       // The audit's log/retry actions share the pipeline's global FIFO —
       // enqueue() chains onto the tail; process() would race it.

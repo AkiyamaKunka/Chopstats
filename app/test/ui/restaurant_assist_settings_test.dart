@@ -863,8 +863,13 @@ void main() {
       expect(tester
           .widget<Switch>(find.byKey(const Key('restaurantLocationToggle')))
           .onChanged, isNull);
+      // Brand-only is how Android works, not a stopgap (owner decision 10,
+      // 2026-11-20): no 'for now'.
       expect(footer(tester),
-          contains('On Android, lookups use printed brands only for now.'));
+          contains('On Android, lookups use printed brands only.'));
+      expect(footer(tester), isNot(contains('for now')));
+      expect(lookupAppLocalizations(const Locale('zh'))
+          .restaurantLocationAndroidHint, 'Android 只按印出的品牌查询。');
       await pickMode(tester, 'off');
       expect(find.byKey(const Key('restaurantOffClearPlaces')), findsNothing,
           reason: 'nothing is learned without a location');

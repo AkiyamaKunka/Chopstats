@@ -214,6 +214,25 @@ void main() {
       expect(init(), _wired(r'glassesCheckLog: recordGlassesCheckLocally\)'));
     });
 
+    // Review of #72: without them, Photo Coverage called every glasses photo
+    // the switch keeps out of automatic intake (Android's default) "never
+    // scanned", and its Log all sent them all to the AI.
+    test('Photo Coverage reads the glasses switch and the Meta albums as '
+        'intake does', () {
+      final auditor = _call(init(), 'CoverageAuditor(');
+      expect(auditor,
+          _wired(r'includeGlasses: \(\) => settings\.watchGlasses,'));
+      expect(
+        auditor,
+        _wired(
+          r'metaAlbumIds: albumChanges == null \? null : \(since\) => '
+          r'metaAlbumAssetIds\(albumChanges, since: since\)\)',
+        ),
+      );
+      expect(init(),
+          _wired(r'final albumChanges = platformPhotoChangeSource\(\);'));
+    });
+
     // G1b: without it every late import is read in full, logged or not.
     // Review r171: without liveHeld the live watcher read every photo an
     // iCloud Backup hold kept back again at each library change.

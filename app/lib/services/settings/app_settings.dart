@@ -467,7 +467,7 @@ class AppSettings extends ChangeNotifier {
   int _calorieGoal = 0; // 0 = unset -> the daily summary uses the median
   bool _watcherEnabled = false;
   bool _watcherDisclosureSeen = false;
-  bool _watchGlasses = true;
+  bool _watchGlasses = defaultWatchGlasses;
   String _restaurantAssist = 'off';
   bool _restaurantAssistLocation = false;
   DateTime? _restaurantAssistConsentAt;
@@ -553,7 +553,7 @@ class AppSettings extends ChangeNotifier {
     s._calorieGoal = (goal > 0 && goal <= maxDailyGoalKcal) ? goal : 0;
     s._watcherEnabled = p.getBool(_kWatcherEnabled) ?? false;
     s._watcherDisclosureSeen = p.getBool(_kWatcherDisclosureSeen) ?? false;
-    s._watchGlasses = p.getBool(_kWatchGlasses) ?? true;
+    s._watchGlasses = p.getBool(_kWatchGlasses) ?? defaultWatchGlasses;
     final assist = p.getString(_kRestaurantAssist) ?? 'off';
     s._restaurantAssist =
         restaurantAssistModes.contains(assist) ? assist : 'off';
@@ -1278,11 +1278,21 @@ class AppSettings extends ChangeNotifier {
   }
 
   /// Whether the automatic intake logs photos it recognizes as taken with
-  /// Meta glasses (design G3, the 'Meta glasses photos' switch; default on).
-  /// Off, they are not offered at all — PhotoPipeline.includeGlasses — and
-  /// photos the user adds on purpose still go through. Read by both
-  /// engines: the background run loads it with the rest at its start.
+  /// Meta glasses (design G3, the 'Meta glasses photos' switch; default
+  /// [defaultWatchGlasses]). Off, they are not offered at all —
+  /// PhotoPipeline.includeGlasses — and photos the user adds on purpose
+  /// still go through. Read by both engines: the background run loads it
+  /// with the rest at its start.
   bool get watchGlasses => _watchGlasses;
+
+  /// The 'Meta glasses photos' switch for an install that never set it:
+  /// on, except on Android (owner decision 8, 2026-11-20). An iPhone
+  /// checks each glasses photo for food on the phone before anything is
+  /// sent (di.dart's foodCheck, Apple's image classifier); Android has no
+  /// such check, so there every one would go to the AI unchecked. Only
+  /// the default: a value the user set, on or off, is stored and wins.
+  static bool get defaultWatchGlasses =>
+      defaultTargetPlatform != TargetPlatform.android;
 
   Future<void> setWatchGlasses(bool value) async {
     _watchGlasses = value;

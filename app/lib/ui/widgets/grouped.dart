@@ -556,8 +556,13 @@ class GroupedPage extends StatelessWidget {
       backgroundColor: pageColor(context),
       body: ContentWidthCap(
         child: CustomScrollView(
-          physics: const BouncingScrollPhysics(
-              parent: AlwaysScrollableScrollPhysics()),
+          // iOS: the grouped table's bounce, even on a short page. Android:
+          // the app's Material scrolling, clamped with the stretch
+          // overscroll (owner decision 6, 2026-11-20; app.dart).
+          physics: Theme.of(context).platform == TargetPlatform.android
+              ? null
+              : const BouncingScrollPhysics(
+                  parent: AlwaysScrollableScrollPhysics()),
           slivers: [
             appLargeTitleBar(context, title: title),
             SliverToBoxAdapter(

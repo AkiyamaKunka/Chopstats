@@ -335,22 +335,24 @@ When merging #22 after this PR:
 - **Never hand-merge the generated `app_localizations*.dart`.** Take
   either side, then run `flutter gen-l10n` in `app/`.
 - `app/test/ui/usual_copy_test.dart` pins the number of keys in each ARB
-  file: 809 on `main` since #22 merged, 959 on the iCloud Backup branch
+  file: 809 on `main` since #22 merged, 961 on the iCloud Backup branch
   merged with #33, the review-171 fixes, the Android photos, privacy,
-  background and ui lanes, the Play channel and the Android lows lane
-  (`feat/icloud-backup` adds 72 `backup*` and `import*` keys, #33's
-  source-link label 1, the Test AI provider page's three `diagStatus*`
-  check states 3, the Body tab's three failure lines 3, the coverage
-  window slider's screen-reader name `covWindowLabel` 1, the Leftovers
-  screen's two failure lines 2, Android's system photo picker
-  `addChooseAllPhotos`, `addPickerNote`, `addPickerUnavailable` and
-  `addOldPhotoLoggedToday` 4, `android/privacy`'s privacy and https
-  strings 23, the Android background lane's block 10, the ui lane's
-  discard-changes question 4, the Play channel's block 20 (its notice,
-  Diagnostics' build line and the `*Play` variants of the copy that names
-  Watch Camera Roll or Photo Coverage or says a photo is kept or retried),
-  the Android lows lane's `outcomeShareFixAddressMsg` 1 (a share refused
-  for the server address) and its review's seven lines for an upload key
+  background and ui lanes, the Play channel, the Android
+  look-and-defaults branch and the Android lows lane (`feat/icloud-backup`
+  adds 72 `backup*` and `import*` keys, #33's source-link label 1, the
+  Test AI provider page's three `diagStatus*` check states 3, the Body
+  tab's three failure lines 3, the coverage window slider's screen-reader
+  name `covWindowLabel` 1, the Leftovers screen's two failure lines 2,
+  Android's system photo picker `addChooseAllPhotos`, `addPickerNote`,
+  `addPickerUnavailable` and `addOldPhotoLoggedToday` 4,
+  `android/privacy`'s privacy and https strings 23, the Android background
+  lane's block 10, the ui lane's discard-changes question 4, the Play
+  channel's block 20 (its notice, Diagnostics' build line and the `*Play`
+  variants of the copy that names Watch Camera Roll or Photo Coverage or
+  says a photo is kept or retried), the Android look-and-defaults
+  branch's `watchGlassesAndroidNote` and `covGlassesOffCount` 2, the
+  Android lows lane's `outcomeShareFixAddressMsg` 1 (a share refused for
+  the server address) and its review's seven lines for an upload key
   saved for another server address 7, none shared; review r171 deleted
   `bodyEmptyHintImperial`, the same text as `bodyEmptyHint`). If either
   side adds keys before both merge, change the number in that test to the
@@ -1106,13 +1108,52 @@ position. The paste-ready answers live next to the app in
    under the tag `android-v1.7.0` (§ 6.6), so `v1.7.0` stays free for the
    iPhone 1.7.0.
 
-Not decided yet: decision 5 (Android backup beyond Auto Backup and Save
-to device; end-to-end-only cloud backup), 6 (Android look and feel: back
-at the root, predictive back, scrolling), 7 (orientation and large
-screens), 8 (the Meta glasses default on Android), 9 (analysis after you
-leave the app), 10 (restaurant lookups with photo location), 11
-(shortcuts and a widget) and 12 (Health Connect). Nothing below assumes
-an answer to them.
+**The owner's decisions (2026-11-20):**
+
+5. **Backup:** Android's Auto Backup plus Export Data › Save to Device
+   now; "Back up to a file" (the background job rewrites an export in a
+   file or folder the user picks) after launch. The Google backup takes
+   the app's data only end-to-end encrypted, which needs the phone's
+   screen lock: `disableIfNoEncryptionCapabilities` on Android 12 and
+   later (`res/xml/data_extraction_rules.xml`),
+   `requireFlags="clientSideEncryption"` on Android 9 to 11
+   (`res/xml-v28/backup_rules.xml`). Android 7.0 to 8.1 cannot encrypt
+   end to end, so there neither a backup nor a transfer carries the
+   app's data (`res/xml/backup_rules.xml`). The Android footer under
+   Settings › Your Data says the backup needs a screen lock; the privacy
+   policy dates it from 1.7.1 (§ 6.6).
+6. **Android look and feel:** predictive back (with
+   `android:enableOnBackInvokedCallback="true"`), Material stretch
+   overscroll and Roboto at its own spacing on Android; iOS keeps its
+   slide, bounce and tracking. Back at the root moves the task to the back
+   instead of finishing it (`popSystemNavigator`, in its own PR). Android
+   14 and later finish a task the launcher did not start when Back at its
+   root reaches them, so such a task keeps Flutter's back callback there
+   (`MainActivity`). One start still looks like the launcher's and is
+   finished on Android 14 and later: the launcher intent sent from
+   somewhere other than the home screen, such as Play's Open button.
+   While a shared photo is still pending, the app keeps Back at the root
+   itself in every task (`SharedPhotosBackGuard`, in its own PR).
+   `singleTask` stays.
+7. **Orientation:** portrait on phones
+   (`android:screenOrientation="portrait"`). Android 16 ignores it at
+   600 dp and wider, where the width-capped layout applies. Tablets stay
+   in the device catalog.
+8. **Meta glasses photos** start Off on Android, which cannot check them
+   for food on the phone; a value the user set wins, and a line under
+   Settings › Photos says why. The privacy policy dates it from 1.7.1
+   (§ 6.6).
+9. **Analysis after you leave the app:** QA on 2026-11-20 (API 35 and
+   36) found that once other apps are opened, Android freezes the app
+   about 17 seconds after it leaves the screen, and an analysis waits
+   until it comes back (a kill in between loses it). A short expedited
+   WorkManager job will keep an analysis running (API 31 and later), in
+   its own PR.
+10. **Restaurant lookups** stay brand-only on Android (no photo location,
+    no places service); the hint no longer says "for now" / 目前.
+11. **Shortcuts and a widget:** after launch, static shortcuts first and
+    a widget later; nothing in 1.7.1.
+12. **Health Connect:** no sync in v1.
 
 ### 6.1 Account and app record
 
@@ -1575,11 +1616,25 @@ on any `v*` tag, and the iOS lane stops until the iCloud container exists
    other **only after** § 6.3's step 2 check has passed, and say that the
    Play build has no Watch Camera Roll.
 
-Later, when the iPhone 1.7.0 is ready, tag `v1.7.0` on `main` as usual.
+Later, when the iPhone 1.7.0 is ready, tag `v1.7.0` on `main` as usual
+(but read the next paragraph first).
 That run also builds Android again, with a higher build number: it puts
 that APK on the `v1.7.0` release and, with `PLAY_SERVICE_ACCOUNT_JSON`
 set, sends the bundle to the internal track. Both are harmless (an
 upgrade for anyone who installs them).
+
+**The next Android build is 1.7.1.** `android-v1.7.0` (b207) went out as
+1.7.0, and the privacy policy dates two Android changes from 1.7.1: Meta
+glasses photos off until turned on, and the Google backup only
+end-to-end encrypted (owner decisions 8 and 5). So before the next build
+of `main` that includes Android, by lane `play` or by any `v*` tag, set
+`version:` in `app/pubspec.yaml` and `kAppVersion`
+(`lib/services/backup/backup_files.dart`) to `1.7.1` or later: a build
+still named 1.7.0 would not do what the policy says 1.7.0 does. The tag
+must match pubspec, so this also makes the next iPhone release from
+`main` 1.7.1, not the 1.7.0 decision 4 kept free for it: ask the owner
+before bumping. `release_decisions_test` keeps this paragraph while
+pubspec is behind the newest version the policy names.
 
 **Developer verification and the GitHub APK.** Because the package
 shipped as GitHub APKs before it existed on Play, Play Console may ask,
@@ -1665,8 +1720,7 @@ checks that they agree; it cannot tell that the date is old).
 
 Do now:
 
-1. Read decisions 1–4 above; they are settled. Decisions 5–12 can wait
-   for the closed test.
+1. Read decisions 1–12 above; they are settled.
 2. Create the personal Play Console account, with 2-Step Verification,
    identity, email and phone checks, the public developer name and contact
    email, and the trader-status declaration (§ 6.1).

@@ -109,10 +109,10 @@ class _FixMealScreenState extends State<FixMealScreen> {
       // staged delete needs this screen's question, so it never lands).
       // Left means popped, not only unmounted: Back completes the push at
       // once, so Today reloads then, but the screen stays mounted through
-      // its exit transition (500 ms with the Cupertino one), and a reply
-      // landing in it was presented over Today and never reloaded it. The
-      // route stops being active at the pop (a dialog on top leaves it
-      // active).
+      // its exit transition (450 ms with Android's predictive-back one,
+      // 500 ms with iOS's Cupertino one), and a reply landing in it was
+      // presented over Today and never reloaded it. The route stops being
+      // active at the pop (a dialog on top leaves it active).
       if (!mounted || !(ModalRoute.of(context)?.isActive ?? true)) {
         if (changedAfterClose != null && replies.any((r) => r.applied)) {
           await changedAfterClose();

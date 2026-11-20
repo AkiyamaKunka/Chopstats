@@ -67,11 +67,57 @@ void main() {
     // arriving — the switch exists so a friend can turn it OFF.
     expect(s.summaryEnabled, isTrue);
     expect(s.watcherEnabled, isFalse);
-    // Design G3: Meta glasses photos are included unless switched off.
-    expect(s.watchGlasses, isTrue);
+    // Meta glasses photos: per platform, below.
+    expect(s.watchGlasses, AppSettings.defaultWatchGlasses);
     expect(s.dietaryProfile, isNull);
     expect(s.quotaPauseUntil, isNull);
     expect(s.isQuotaPaused, isFalse);
+  });
+
+  // Design G3 put Meta glasses photos on by default: an iPhone checks each
+  // one for food on the phone before it is sent. Android has no such
+  // check, so there the switch starts off (owner decision 8, 2026-11-20).
+  // Only the default changes: whatever the user set is stored and wins.
+  group('the Meta glasses photos default', () {
+    tearDown(() => debugDefaultTargetPlatformOverride = null);
+
+    for (final (platform, byDefault) in [
+      (TargetPlatform.iOS, true),
+      (TargetPlatform.android, false),
+    ]) {
+      test('${platform.name}: ${byDefault ? 'on' : 'off'} for an install '
+          'that never touched the switch', () async {
+        debugDefaultTargetPlatformOverride = platform;
+        expect(AppSettings.defaultWatchGlasses, byDefault);
+        final (s, prefs, keys) = await freshSettings(
+            initial: {'settings.watcher_enabled': true});
+        expect(s.watchGlasses, byDefault);
+        expect(prefs.getBool('settings.watch_glasses'), isNull,
+            reason: 'a default is never written, so it can still change');
+        final again = await AppSettings.load(prefs: prefs, keyStore: keys);
+        expect(again.watchGlasses, byDefault);
+      });
+
+      for (final stored in [true, false]) {
+        test('${platform.name}: a stored $stored wins over the default',
+            () async {
+          debugDefaultTargetPlatformOverride = platform;
+          final (s, _, _) =
+              await freshSettings(initial: {'settings.watch_glasses': stored});
+          expect(s.watchGlasses, stored);
+        });
+      }
+
+      test('${platform.name}: flipping the switch stores the choice, and it '
+          'survives a relaunch', () async {
+        debugDefaultTargetPlatformOverride = platform;
+        final (s, prefs, keys) = await freshSettings();
+        await s.setWatchGlasses(!byDefault);
+        expect(prefs.getBool('settings.watch_glasses'), !byDefault);
+        final again = await AppSettings.load(prefs: prefs, keyStore: keys);
+        expect(again.watchGlasses, !byDefault);
+      });
+    }
   });
 
   test('setters persist and a second load sees the values', () async {

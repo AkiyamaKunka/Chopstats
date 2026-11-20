@@ -268,4 +268,140 @@ void main() {
     library.assets = []; // deleted from the gallery meanwhile
     expect(await auditor.loadForProcessing(report.missing.single), isNull);
   });
+
+  // Design G3: with 'Meta glasses photos' off (Android's default, owner
+  // decision 8), automatic intake lets a glasses photo go before hashing
+  // it, with no ledger row on purpose. The audit called it "never
+  // scanned", never covered the window, and Log all sent it to the AI as a
+  // deliberate photo (review of #72).
+  group('Meta glasses photos switched off', () {
+    const glassesName = 'photo-1_singular_display_fullPicture.HEIC';
+    late bool include;
+    late List<DateTime> albumAsks;
+    late Set<String> album;
+
+    CoverageAuditor withSwitch(
+            {bool Function()? switchOn,
+            Future<Set<String>> Function(DateTime since)? albumIds}) =>
+        CoverageAuditor(
+            library: library,
+            dao: dao,
+            hasher: testHash,
+            clock: () => now,
+            includeGlasses: switchOn ?? () => include,
+            metaAlbumIds: albumIds);
+
+    setUp(() {
+      include = false;
+      albumAsks = [];
+      album = {};
+    });
+
+    Future<Set<String>> albumLookup(DateTime since) async {
+      albumAsks.add(since);
+      return album;
+    }
+
+    test('are kept out, not "never scanned": no Log all, and the window '
+        'is covered', () async {
+      library.assets = [asset(1, name: glassesName), asset(2)];
+      dao.ledger['h2'] = IngestionStatus.saved;
+      final report = await withSwitch().audit(lookbackDays: 2);
+      expect(report.missing, isEmpty);
+      expect(report.glassesOff.single.assetId, 'a1');
+      expect(report.glassesOff.single.fileName, glassesName);
+      expect(report.fullyCovered, isTrue);
+    });
+
+    test('a camera photo with no ledger row is still never scanned',
+        () async {
+      library.assets = [asset(1, name: glassesName), asset(2)];
+      final report = await withSwitch().audit(lookbackDays: 2);
+      expect(report.missing.single.assetId, 'a2');
+      expect(report.glassesOff.single.assetId, 'a1');
+      expect(report.fullyCovered, isFalse);
+    });
+
+    test('switched on, a glasses photo with no ledger row is never scanned',
+        () async {
+      include = true;
+      library.assets = [asset(1, name: glassesName)];
+      final report = await withSwitch().audit(lookbackDays: 2);
+      expect(report.missing.single.assetId, 'a1');
+      expect(report.glassesOff, isEmpty);
+    });
+
+    test('read live, at each photo, as the pipeline reads it', () async {
+      library.assets = [
+        asset(1, name: glassesName),
+        asset(2, name: 'photo-2_singular_display_fullPicture.HEIC'),
+      ];
+      var asked = 0;
+      final report = await withSwitch(switchOn: () => ++asked > 1)
+          .audit(lookbackDays: 2);
+      expect(report.glassesOff.map((i) => i.assetId), ['a1']);
+      expect(report.missing.map((i) => i.assetId), ['a2']);
+    });
+
+    test('no switch (tests), or one that throws: included, as in the '
+        'pipeline', () async {
+      library.assets = [asset(1, name: glassesName)];
+      expect((await auditor.audit(lookbackDays: 2)).missing, hasLength(1));
+      final thrown = await withSwitch(switchOn: () => throw StateError('x'))
+          .audit(lookbackDays: 2);
+      expect(thrown.missing, hasLength(1));
+      expect(thrown.glassesOff, isEmpty);
+    });
+
+    test('a glasses photo the ledger or a meal accounts for is counted as '
+        'before', () async {
+      library.assets = [
+        asset(1, name: glassesName), // logged while the switch was on
+        asset(2, name: 'photo-2_singular_display_fullPicture.HEIC'),
+        asset(3, name: 'photo-3_singular_display_fullPicture.HEIC'),
+      ];
+      dao.ledger['h1'] = IngestionStatus.saved;
+      dao.ledger['h2'] = IngestionStatus.failed; // picked, and it failed
+      dao.seed(namesAsset(9, '2026-07-26', 'a3')); // edited after logging
+      final report = await withSwitch().audit(lookbackDays: 2);
+      expect(report.logged.map((i) => i.assetId), unorderedEquals(['a1', 'a3']));
+      expect(report.failed.single.assetId, 'a2');
+      expect(report.glassesOff, isEmpty);
+      expect(report.missing, isEmpty);
+    });
+
+    test('a photo only the Meta album marks counts too, the album asked '
+        'once per audit and only when needed', () async {
+      library.assets = [asset(1), asset(2), asset(3)];
+      album = {'a1', 'a3'};
+      dao.ledger['h3'] = IngestionStatus.saved;
+      final report =
+          await withSwitch(albumIds: albumLookup).audit(lookbackDays: 2);
+      expect(report.glassesOff.map((i) => i.assetId), ['a1']);
+      expect(report.missing.map((i) => i.assetId), ['a2']);
+      // The window of 2 days starts at midnight on the 25th.
+      expect(albumAsks, [DateTime(2026, 7, 24, 23, 59)],
+          reason: 'once, from a minute before the window');
+
+      albumAsks.clear();
+      include = true;
+      await withSwitch(albumIds: albumLookup).audit(lookbackDays: 2);
+      expect(albumAsks, isEmpty, reason: 'not while the switch is on');
+      include = false;
+      dao.ledger['h1'] = IngestionStatus.saved;
+      dao.ledger['h2'] = IngestionStatus.saved;
+      await withSwitch(albumIds: albumLookup).audit(lookbackDays: 2);
+      expect(albumAsks, isEmpty, reason: 'nothing needed it');
+    });
+
+    test('an album lookup that fails counts no photo as in the album',
+        () async {
+      library.assets = [asset(1)];
+      final report = await withSwitch(
+              albumIds: (_) async => throw StateError('channel gone'))
+          .audit(lookbackDays: 2);
+      expect(report.missing.single.assetId, 'a1');
+      expect(report.glassesOff, isEmpty);
+    });
+  });
 }

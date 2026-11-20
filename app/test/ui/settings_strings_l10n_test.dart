@@ -246,14 +246,21 @@ void main() {
       }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
     });
 
-    // Design G3: the switch under 监控相册, on by default.
+    // Design G3: the switch under 监控相册. Its default per platform is
+    // AppSettings.defaultWatchGlasses (app_settings_test).
     group('[$tag] the Meta glasses photos switch', () {
       final title =
           tag == 'zh' ? '包括 Meta 眼镜拍的照片' : 'Meta glasses photos';
+      final note = tag == 'zh'
+          ? '在 Android 上，「包括 Meta 眼镜拍的照片」默认关闭：这些照片无法先在'
+              '手机上检查有没有食物，打开后每一张都会不经检查就发送给 AI 服务。'
+          : 'On Android, the Meta glasses photos switch starts off: these '
+              "photos can't be checked for food on the phone first, so each "
+              'one would go to the AI service unchecked.';
 
-      testWidgets('the row under Watch Camera Roll, on by default; it '
-          'switches the setting off and on', (tester) async {
-        final settings = FakeSettings(watcherEnabled: true);
+      testWidgets('the row under Watch Camera Roll; it switches the setting '
+          'off and on', (tester) async {
+        final settings = FakeSettings(watcherEnabled: true, watchGlasses: true);
         await pump(tester, c.locale, settings: settings);
         final row = find.byKey(const Key('watchGlassesRow'));
         expect(find.descendant(of: row, matching: find.text(title)),
@@ -274,6 +281,35 @@ void main() {
         await tester.pumpAndSettle();
         expect(settings.watchGlasses, isTrue);
       });
+
+      // Owner decision 8 (2026-11-20): Android has no on-phone food check
+      // for glasses photos, so the switch starts off there, and the Photos
+      // footer says why, under the generic watcher sentence, whatever the
+      // switch shows. iPhone checks each one and says nothing.
+      testWidgets('Android: the Photos footer says why the switch starts off',
+          (tester) async {
+        expect(lookupAppLocalizations(c.locale).watchGlassesAndroidNote, note);
+        for (final on in [false, true]) {
+          await pump(tester, c.locale,
+              settings: FakeSettings(watcherEnabled: on, watchGlasses: on));
+          final footer = find.textContaining(note);
+          expect(footer, findsOneWidget, reason: 'switch on: $on');
+          final text = tester.widget<Text>(footer).data!;
+          expect(text, endsWith(note), reason: 'the last line');
+          expect(
+              tester.getTopLeft(footer).dy,
+              greaterThan(tester
+                  .getTopLeft(find.byKey(const Key('watchGlassesRow')))
+                  .dy));
+        }
+      }, variant: TargetPlatformVariant.only(TargetPlatform.android));
+
+      testWidgets('iPhone: no such line', (tester) async {
+        await pump(tester, c.locale,
+            settings: FakeSettings(watcherEnabled: true));
+        expect(find.byKey(const Key('watchGlassesRow')), findsOneWidget);
+        expect(find.textContaining(note), findsNothing);
+      }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
     });
 
     group('[$tag] 导入数据… / 导出数据…', () {
