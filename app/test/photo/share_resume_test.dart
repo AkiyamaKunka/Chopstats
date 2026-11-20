@@ -194,7 +194,7 @@ void main() {
     expect(await mealCount(), 1);
     expect((await run.dao.photoStatus(hash))?.status, IngestionStatus.saved);
     expect(run.intake.photosPending.value, isFalse,
-        reason: 'its meal is written: Back is Android\'s own again');
+        reason: 'its meal is written: the shell\'s Back guard lets go');
     expect(thumb.isCompleted, isFalse,
         reason: 'gone with the meal row, not after the thumbnail');
     thumb.complete(null);

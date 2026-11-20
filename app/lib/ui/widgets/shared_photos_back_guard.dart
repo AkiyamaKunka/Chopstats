@@ -11,30 +11,36 @@ import 'package:flutter/widgets.dart';
 
 /// Keeps the app running when Back reaches the root while [pending] is
 /// true (ShareIntake.photosPending: a shared photo not settled yet), on
-/// Android.
+/// Android, in every task.
 ///
 /// MainActivity.popSystemNavigator moves the task to the back instead of
-/// finishing it, but only a Back that Flutter handles gets there. At the
-/// root, with nothing to pop, Flutter hands Back to Android
-/// (setFrameworkHandlesBack(false)). With predictive back on (every
-/// Android 16 phone, since the app targets SDK 36, and Android 13-15 with
-/// android:enableOnBackInvokedCallback) Android then answers that Back
-/// itself. Android 14 and later move to the back only a task the home
-/// screen started with the launcher intent, and FINISH any other, such as
-/// the task a share from Gallery started, destroying the engine in the
-/// middle of the analysis. The photo came back only at the next start,
-/// sent to the AI a second time, or never when that start was a day
-/// later. (Android 13 also moves back a task whose root is a launcher
-/// activity, as MainActivity is: there the guard does what Android would.)
+/// finishing it, but only a Back that Flutter handles gets there. With
+/// predictive back on (android:enableOnBackInvokedCallback, Android 13 and
+/// later), at an idle root Flutter hands Back to Android
+/// (setFrameworkHandlesBack(false)), which answers it itself: Android 13
+/// moves a task whose root is a launcher activity, as MainActivity is, to
+/// the back, and Android 14 and later a task the home screen started with
+/// the launcher intent. Any other task keeps Flutter's callback on
+/// Android 14 and later (MainActivity.setFrameworkHandlesBack: a share,
+/// the setup link, a notification), so its Back reaches popSystemNavigator
+/// anyway. One start is left that Android 14 and later FINISH on that
+/// Back: the launcher intent sent from somewhere other than the home
+/// screen (Play's Open button), which looks like the launcher's own to the
+/// app. A photo shared into such a task (singleTask: the share reaches the
+/// running activity) would die with its engine in the middle of the
+/// analysis, and come back only at the next start, sent to the AI a
+/// second time, or never when that start was a day later.
 ///
 /// So while [pending] is true the root route does not pop (PopScope with
 /// canPop false): Flutter keeps the Back (setFrameworkHandlesBack(true))
 /// and, when one reaches the root, calls SystemNavigator.pop, which
 /// MainActivity answers with moveTaskToBack. The engine lives on and logs
-/// the photo, on every Android version. Once nothing is pending, Back at
-/// the root is Android's own again, with its back-to-home preview. Screens
-/// and dialogs over the shell pop as before. iPhone has no Back: [child]
-/// as it is.
+/// the photo, in every task on every Android version; where Android or
+/// MainActivity would move the task back anyway, the guard does the same.
+/// Once nothing is pending, Back at the root is as it was, with Android's
+/// back-to-home preview in a task the home screen started. Screens and
+/// dialogs over the shell pop as before. iPhone has no Back: [child] as it
+/// is.
 class SharedPhotosBackGuard extends StatelessWidget {
   const SharedPhotosBackGuard(
       {super.key, required this.pending, required this.child});

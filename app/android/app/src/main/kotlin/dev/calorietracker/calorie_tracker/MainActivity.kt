@@ -50,11 +50,40 @@ class MainActivity : FlutterActivity() {
     /// it does (onNewIntent, releaseHeldShares). Main thread only.
     private val heldShares = ShareHold<Intent>()
 
+    /// Whether the launcher's own intent created this activity's task
+    /// (IntakeRules.launcherTask). Decided at its first create, from that
+    /// intent, then kept in the saved state (onSaveInstanceState).
+    private var launcherTask = false
+
+    /// Whether Flutter's back callback stays registered at the root route
+    /// (setFrameworkHandlesBack). Set in onCreate, from launcherTask.
+    private var backCallbackAtRoot = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         // Picked-photo copies an earlier activity left (its engine died
         // before Dart read them) have no reader: no pick of this one is
         // open yet.
         IntakeRules.clearPickFolders(File(cacheDir, PICKED_PHOTO_FOLDER))
+        // Back at the root (setFrameworkHandlesBack): whether the launcher
+        // intent created this activity, the root of its task (singleTask).
+        // Android's own answer never changes: it checks the intent the
+        // activity was created with, and a launch from the icon into a
+        // task a share created arrives through onNewIntent and leaves that
+        // intent as it was. The first create reads that intent, before the
+        // replay rewrite below empties it. Every later create reads the
+        // saved state: an activity recreated after its process died gets
+        // the original intent again, but one relaunched in the same process
+        // (theme colours, Bold text, grammatical gender) gets whatever
+        // intent its last instance set, the replay rewrite's or a
+        // notification tap's.
+        launcherTask = IntakeRules.launcherTask(
+            saved = savedInstanceState?.takeIf { it.containsKey(STATE_LAUNCHER_TASK) }
+                ?.getBoolean(STATE_LAUNCHER_TASK),
+            fromIntent = intent?.let {
+                IntakeRules.isLauncherIntent(it.action, it.categories, it.data != null, it.type)
+            } ?: false,
+        )
+        backCallbackAtRoot = IntakeRules.keepsBackCallbackAtRoot(Build.VERSION.SDK_INT, launcherTask)
         // receive_sharing_intent reads the launch intent while
         // super.onCreate attaches it: the copies must be there already.
         // A share is delivered once. An activity Android recreates (saved
@@ -80,12 +109,37 @@ class MainActivity : FlutterActivity() {
             intent?.let { setIntent(withSafeShares(it)) }
         }
         super.onCreate(savedInstanceState)
+        if (backCallbackAtRoot) setFrameworkHandlesBack(true)
         pendingSaveSource = cachedFile(savedInstanceState?.getString(STATE_SAVE_SOURCE))
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         pendingSaveSource?.let { outState.putString(STATE_SAVE_SOURCE, it.path) }
+        outState.putBoolean(STATE_LAUNCHER_TASK, launcherTask)
+    }
+
+    /// Flutter keeps its back callback registered only while it has
+    /// something to pop (a route, a screen that asks before it closes, the
+    /// shell while a shared photo is pending): at an idle root it hands
+    /// Back to Android (enableOnBackInvokedCallback, AndroidManifest.xml).
+    /// Android 14 and later then move the task to the back only when the
+    /// home screen started it with the launcher's own intent; any other
+    /// root they finish, and its engine with it, mid-analysis: a task a
+    /// share, the bitewise://setup link, a notification or a plain
+    /// `am start -n` started (IntakeRules.keepsBackCallbackAtRoot). Such a
+    /// task keeps the callback, so Back at its root goes through Flutter
+    /// (handlePopRoute, SystemNavigator.pop, popSystemNavigator, which
+    /// moves the task to the back) as on Android 12 and lower, and gives up
+    /// Android's back-to-home preview. A task the launcher started keeps
+    /// the preview. A launcher-intent start that did not come from the home
+    /// screen (Play's Open button, `am start -a MAIN -c LAUNCHER`) looks the
+    /// same from here, and Android still finishes it on a Back at an idle
+    /// root; only a pending shared photo keeps that Back in Flutter there
+    /// (SharedPhotosBackGuard). FlutterActivity also calls this from its
+    /// onCreate, with the state it saved.
+    override fun setFrameworkHandlesBack(frameworkHandlesBack: Boolean) {
+        super.setFrameworkHandlesBack(frameworkHandlesBack || backCallbackAtRoot)
     }
 
     /// Back at the root (Flutter's navigator has nothing left to pop) moves
@@ -93,16 +147,21 @@ class MainActivity : FlutterActivity() {
     /// 6.1). Finishing destroyed the engine with it: a shared photo still
     /// being analyzed was never saved (Q9), and every reopen started Dart
     /// cold on Today. Also what SystemNavigator.pop() does from Dart.
-    /// Only a Back that Flutter handles gets here. With predictive back on
-    /// (every Android 16 phone for targetSdk 36; Android 13-15 with
-    /// enableOnBackInvokedCallback) Flutter hands Back at an idle root to
-    /// Android (setFrameworkHandlesBack(false)). Android 14 and later move
-    /// to the back only a task the home screen started with the launcher
-    /// intent, and finish any other: one a share started, or one
-    /// `am start` launched (QA: start from the launcher icon). Android 13
-    /// also moves back a task whose root is a launcher activity, as
-    /// MainActivity is. So while a shared photo is pending the shell keeps
-    /// that Back in Flutter (SharedPhotosBackGuard, app.dart), and its
+    /// Only a Back that Flutter handles gets here: every Back on Android 12
+    /// and lower (onBackPressed); with predictive back on Android 13 and
+    /// later (enableOnBackInvokedCallback), a Back at the root only while
+    /// Flutter keeps its callback there. At an idle root Flutter hands Back
+    /// to Android (setFrameworkHandlesBack(false)): Android 13 moves a task
+    /// whose root is a launcher activity, as MainActivity is, to the back,
+    /// and Android 14 and later a task the home screen started with the
+    /// launcher intent. Every other task keeps the callback on Android 14
+    /// and later (setFrameworkHandlesBack above: a share, the setup link, a
+    /// notification, a plain `am start -n`), so its Back lands here. One
+    /// start is left that Android 14 and later finish on that Back: the
+    /// launcher intent sent from somewhere other than the home screen
+    /// (Play's Open button, `am start -a MAIN -c LAUNCHER`). So while a
+    /// shared photo is pending the shell keeps Back at the root in Flutter
+    /// in every task (SharedPhotosBackGuard, app.dart), and its
     /// SystemNavigator.pop() lands here on every Android version. A photo
     /// a finish still cuts off (a swipe from Recents, a Back before share
     /// intake has the share) is offered again at the next start, since its
@@ -738,5 +797,9 @@ class MainActivity : FlutterActivity() {
         /// Saved state: the cached file an open create-document screen
         /// was asked for (onSaveTargetPicked).
         const val STATE_SAVE_SOURCE = "chopstats.saveFile.source"
+
+        /// Saved state: whether the launcher's own intent created the
+        /// activity's task (launcherTask).
+        const val STATE_LAUNCHER_TASK = "chopstats.back.launcherTask"
     }
 }

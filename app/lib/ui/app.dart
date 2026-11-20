@@ -10,7 +10,8 @@ import '../core/app_channel.dart' show photoLibraryInBuild;
 import '../core/setup_link.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
-import 'package:flutter/foundation.dart' show kDebugMode;
+import 'package:flutter/foundation.dart'
+    show defaultTargetPlatform, kDebugMode, visibleForTesting;
 import 'package:path_provider/path_provider.dart'
     show getApplicationDocumentsDirectory;
 
@@ -53,6 +54,16 @@ class _AppleScrollBehavior extends MaterialScrollBehavior {
           BuildContext context, Widget child, ScrollableDetails details) =>
       child;
 }
+
+/// How lists scroll on [platform]: iOS bounces with no overscroll
+/// indicator, as it always did. Android scrolls as Android does (owner
+/// decision 6, 2026-11-20): Material's own behaviour, which clamps at the
+/// ends and stretches the content on an overscroll (Android 12 and later).
+@visibleForTesting
+ScrollBehavior appScrollBehavior(TargetPlatform platform) =>
+    platform == TargetPlatform.android
+        ? const MaterialScrollBehavior()
+        : const _AppleScrollBehavior();
 
 /// Android's navigation bar styled for the theme the app SHOWS (Android
 /// push, 2026-11-13). MainActivity handles uiMode changes itself
@@ -115,8 +126,8 @@ class CalorieTrackerApp extends StatelessWidget {
       return MaterialApp(
           title: 'Chopstats',
           scaffoldMessengerKey: messengerKey,
-          // iOS scroll feel everywhere: bounce, no glow indicator.
-          scrollBehavior: const _AppleScrollBehavior(),
+          // iOS: bounce, no glow indicator. Android: stretch overscroll.
+          scrollBehavior: appScrollBehavior(defaultTargetPlatform),
           theme: AppTheme.build(Brightness.light, cjk: cjk),
           darkTheme: AppTheme.build(Brightness.dark, cjk: cjk),
           // iOS Increase Contrast: darker accent, labels and separators.
@@ -788,8 +799,11 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
         },
         child: shell);
     // Android: while a shared photo is on its way to a meal, Back at the
-    // root moves the app to the back; Android 14 and later would finish a
-    // task a share started, and its engine with it (Q9).
+    // root moves the app to the back in every task. Android 14 and later
+    // would finish a task the launcher intent started from somewhere other
+    // than the home screen (Play's Open button), and its engine with it
+    // (Q9); MainActivity keeps that Back in Flutter in the other tasks
+    // Android would finish.
     final sharing = s.sharedPhotosPending;
     return sharing == null
         ? page

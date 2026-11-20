@@ -1,6 +1,7 @@
 package dev.calorietracker.calorie_tracker
 
 import android.content.Intent
+import android.os.Build
 import java.io.File
 import java.io.InputStream
 
@@ -8,8 +9,8 @@ import java.io.InputStream
 /// tests (src/test, `./gradlew :app:testDebugUnitTest`, run by
 /// .github/workflows/mobile-build.yml) can run them for real. MainActivity
 /// only wires them to the platform, and manifest_gate_test pins that
-/// wiring. (Intent's flag is a compile-time constant: no Android class is
-/// loaded.)
+/// wiring. (Intent's flag, action and category and Build's version codes
+/// are compile-time constants: no Android class is loaded.)
 internal object IntakeRules {
     /// Whether the launch intent was delivered before: the activity is
     /// recreated (saved state: Android stopped its process while it sat in
@@ -17,6 +18,42 @@ internal object IntakeRules {
     /// carries the intent that first started its task.
     fun isRedelivery(hasSavedState: Boolean, flags: Int): Boolean =
         hasSavedState || (flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0
+
+    /// Whether an intent with [action], [categories], data ([hasData]) and
+    /// [type] is exactly the launcher's own: MAIN with the LAUNCHER
+    /// category alone, no data and no type (ActivityRecord.isMainIntent).
+    fun isLauncherIntent(action: String?, categories: Set<String>?, hasData: Boolean, type: String?): Boolean =
+        action == Intent.ACTION_MAIN &&
+            categories != null && categories.size == 1 && Intent.CATEGORY_LAUNCHER in categories &&
+            !hasData && type == null
+
+    /// Whether the activity's task is a launcher task, decided once per
+    /// activity record: what its last instance saved ([saved], null when
+    /// nothing was), else what the intent it has now says ([fromIntent],
+    /// isLauncherIntent). Android checks the intent the record was created
+    /// with, which never changes. An activity recreated after its process
+    /// died gets that intent again, but one relaunched in the same process
+    /// (theme colours, Bold text, grammatical gender) gets whatever intent
+    /// its last instance set: the replay rewrite's, with no action, or a
+    /// notification tap's.
+    fun launcherTask(saved: Boolean?, fromIntent: Boolean): Boolean = saved ?: fromIntent
+
+    /// Whether Flutter's back callback stays registered at the root route
+    /// on Android [sdk], for a task the launcher's own intent created
+    /// ([launcherTask]) or any other (MainActivity.setFrameworkHandlesBack).
+    /// With enableOnBackInvokedCallback, Flutter hands Back at the root to
+    /// Android. Android 14 and later move the task to the back only when
+    /// the home screen started it with the launcher intent, and finish any
+    /// other root (ActivityClientController.shouldMoveTaskToBack): a task a
+    /// share, the setup link or a notification created, its engine with
+    /// it. Android 13 moves every task whose root is a launcher activity
+    /// to the back (onBackPressedOnTaskRoot), and Android 12 and lower have
+    /// no back callback: Back reaches Flutter through onBackPressed. Where
+    /// the callback stays, as on Android 12 and lower, Back at the root
+    /// goes through Flutter's SystemNavigator.pop to
+    /// MainActivity.popSystemNavigator, which moves the task to the back.
+    fun keepsBackCallbackAtRoot(sdk: Int, launcherTask: Boolean): Boolean =
+        sdk >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE && !launcherTask
 
     /// share_plus's FileProvider authority after the package name (its
     /// AndroidManifest.xml: ${applicationId}.flutter.share_provider).
@@ -231,10 +268,12 @@ internal class SingleCall<V> {
 /// activity in the launch that recreates it, before its Dart has run: such
 /// a share waits here until Dart says it listens ("shareIntakeReady"),
 /// then goes to the plugin once. An activity that goes before then (a
-/// swipe from Recents during the cold start, a Back Android answers by
-/// finishing it) takes what it holds with it; those copies stay in
-/// shared_photos, where share intake's sweep takes them (share_intake.dart,
-/// strandedRecheck). Main thread only.
+/// swipe from Recents during the cold start; a Back Android answers by
+/// finishing it, which Android 14 and later still do in a task the
+/// launcher intent started from somewhere other than the home screen:
+/// MainActivity.setFrameworkHandlesBack) takes what it holds with it;
+/// those copies stay in shared_photos, where share intake's sweep takes
+/// them (share_intake.dart, strandedRecheck). Main thread only.
 internal class ShareHold<T> {
     private val held = ArrayList<T>()
     private var listening = false

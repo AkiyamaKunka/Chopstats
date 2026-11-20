@@ -265,10 +265,11 @@ class ShareIntake implements ShareDeliveries {
   /// (IntakePhoto.onSettled) — its copy waiting unread ([_untaken]), being
   /// read, or in hand ([_inHand]) — so stopping the engine now would cut
   /// it off. The app shell keeps Back at the root from finishing the
-  /// activity meanwhile (SharedPhotosBackGuard): with predictive back,
-  /// Android 14 and later finish a task a share started, its engine with
-  /// it, mid-analysis (Q9). False once every photo is settled, and always
-  /// on iOS.
+  /// activity meanwhile, in every task (SharedPhotosBackGuard): with
+  /// predictive back, Android 14 and later finish a task the launcher
+  /// intent started from somewhere other than the home screen (Play's Open
+  /// button), its engine with it, mid-analysis (Q9). False once every
+  /// photo is settled, and always on iOS.
   ValueListenable<bool> get photosPending => _pending;
   final ValueNotifier<bool> _pending = ValueNotifier<bool>(false);
 

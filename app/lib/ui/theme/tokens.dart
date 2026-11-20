@@ -440,11 +440,13 @@ class AppColors extends ThemeExtension<AppColors> {
 /// One iOS text style: [size]/[line] pt, [weight], Latin [tracking] (pt).
 /// The line height is set as `height = line / size` with even leading,
 /// so the box is exactly [line] pt at 1.0x and scales with Dynamic Type.
+/// [appleTracking] false (Android): no tracking, the font's own spacing.
 TextStyle appTextRole(TextStyle? base, double size, double line,
     FontWeight weight, double tracking,
     {required String? family,
     List<String>? fallback,
     bool cjk = false,
+    bool appleTracking = true,
     bool tabular = false}) {
   return (base ?? const TextStyle()).copyWith(
     fontFamily: family,
@@ -455,7 +457,8 @@ TextStyle appTextRole(TextStyle? base, double size, double line,
     fontWeight: weight,
     // Apple's SF tracking table is for Latin; CJK glyphs take none (the
     // zh UI also keeps any typed Latin untracked, as iOS does there).
-    letterSpacing: cjk ? 0 : tracking,
+    // Roboto on Android takes none either: its spacing is set for it.
+    letterSpacing: cjk || !appleTracking ? 0 : tracking,
     fontFeatures: tabular ? const [FontFeature.tabularFigures()] : null,
   );
 }
@@ -494,11 +497,13 @@ class AppTypography extends ThemeExtension<AppTypography> {
 
   /// Built over [text] (the theme's TextTheme, for its platform families
   /// and colour). [textFamily]/[displayFamily] default to that theme's
-  /// bodyLarge/displayLarge families.
+  /// bodyLarge/displayLarge families. [cjk] and [appleTracking] as for
+  /// [appTextRole].
   factory AppTypography.from(
     TextTheme text, {
     required Color mutedColor,
     bool cjk = false,
+    bool appleTracking = true,
     String? textFamily,
     String? displayFamily,
     List<String>? fallback,
@@ -507,15 +512,18 @@ class AppTypography extends ThemeExtension<AppTypography> {
     final df = displayFamily ?? text.displayLarge?.fontFamily;
     final fb = fallback ?? text.bodyLarge?.fontFamilyFallback;
     final base = text.bodyLarge;
+    TextStyle t(String? family, double size, double line, FontWeight w,
+            double tracking) =>
+        appTextRole(base, size, line, w, tracking,
+            family: family,
+            fallback: fb,
+            cjk: cjk,
+            appleTracking: appleTracking);
     return AppTypography(
-      title2: appTextRole(base, 22, 28, FontWeight.w700, 0.35,
-          family: df, fallback: fb, cjk: cjk),
-      title3: appTextRole(base, 20, 25, FontWeight.w600, 0.38,
-          family: df, fallback: fb, cjk: cjk),
-      callout: appTextRole(base, 16, 21, FontWeight.w400, -0.31,
-          family: tf, fallback: fb, cjk: cjk),
-      caption2: appTextRole(base, 11, 13, FontWeight.w400, 0.06,
-          family: tf, fallback: fb, cjk: cjk),
+      title2: t(df, 22, 28, FontWeight.w700, 0.35),
+      title3: t(df, 20, 25, FontWeight.w600, 0.38),
+      callout: t(tf, 16, 21, FontWeight.w400, -0.31),
+      caption2: t(tf, 11, 13, FontWeight.w400, 0.06),
       mutedColor: mutedColor,
     );
   }
@@ -586,9 +594,11 @@ class AppNumerals extends ThemeExtension<AppNumerals> {
   /// 12/16 w600: kcal and macro chips.
   final TextStyle chip;
 
+  /// [cjk] and [appleTracking] as for [appTextRole].
   factory AppNumerals.from(
     TextTheme text, {
     bool cjk = false,
+    bool appleTracking = true,
     String? textFamily,
     String? displayFamily,
     List<String>? fallback,
@@ -602,6 +612,7 @@ class AppNumerals extends ThemeExtension<AppNumerals> {
             family: size >= 20 ? df : tf,
             fallback: fb,
             cjk: cjk,
+            appleTracking: appleTracking,
             tabular: true);
     return AppNumerals(
       hero: n(34, 41, FontWeight.w700, 0.40),

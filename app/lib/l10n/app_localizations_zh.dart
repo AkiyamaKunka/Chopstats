@@ -2048,6 +2048,11 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
+  String covGlassesOffCount(int count) {
+    return '$count 张 Meta 眼镜照片（已在 设置 › 照片 里关闭）';
+  }
+
+  @override
   String get macroNoBreakdown => '没有记录营养素分布。';
 
   @override
@@ -2490,7 +2495,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get restaurantLocationOffHint => '仅按品牌：只用杯子、袋子或小票上印的品牌名。';
 
   @override
-  String get restaurantLocationAndroidHint => 'Android 目前只按印出的品牌查询。';
+  String get restaurantLocationAndroidHint => 'Android 只按印出的品牌查询。';
 
   @override
   String get restaurantLocationHttpHint => '附近餐厅查询需要你的服务器使用 https；仅按品牌查询仍可使用。';
@@ -3013,7 +3018,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get backupAndroidFooter =>
-      'Android 自带的备份可以把饮食记录保存在你的 Google 账户里，但不包括 API Key 和服务器上传密钥：在新手机上需要重新输入。换手机时，请用「导出数据」→「保存到设备…」存一个文件，再在新手机上导入。导入会合并：已有的餐不会被改动。';
+      'Android 自带的备份可以把饮食记录保存在你的 Google 账户里，但不包括 API Key 和服务器上传密钥：在新手机上需要重新输入。在 Android 9 及以上版本上，这份备份会用手机的屏幕锁定（PIN 码、图案或密码）进行端到端加密；没有设置屏幕锁定时，或在 Android 8.1 及更早的版本上，饮食记录不会被备份。换手机时，请用「导出数据」→「保存到设备…」存一个文件，再在新手机上导入。导入会合并：已有的餐不会被改动。';
 
   @override
   String get backupStatusOff => '已关闭';
@@ -3485,4 +3490,8 @@ class AppLocalizationsZh extends AppLocalizations {
   String outcomeFailedKeptMsgPlay(String reason) {
     return '照片分析失败。$reason';
   }
+
+  @override
+  String get watchGlassesAndroidNote =>
+      '在 Android 上，「包括 Meta 眼镜拍的照片」默认关闭：这些照片无法先在手机上检查有没有食物，打开后每一张都会不经检查就发送给 AI 服务。';
 }

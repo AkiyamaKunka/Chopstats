@@ -1,17 +1,22 @@
 // Q9 under predictive back (review 2026-11-20): MainActivity's
 // popSystemNavigator moves the task to the back, but Flutter calls it only
-// for a Back it handles. At the root it handed Back to Android
-// (setFrameworkHandlesBack(false)), and with predictive back on (every
-// Android 16 phone, the app targeting SDK 36) Android finished a task a
-// share started: the engine died mid-analysis, and the photo came back
-// only at the next start, sent to the AI a second time, or never when that
-// start was a day later.
+// for a Back it handles. At an idle root Flutter hands Back to Android
+// (setFrameworkHandlesBack(false)), and with predictive back on
+// (enableOnBackInvokedCallback) Android 14 and later finish every task the
+// home screen did not start with the launcher intent. MainActivity keeps
+// Back in Flutter in all of them but one: a task the launcher intent
+// started from somewhere other than the home screen (Play's Open button),
+// which looks like the launcher's own to the app. A photo shared into such
+// a task would die with its engine mid-analysis, and come back only at the
+// next start, sent to the AI a second time, or never when that start was a
+// day later.
 //
 // While a shared photo is pending the shell's guard keeps the Back in
-// Flutter, and a Back at the root calls SystemNavigator.pop, which lands in
-// popSystemNavigator: through the old key path (popRoute) and through the
-// predictive gesture alike. Once the photo is settled, Back at the root is
-// Android's own again. iPhone has no Back and no guard.
+// Flutter, in every task, and a Back at the root calls SystemNavigator.pop,
+// which lands in popSystemNavigator: through the old key path (popRoute)
+// and through the predictive gesture alike. Once the photo is settled,
+// Flutter leaves Back at the root to the platform again. iPhone has no
+// Back and no guard.
 import 'package:calorie_tracker/ui/app.dart';
 import 'package:calorie_tracker/ui/services.dart';
 import 'package:flutter/foundation.dart';
@@ -19,6 +24,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../support/back_gesture.dart' show predictiveBack;
 import 'fakes.dart';
 
 UiServices _services(ValueListenable<bool>? pending) {
@@ -57,37 +63,19 @@ class _Platform {
   }
 }
 
-/// The Android 14+ predictive back gesture as the engine sends it
-/// (FlutterActivity's OnBackAnimationCallback), let go past the point of
-/// no return. Only sent while Flutter handles Back.
-Future<void> _predictiveBack(WidgetTester tester) async {
-  Future<void> send(String method, [Map<String, Object?>? arguments]) =>
-      tester.binding.defaultBinaryMessenger.handlePlatformMessage(
-          'flutter/backgesture',
-          const StandardMethodCodec()
-              .encodeMethodCall(MethodCall(method, arguments)),
-          (_) {});
-  await send('startBackGesture',
-      {'touchOffset': [5.0, 300.0], 'progress': 0.0, 'swipeEdge': 0});
-  await tester.pump();
-  await send('updateBackGestureProgress',
-      {'x': 120.0, 'y': 300.0, 'progress': 0.4, 'swipeEdge': 0});
-  await tester.pump();
-  await send('commitBackGesture');
-  await tester.pumpAndSettle();
-}
-
 void main() {
   testWidgets('Android: while a shared photo is pending, Flutter keeps Back '
-      'at the root and moves the app to the back; settled, Back is '
-      'Android\'s again', (tester) async {
+      'at the root and moves the app to the back; settled, it leaves Back '
+      'to the platform again', (tester) async {
     final platform = _Platform()..listen(tester);
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     final pending = ValueNotifier<bool>(false);
     await tester.pumpWidget(CalorieTrackerApp(services: _services(pending)));
     await tester.pumpAndSettle();
     expect(platform.handlesBack.lastOrNull ?? false, isFalse,
-        reason: 'nothing pending: Android answers Back at the root');
+        reason: 'nothing pending: Flutter leaves Back at the root to the '
+            'platform (MainActivity keeps it in a task the launcher did '
+            'not start, Android 14 and later)');
 
     // A share arrives: its photo is read and sent.
     pending.value = true;
@@ -96,20 +84,23 @@ void main() {
         reason: 'Flutter takes Back while the photo is pending, so Android '
             'never finishes the task itself');
 
-    // Back with the key (API 32 and lower, or predictive back off).
+    // Back through popRoute (Android 12 and lower, and Android 13's back
+    // callback).
     expect(await tester.binding.handlePopRoute(), isTrue);
     await tester.pumpAndSettle();
     expect(platform.pops, 1,
         reason: 'SystemNavigator.pop: MainActivity moves the task back');
     expect(find.byType(HomeShell), findsOneWidget);
 
-    // The predictive back gesture (Android 14 and later).
-    await _predictiveBack(tester);
+    // The predictive back gesture (Android 14 and later), which the engine
+    // sends only while Flutter handles Back.
+    await predictiveBack(tester);
     expect(platform.pops, 2);
     expect(find.byType(HomeShell), findsOneWidget);
 
-    // Its meal is written: the copy goes, and Back is Android's own again
-    // (its back-to-home preview included).
+    // Its meal is written: the copy goes, and Flutter leaves Back at the
+    // root to the platform again (Android's own, back-to-home preview
+    // included, in a task the home screen started).
     pending.value = false;
     await tester.pumpAndSettle();
     expect(platform.handlesBack.last, isFalse);

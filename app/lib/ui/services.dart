@@ -103,7 +103,8 @@ abstract class SettingsStore {
   /// go to the chosen AI service); only the Settings toggle reads it.
   bool get watcherDisclosureSeen;
 
-  /// The 'Meta glasses photos' switch (AppSettings.watchGlasses, default on).
+  /// The 'Meta glasses photos' switch (AppSettings.watchGlasses; default
+  /// on, off on Android: AppSettings.defaultWatchGlasses).
   bool get watchGlasses;
   String get dietaryProfile; // spec §1.3 photo-prompt appendix
 
@@ -250,8 +251,9 @@ class UiServices {
 
   /// Android: true while a shared photo is not settled yet
   /// (ShareIntake.photosPending); the shell's Back at the root then moves
-  /// the app to the back instead of leaving that Back to Android, which
-  /// finishes a task a share started on Android 14 and later
+  /// the app to the back in every task instead of leaving that Back to
+  /// Android, which on Android 14 and later finishes a task the launcher
+  /// intent started from somewhere other than the home screen
   /// (SharedPhotosBackGuard). Null on iPhone and in most tests.
   final ValueListenable<bool>? sharedPhotosPending;
 

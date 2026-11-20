@@ -1023,11 +1023,13 @@ void main() {
   });
 
   // Review 2026-11-20: with predictive back, Android 14 and later finish a
-  // task a share started when Back reaches the root, and the engine with
-  // it, mid-analysis (Q9). The shell keeps that Back in Flutter while a
-  // shared photo is pending (SharedPhotosBackGuard): from the moment its
-  // share arrives until the photo is settled, through every read, and
-  // never on iOS.
+  // task the launcher intent started from somewhere other than the home
+  // screen (Play's Open button) when Back reaches the root, and the engine
+  // with it, mid-analysis (Q9); MainActivity keeps Back in Flutter
+  // in the other tasks they would finish. The shell keeps that Back in
+  // Flutter in every task while a shared photo is pending
+  // (SharedPhotosBackGuard): from the moment its share arrives until the
+  // photo is settled, through every read, and never on iOS.
   group('Android: photosPending, from a share\'s arrival to its last '
       'verdict', () {
     late Map<String, Uint8List> held;
