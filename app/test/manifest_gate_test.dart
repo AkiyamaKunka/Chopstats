@@ -1013,6 +1013,91 @@ void main() {
         isNot(contains('requestedOrientation')));
   });
 
+  // With enableOnBackInvokedCallback, Flutter unregisters its back
+  // callback at the root route and leaves Back there to Android. Android
+  // 14 and later move the task to the back only when the home screen
+  // started it with the launcher's own intent (ActivityClientController.
+  // shouldMoveTaskToBack, ActivityRecord.isMainIntent) and finish any other
+  // root: a task a share created was finished on Back, with the engine
+  // that was still analyzing its photo (review of #72). Such a task keeps
+  // Flutter's callback, so Back at its root goes through Flutter's
+  // SystemNavigator.pop to popSystemNavigator, as on Android 12 and lower.
+  // Decided once, from the intent that created the activity (Android's
+  // own check), before the replay rewrite empties it.
+  test('Back at the root of a task the launcher did not start stays with '
+      'Flutter on Android 14 and later', () {
+    final code = _kotlinCode(_mainActivity());
+    final create = _kotlinFunction(code, 'override fun onCreate(');
+    const decide = 'backCallbackAtRoot = IntakeRules.keepsBackCallbackAtRoot( '
+        'Build.VERSION.SDK_INT, launcherTask = intent?.let { '
+        'IntakeRules.isLauncherIntent(it.action, it.categories, '
+        'it.data != null, it.type) } ?: false, )';
+    expect(create, contains(decide));
+    expect(create.indexOf(decide), lessThan(create.indexOf('val replay =')),
+        reason: 'read before the replay rewrite empties the intent');
+    expect(
+        create,
+        contains('super.onCreate(savedInstanceState) if (backCallbackAtRoot) '
+            'setFrameworkHandlesBack(true)'),
+        reason: 'registered at once: the root route never asks for it');
+    expect(code, contains('private var backCallbackAtRoot = false'));
+    expect(RegExp(r'backCallbackAtRoot = (?!=)').allMatches(code),
+        hasLength(2),
+        reason: 'declared false, then decided once, in onCreate');
+    expect(_kotlinFunction(code, 'override fun setFrameworkHandlesBack('),
+        '{ super.setFrameworkHandlesBack(frameworkHandlesBack || '
+        'backCallbackAtRoot) }');
+    expect(code, isNot(contains('registerOnBackInvokedCallback')),
+        reason: "Flutter's own callback, not a second one in front of it");
+    final rules = _kotlinCode(_intakeRules());
+    expect(
+        rules,
+        contains('fun isLauncherIntent(action: String?, categories: '
+            'Set<String>?, hasData: Boolean, type: String?): Boolean = '
+            'action == Intent.ACTION_MAIN && categories != null && '
+            'categories.size == 1 && Intent.CATEGORY_LAUNCHER in categories '
+            '&& !hasData && type == null'));
+    expect(
+        rules,
+        contains('fun keepsBackCallbackAtRoot(sdk: Int, launcherTask: '
+            'Boolean): Boolean = sdk >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE '
+            '&& !launcherTask'));
+    _expectJvmTests(['isLauncherIntent', 'keepsBackCallbackAtRoot']);
+    expect(_uncommented(_manifest()),
+        contains('android:enableOnBackInvokedCallback="true"'));
+
+    // Flutter 3.44, where the SDK carries its sources: FlutterActivity
+    // registers its callback through the hook and restores the saved state
+    // through it in onCreate, and a committed back gesture no route took
+    // becomes handlePopRoute, which ends in SystemNavigator.pop.
+    final flutter = _pluginRoot('flutter');
+    final activity = File('$flutter/../../engine/src/flutter/shell/platform/'
+        'android/io/flutter/embedding/android/FlutterActivity.java');
+    if (activity.existsSync()) {
+      final java = activity.readAsStringSync().replaceAll(RegExp(r'\s+'), ' ');
+      expect(
+          java,
+          contains('public void setFrameworkHandlesBack(boolean '
+              'frameworkHandlesBack) { if (frameworkHandlesBack && '
+              '!hasRegisteredBackCallback) { registerOnBackInvokedCallback();'));
+      expect(
+          java,
+          contains('setFrameworkHandlesBack(frameworkHandlesBack); } '
+              'delegate = new FlutterActivityAndFragmentDelegate(this);'));
+    }
+    final binding = File('$flutter/lib/src/widgets/binding.dart');
+    expect(binding.existsSync(), isTrue, reason: binding.path);
+    final dart = binding
+        .readAsStringSync()
+        .replaceAll(RegExp(r'//[^\n]*'), '')
+        .replaceAll(RegExp(r'\s+'), ' ');
+    expect(
+        dart,
+        contains('Future<void> _handleCommitBackGesture() async { if '
+            '(_backGestureObservers.isEmpty) { await handlePopRoute(); '
+            'return; }'));
+  });
+
   // Design R7a: while restaurant lookup uses the photo location, the app
   // reads where a meal photo was taken. iOS shows NSPhotoLibraryUsageDescription
   // in the permission prompt, from Info.plist and from each InfoPlist.strings
@@ -1409,9 +1494,12 @@ void main() {
     final create = _kotlinFunction(code, 'override fun onCreate(');
     expect(
         create,
-        endsWith('super.onCreate(savedInstanceState) pendingSaveSource = '
+        endsWith(' pendingSaveSource = '
             'cachedFile(savedInstanceState?.getString(STATE_SAVE_SOURCE)) }'),
         reason: 'restored through the same cache check');
+    expect(create.indexOf('super.onCreate(savedInstanceState)'),
+        lessThan(create.indexOf('pendingSaveSource =')),
+        reason: 'once the activity is created');
     _expectJvmTests(['regularFileIn', 'saveStep', 'dropSaveSource',
         'openSaveSource', 'SAVE_MODES', 'firstStream', 'SingleCall']);
   });

@@ -50,11 +50,28 @@ class MainActivity : FlutterActivity() {
     /// it does (onNewIntent, releaseHeldShares). Main thread only.
     private val heldShares = ShareHold<Intent>()
 
+    /// Whether Flutter's back callback stays registered at the root route
+    /// (setFrameworkHandlesBack). Decided once, in onCreate.
+    private var backCallbackAtRoot = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         // Picked-photo copies an earlier activity left (its engine died
         // before Dart read them) have no reader: no pick of this one is
         // open yet.
         IntakeRules.clearPickFolders(File(cacheDir, PICKED_PHOTO_FOLDER))
+        // Back at the root (setFrameworkHandlesBack), from the intent that
+        // created this activity, the root of its task (singleTask), read
+        // before the replay rewrite below empties it: the intent Android
+        // itself checks. It holds for the activity's whole life: a launch
+        // from the icon into a task a share created arrives through
+        // onNewIntent and leaves that intent as it was, and an activity
+        // Android recreates gets it again.
+        backCallbackAtRoot = IntakeRules.keepsBackCallbackAtRoot(
+            Build.VERSION.SDK_INT,
+            launcherTask = intent?.let {
+                IntakeRules.isLauncherIntent(it.action, it.categories, it.data != null, it.type)
+            } ?: false,
+        )
         // receive_sharing_intent reads the launch intent while
         // super.onCreate attaches it: the copies must be there already.
         // A share is delivered once. An activity Android recreates (saved
@@ -78,12 +95,33 @@ class MainActivity : FlutterActivity() {
             intent?.let { setIntent(withSafeShares(it)) }
         }
         super.onCreate(savedInstanceState)
+        if (backCallbackAtRoot) setFrameworkHandlesBack(true)
         pendingSaveSource = cachedFile(savedInstanceState?.getString(STATE_SAVE_SOURCE))
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         pendingSaveSource?.let { outState.putString(STATE_SAVE_SOURCE, it.path) }
+    }
+
+    /// Flutter keeps its back callback registered only while it has
+    /// something to pop (a route, a screen that asks before it closes): at
+    /// the root it hands Back to Android (enableOnBackInvokedCallback,
+    /// AndroidManifest.xml). Android 14 and later then move the task to
+    /// the back only when the home screen started it with the launcher's
+    /// own intent; any other root they finish, and its engine with it,
+    /// mid-analysis: a task a share, the bitewise://setup link or a
+    /// notification started (IntakeRules.keepsBackCallbackAtRoot). Such a
+    /// task keeps the callback, so Back at its root goes through Flutter
+    /// (handlePopRoute, SystemNavigator.pop, popSystemNavigator) as on
+    /// Android 12 and lower, and gives up Android's back-to-home preview.
+    /// A task the launcher started keeps the preview. A launcher-intent
+    /// start that did not come from the home screen (Play's Open button)
+    /// looks the same from here, and Android still finishes it.
+    /// FlutterActivity also calls this from its onCreate, with the state
+    /// it saved.
+    override fun setFrameworkHandlesBack(frameworkHandlesBack: Boolean) {
+        super.setFrameworkHandlesBack(frameworkHandlesBack || backCallbackAtRoot)
     }
 
     /// A share (withSafeShares made copies: a new SEND) goes to the plugins

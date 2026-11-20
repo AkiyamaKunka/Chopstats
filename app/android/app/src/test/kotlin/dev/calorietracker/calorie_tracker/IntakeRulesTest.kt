@@ -40,6 +40,70 @@ class IntakeRulesTest {
         assertFalse(IntakeRules.isRedelivery(false, 0x10000000 or 0x00000001))
     }
 
+    // --- Back at the root: Android 14+ moves only a task the launcher's
+    // own intent created to the back, and finishes any other; those keep
+    // Flutter's back callback (MainActivity.setFrameworkHandlesBack).
+
+    private val launcher = setOf("android.intent.category.LAUNCHER")
+
+    @Test
+    fun theLauncherIntentIsALauncherTask() {
+        assertEquals("android.intent.action.MAIN", Intent.ACTION_MAIN)
+        assertEquals("android.intent.category.LAUNCHER", Intent.CATEGORY_LAUNCHER)
+        assertTrue(IntakeRules.isLauncherIntent(Intent.ACTION_MAIN, launcher, hasData = false, type = null))
+    }
+
+    @Test
+    fun anyOtherIntentIsNot() {
+        // A share, a several-photo share, the bitewise://setup link.
+        assertFalse(IntakeRules.isLauncherIntent(Intent.ACTION_SEND, null, false, "image/jpeg"))
+        assertFalse(IntakeRules.isLauncherIntent(Intent.ACTION_SEND_MULTIPLE, null, false, "image/*"))
+        assertFalse(
+            IntakeRules.isLauncherIntent(
+                Intent.ACTION_VIEW,
+                setOf("android.intent.category.BROWSABLE", "android.intent.category.DEFAULT"),
+                hasData = true,
+                type = null,
+            ),
+        )
+        // A notification tap (flutter_local_notifications' launch intent
+        // with its own action).
+        assertFalse(IntakeRules.isLauncherIntent("SELECT_NOTIFICATION", launcher, false, null))
+        // MAIN, but not exactly the launcher's (ActivityRecord.isMainIntent).
+        assertFalse(IntakeRules.isLauncherIntent(Intent.ACTION_MAIN, null, false, null))
+        assertFalse(IntakeRules.isLauncherIntent(Intent.ACTION_MAIN, emptySet(), false, null))
+        assertFalse(
+            IntakeRules.isLauncherIntent(
+                Intent.ACTION_MAIN,
+                launcher + "android.intent.category.DEFAULT",
+                false,
+                null,
+            ),
+        )
+        assertFalse(IntakeRules.isLauncherIntent(Intent.ACTION_MAIN, launcher, hasData = true, type = null))
+        assertFalse(IntakeRules.isLauncherIntent(Intent.ACTION_MAIN, launcher, false, "image/jpeg"))
+        // What the replay rewrite leaves (emptyShare): no action at all.
+        assertFalse(IntakeRules.isLauncherIntent(null, launcher, false, null))
+        assertFalse(IntakeRules.isLauncherIntent(null, null, false, null))
+    }
+
+    @Test
+    fun flutterKeepsBackAtTheRootOfAnyOtherTaskFromAndroid14() {
+        assertEquals(34, android.os.Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+        for (sdk in listOf(34, 35, 36, 37)) {
+            assertTrue(IntakeRules.keepsBackCallbackAtRoot(sdk, launcherTask = false))
+            // A task the launcher started: Android moves it to the back,
+            // with its back-to-home preview.
+            assertFalse(IntakeRules.keepsBackCallbackAtRoot(sdk, launcherTask = true))
+        }
+        // Android 13 moves every root of a launcher activity to the back;
+        // Android 12 and lower deliver Back through onBackPressed.
+        for (sdk in listOf(24, 30, 32, 33)) {
+            assertFalse(IntakeRules.keepsBackCallbackAtRoot(sdk, launcherTask = false))
+            assertFalse(IntakeRules.keepsBackCallbackAtRoot(sdk, launcherTask = true))
+        }
+    }
+
     // --- A share that comes before share intake listens waits for it
     // (ShareHold): the plugin tells only a listener, and Android delivers
     // the share a stopped app was started again for before Dart runs.
