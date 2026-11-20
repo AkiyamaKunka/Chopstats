@@ -1112,7 +1112,12 @@ position. The paste-ready answers live next to the app in
    instead of finishing it (`popSystemNavigator`, in its own PR). Android
    14 and later finish a task the launcher did not start when Back at its
    root reaches them, so such a task keeps Flutter's back callback there
-   (`MainActivity`). `singleTask` stays.
+   (`MainActivity`). One start still looks like the launcher's and is
+   finished on Android 14 and later: the launcher intent sent from
+   somewhere other than the home screen, such as Play's Open button.
+   While a shared photo is still pending, the app keeps Back at the root
+   itself in every task (`SharedPhotosBackGuard`, in its own PR).
+   `singleTask` stays.
 7. **Orientation:** portrait on phones
    (`android:screenOrientation="portrait"`). Android 16 ignores it at
    600 dp and wider, where the width-capped layout applies. Tablets stay
