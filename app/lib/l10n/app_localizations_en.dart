@@ -2230,6 +2230,17 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String covGlassesOffCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count Meta glasses photos (switched off in Settings › Photos)',
+      one: '1 Meta glasses photo (switched off in Settings › Photos)',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get macroNoBreakdown => 'No macro breakdown recorded.';
 
   @override

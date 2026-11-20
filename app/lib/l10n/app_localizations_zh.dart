@@ -2048,6 +2048,11 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
+  String covGlassesOffCount(int count) {
+    return '$count 张 Meta 眼镜照片（已在 设置 › 照片 里关闭）';
+  }
+
+  @override
   String get macroNoBreakdown => '没有记录营养素分布。';
 
   @override

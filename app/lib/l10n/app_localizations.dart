@@ -3456,6 +3456,12 @@ abstract class AppLocalizations {
   /// **'{count} too large to analyze'**
   String covTooLargeCount(int count);
 
+  /// Photo Coverage summary count: Meta glasses photos in the window that automatic intake leaves out because the 'Meta glasses photos' switch (settingsRowWatchGlasses, Settings › Photos) is off, which on Android it is until the user turns it on (owner decision 8). Not 'never scanned', and Log all never sends them.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 Meta glasses photo (switched off in Settings › Photos)} other{{count} Meta glasses photos (switched off in Settings › Photos)}}'**
+  String covGlassesOffCount(int count);
+
   /// No description provided for @macroNoBreakdown.
   ///
   /// In en, this message translates to:

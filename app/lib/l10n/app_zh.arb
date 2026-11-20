@@ -578,6 +578,7 @@
   "covInFlightCount": "{count} 张分析中",
   "covUnreadableCount": "{count} 张无法读取",
   "covTooLargeCount": "{count} 张过大无法分析",
+  "covGlassesOffCount": "{count} 张 Meta 眼镜照片（已在 设置 › 照片 里关闭）",
   "macroNoBreakdown": "没有记录营养素分布。",
   "setupLinkTitle": "用此链接配置服务器？",
   "setupLinkBody": "服务器：{server}\nAI：{backend}\n上传密钥：••••{keyTail}\n\n你的餐食照片会发送到这台服务器进行分析，请确认它是你自己的。",

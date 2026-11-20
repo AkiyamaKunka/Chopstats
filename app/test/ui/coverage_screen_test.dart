@@ -665,4 +665,51 @@ void main() {
       handle.dispose();
     });
   });
+
+  // Review of #72: a glasses photo the 'Meta glasses photos' switch keeps
+  // out of automatic intake (Android's default, owner decision 8) is
+  // counted as such: no tile, no Log all, and the window still reads as
+  // accounted for. Log all would have sent it to the AI unchecked.
+  for (final locale in const [Locale('en'), Locale('zh')]) {
+    testWidgets('a glasses photo switched off: a count, no Log all '
+        '(${locale.languageCode})', (tester) async {
+      auditor = CoverageAuditor(
+          library: library,
+          dao: dao,
+          hasher: testHash,
+          clock: () => DateTime(2026, 7, 26, 12, 0),
+          includeGlasses: () => false);
+      library.assets = [
+        FakeAsset('g1', 'photo-1_singular_display_fullPicture.HEIC',
+            DateTime(2026, 7, 26, 8), bytesOf(1)),
+        FakeAsset('a2', 'IMG_2.jpg', DateTime(2026, 7, 26, 9), bytesOf(2)),
+      ];
+      dao.ledger['h2'] = IngestionStatus.saved;
+
+      await tester.pumpWidget(host(locale: locale));
+      await tester.tap(find.byKey(const Key('runCoverageCheck')));
+      await tester.pumpAndSettle();
+
+      final l = lookupAppLocalizations(locale);
+      expect(find.text(l.covAllAccounted(2)), findsOneWidget);
+      expect(find.textContaining(l.covGlassesOffCount(1)), findsOneWidget);
+      expect(find.byKey(const Key('logAllMissing')), findsNothing);
+      expect(find.text('photo-1_singular_display_fullPicture.HEIC'),
+          findsNothing);
+      expect(processed, isEmpty);
+    });
+  }
+
+  test('the glasses count names the switch\'s place, in English and 中文', () {
+    final en = lookupAppLocalizations(const Locale('en'));
+    final zh = lookupAppLocalizations(const Locale('zh'));
+    expect(en.covGlassesOffCount(1),
+        '1 Meta glasses photo (switched off in Settings › Photos)');
+    expect(en.covGlassesOffCount(3),
+        '3 Meta glasses photos (switched off in Settings › Photos)');
+    // The switch's own label.
+    expect(en.covGlassesOffCount(3), contains(en.settingsRowWatchGlasses));
+    expect(zh.covGlassesOffCount(2), '2 张 Meta 眼镜照片（已在 设置 › 照片 里关闭）');
+    expect(zh.covGlassesOffCount(2), contains(zh.settingsSectionPhotos));
+  });
 }
