@@ -3407,4 +3407,82 @@ class AppLocalizationsZh extends AppLocalizations {
   @override
   String get watcherLimitedFooterIos =>
       '筷拍无法访问你的全部照片，新拍的照片不会被自动记录。请在系统「设置」里允许访问所有照片。';
+
+  @override
+  String get watchRetiredTitle => '「监控相册」已关闭';
+
+  @override
+  String get watchRetiredBody =>
+      'Google Play 版筷拍没有自动记录相册照片的功能，所以「监控相册」已经关闭。你的餐食和设置都还在。\n\n要记录餐食照片，请点「记录」›「从最近照片选择」，或者在相册应用里把照片分享给筷拍。';
+
+  @override
+  String get diagChannelPlay =>
+      '版本：Google Play 版。它无法访问你的相册：照片只能通过 Android 的照片选择器选择，或从其他应用分享给筷拍。';
+
+  @override
+  String get diagChannelGithub => '版本：GitHub 版（完整功能）。';
+
+  @override
+  String get todayEmptyHintPlay =>
+      '点击下方「记录」，用照片、文字或手动输入添加一餐；也可以在相册应用里把食物照片分享给筷拍。';
+
+  @override
+  String get settingsWelcomeBodyPlay =>
+      '选择一家 AI 服务并粘贴它的 API Key（输入即保存），然后点「测试当前服务」。\n之后在「今天」页点「记录」用照片添加一餐，或者在相册应用里把食物照片分享给筷拍。\n中国大陆用户请选择 DeepSeek 深度求索、Qwen 通义千问、Doubao 豆包或 GLM 智谱（GLM 默认模型免费）——Gemini、OpenAI、Claude、Grok 需要 VPN。';
+
+  @override
+  String aiStopSharingBodyPlay(String provider) {
+    return '筷拍不再把照片和餐食文字发送给 $provider。已记录的餐食仍保存在这台手机上。下次使用 AI 分析时，筷拍会再次征求你的同意。';
+  }
+
+  @override
+  String aiStopSharingBodyWithLookupsPlay(String provider) {
+    return '筷拍不再把照片、餐食文字和餐厅营养查询发送给 $provider，餐厅营养查询会关闭，未完成的查询会被取消。已记录的餐食仍保存在这台手机上。再向 $provider 发送任何内容之前，筷拍会再次征求你的同意。';
+  }
+
+  @override
+  String errServerFailedFinalPlay(String reason) {
+    return '你的服务器没能分析这张照片：$reason。要重试，请在「记录」里重新选择这张照片，或再分享一次。';
+  }
+
+  @override
+  String errServerRejectedPlay(String code) {
+    return '你的服务器拒绝了这次请求（$code）。请把 App 和服务器更新到匹配的版本，然后重新记录这张照片。';
+  }
+
+  @override
+  String get coachEmptyPlay => '今天还没有记录。下一餐可以用照片、文字或手动输入来记录。';
+
+  @override
+  String get coachEmptyYesterdayPlay => '昨天没有记录。下一餐可以用照片、文字或手动输入来记录。';
+
+  @override
+  String get coachEmptyOnDayPlay => '当天没有记录。下一餐可以用照片、文字或手动输入来记录。';
+
+  @override
+  String get settingsAiFooterPausedPlay =>
+      '分析已暂停 — 已达 Gemini 当日上限（免费额度每天只能处理有限的请求）。现在添加的照片不会被分析：可以先手动记录这一餐，或等暂停结束后重新添加照片。想立即恢复：在 Google AI Studio 开通付费后运行「测试当前服务」，或在 AI 服务页更换 Key 或服务。';
+
+  @override
+  String get providerQuotaPausedPlay =>
+      '分析已暂停 — 已达 Gemini 当日上限（免费额度每天只能处理有限的请求）。现在添加的照片不会被分析：可以先手动记录这一餐，或等暂停结束后重新添加照片。想立即恢复：在 Google AI Studio 开通付费后运行「测试当前服务」，或更换 Key 或服务。';
+
+  @override
+  String providerQuotaPausedUntilPlay(String time) {
+    return '分析已暂停到 $time — 已达 Gemini 当日上限（免费额度每天只能处理有限的请求）。现在添加的照片不会被分析：可以先手动记录这一餐，或等暂停结束后重新添加照片。想立即恢复：在 Google AI Studio 开通付费后运行「测试当前服务」，或更换 Key 或服务。';
+  }
+
+  @override
+  String get diagFixWaitRateLimitPlay => '等一分钟再试。期间添加的照片可能没有被分析，之后请重新添加。';
+
+  @override
+  String get diagFixPhotoTempPlay => '通常是限流或服务器繁忙 —— 一分钟后再试，没有被分析的照片请重新添加。';
+
+  @override
+  String get diagFixQuotaPlay => '等暂停结束后再重新添加照片（期间照片不会被分析），或更换 Key / 服务立即恢复。';
+
+  @override
+  String outcomeFailedKeptMsgPlay(String reason) {
+    return '照片分析失败。$reason';
+  }
 }

@@ -26,6 +26,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show HapticFeedback;
 
+import '../../core/app_channel.dart' show photoLibraryInBuild;
 import '../../core/coerce.dart'
     show addCalendarDays, normalizeImageHash, safeNumber;
 import '../../core/contracts.dart';
@@ -137,8 +138,9 @@ class _LeftoverScreenState extends State<LeftoverScreen> {
     if (system == null) return _loadGrid();
     // Play's photo policy: full access is read, never asked for (the Play
     // build declares no photo permission; a request was a silent denial
-    // and the "isn't allowed" dead end).
-    final full = await system.hasBroadAccess();
+    // and the "isn't allowed" dead end). The Play build does not even read
+    // it (core/app_channel.dart): the picker is its one way in.
+    final full = photoLibraryInBuild && await system.hasBroadAccess();
     if (!mounted) return const [];
     if (full) {
       _pickerRow = true;

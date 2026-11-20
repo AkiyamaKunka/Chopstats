@@ -713,9 +713,18 @@ jobs:
         working-directory: app
         run: |
           set -euo pipefail
+          # The bundle is the Google Play build (owner decision 1,
+          # 2026-11-13; docs/RELEASING.md § 6): the one switch,
+          # --dart-define=CHOPSTATS_CHANNEL=play, leaves the three photo
+          # permissions out of its manifest (app/android/app/build.gradle.kts)
+          # and Watch Camera Roll out of the app (lib/core/app_channel.dart).
+          # The sideload APK below is built WITHOUT it: the GitHub APK keeps
+          # everything. Two builds of different Dart code, so each keeps its
+          # own Dart symbols (play/, github/).
           flutter build appbundle --release \
+            --dart-define=CHOPSTATS_CHANNEL=play \
             --build-name "$BUILD_NAME" --build-number "$BUILD_NUMBER" \
-            --split-debug-info=build/android/symbols
+            --split-debug-info=build/android/symbols/play
           # The APK build below runs R8 again and overwrites mapping.txt in
           # place. Keep the bundle's own mapping for the Play upload: the
           # mapping Play deobfuscates with must come from the same R8 run as
@@ -734,8 +743,41 @@ jobs:
           # out, so a 32-bit phone refuses it instead of crashing).
           flutter build apk --release --target-platform android-arm64 \
             --build-name "$BUILD_NAME" --build-number "$BUILD_NUMBER" \
-            --split-debug-info=build/android/symbols
+            --split-debug-info=build/android/symbols/github
           ls -la build/app/outputs/bundle/release/ build/app/outputs/flutter-apk/
+
+      # The Google Play build ships without broad photo access, and the
+      # GitHub APK keeps it (owner decision 1, 2026-11-13; docs/RELEASING.md
+      # § 6). Read from the bundle's own manifest, the one Play reviews, and
+      # from the APK, with aapt2 (scripts/android_permissions.sh: a bundle's
+      # proto manifest reads like a proto APK's, so no bundletool is
+      # needed). A bundle built without the define, or an APK built with
+      # it, stops the run here, before anything is uploaded or released.
+      - name: Check the Play bundle asks for no photo permission and the APK keeps them
+        if: steps.secrets.outputs.ready == 'true'
+        run: |
+          set -euo pipefail
+          aab=app/build/app/outputs/bundle/release/app-release.aab
+          apk=app/build/app/outputs/flutter-apk/app-release.apk
+          in_aab=$(scripts/android_permissions.sh "$aab")
+          in_apk=$(scripts/android_permissions.sh "$apk")
+          # A listing with nothing in it would pass the check below: the
+          # bundle asks for INTERNET, so its listing must name it.
+          if ! grep -qx android.permission.INTERNET <<<"$in_aab"; then
+            echo "::error::no android.permission.INTERNET in the permissions read from app-release.aab; aapt2's listing (in the log above) was not read"
+            exit 1
+          fi
+          for p in READ_MEDIA_IMAGES READ_MEDIA_VISUAL_USER_SELECTED READ_EXTERNAL_STORAGE; do
+            if grep -qx "android.permission.$p" <<<"$in_aab"; then
+              echo "::error::app-release.aab (the Google Play build) asks for android.permission.$p; it must be built with --dart-define=CHOPSTATS_CHANNEL=play (docs/RELEASING.md § 6)"
+              exit 1
+            fi
+          done
+          if ! grep -qx android.permission.READ_MEDIA_IMAGES <<<"$in_apk"; then
+            echo "::error::app-release.apk (the GitHub APK) does not ask for android.permission.READ_MEDIA_IMAGES; Watch Camera Roll needs it, so it must be built without the Play define"
+            exit 1
+          fi
+          echo "app-release.aab: no photo permission. app-release.apk: READ_MEDIA_IMAGES kept."
 
       - name: Verify the bundle is signed with the upload key, not the debug key
         id: artifacts

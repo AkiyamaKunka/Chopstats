@@ -652,8 +652,9 @@ void main() {
     // left the new weight behind; its date row brought the day back
     // without the weight, as a new log; and in place the sheet still took
     // the day for one without a weight, so clearing it deleted nothing.
-    Future<void> partlySave(WidgetTester tester, _FlakyBodyDao dao) async {
-      await tester.enterText(find.byKey(const Key('bodyWeightField')), '81.6');
+    Future<void> partlySave(WidgetTester tester, _FlakyBodyDao dao,
+        {String weight = '81.6'}) async {
+      await tester.enterText(find.byKey(const Key('bodyWeightField')), weight);
       await tester.enterText(find.byKey(const Key('bodyWaistField')), '90');
       dao.failMeasurementWrites = true;
       await tester.tap(find.byKey(const Key('bodySheetSave')));
@@ -755,6 +756,74 @@ void main() {
       expect(dao.weightsByDate.keys, ['2026-07-28']);
       expect(dao.measurementsByDate['2026-08-02']?.waistCm, 90);
     });
+
+    // Android review 2026-11-19 (R12): after a part-failed save the sheet
+    // still counted the weight it had just written (or deleted) as typed,
+    // against the day as the sheet first showed it. With the unsaved waist
+    // let go, back asked about changes not saved, and the date row took
+    // the written weight to another day as typed. Some keyboards type the
+    // decimal point as a comma: '81,6' is stored as 81.6 all the same,
+    // though the field never shows a stored value that way.
+    for (final (what, stored, typed, written) in const [
+      ('a new weight written', null, '81.6', 81.6),
+      ('a new weight typed with a comma written', null, '81,6', 81.6),
+      ('a cleared weight deleted', 83.2, '', null),
+    ]) {
+      testWidgets('$what, the measurements not, the waist then cleared: '
+          'back closes without asking', (tester) async {
+        final dao = await pumpFlaky(tester);
+        if (stored != null) {
+          dao.weightsByDate['2026-08-02'] =
+              WeightEntry('2026-08-02', stored, source: 'manual');
+          await tester.state<BodyScreenState>(find.byType(BodyScreen)).reload();
+          await tester.pumpAndSettle();
+        }
+        await tester.tap(find.byKey(const Key('logBodyButton')));
+        await tester.pumpAndSettle();
+        await partlySave(tester, dao, weight: typed);
+        expect(dao.weightsByDate['2026-08-02']?.kg, written,
+            reason: 'the weight write went through');
+
+        await tester.enterText(find.byKey(const Key('bodyWaistField')), '');
+        await tester.pump();
+        await tester.binding.handlePopRoute();
+        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('discardChangesDialog')), findsNothing,
+            reason: 'the sheet shows what is stored for Aug 2');
+        expect(find.byType(LogBodySheet), findsNothing);
+      });
+    }
+
+    testWidgets('a part-failed save, then the weight changed again: back '
+        'asks about that change', (tester) async {
+      final dao = await pumpFlaky(tester);
+      await tester.tap(find.byKey(const Key('logBodyButton')));
+      await tester.pumpAndSettle();
+      await partlySave(tester, dao);
+      await tester.enterText(find.byKey(const Key('bodyWaistField')), '');
+      await tester.enterText(find.byKey(const Key('bodyWeightField')), '82');
+      await tester.pump();
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('discardChangesDialog')), findsOneWidget,
+          reason: 'Aug 2 stores 81.6, not 82');
+    });
+
+    for (final typed in const ['81.6', '81,6']) {
+      testWidgets('a part-failed save, then the date row to a day without '
+          'data: the waist not saved goes along, the weight written does '
+          'not ($typed)', (tester) async {
+        final dao = await pumpFlaky(tester);
+        await tester.tap(find.byKey(const Key('logBodyButton')));
+        await tester.pumpAndSettle();
+        await partlySave(tester, dao, weight: typed);
+        await pickDay(tester, '1');
+        expect(find.text('Log body · Aug 1'), findsOneWidget);
+        expect(field(tester, 'bodyWeightField'), '',
+            reason: 'Aug 2 stores the weight: it was not left unsaved');
+        expect(field(tester, 'bodyWaistField'), '90');
+      });
+    }
 
     testWidgets('a part-failed save takes no input until the day is re-read',
         (tester) async {

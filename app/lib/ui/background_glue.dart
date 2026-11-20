@@ -24,6 +24,7 @@ import 'package:path_provider/path_provider.dart' show getTemporaryDirectory;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:workmanager/workmanager.dart';
 
+import '../core/app_channel.dart' show photoLibraryInBuild;
 import '../core/contracts.dart';
 import '../core/outcome_kind.dart';
 import '../data/meals_dao_impl.dart';
@@ -44,6 +45,7 @@ import 'coach_strings.dart';
 import 'format.dart' show mealDescription;
 import '../services/settings/app_settings.dart';
 import 'photo_pipeline.dart';
+import 'play_channel.dart' show retireWatchCameraRoll;
 import 'os_summary.dart';
 import 'outcome_text.dart';
 
@@ -832,6 +834,25 @@ Future<bool> _runAfterLaunch({
     return true;
   }
   await recorder.stage(BackgroundRunStage.settings);
+  // The Google Play build (core/app_channel.dart): the job of a GitHub
+  // install it was installed over, run before the app was opened. No scan
+  // (no photo permission either): Watch Camera Roll is turned off as the
+  // first launch would, the app owes its one notice (play_channel.dart),
+  // and the job cancels itself (backgroundJobWanted is false there).
+  if (!photoLibraryInBuild) {
+    try {
+      await retireWatchCameraRoll(settings, prefs);
+    } catch (_) {
+      // The app's launch tries again.
+    }
+    await recorder.finish(BackgroundStop.watcherOff);
+    try {
+      await syncBackgroundScan(settings);
+    } catch (_) {
+      // The app's launch cancels it instead (di.dart).
+    }
+    return true;
+  }
   final deferred = inFlight.deferred = await DeferredAssets.load(prefs);
   // Time-derived id seed: cards from successive runs stack instead of
   // overwriting each other. Base 10000 keeps the whole range clear of the

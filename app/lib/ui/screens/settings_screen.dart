@@ -14,6 +14,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:url_launcher/url_launcher.dart' as launcher;
 
+import '../../core/app_channel.dart' show photoLibraryInBuild;
 import '../../core/contracts.dart';
 import '../../core/server_transport.dart' show serverAddressRefused;
 import '../../services/backup/backup_coordinator.dart';
@@ -334,7 +335,8 @@ class _SettingsScreenState extends State<SettingsScreen>
   /// or touch the logging path.
   Future<void> _probePhotoAccess() async {
     final lib = widget.photoLibrary;
-    if (lib == null) return;
+    // The Play build has no photo permission and nothing that needs it.
+    if (lib == null || !photoLibraryInBuild) return;
     bool limited;
     try {
       limited = !await lib.hasFullAccess();
@@ -527,10 +529,16 @@ class _SettingsScreenState extends State<SettingsScreen>
       builder: (ctx) => appAlertDialog(
         key: const Key('aiStopSharingDialog'),
         title: Text(ctx.l10n.aiStopSharingTitle(provider)),
+        // The Play build has no Watch Camera Roll to turn off: the same
+        // words without it (core/app_channel.dart).
         content: SingleChildScrollView(
-            child: Text(lookupsToo
-                ? ctx.l10n.aiStopSharingBodyWithLookups(provider)
-                : ctx.l10n.aiStopSharingBody(provider))),
+            child: Text(switch ((lookupsToo, photoLibraryInBuild)) {
+          (true, true) => ctx.l10n.aiStopSharingBodyWithLookups(provider),
+          (false, true) => ctx.l10n.aiStopSharingBody(provider),
+          (true, false) =>
+            ctx.l10n.aiStopSharingBodyWithLookupsPlay(provider),
+          (false, false) => ctx.l10n.aiStopSharingBodyPlay(provider),
+        })),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
@@ -639,7 +647,11 @@ class _SettingsScreenState extends State<SettingsScreen>
     final colors = context.colors;
     final title = Text(context.l10n.settingsWelcomeTitle,
         style: theme.textTheme.titleMedium?.copyWith(color: colors.label));
-    final body = Text(context.l10n.settingsWelcomeBody,
+    // The Play build has no Watch Camera Roll to turn on.
+    final body = Text(
+        photoLibraryInBuild
+            ? context.l10n.settingsWelcomeBody
+            : context.l10n.settingsWelcomeBodyPlay,
         style: theme.textTheme.bodyMedium
             ?.copyWith(color: colors.secondaryLabel));
     final chevron = ExcludeSemantics(
@@ -730,9 +742,13 @@ class _SettingsScreenState extends State<SettingsScreen>
         if (widget.settings.apiKey.trim().isEmpty) _firstRunCard(theme),
         GroupedSection(
           header: context.l10n.settingsSectionAi,
-          footer: widget.settings.isQuotaPaused
-              ? context.l10n.settingsAiFooterPaused
-              : context.l10n.settingsAiFooter,
+          // The Play build keeps no photo for later and retries none on
+          // its own (core/app_channel.dart): its words say to add it again.
+          footer: !widget.settings.isQuotaPaused
+              ? context.l10n.settingsAiFooter
+              : photoLibraryInBuild
+                  ? context.l10n.settingsAiFooterPaused
+                  : context.l10n.settingsAiFooterPausedPlay,
           children: [
             GroupedRow(
               key: const Key('aiProviderRow'),
@@ -839,12 +855,19 @@ class _SettingsScreenState extends State<SettingsScreen>
         serverBackend: s.serverBackend);
   }
 
-  /// Camera-roll watching, coverage audit, backfill window.
+  /// Camera-roll watching, coverage audit, backfill window. The Google Play
+  /// build never reads the photo library (core/app_channel.dart): the whole
+  /// group is left out there, Watch Camera Roll, the Meta glasses switch
+  /// that rides on its scans, the window, the background row and Photo
+  /// Coverage alike.
   List<Widget> _photoSection(ThemeData theme) => [
-        ..._photoGroup(theme),
+        if (photoLibraryInBuild) ..._photoGroup(theme),
         // Android: under the footer's 'can't see all your photos' line,
         // the fix itself (the reselect dialog), not a trip to App info.
-        if (_watcherEnabled && _photosLimited && _fixesPhotoAccessInPlace)
+        if (photoLibraryInBuild &&
+            _watcherEnabled &&
+            _photosLimited &&
+            _fixesPhotoAccessInPlace)
           Padding(
             padding: const EdgeInsets.fromLTRB(
                 kGroupInset + AppSpace.s4, 0, kGroupInset, 0),

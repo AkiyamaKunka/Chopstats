@@ -11,6 +11,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart' show DateFormat;
 
+import '../../core/app_channel.dart' show photoLibraryInBuild;
 import '../../core/coerce.dart' show isoDate;
 import '../../core/contracts.dart';
 import '../../core/shared_generated.dart' show SharedConstants;
@@ -211,8 +212,9 @@ class _AddPhotoScreenState extends State<AddPhotoScreen> {
     if (system == null) return _loadGrid();
     // Play's photo policy: full access is READ, never asked for. The Play
     // build declares no photo permission, so a request there was a silent
-    // denial and the "isn't allowed" dead end.
-    final full = await system.hasBroadAccess();
+    // denial and the "isn't allowed" dead end; it does not even read it
+    // (core/app_channel.dart): the picker is its one way in.
+    final full = photoLibraryInBuild && await system.hasBroadAccess();
     if (!mounted) return const [];
     if (full) {
       _pickerRow = true;

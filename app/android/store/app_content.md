@@ -169,12 +169,15 @@ no `com.google.android.gms.permission.AD_ID`, and no SDK reads the ID.)
 
 ## Photo and video permissions
 
-**Nothing to declare for the first submission.** The Play build declares
-no `READ_MEDIA_IMAGES`, `READ_MEDIA_VISUAL_USER_SELECTED` or
+**Not declared in the Play build: nothing to declare.** The Play build
+(`--dart-define=CHOPSTATS_CHANNEL=play`, `docs/RELEASING.md` § 6.3)
+declares no `READ_MEDIA_IMAGES`, `READ_MEDIA_VISUAL_USER_SELECTED` or
 `READ_EXTERNAL_STORAGE` (decision 1); photos come through Android's photo
-picker and the share sheet, which need no permission. If the console still
+picker and the share sheet, which need no permission, and release.yml
+stops a run whose bundle asks for any of the three. If the console still
 shows this declaration, the uploaded bundle is the wrong one: check its
-permissions (`docs/RELEASING.md` § 6.3) before going on.
+permissions with `scripts/android_permissions.sh app-release.aab`
+(`docs/RELEASING.md` § 6.3) before going on.
 
 ## AI-generated content (no form; the assessment to keep on file)
 
