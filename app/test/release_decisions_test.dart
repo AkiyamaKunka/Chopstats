@@ -1354,8 +1354,13 @@ void main() {
           .firstMatch(workflow)!
           .group(1)!;
 
-      Future<({int code, String log, String out})> plan(String event,
-          String ref, int run) async {
+      /// The plan step at Release run [run]. [released]: whether `gh
+      /// release view` finds the tag's GitHub Release. A stub `gh` first
+      /// on PATH answers it and records its calls in `gh`: the developer's
+      /// own gh is never called.
+      Future<({int code, String log, String out, List<String> gh})> plan(
+          String event, String ref, int run,
+          {bool released = false}) async {
         final dir = Directory.systemTemp.createTempSync('ct_plan');
         addTearDown(() => dir.deleteSync(recursive: true));
         Directory('${dir.path}/app').createSync();
@@ -1365,9 +1370,19 @@ void main() {
           ..writeAsStringSync(planScript());
         final out = File('${dir.path}/out')..createSync();
         final summary = File('${dir.path}/summary')..createSync();
+        final calls = File('${dir.path}/gh-calls')..createSync();
+        final bin = Directory('${dir.path}/bin')..createSync();
+        final gh = File('${bin.path}/gh')
+          ..writeAsStringSync('#!/usr/bin/env bash\n'
+              'echo "\$*" >> "${calls.path}"\n'
+              'exit ${released ? 0 : 1}\n');
+        expect((await Process.run('chmod', ['+x', gh.path])).exitCode, 0);
         final r = await Process.run('bash', [script.path],
             workingDirectory: dir.path,
             environment: {
+              'PATH': '${bin.path}:${Platform.environment['PATH']}',
+              'GITHUB_REPOSITORY': 'owner/repo',
+              'GH_TOKEN': 'token',
               'GITHUB_EVENT_NAME': event,
               'GITHUB_REF': ref,
               'GITHUB_RUN_NUMBER': '$run',
@@ -1382,6 +1397,10 @@ void main() {
           code: r.exitCode,
           log: '${r.stdout}${r.stderr}',
           out: out.readAsStringSync(),
+          gh: calls
+              .readAsLinesSync()
+              .where((l) => l.isNotEmpty)
+              .toList(),
         );
       }
 
@@ -1439,15 +1458,54 @@ void main() {
         }
       });
 
-      test('Run workflow on a +N tag that already ran still works, with a '
-          'warning', () async {
-        final r = await plan('workflow_dispatch', 'refs/tags/v1.7.0+215', 16);
+      test('Run workflow on a +N tag whose release is out still works, with '
+          'a warning', () async {
+        final r = await plan('workflow_dispatch', 'refs/tags/v1.7.0+215', 16,
+            released: true);
         expect(r.code, 0, reason: r.log);
         expect(r.out, contains('build_number=215\n'));
         expect(r.log, contains('::warning::'));
+        expect(r.log, contains('re-releasing build 215'));
+        expect(r.gh, ['release view v1.7.0+215 --repo owner/repo']);
         final main = await plan('workflow_dispatch', 'refs/heads/main', 16);
         expect(main.code, 0);
         expect(main.out, contains('build_number=216\n'));
+        expect(main.gh, isEmpty);
+      });
+
+      // A tag whose push the plan refused has no GitHub Release: Run
+      // workflow on it built the low number and published it (Android
+      // refuses it as a downgrade over a higher build already out).
+      test('Run workflow on a +N tag with no release (its push was refused) '
+          'stops before anything is built', () async {
+        final pushed = await plan('push', 'refs/tags/v1.7.0+205', 8);
+        expect(pushed.code, 1);
+        expect(pushed.gh, isEmpty, reason: 'a push asks nothing');
+        final r = await plan('workflow_dispatch', 'refs/tags/v1.7.0+205', 9);
+        expect(r.code, 1, reason: r.log);
+        expect(r.gh, ['release view v1.7.0+205 --repo owner/repo']);
+        expect(r.log, contains('::error::Run workflow on tag v1.7.0+205: '
+            'build number 205 is below 209, and v1.7.0+205 has no GitHub '
+            'Release'));
+        expect(r.log, contains('use a +N above 209'));
+        expect(r.log, isNot(contains('::warning::')));
+        expect(r.out, isNot(contains('build_number=')));
+        // At or above the floor, Run workflow asks nothing.
+        final high = await plan('workflow_dispatch', 'refs/tags/v1.7.0+220', 16);
+        expect(high.code, 0, reason: high.log);
+        expect(high.gh, isEmpty);
+        expect(high.out, contains('build_number=220\n'));
+      });
+
+      test('the plan step has the token gh needs, and no more permission',
+          () {
+        final at = workflow.indexOf('        id: plan\n');
+        final step = workflow.substring(
+            at, workflow.indexOf('        run: |\n', at));
+        expect(step, contains(r'GH_TOKEN: ${{ github.token }}'));
+        expect(job('plan'), isNot(contains('permissions:')),
+            reason: 'the workflow\'s contents: read is enough');
+        expect(workflow, contains('\npermissions:\n  contents: read\n'));
       });
     }, skip: Platform.isWindows);
 

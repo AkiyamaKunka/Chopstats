@@ -137,6 +137,8 @@ jobs:
           LANE: ${{ github.event.inputs.lane || 'both' }}
           INTERNAL_ONLY_INPUT: ${{ inputs.testflight_internal_only }}
           PLAY_TRACK: ${{ github.event_name == 'workflow_dispatch' && inputs.play_track || 'internal' }}
+          # Only for `gh release view` below (contents: read is enough).
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           pubspec_version=$(sed -n 's/^version:[[:space:]]*//p' app/pubspec.yaml | tr -d '[:space:]')
@@ -161,17 +163,23 @@ jobs:
               # number no CI build has used (android-v1.7.0 is 200 + run 7).
               # Below it, App Store Connect or Play may refuse the upload as
               # used or lower, and the GitHub APK may not install over one
-              # already out (a downgrade). Only a tag push is held to it:
-              # "Run workflow" on
-              # a +N tag that already ran gets a later run number, and
-              # re-running that tag's release must still work.
+              # already out (a downgrade). A tag push is held to it. "Run
+              # workflow" on a +N tag gets a later run number, so it is let
+              # through only to re-release a tag whose GitHub Release is out:
+              # a tag the plan refused (or that never released) has none,
+              # and is refused here too, before anything is built or sent.
+              # An API error refuses as well.
               floor=$((offset + GITHUB_RUN_NUMBER))
               if [[ "$number" =~ ^[0-9]+$ ]] && (( number < floor )); then
                 if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
                   echo "::error::tag v$tag carries build number $number, but this is Release run $GITHUB_RUN_NUMBER: earlier runs numbered their builds up to $((floor - 1)) (BUILD_NUMBER_OFFSET $offset + run number), so $number may already be on App Store Connect, on Play or in a GitHub APK. Tag v$name without a +N instead: CI numbers it BUILD_NUMBER_OFFSET + the new run's number, which no run has used. A +N must clear the floor of the run your new push starts, not this one's: that run is numbered $((GITHUB_RUN_NUMBER + 1)) or later, so use more than $floor, with room to spare if other Release runs may start first."
                   exit 1
                 fi
-                echo "::warning::Run workflow on tag v$tag: build number $number is below $floor, the lowest number no earlier run has used. Fine for re-running this tag's own release; App Store Connect and Play refuse it if an earlier run uploaded $number or more."
+                if ! gh release view "v$tag" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+                  echo "::error::Run workflow on tag v$tag: build number $number is below $floor, and v$tag has no GitHub Release (its push was refused, or it never released). Its APK may not install over one already out (Android refuses a lower versionCode), and App Store Connect or Play may already have $number. Tag v$name without a +N instead, or use a +N above $floor, with room to spare if other Release runs may start first. To finish a run of v$tag that failed after its plan passed, use Re-run failed jobs on that run."
+                  exit 1
+                fi
+                echo "::warning::Run workflow on tag v$tag: re-releasing build $number (below $floor, the lowest number no earlier run has used). The GitHub Release's APK is replaced by a rebuild of the same number; App Store Connect and Play refuse $number if they already have it or a higher one."
               fi
             else
               number=$((offset + GITHUB_RUN_NUMBER)); source="BUILD_NUMBER_OFFSET + run_number"

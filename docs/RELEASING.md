@@ -1067,8 +1067,11 @@ step. Revisit if the app is ever published with a developer-run service.
   `vX.Y.Z` instead; for a `+N`, go above `BUILD_NUMBER_OFFSET` + the
   refused run's number. The corrected tag is a new push, so it starts a
   new run with a higher number and a higher floor. Run workflow on a `+N`
-  tag that already ran (to re-release that tag) gets a later run number,
-  so there it only warns.
+  tag whose GitHub Release is already out (to re-release it) gets a later
+  run number, so there it only warns; on a tag the plan refused (or one
+  that never released), it refuses too, before anything is built. To
+  finish a tag's run that failed after its plan passed, use *Re-run
+  failed jobs* on that run: a re-run keeps its run number.
 
 ---
 
