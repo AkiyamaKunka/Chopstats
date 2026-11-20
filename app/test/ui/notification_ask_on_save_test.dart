@@ -4,23 +4,28 @@
 /// pipeline, so its hook never asked, and the daily summary — on by
 /// default — was dropped by the OS every night. Driven through the real
 /// shell, with the trigger on the meals-changed signal as di.dart puts it
-/// (production_wiring_test pins that line).
+/// (production_wiring_test pins that line); Settings › Photo coverage's
+/// Log manually through the real Settings screen.
 library;
 
 import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:calorie_tracker/core/contracts.dart';
+import 'package:calorie_tracker/l10n/app_localizations.dart';
+import 'package:calorie_tracker/services/photo/coverage.dart';
 import 'package:calorie_tracker/services/report/notification_permission.dart';
 import 'package:calorie_tracker/ui/app.dart';
 import 'package:calorie_tracker/ui/format.dart' show isoDate;
 import 'package:calorie_tracker/ui/photo_pipeline.dart';
 import 'package:calorie_tracker/ui/refresh_signal.dart';
+import 'package:calorie_tracker/ui/screens/settings_screen.dart';
 import 'package:calorie_tracker/ui/services.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../photo/watcher_test.dart' show FakeAsset, FakePhotoLibrary, bytesOf;
 import 'fakes.dart';
 
 void main() {
@@ -184,6 +189,78 @@ void main() {
       dao.meals.where((m) => m.source == MealSource.appRepeat),
       hasLength(1),
     );
+    expect(requests, 1);
+  }, variant: android);
+
+  // Review of the fix: the coverage screen's editor saved the meal and
+  // sent no meals-changed signal, so nothing was asked (and the shell
+  // neither reloaded nor re-armed the summary with it).
+  testWidgets('Settings › Photo coverage › a not-food photo › Log manually '
+      '→ Save signals the change and asks once', (tester) async {
+    tester.view.physicalSize = const Size(800, 3000);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    final dao = FakeDao();
+    final settings = FakeSettings();
+    wireAsDiDart(dao, settings);
+    var signals = 0;
+    void count() => signals++;
+    mealsChangedSignal.addListener(count);
+    addTearDown(() => mealsChangedSignal.removeListener(count));
+    final library = FakePhotoLibrary()
+      ..assets = [
+        FakeAsset('s3', 'S3.jpg', DateTime(2026, 7, 26, 9), bytesOf(3)),
+      ];
+    dao.ledger['h3'] = IngestionStatus.skipped; // judged not food
+    await tester.pumpWidget(
+      MaterialApp(
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        home: Scaffold(
+          body: SettingsScreen(
+            settings: settings,
+            analyzer: FakeAnalyzer(),
+            dao: dao,
+            photoIntake: FakeIntake(),
+            requestPhotoPermission: () async => true,
+            coverage: CoverageAuditor(
+              library: library,
+              dao: dao,
+              hasher: (b) async => 'h${b.first}',
+              clock: () => DateTime(2026, 7, 26, 12),
+            ),
+            processPhoto: (_) async =>
+                const PhotoOutcome(PhotoOutcomeKind.saved, 'ok'),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const Key('coverageCheckTile')));
+    await tester.tap(find.byKey(const Key('coverageCheckTile')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('runCoverageCheck')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('S3.jpg'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('editorCalories')), '420');
+    await tester.tap(find.byKey(const Key('saveMealButton')));
+    // The save makes the meal's thumbnail from the photo: real decoding.
+    for (
+      var i = 0;
+      i < 100 && find.byKey(const Key('saveMealButton')).evaluate().isNotEmpty;
+      i++
+    ) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 20)),
+      );
+      await tester.pump();
+    }
+    await tester.pumpAndSettle();
+    expect(dao.saved, hasLength(1));
+    expect(find.byKey(const Key('runCoverageCheck')), findsOneWidget,
+        reason: 'back on the coverage screen');
+    expect(signals, 1, reason: 'Today, History and the summary re-query');
     expect(requests, 1);
   }, variant: android);
 
