@@ -22,8 +22,11 @@
 /// address it was entered at, alone (SettingsStore.setServerKeyFromField):
 /// the previous server's key is never in the field to be edited in place,
 /// and an edit of a field filled at another host than the saved address's
-/// is refused. A change from elsewhere while the page is open (a setup link
-/// confirmed over it) refills both fields.
+/// is refused. A key whose host is lost (one an iPhone reinstall kept
+/// without the preferences that said which server it was for) leaves the
+/// field empty at every address and names no host. A change from elsewhere
+/// while the page is open (a setup link confirmed over it) refills both
+/// fields.
 library;
 
 import 'dart:async';

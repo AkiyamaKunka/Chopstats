@@ -363,6 +363,8 @@ void main() {
   group('key A\'s text and the key field, from every angle', () {
     const keyA = 'key-a-0123456789';
     late AppSettings settings;
+    late SharedPreferences prefs;
+    late MemoryKeyStore keys;
     late SettingsStore store;
     late List<String> seen; // 'host <- key'
     late ServerAnalyzer server;
@@ -370,9 +372,9 @@ void main() {
 
     setUp(() async {
       SharedPreferences.setMockInitialValues({});
-      settings = await AppSettings.load(
-          prefs: await SharedPreferences.getInstance(),
-          keyStore: MemoryKeyStore());
+      prefs = await SharedPreferences.getInstance();
+      keys = MemoryKeyStore();
+      settings = await AppSettings.load(prefs: prefs, keyStore: keys);
       await settings.setProvider(AiProvider.server);
       await settings.setServerBaseUrl('https://a.example');
       await settings.setServerApiKey(keyA);
@@ -417,19 +419,26 @@ void main() {
     }
 
     /// No request to a host outside [hosts] carried key A's text, and the
-    /// key saved for any other host (or for none yet) does not carry it.
-    void expectKeyAOnlyAt(Set<String> hosts) {
+    /// key saved for any other host (or for none yet) does not carry it:
+    /// in memory, nor as the next launch (or a background run) loads it
+    /// from the store.
+    Future<void> expectKeyAOnlyAt(Set<String> hosts) async {
       for (final s in seen) {
         final [host, key] = s.split(' <- ');
         if (!hosts.contains(host)) {
           expect(carriesKeyA(key), isFalse, reason: 'sent $s');
         }
       }
-      if (!hosts.contains(settings.serverKeyHost)) {
-        expect(carriesKeyA(settings.serverApiKey), isFalse,
-            reason: 'saved for ${settings.serverKeyHost}: '
-                '${settings.serverApiKey}');
+      final stored = await AppSettings.load(prefs: prefs, keyStore: keys);
+      for (final s in [settings, stored]) {
+        if (!hosts.contains(s.serverKeyHost)) {
+          expect(carriesKeyA(s.serverApiKey), isFalse,
+              reason: 'saved for ${s.serverKeyHost}: ${s.serverApiKey}');
+        }
       }
+      expect((stored.serverApiKey, stored.serverKeyHost),
+          (settings.serverApiKey, settings.serverKeyHost),
+          reason: 'stored as it is in memory');
     }
 
     /// Settings with the Restaurant group, as di.dart wires it, and the
@@ -553,7 +562,7 @@ void main() {
             await moveAddress(tester, 'https://b.example');
             await rest(tester);
           }
-          expectKeyAOnlyAt({'a.example'});
+          await expectKeyAOnlyAt({'a.example'});
           final pasted = editName != 'one backspace';
           final keptAt = serverKeyHostOf(move) ?? 'b.example';
           if (!pasted) {
@@ -591,7 +600,7 @@ void main() {
         expect(find.textContaining('Saved for'), findsNothing);
         expect(settings.serverKeyHost, 'a.example');
         await rest(tester);
-        expectKeyAOnlyAt({'a.example'});
+        await expectKeyAOnlyAt({'a.example'});
       });
     }
 
@@ -611,7 +620,7 @@ void main() {
         await edit(tester);
         await rest(tester);
       }
-      expectKeyAOnlyAt({'a.example', 'a2.example'});
+      await expectKeyAOnlyAt({'a.example', 'a2.example'});
       expect(settings.serverApiKey, 'key-b');
       expect(settings.serverKeyHost, 'b.example');
       expect(seen.last, 'b.example <- key-b');
@@ -634,7 +643,7 @@ void main() {
       for (final edit in edits.values) {
         await edit(tester);
         await rest(tester);
-        expectKeyAOnlyAt({'a.example'});
+        await expectKeyAOnlyAt({'a.example'});
       }
       expect(settings.serverKeyHost, 'b.example');
       expect(settings.serverApiKey, 'zz');
@@ -659,7 +668,7 @@ void main() {
           .updateEditingValue(value.replaced(value.selection, clipboard));
       await tester.pumpAndSettle();
       await rest(tester);
-      expectKeyAOnlyAt({'a.example'});
+      await expectKeyAOnlyAt({'a.example'});
       expect(settings.serverApiKey, 'key-link');
       expect(settings.serverKeyHost, 'b.example');
       expect(keyText(tester), 'key-link');
@@ -685,8 +694,330 @@ void main() {
       expect(settings.serverApiKey, 'key-link');
       expect(settings.serverKeyHost, 'b.example');
       await rest(tester);
-      expectKeyAOnlyAt({'a.example'});
+      await expectKeyAOnlyAt({'a.example'});
     });
+  });
+
+  // Recheck of the rule above: the key's host was kept in the preferences,
+  // the key in the keychain. An iPhone reinstall keeps keychain items and
+  // drops the preferences, so key A loaded bound to no host: in the field
+  // at '' and at the first address saved, then bound to it, and a paste at
+  // the caret saved key A + key B for b.example. The host is stored with
+  // the key now; a key stored as plain text (1.7.0 and earlier) that a
+  // first launch finds has lost its host, and is never shown or sent.
+  group('after a reinstall that kept the key and dropped the preferences',
+      () {
+    const keyA = 'key-a-0123456789';
+    late AppSettings settings;
+    late SharedPreferences prefs;
+    late MemoryKeyStore keys;
+    late SettingsStore store;
+    late List<String> seen; // 'host <- key'
+    late ServerAnalyzer server;
+    late String clipboard;
+
+    /// Key A's secure item as this version stores it, saved for a.example.
+    Future<String> itemSavedForA() async {
+      SharedPreferences.setMockInitialValues({});
+      final saved = MemoryKeyStore();
+      final s = await AppSettings.load(
+          prefs: await SharedPreferences.getInstance(), keyStore: saved);
+      await s.setServerBaseUrl('https://a.example');
+      await s.setServerApiKey(keyA);
+      return saved.data['server_api_key']!;
+    }
+
+    /// The reinstalled app's first launch: no preferences, [item] still in
+    /// the store. The user picks the plan again and allows it.
+    Future<void> reinstall(String item) async {
+      SharedPreferences.setMockInitialValues({});
+      prefs = await SharedPreferences.getInstance();
+      keys = MemoryKeyStore()..data['server_api_key'] = item;
+      settings = await AppSettings.load(prefs: prefs, keyStore: keys);
+      await settings.setProvider(AiProvider.server);
+      await settings.setAiConsent(aiConsentRoute('server', 'claude'),
+          granted: true);
+      store = createSettingsStore(settings);
+      seen = [];
+      clipboard = 'key-b';
+      server = ServerAnalyzer(settings, client: MockClient((req) async {
+        seen.add('${req.url.host} <- ${req.headers['X-API-Key']}');
+        return http.Response(
+            jsonEncode({
+              'ok': true,
+              'features': {'restaurant_lookup': true, 'lookup_jobs': true},
+            }),
+            200);
+      }));
+    }
+
+    final keyField = find.byKey(const Key('serverUploadKeyField'));
+    final keyEditable =
+        find.descendant(of: keyField, matching: find.byType(EditableText));
+    final urlField = find.byKey(const Key('serverUrlField'));
+    final useHere = find.byKey(const Key('serverKeyUseHereRow'));
+    String keyText(WidgetTester tester) =>
+        tester.widget<EditableText>(keyEditable).controller.text;
+    final savedForA =
+        find.text('Saved for a.example: not sent to the address above.');
+
+    bool carriesKeyA(String? text) {
+      if (text == null) return false;
+      for (var i = 0; i + 8 <= keyA.length; i++) {
+        if (text.contains(keyA.substring(i, i + 8))) return true;
+      }
+      return false;
+    }
+
+    /// No request to a host but a.example carried key A's text, and no key
+    /// bound to any other host (or to none) carries it: in memory, and as
+    /// the next launch loads it from the store.
+    Future<void> expectKeyAOnlyAtA() async {
+      for (final s in seen) {
+        final [host, key] = s.split(' <- ');
+        if (host != 'a.example') {
+          expect(carriesKeyA(key), isFalse, reason: 'sent $s');
+        }
+      }
+      final next = await AppSettings.load(prefs: prefs, keyStore: keys);
+      for (final s in [settings, next]) {
+        if (s.serverKeyHost != 'a.example') {
+          expect(carriesKeyA(s.serverKeyForAddress), isFalse);
+          expect(carriesKeyA(s.serverKeyFor('b.example')), isFalse);
+          if (s.serverKeyHost != null) {
+            expect(carriesKeyA(s.serverApiKey), isFalse,
+                reason: 'saved for ${s.serverKeyHost}: ${s.serverApiKey}');
+          }
+        }
+      }
+    }
+
+    /// Settings with the Restaurant group, as di.dart wires it, and the
+    /// server page pushed over it with the same store, at ''.
+    Future<void> openServerPage(WidgetTester tester) async {
+      tester.view.physicalSize = const Size(800, 3200);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      final messenger = tester.binding.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(
+          SystemChannels.platform,
+          (call) async => switch (call.method) {
+                'Clipboard.hasStrings' => {'value': true},
+                'Clipboard.getData' => {'text': clipboard},
+                _ => null,
+              });
+      addTearDown(() =>
+          messenger.setMockMethodCallHandler(SystemChannels.platform, null));
+      final controls = RestaurantAssistControls(
+        lookupSupport: () => const LookupSupport(
+          supported: true,
+          recipient: LookupRecipient.claudePlan,
+          locationAllowed: true,
+          recipientHostTag: '0a1b2c3d',
+        ),
+        clearLearnedPlaces: () async => true,
+        serverState: () async =>
+            assistServerStateOf(await server.serverFeatures()),
+      );
+      await tester.pumpWidget(MaterialApp(
+        locale: const Locale('en'),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        home: Scaffold(
+          body: SettingsScreen(
+            settings: store,
+            analyzer: FakeAnalyzer(),
+            dao: FakeDao(),
+            requestPhotoPermission: () async => true,
+            changes: settings,
+            restaurantAssist: controls,
+          ),
+        ),
+      ));
+      await tester.pumpAndSettle();
+      expect(find.byType(RestaurantAssistSection), findsOneWidget);
+      unawaited(Navigator.of(tester.element(find.byType(SettingsScreen)))
+          .push(MaterialPageRoute<void>(
+              builder: (_) => SubscriptionProviderPage(settings: store))));
+      await tester.pumpAndSettle();
+      expect(settings.serverBaseUrl, '');
+    }
+
+    Future<void> moveAddress(WidgetTester tester, String url) async {
+      await tester.enterText(urlField, url);
+      await tester.tap(keyField);
+      await tester.pumpAndSettle();
+    }
+
+    Future<void> rest(WidgetTester tester) async {
+      await tester.pump(const Duration(milliseconds: 1100));
+      await tester.pumpAndSettle();
+    }
+
+    Future<void> pasteAtCaret(WidgetTester tester) async {
+      await tester.tap(keyField);
+      await tester.pumpAndSettle();
+      final value =
+          tester.state<EditableTextState>(keyEditable).textEditingValue;
+      tester.testTextInput
+          .updateEditingValue(value.replaced(value.selection, clipboard));
+      await tester.pumpAndSettle();
+    }
+
+    Future<void> deleteOne(WidgetTester tester) async {
+      await tester.tap(keyField);
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.backspace);
+      await tester.pumpAndSettle();
+    }
+
+    Future<void> selectAllPaste(WidgetTester tester) async {
+      await tester.tap(keyField);
+      await tester.pumpAndSettle();
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await tester.pumpAndSettle();
+    }
+
+    final edits = <String, Future<void> Function(WidgetTester)>{
+      'a paste at the caret': pasteAtCaret,
+      'one backspace': deleteOne,
+      'Select All + Paste': selectAllPaste,
+    };
+
+    for (final (lost, kind) in const [
+      (false, 'key A stored with its host'),
+      (true, 'key A stored as plain text (its host lost)'),
+    ]) {
+      /// The line under the field names a.example for a key stored with
+      /// its host; a lost host is named nowhere.
+      void expectEmptyField(WidgetTester tester, {required bool atHost}) {
+        expect(keyText(tester), isEmpty,
+            reason: 'key A is not in the field to be edited');
+        expect(savedForA, lost ? findsNothing : findsOneWidget);
+        expect(useHere, atHost && !lost ? findsOneWidget : findsNothing);
+      }
+
+      for (final MapEntry(key: editName, value: edit) in edits.entries) {
+        for (final atB in [false, true]) {
+          final where = atB ? 'at https://b.example' : 'at \'\', then '
+              'https://b.example';
+          testWidgets('$kind: $editName $where: b.example gets only what is '
+              'pasted', (tester) async {
+            await reinstall(lost ? keyA : await itemSavedForA());
+            await openServerPage(tester);
+            expectEmptyField(tester, atHost: false);
+            if (atB) {
+              await moveAddress(tester, 'https://b.example');
+              expectEmptyField(tester, atHost: true);
+            }
+            await edit(tester);
+            await rest(tester);
+            if (!atB) {
+              await moveAddress(tester, 'https://b.example');
+              await rest(tester);
+            }
+            await expectKeyAOnlyAtA();
+            if (editName == 'one backspace') {
+              // The field was empty: nothing deleted, nothing saved.
+              expect(settings.serverApiKey, keyA);
+              expect(settings.serverKeyHost, lost ? isNull : 'a.example');
+              expectEmptyField(tester, atHost: true);
+              expect(seen, isEmpty);
+            } else {
+              expect(settings.serverApiKey, 'key-b');
+              expect(settings.serverKeyHost, 'b.example');
+              expect(keyText(tester), 'key-b');
+              expect(find.textContaining('Saved for'), findsNothing);
+              expect(seen, ['b.example <- key-b']);
+            }
+          });
+        }
+      }
+
+      testWidgets('$kind: at a.example the field '
+          '${lost ? 'stays empty' : 'is filled again'}', (tester) async {
+        await reinstall(lost ? keyA : await itemSavedForA());
+        await openServerPage(tester);
+        await moveAddress(tester, 'https://b.example');
+        await deleteOne(tester);
+        await moveAddress(tester, 'https://a.example');
+        await rest(tester);
+        if (lost) {
+          // Nothing says it is a.example's.
+          expectEmptyField(tester, atHost: true);
+          expect(seen, isEmpty);
+        } else {
+          expect(keyText(tester), keyA);
+          expect(find.textContaining('Saved for'), findsNothing);
+          expect(seen, ['a.example <- $keyA']);
+        }
+        await expectKeyAOnlyAtA();
+      });
+
+      testWidgets('$kind: Use this key '
+          '${lost ? 'is never offered' : 'makes it the same server\'s new '
+              'name\'s, by the tap alone'}', (tester) async {
+        await reinstall(lost ? keyA : await itemSavedForA());
+        await openServerPage(tester);
+        await moveAddress(tester, 'https://a2.example');
+        await rest(tester);
+        expect(seen, isEmpty);
+        if (lost) {
+          expect(useHere, findsNothing);
+          return;
+        }
+        await tester.tap(useHere);
+        await tester.pumpAndSettle();
+        expect(settings.serverKeyHost, 'a2.example');
+        expect(keyText(tester), keyA);
+        expect(seen, ['a2.example <- $keyA']);
+        await moveAddress(tester, 'https://b.example');
+        expect(keyText(tester), isEmpty);
+        for (final edit in edits.values) {
+          await edit(tester);
+          await rest(tester);
+        }
+        final toB = seen.where((s) => s.startsWith('b.example ')).toList();
+        expect(toB, isNotEmpty);
+        for (final s in toB) {
+          expect(carriesKeyA(s), isFalse, reason: 'sent $s');
+        }
+        expect((settings.serverApiKey, settings.serverKeyHost),
+            ('key-b', 'b.example'));
+      });
+
+      testWidgets('$kind: a setup link confirmed with the page open fills '
+          'both fields with the link\'s server', (tester) async {
+        await reinstall(lost ? keyA : await itemSavedForA());
+        await openServerPage(tester);
+        await store.applyServerSetup(
+            serverBackend: 'claude',
+            serverBaseUrl: 'https://b.example',
+            apiKey: 'key-link');
+        await tester.pumpAndSettle();
+        expect(
+            tester
+                .widget<EditableText>(find.descendant(
+                    of: urlField, matching: find.byType(EditableText)))
+                .controller
+                .text,
+            'https://b.example');
+        expect(keyText(tester), 'key-link');
+        clipboard = 'zz';
+        for (final edit in edits.values) {
+          await edit(tester);
+          await rest(tester);
+        }
+        await expectKeyAOnlyAtA();
+        expect((settings.serverApiKey, settings.serverKeyHost),
+            ('zz', 'b.example'));
+        expect(seen.first, 'b.example <- key-link');
+        expect(seen.last, 'b.example <- zz');
+      });
+    }
   });
 
   group('Settings › Your own server', () {

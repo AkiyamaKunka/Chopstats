@@ -378,7 +378,10 @@ void main() {
       'switch off)', () async {
     debugRequireHttpsServerOverride = false;
     addTearDown(() => debugRequireHttpsServerOverride = null);
-    SharedPreferences.setMockInitialValues({});
+    // A key saved with its server's address (a key in the store with no
+    // preferences at all is one a reinstall left: never sent).
+    SharedPreferences.setMockInitialValues(
+        {'settings.server_base_url': 'https://srv.example'});
     final keys = _Keys()..data['server_api_key'] = 'k-srv';
     final settings = await AppSettings.load(
         prefs: await SharedPreferences.getInstance(), keyStore: keys);
@@ -486,7 +489,9 @@ void main() {
       'on: nothing is sent', () async {
     debugRequireHttpsServerOverride = true;
     addTearDown(() => debugRequireHttpsServerOverride = null);
-    SharedPreferences.setMockInitialValues({});
+    // A key saved with this address: only its http:// keeps it back.
+    SharedPreferences.setMockInitialValues(
+        {'settings.server_base_url': 'http://10.0.0.5:5000'});
     final keys = _Keys()..data['server_api_key'] = 'k-srv';
     final settings = await AppSettings.load(
         prefs: await SharedPreferences.getInstance(), keyStore: keys);

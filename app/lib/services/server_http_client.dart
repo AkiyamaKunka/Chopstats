@@ -22,7 +22,10 @@
 /// read after a wait (a leftover estimate decoding, or waiting out a busy
 /// server, as a setup link was confirmed), go to the new host once the new
 /// key was bound there. The text of a key saved for one host now goes to no
-/// other, whichever path sends and whenever it read the key.
+/// other, whichever path sends and whenever it read the key. The key and
+/// its host are stored and read as one value (AppSettings), so the
+/// background run, whose address may have been read before a change, never
+/// holds a key paired with another key's host either.
 ///
 /// It also turns redirects off. dart:io follows a 3xx by itself and
 /// copies every header but Authorization and Cookie onto the next

@@ -114,15 +114,17 @@ abstract class SettingsStore {
   String get serverBaseUrl;
 
   /// The host the own server's upload key was saved for
-  /// (AppSettings.serverKeyHost, lowercased); null: no key, or one saved
-  /// before any address. The key is sent to that host only
-  /// (core/server_transport.dart serverKeyForOtherHost).
+  /// (AppSettings.serverKeyHost, lowercased); null: no key, one saved
+  /// before any address, or one whose host is lost (a reinstall kept the
+  /// key without it: never shown or sent). The key is sent to that host
+  /// only (core/server_transport.dart serverKeyForOtherHost).
   String? get serverKeyHost;
 
   /// The own server's upload key as its key field shows it at the saved
   /// address (AppSettings.serverKeyForAddress): the key while it is bound
   /// to the address's host, or to none yet; '' while it is bound to another
-  /// host, or to one while the address names none.
+  /// host, or to one while the address names none, and at every address
+  /// while its host is lost.
   String get serverKeyForAddress;
 
   /// The text of the upload key that may go to [host] (AppSettings
