@@ -205,7 +205,10 @@ internal class SingleCall<V> {
 /// for later, and Android hands a share to a stopped app's recreated
 /// activity in the launch that recreates it, before its Dart has run: such
 /// a share waits here until Dart says it listens ("shareIntakeReady"),
-/// then goes to the plugin once. Main thread only.
+/// then goes to the plugin once. An activity that goes before then (Back
+/// or a swipe during the cold start) takes what it holds with it; those
+/// copies stay in shared_photos, where share intake's sweep takes them
+/// (share_intake.dart, strandedRecheck). Main thread only.
 internal class ShareHold<T> {
     private val held = ArrayList<T>()
     private var listening = false

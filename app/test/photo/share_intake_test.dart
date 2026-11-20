@@ -968,7 +968,8 @@ void main() {
       expect(read, [sentinel.path],
           reason: 'it may still be being copied, and its own event '
               'delivers it: MainActivity holds a share that comes before '
-              'share intake listens until it does (R0, below)');
+              'share intake listens until it does (R0, below); one whose '
+              'event never comes is taken by the second look (below)');
       expect(fresh.existsSync(), isTrue);
       await sub.cancel();
     });
@@ -1291,6 +1292,99 @@ void main() {
       await androidShareIntakeReady();
       messenger.setMockMethodCallHandler(activity, null);
       await androidShareIntakeReady(); // MissingPluginException
+    });
+
+    // Review of the R0 fix: the share MainActivity holds goes with that
+    // activity if it goes before share intake listens (Back or a swipe
+    // during the cold start, a crash). Its copy stays in the share folder,
+    // but a start within seconds found it too young for the sweep, and no
+    // event ever came for it: the meal waited for a later start, possibly
+    // a day later, or was deleted unread. The copies the sweep found too
+    // young are looked at again once they are old enough
+    // (strandedRecheck, shortened here; the production delay takes this
+    // test 15 s).
+    ShareIntake rechecking(FakeShareSource source,
+            {FileBytesReader? readBytes}) =>
+        ShareIntake(
+            source: source,
+            library: FakePhotoLibrary(),
+            readBytes: readBytes ?? (path) => File(path).readAsBytes(),
+            sharedFolder: () async => folder,
+            recheckAfter: const Duration(milliseconds: 50),
+            clock: () => now);
+
+    test('a share held by an activity that went before share intake '
+        'listened is logged in the run that starts seconds later, once',
+        () async {
+      expect(ShareIntake.strandedRecheck > ShareIntake.strandedMinAge, isTrue,
+          reason: 'every copy too young for the sweep is old enough then');
+      final orphan = copyAt('o1', 'IMG_meal.jpg', const Duration(seconds: 3));
+      final sentinel = copyAt('s1', 'IMG_s.jpg', const Duration(hours: 1));
+      final intake = rechecking(FakeShareSource());
+      final emitted = <IntakePhoto>[];
+      final sub = intake.photos().listen(emitted.add);
+      await until(() => emitted.length >= 2, 'the sentinel and the meal');
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      expect([for (final p in emitted) p.fileName],
+          ['IMG_s.jpg', 'IMG_meal.jpg']);
+      expect(intake.asksAlone(emitted.last.shareDelivery!), isTrue,
+          reason: 'no share being made now: a question of its own');
+      expect(orphan.existsSync(), isFalse, reason: 'read, so deleted');
+      expect(sentinel.existsSync(), isFalse);
+      await sub.cancel();
+    });
+
+    test('the second look gives no copy twice: one whose share was handed '
+        'over is not given again', () async {
+      // Both seconds old when share intake starts: MainActivity handed one
+      // over (its event comes), the other's activity went.
+      final live = copyAt('l1', 'IMG_live.jpg', const Duration(seconds: 2));
+      final orphan =
+          copyAt('o1', 'IMG_orphan.jpg', const Duration(seconds: 3));
+      final source = FakeShareSource();
+      source.controller.add([live.path]);
+      final intake = rechecking(source);
+      final emitted = <IntakePhoto>[];
+      // Paused from the start (a question open, say): nothing is read, so
+      // both copies are still on disk for the sweep and the second look.
+      final sub = intake.photos().listen(emitted.add)..pause();
+      await until(() => intake.arrivedDelivery >= 2, 'the second look');
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      expect(intake.arrivedDelivery, 2,
+          reason: 'the live share, then the other copy alone, once');
+      expect(intake.asksAlone(1), isFalse);
+      expect(intake.asksAlone(2), isTrue);
+      expect(intake.photoCountOf(2), 1);
+      expect(live.existsSync(), isTrue);
+      sub.resume();
+      await until(() => emitted.length >= 2, 'both read');
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      expect([for (final p in emitted) (p.fileName, p.shareDelivery)],
+          [('IMG_live.jpg', 1), ('IMG_orphan.jpg', 2)]);
+      expect(live.existsSync(), isFalse);
+      expect(orphan.existsSync(), isFalse);
+      await sub.cancel();
+    });
+
+    test('stopped before the second look: a copy too young for the sweep is '
+        'left for the next start, unread', () async {
+      final orphan =
+          copyAt('o1', 'IMG_orphan.jpg', const Duration(seconds: 3));
+      final sentinel = copyAt('s1', 'IMG_s.jpg', const Duration(hours: 1));
+      final read = <String>[];
+      late StreamSubscription<IntakePhoto> sub;
+      final intake = rechecking(FakeShareSource(), readBytes: (path) async {
+        read.add(path);
+        unawaited(sub.cancel()); // the app goes as the sweep's copy is read
+        return File(path).readAsBytes();
+      });
+      sub = intake.photos().listen((_) {});
+      await until(() => read.isNotEmpty, 'the sweep reached the sentinel');
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+      expect(read, [sentinel.path]);
+      expect(intake.arrivedDelivery, 1, reason: 'no second look once stopped');
+      expect(orphan.existsSync(), isTrue,
+          reason: 'never deleted unread: the next start logs it');
     });
   });
 }

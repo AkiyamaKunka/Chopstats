@@ -110,7 +110,8 @@ Future<void> androidShareIntakeReady(
   } on MissingPluginException {
     // No native side to tell (tests, an older build): nothing is held.
   } on PlatformException {
-    // Its copies wait in the share folder for the next start's sweep.
+    // Its copies wait in the share folder for the sweep
+    // (ShareIntake.strandedRecheck).
   }
 }
 
@@ -205,9 +206,13 @@ class ShareIntake implements ShareDeliveries {
       // §8 CAPTURED_AT_MAX_AGE_DAYS: default 45, not user-editable.
       this._capturedAtMaxAgeDays = 45,
       this._listening,
-      this._sharedFolder})
+      this._sharedFolder,
+      this._recheckAfter = strandedRecheck})
       : _cleanup = cleanup ?? _deleteSharedFile,
         _clock = clock ?? DateTime.now;
+
+  /// [strandedRecheck]; shorter in tests.
+  final Duration _recheckAfter;
 
   /// The folder a shared file must lie in to be read or deleted (Android:
   /// [androidSharedPhotoFolder]); null: any path (iOS, where the share
@@ -248,9 +253,9 @@ class ShareIntake implements ShareDeliveries {
   String? _knownFolder;
 
   /// Android: every copy path handed to a delivery so far (normalized).
-  /// The start-up sweep and a live share can name the same copy (one
-  /// older than [strandedMinAge] whose event comes late): it goes to the
-  /// first delivery only, so it is counted, and read, once.
+  /// The start-up sweep (or its second look, [strandedRecheck]) and a live
+  /// share can name the same copy (one whose event comes late): it goes
+  /// to the first delivery only, so it is counted, and read, once.
   final Set<String> _delivered = {};
 
   /// Wakes the reader from its pause-wait (set by [photos]).
@@ -315,6 +320,7 @@ class ShareIntake implements ShareDeliveries {
   Stream<IntakePhoto> photos() {
     late final StreamController<IntakePhoto> controller;
     StreamSubscription<List<String>>? liveSub;
+    Timer? recheck;
     var cancelled = false;
     Completer<void>? resumed;
     var reading = Future<void>.value();
@@ -399,17 +405,35 @@ class ShareIntake implements ShareDeliveries {
         try {
           unawaited(_listening?.call().catchError((Object _) {}));
         } catch (_) {
-          // Nobody to tell: their copies wait for the next start's sweep.
+          // Nobody to tell: their copies wait for the sweep (below).
         }
         if (_copiesWait) {
-          final left = await _leftOver(initial);
+          final (left, young) = await _leftOver(initial);
           if (!cancelled && left.isNotEmpty) enqueue(left, leftOver: true);
+          // The copies too young for it: once each is old enough that its
+          // share's event has come if it ever will, those still on disk
+          // and given to no delivery are taken ([strandedRecheck]).
+          if (!cancelled && young.isNotEmpty) {
+            recheck = Timer(_recheckAfter, () async {
+              final waiting = <String>[];
+              for (final path in young) {
+                try {
+                  if (await File(path).exists()) waiting.add(path);
+                } catch (_) {
+                  // Cannot tell: left for the next start's sweep.
+                }
+              }
+              if (cancelled || controller.isClosed) return;
+              enqueue(waiting, leftOver: true);
+            });
+          }
         }
       },
       onResume: wake,
       onCancel: () async {
         _wakeReader = null;
         cancelled = true;
+        recheck?.cancel();
         wake();
         await liveSub?.cancel();
       },
@@ -423,10 +447,22 @@ class ShareIntake implements ShareDeliveries {
 
   /// A copy younger than this may still be being written for a share
   /// whose own event delivers it: the start-up sweep leaves it alone. The
-  /// event does come, even for a share Android delivered before this
-  /// engine's Dart ran: MainActivity holds it until share intake listens
-  /// ([androidShareIntakeReady]).
+  /// event comes even for a share Android delivered before this engine's
+  /// Dart ran (MainActivity holds it until share intake listens,
+  /// [androidShareIntakeReady]), but not for one held by an activity that
+  /// went before then (Back or a swipe during the cold start, a crash):
+  /// that copy is taken at [strandedRecheck].
   static const strandedMinAge = Duration(seconds: 10);
+
+  /// How long after the start-up sweep the copies it left for being
+  /// younger than [strandedMinAge] are looked at again (Android). Each is
+  /// older than that by then, so its share's event has come if it ever
+  /// will; one still on disk and given to no delivery is taken then, as a
+  /// start-up batch ([asksAlone]), through the same consent gate. Without
+  /// this, a share whose activity went before this engine's Dart listened
+  /// waited, when the app was opened again within seconds, for a later
+  /// start: possibly a day late, or deleted unread (review 2026-11-19).
+  static const strandedRecheck = Duration(seconds: 15);
 
   /// The share folder's copies an earlier run never read (Android, review
   /// 2026-11-13): with the C2 backpressure they wait there for minutes,
@@ -438,18 +474,20 @@ class ShareIntake implements ShareDeliveries {
   /// shared them to be logged, and a copy still on disk was never read
   /// (reading deletes it), so nothing is sent twice. Older ones are
   /// deleted here, unread: logged days late they would surprise, and
-  /// could land on the wrong day. The launch share's own copies, and any
-  /// younger than [strandedMinAge], are left out.
-  Future<List<String>> _leftOver(List<String> launch) async {
+  /// could land on the wrong day. The launch share's own copies are left
+  /// out, and those younger than [strandedMinAge] come back second, for
+  /// [strandedRecheck].
+  Future<(List<String>, List<String>)> _leftOver(List<String> launch) async {
     final String root;
     try {
       root = _knownFolder ??= await _sharedFolder!();
     } catch (_) {
-      return const [];
+      return (const <String>[], const <String>[]);
     }
     final skip = {for (final p in launch) _normalized(p)};
     final now = _clock();
     final keep = <(DateTime, String)>[];
+    final young = <(DateTime, String)>[];
     try {
       await for (final entry
           in Directory(root).list(recursive: true, followLinks: false)) {
@@ -462,7 +500,10 @@ class ShareIntake implements ShareDeliveries {
           continue;
         }
         final age = now.difference(modified);
-        if (age < strandedMinAge) continue;
+        if (age < strandedMinAge) {
+          young.add((modified, entry.path));
+          continue;
+        }
         if (age > strandedMaxAge) {
           await _cleanup(entry.path);
           continue;
@@ -472,8 +513,9 @@ class ShareIntake implements ShareDeliveries {
     } catch (_) {
       // No folder yet, or it cannot be listed: nothing left over.
     }
-    keep.sort((a, b) => a.$1.compareTo(b.$1));
-    return [for (final k in keep) k.$2];
+    List<String> oldestFirst(List<(DateTime, String)> copies) =>
+        [for (final c in copies..sort((a, b) => a.$1.compareTo(b.$1))) c.$2];
+    return (oldestFirst(keep), oldestFirst(young));
   }
 
   /// The reader takes [path] of [delivery]: false when it is no longer
