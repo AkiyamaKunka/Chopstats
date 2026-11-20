@@ -1119,14 +1119,16 @@ void main() {
   });
 
   // With enableOnBackInvokedCallback, Flutter unregisters its back
-  // callback at the root route and leaves Back there to Android. Android
-  // 14 and later move the task to the back only when the home screen
-  // started it with the launcher's own intent (ActivityClientController.
-  // shouldMoveTaskToBack, ActivityRecord.isMainIntent) and finish any other
-  // root: a task a share created was finished on Back, with the engine
-  // that was still analyzing its photo (review of #72). Such a task keeps
-  // Flutter's callback, so Back at its root goes through Flutter's
-  // SystemNavigator.pop to popSystemNavigator, as on Android 12 and lower.
+  // callback at an idle root route and leaves Back there to Android.
+  // Android 14 and later move the task to the back only when the home
+  // screen started it with the launcher's own intent
+  // (ActivityClientController.shouldMoveTaskToBack,
+  // ActivityRecord.isMainIntent) and finish any other root: a task a share
+  // created was finished on Back, with the engine that was still analyzing
+  // its photo (review of #72). Such a task keeps Flutter's callback, so
+  // Back at its root goes through Flutter's SystemNavigator.pop to
+  // popSystemNavigator, which moves the task to the back (the test of
+  // decision 6.1 below), as on Android 12 and lower.
   // Decided once per activity: from the intent that created it (Android's
   // own check) at its first create, before the replay rewrite empties it,
   // then from the saved state. Android re-sends that intent only after
@@ -1360,6 +1362,51 @@ void main() {
             'Boolean = hasSavedState || (flags and '
             'Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0'));
     _expectJvmTests(['isRedelivery', 'ShareHold']);
+  });
+
+  // Decision 6.1 (Q9): SystemNavigator.pop moves the task to the back, so
+  // the engine lives on: FlutterActivity's default finished the activity,
+  // destroying its engine, and a shared photo still being analyzed was
+  // never saved. Flutter's PlatformPlugin runs its default (finish(), or
+  // the OnBackPressedDispatcher) only when popSystemNavigator returns
+  // false. Only a Back Flutter handles reaches it: every Back on Android
+  // 12 and lower; with enableOnBackInvokedCallback, a Back at the root of
+  // a task that keeps Flutter's callback there (on Android 14 and later,
+  // any task the launcher's own intent did not start: the test above). At
+  // an idle root Android answers Back itself: Android 13 moves a task
+  // whose root is a launcher activity (MainActivity is one) to the back,
+  // and Android 14 and later move back one the home screen started and
+  // finish a launcher-intent start from anywhere else (Play's Open
+  // button). While a shared photo is pending the shell's guard keeps that
+  // Back in Flutter in every task (test/ui/shared_photos_back_test.dart).
+  // The launch mode stays singleTask (decision 6.4), and nothing else
+  // finishes the activity by hand.
+  test('SystemNavigator.pop moves the task to the back, never finishes it',
+      () {
+    final code = _kotlinCode(_mainActivity());
+    expect(_kotlinFunction(code, 'override fun popSystemNavigator('),
+        '{ moveTaskToBack(true) return true }');
+    expect(code, contains('override fun popSystemNavigator(): Boolean {'));
+    expect(code, isNot(contains('finish()')));
+    // Flutter 3.44's embedding, where the SDK carries its sources: the
+    // hook, and that the default runs only when the hook says no.
+    final embedding = '${_pluginRoot('flutter')}/../../engine/src/flutter/'
+        'shell/platform/android/io/flutter';
+    final activity =
+        File('$embedding/embedding/android/FlutterActivity.java');
+    final plugin = File('$embedding/plugin/platform/PlatformPlugin.java');
+    if (activity.existsSync() && plugin.existsSync()) {
+      expect(activity.readAsStringSync(),
+          contains('public boolean popSystemNavigator() {'));
+      expect(
+          plugin.readAsStringSync().replaceAll(RegExp(r'\s+'), ' '),
+          contains('if (platformPluginDelegate != null && '
+              'platformPluginDelegate.popSystemNavigator()) { '));
+    }
+    final manifest = File('${_appRoot().path}/android/app/src/main/'
+            'AndroidManifest.xml')
+        .readAsStringSync();
+    expect(manifest, contains('android:launchMode="singleTask"'));
   });
 
   // Chopstats is a target in its own sharesheet: Today's day image and the

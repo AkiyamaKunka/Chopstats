@@ -406,11 +406,21 @@ between user-initiated and automated intake. The 6-hour stale-processing reclaim
 30 minutes on the phone (`appProcessingStaleAge`; the longest live analysis is ~15 min, and iOS
 kills runs mid-analysis — reclaiming a run that is only suspended, or whose zone-less `last_seen_at`
 reads an hour old after a DST fall-back, is safe because of the ownership stamp below), plus a
-cold-launch sweep of `processing` rows older than 20 minutes — not every row, since a background
-isolate may own a fresher one. A run is not dead just because its row went stale (a suspended
-process wakes up later), so `reservePhotoHash` returns the `last_seen_at` stamp it wrote and every
-settling write (save / mark / release) checks the row still carries it; a run that lost its row
-drops its verdict silently (`ReservationLost`).
+cold-launch sweep of automatic `processing` rows older than 20 minutes — not every row, since a
+background isolate may own a fresher one. Deliberate (`app_photo`) rows are only ever the app
+engine's own, so that sweep also RELEASES the younger ones: the engine that held one is gone,
+and the photo goes to whoever offers it next (on Android, a shared photo's copy, kept on disk
+until the photo is settled, comes back at that start; an iPhone share's copy goes as it is read,
+so nothing comes back there; a share or pick again; for a photo in the library, Watch Camera
+Roll's launch catch-up, which the Play build does not have). Older deliberate rows are
+`failed`, which a deliberate add reclaims (2026-11-20). Failing the young ones too would settle
+them for the automatic intake: a pick killed mid-analysis would never be logged by the watcher,
+which reclaims such a row once stale. A run is not dead just because its row went stale (a
+suspended process wakes up later), so `reservePhotoHash` returns the `last_seen_at` stamp it
+wrote and every settling write (save / mark / release) checks the row still carries it. A run
+that lost its row (`ReservationLost`) drops its verdict silently when it is automatic; a
+deliberate one settles that verdict once more under a fresh reservation, with no second upload,
+unless the photo is saved or held by another run by then (2026-10-12).
 
 ### 2.4 Meal mutation semantics
 
@@ -1063,7 +1073,7 @@ one SQLite file). Each is pinned by tests named alongside.
 | Divergence | Server behavior | App behavior | Why | Pinned by |
 |---|---|---|---|---|
 | Transient analysis failure | mark `failed` | RELEASE the reservation (`AnalysisOutcome.retryable`) | automated intake never reclaims `failed`; a 12 h quota latch would silently drop photos forever | `photo_pipeline_test` retryable-release |
-| Launch reclaim sweep | all `processing` → `failed` | `app_watch` rows RELEASED, only >15 min stale rows touched | EMUI kills mid-analysis routinely; a live background isolate may own fresh rows | `meals_dao_reclaim_test` |
+| Launch reclaim sweep | all `processing` → `failed` | `app_watch` rows RELEASED, only >20 min stale rows touched; `app_photo` rows RELEASED when younger (only the app engine reserves them, and it is starting), `failed` when older | EMUI kills mid-analysis routinely; a live background isolate may own fresh automatic rows; a shared photo kept on disk (Android) comes back and takes its row, and the watcher can still log a pick killed mid-analysis | `meals_dao_reclaim_test`, `share_resume_test` |
 | Backfill cadence | nightly `--sync` | 30-min WorkManager + launch/resume full-window catch-up + `safeFrontier` watermark | the app cannot rely on cron; watermark keeps 48 scans/day cheap | `background_glue_test` watermark suite |
 | Photo intake concurrency | sequential bot loop | backpressured sink (`PhotoIntake.attachSink`), one photo's bytes resident | 200-photo backlog ≈ 1 GB resident otherwise (OOM) | `watcher_test` backpressure |
 | Key checking (rewritten 2026-07-31) | n/a (server key assumed valid) | keys persist ON TYPE (no validate-to-save step; the Validate button is deleted); the one test action is the diagnostics page, whose auth stage uses `AnalyzerService.probeKey` — a four-way classification (ok / outOfCredit / rateLimited / rejected) that validateKey cannot express because quota-class responses count as ACCEPTED there (a 429 proves auth; refusing to save locked onboarding for hours). ServerAnalyzer's probeKey uses the free /api/auth_check, never a CLI run | an empty account must be distinguishable from a healthy one, and a paste-then-tab-away must configure the app | `settings_store_adapter_test`, `server_analyzer_test` probeKey, `diagnostics_test` |
@@ -1104,13 +1114,13 @@ one SQLite file). Each is pinned by tests named alongside.
 
 SIX wire values, defined once in `core/contracts.dart` as `MealSource` and
 never spelled as literals at call sites — the reclaim sweep MATCHES on
-`app_watch` in SQL, so a drifting literal silently changes intake policy
-instead of failing.
+`app_watch` and `app_photo` in SQL, so a drifting literal silently changes
+intake policy instead of failing.
 
 | Value | Written by | Reservation policy |
 |---|---|---|
 | `app_photo` | in-app picker, share sheet | deliberate — reclaims failed/skipped/deleted |
-| `app_watch` | watcher, background job, catch-up scans | strict — never reclaims; the ONLY value the launch sweep releases |
+| `app_watch` | watcher, background job, catch-up scans | strict — never reclaims; the launch sweep releases it once 20 min stale (`app_photo` rows are released only while younger, older ones failed) |
 | `manual_text` | describe-a-meal screen, NL `new_meal` | n/a (no photo); server parity, `telegram_bot` writes the same string |
 | `app_manual` | meal editor, numbers typed by hand | n/a; distinct from `manual_text` to record that NO model produced the values |
 | `app_manual_photo` | meal editor reached from the coverage screen's "log it yourself" | a photo EXISTS and its md5 is ledgered, but every number came from the user |

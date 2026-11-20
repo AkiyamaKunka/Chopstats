@@ -234,7 +234,18 @@ abstract class MealsDao {
   Future<bool> applyLeftoverVerdict(
       String imageHash, int mealId, Map<String, dynamic> analysis,
       {String? ownerStamp, String? expectedRaw});
-  Future<void> reclaimStaleProcessing(); // launch-time sweep (spec §2 delta)
+
+  /// The launch-time sweep (spec §2 delta), run once as the app's own
+  /// engine starts, before anything reserves: 'processing' rows whose run
+  /// is gone. A deliberate row (picked or shared) younger than the stale
+  /// age is released, since only the app's engine reserves those and the
+  /// one that held it is gone: the photo is free for a deliberate add, and
+  /// for the camera-roll scan when it is in the library. Older ones are
+  /// failed (the user-visible retry: a deliberate add, or Photo Coverage
+  /// for a photo in the library, outside the Play build). Automatic rows
+  /// are released only once stale, since the background run may still own
+  /// them.
+  Future<void> reclaimStaleProcessing();
 
   /// Forget every verdict from [source] that did not become a meal
   /// (skipped / failed), so the next scan re-offers those photos. Saved
@@ -649,12 +660,27 @@ class IntakePhoto {
   /// The consent gate's Not now covers whole deliveries ([ShareDeliveries]).
   /// Null: not a shared photo.
   final int? shareDelivery;
+
+  /// A shared photo whose copy waits on disk until its turn ends (Android:
+  /// share_intake.dart): whoever ends the turn calls this — the pipeline
+  /// once process() has returned for it (PhotoPipeline.bindStream: its
+  /// verdict written, or the photo let go, released or never sent, as
+  /// after a transient failure, a refused http:// address, not allowed or
+  /// in flight), and a save as soon as the meal row is; the consent gate
+  /// for a photo it drops unsent — and the share intake deletes the copy
+  /// then. Until then the copy stays, so a photo whose engine stopped
+  /// mid-analysis (a swipe from Recents, Android stopped the process) is
+  /// offered again at the next start rather than lost. A second call does
+  /// nothing. Null: nothing waits (iOS deletes its copy as it reads it;
+  /// picked and watched photos have none).
+  final void Function()? onSettled;
   const IntakePhoto(this.bytes, this.assetId, this.fileName,
       {this.capturedAt,
       this.deliberate = false,
       this.capture,
       this.glassesQuota,
-      this.shareDelivery});
+      this.shareDelivery,
+      this.onSettled});
 }
 
 /// What the share intake tells the consent gate about its deliveries
@@ -672,7 +698,9 @@ abstract interface class ShareDeliveries {
   int photoCountOf(int delivery);
 
   /// Every copy of [deliveries] not read yet is deleted unread (at once,
-  /// even while the stream is paused), never handed on.
+  /// even while the stream is paused), never handed on; so is every one
+  /// read and handed on whose photo is not settled yet
+  /// (IntakePhoto.onSettled), which the consent gate drops unsent.
   void declineDeliveries(Set<int> deliveries);
 
   /// Whether [delivery] is only ever covered by an answer about itself:

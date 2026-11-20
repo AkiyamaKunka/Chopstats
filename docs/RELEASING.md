@@ -1126,14 +1126,14 @@ position. The paste-ready answers live next to the app in
    `android:enableOnBackInvokedCallback="true"`), Material stretch
    overscroll and Roboto at its own spacing on Android; iOS keeps its
    slide, bounce and tracking. Back at the root moves the task to the back
-   instead of finishing it (`popSystemNavigator`, in its own PR). Android
+   instead of finishing it (`MainActivity.popSystemNavigator`). Android
    14 and later finish a task the launcher did not start when Back at its
    root reaches them, so such a task keeps Flutter's back callback there
    (`MainActivity`). One start still looks like the launcher's and is
-   finished on Android 14 and later: the launcher intent sent from
-   somewhere other than the home screen, such as Play's Open button.
-   While a shared photo is still pending, the app keeps Back at the root
-   itself in every task (`SharedPhotosBackGuard`, in its own PR).
+   finished on Android 14 and later when nothing is pending: the launcher
+   intent sent from somewhere other than the home screen, such as Play's
+   Open button. While a shared photo is still pending, the app keeps Back
+   at the root itself in every task (`SharedPhotosBackGuard`).
    `singleTask` stays.
 7. **Orientation:** portrait on phones
    (`android:screenOrientation="portrait"`). Android 16 ignores it at

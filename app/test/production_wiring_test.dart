@@ -655,6 +655,22 @@ void main() {
       expect(init(), _wired(r'\n\s*settings: store,'));
       expect(init(), _wired(r'\n\s*sharedPhotoConsent: shareConsent,'));
     });
+
+    // Review 2026-11-20 (Q9 under predictive back): the shell's guard keeps
+    // Back at the root from letting Android finish the activity while a
+    // shared photo is pending (test/ui/shared_photos_back_test.dart, which
+    // builds its own services). Without this line the guard is off on the
+    // phone with every behavioural test still green.
+    test('the share intake\'s pending photos reach the shell, on Android',
+        () {
+      expect(
+        init(),
+        _wired(
+          r'\n\s*sharedPhotosPending: Platform\.isAndroid \? '
+          r'shareIntake\.photosPending : null,',
+        ),
+      );
+    });
   });
 
   // Release-candidate review of 1.6.0: an admitted photo can still be

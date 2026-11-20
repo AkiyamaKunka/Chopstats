@@ -103,11 +103,13 @@ class MainActivity : FlutterActivity() {
         // activity was recreated for too: Android delivers it in this same
         // launch, after onStart, before Dart has run, so onNewIntent holds
         // a share until share intake listens (ShareHold). The launch
-        // intent is not re-delivered, but copies of a several-photo share
-        // cut short by the stop that were never read stay in shared_photos:
-        // share intake (Dart) picks those up at its next start, within a
-        // day, through the same consent gate (reading a copy deletes it, so
-        // nothing is sent twice).
+        // intent is not re-delivered, but the copies of a share cut short
+        // by the stop stay in shared_photos, those never read and those
+        // whose photo was not settled yet (share intake deletes a copy
+        // once its photo's verdict is written or the photo is let go):
+        // share intake (Dart) picks them up at its next start, within a
+        // day, through the same consent gate, and the photo ledger keeps
+        // one already logged from being logged twice.
         val replay = IntakeRules.isRedelivery(savedInstanceState != null, intent?.flags ?: 0)
         if (replay) {
             intent?.let { setIntent(emptyShare(it)) }
@@ -126,23 +128,56 @@ class MainActivity : FlutterActivity() {
     }
 
     /// Flutter keeps its back callback registered only while it has
-    /// something to pop (a route, a screen that asks before it closes): at
-    /// the root it hands Back to Android (enableOnBackInvokedCallback,
-    /// AndroidManifest.xml). Android 14 and later then move the task to
-    /// the back only when the home screen started it with the launcher's
-    /// own intent; any other root they finish, and its engine with it,
-    /// mid-analysis: a task a share, the bitewise://setup link or a
-    /// notification started (IntakeRules.keepsBackCallbackAtRoot). Such a
+    /// something to pop (a route, a screen that asks before it closes, the
+    /// shell while a shared photo is pending): at an idle root it hands
+    /// Back to Android (enableOnBackInvokedCallback, AndroidManifest.xml).
+    /// Android 14 and later then move the task to the back only when the
+    /// home screen started it with the launcher's own intent; any other
+    /// root they finish, and its engine with it, mid-analysis: a task a
+    /// share, the bitewise://setup link, a notification or a plain
+    /// `am start -n` started (IntakeRules.keepsBackCallbackAtRoot). Such a
     /// task keeps the callback, so Back at its root goes through Flutter
-    /// (handlePopRoute, SystemNavigator.pop, popSystemNavigator) as on
-    /// Android 12 and lower, and gives up Android's back-to-home preview.
-    /// A task the launcher started keeps the preview. A launcher-intent
-    /// start that did not come from the home screen (Play's Open button)
-    /// looks the same from here, and Android still finishes it.
-    /// FlutterActivity also calls this from its onCreate, with the state
-    /// it saved.
+    /// (handlePopRoute, SystemNavigator.pop, popSystemNavigator, which
+    /// moves the task to the back) as on Android 12 and lower, and gives up
+    /// Android's back-to-home preview. A task the launcher started keeps
+    /// the preview. A launcher-intent start that did not come from the home
+    /// screen (Play's Open button, `am start -a MAIN -c LAUNCHER`) looks the
+    /// same from here, and Android still finishes it on a Back at an idle
+    /// root; only a pending shared photo keeps that Back in Flutter there
+    /// (SharedPhotosBackGuard). FlutterActivity also calls this from its
+    /// onCreate, with the state it saved.
     override fun setFrameworkHandlesBack(frameworkHandlesBack: Boolean) {
         super.setFrameworkHandlesBack(frameworkHandlesBack || backCallbackAtRoot)
+    }
+
+    /// Back at the root (Flutter's navigator has nothing left to pop) moves
+    /// the task to the back instead of finishing the activity (decision
+    /// 6.1). Finishing destroyed the engine with it: a shared photo still
+    /// being analyzed was never saved (Q9), and every reopen started Dart
+    /// cold on Today. Also what SystemNavigator.pop() does from Dart.
+    /// Only a Back that Flutter handles gets here: every Back on Android 12
+    /// and lower (onBackPressed); with predictive back on Android 13 and
+    /// later (enableOnBackInvokedCallback), a Back at the root only while
+    /// Flutter keeps its callback there. At an idle root Flutter hands Back
+    /// to Android (setFrameworkHandlesBack(false)): Android 13 moves a task
+    /// whose root is a launcher activity, as MainActivity is, to the back,
+    /// and Android 14 and later a task the home screen started with the
+    /// launcher intent. Every task the launcher intent did not start keeps
+    /// the callback on Android 14 and later (setFrameworkHandlesBack above:
+    /// a share, the setup link, a notification, a plain `am start -n`), so
+    /// its Back lands here. One start is left that Android 14 and later
+    /// finish on a Back at an idle root: the launcher intent sent from
+    /// somewhere other than the home screen (Play's Open button,
+    /// `am start -a MAIN -c LAUNCHER`). So while a shared photo is pending
+    /// the shell keeps Back at the root in Flutter in every task
+    /// (SharedPhotosBackGuard, app.dart), and its SystemNavigator.pop()
+    /// lands here on every Android version. A photo a finish still cuts off
+    /// (a swipe from Recents, a Back before share intake has the share) is
+    /// offered again at the next start, since its copy is kept until the
+    /// photo is settled (share_intake.dart).
+    override fun popSystemNavigator(): Boolean {
+        moveTaskToBack(true)
+        return true
     }
 
     /// A share (withSafeShares made copies: a new SEND) goes to the plugins
@@ -328,7 +363,7 @@ class MainActivity : FlutterActivity() {
         "file".equals(uri.scheme, ignoreCase = true) &&
             IntakeRules.liesIn(File(applicationInfo.dataDir), uri.path)
 
-    /// Folders whose copy Dart has read and deleted.
+    /// Folders whose copy Dart has deleted (its photo settled).
     private fun clearEmptyShareFolders() {
         File(cacheDir, SHARE_FOLDER).listFiles()?.forEach {
             if (it.isDirectory && it.list()?.isEmpty() == true) it.delete()
