@@ -822,15 +822,20 @@ void main() {
       expect(body, isNot(contains('<include')), reason: scheme);
     }
 
-    // Android 9 to 11 read res/xml-v28, Android 8.1 and lower res/xml.
-    for (final dir in ['xml', 'xml-v28']) {
-      final legacy = File('$main/res/$dir/backup_rules.xml');
-      expect(legacy.existsSync(), isTrue, reason: legacy.path);
-      final full = section(legacy.readAsStringSync(), 'full-backup-content');
-      expect(exclude.hasMatch(full), isTrue,
-          reason: '$dir fullBackupContent does not exclude '
-              '$localStoreDirName/');
-    }
+    // Android 9 to 11 read res/xml-v28. Android 8.1 and lower read
+    // res/xml, which includes one file the app never writes and so
+    // nothing else: the local store stays out with the rest (the Android
+    // 8.1 test below).
+    final legacy = File('$main/res/xml-v28/backup_rules.xml');
+    expect(legacy.existsSync(), isTrue, reason: legacy.path);
+    final full = section(legacy.readAsStringSync(), 'full-backup-content');
+    expect(exclude.hasMatch(full), isTrue,
+        reason: 'fullBackupContent does not exclude $localStoreDirName/');
+    final oldest = section(
+        _uncommented(File('$main/res/xml/backup_rules.xml').readAsStringSync()),
+        'full-backup-content');
+    expect(oldest.trim(),
+        '<include domain="file" path="no_backup_before_android_9"/>');
   });
 
   // flutter_secure_storage's files hold the API keys encrypted with a key
@@ -867,9 +872,11 @@ void main() {
       'device-transfer': section(extraction, 'device-transfer'),
       'full-backup-content (Android 9 to 11)':
           section(legacy('xml-v28'), 'full-backup-content'),
-      'full-backup-content (Android 8.1 and lower)':
-          section(legacy('xml'), 'full-backup-content'),
     };
+    // Android 8.1 and lower include one file the app never writes, so the
+    // key files stay out there with everything else.
+    expect(section(legacy('xml'), 'full-backup-content').trim(),
+        '<include domain="file" path="no_backup_before_android_9"/>');
     sections.forEach((name, body) {
       for (final file in files) {
         expect(
@@ -978,7 +985,9 @@ void main() {
   // unencrypted (review of #72). Their rules (res/xml; Android 9 and later
   // read res/xml-v28) parse there and include one file the app never
   // writes: no backup or transfer carries the app's data, and a restore
-  // takes none. Google's page asks for such alternate rules.
+  // takes none. Google's page asks for such alternate rules. No exclude:
+  // one outside every included path fails lint's FullBackupContent check,
+  // which is fatal, so it stops a release build (lintVital).
   test("Android 8.1 and lower: rules they can read, which carry none of the "
       "app's data", () {
     final res = '${_appRoot().path}/android/app/src/main/res';
@@ -1028,15 +1037,40 @@ void main() {
           reason: source.path);
     }
 
-    // The same excludes as from Android 9.
-    Set<String> excludes(String rules) => {
-          for (final m in RegExp(r'<exclude\b[^>]*>').allMatches(rules))
-            m.group(0)!,
+    expect(tags.where((t) => t.$1 == 'exclude'), isEmpty,
+        reason: 'an exclude outside every include fails lintVital');
+  });
+
+  // Lint's FullBackupContent check is fatal, so lintVital stops a release
+  // build on it: once a file has an <include>, every <exclude> must lie
+  // under an include of its domain (path "." or a folder above it).
+  test("every backup rule file passes lint's include and exclude check", () {
+    final res = '${_appRoot().path}/android/app/src/main/res';
+    Map<String, String> attributes(String tag) => {
+          for (final m in RegExp(r'(\w+)="([^"]*)"').allMatches(tag))
+            m.group(1)!: m.group(2)!,
         };
-    final v28 =
-        _uncommented(File('$res/xml-v28/backup_rules.xml').readAsStringSync());
-    expect(excludes(xml), hasLength(5));
-    expect(excludes(xml), excludes(v28));
+    for (final dir in ['xml', 'xml-v28']) {
+      final xml = _uncommented(
+          File('$res/$dir/backup_rules.xml').readAsStringSync());
+      final rules = [
+        for (final m in RegExp(r'<(include|exclude)\b([^>]*?)/?>')
+            .allMatches(xml))
+          (m.group(1)!, attributes(m.group(2)!)),
+      ];
+      final included = <String, List<String>>{};
+      for (final (kind, a) in rules) {
+        if (kind == 'include') (included[a['domain']!] ??= []).add(a['path']!);
+      }
+      if (included.isEmpty) continue;
+      for (final (kind, a) in rules) {
+        if (kind != 'exclude') continue;
+        final paths = included[a['domain']] ?? const <String>[];
+        expect(paths.any((p) => p == '.' || a['path']!.startsWith(p)), isTrue,
+            reason: "$dir: ${a['domain']} ${a['path']} is not in an included "
+                'path');
+      }
+    }
   });
 
   // Owner decisions 6 and 7 (2026-11-20): back reaches the app through

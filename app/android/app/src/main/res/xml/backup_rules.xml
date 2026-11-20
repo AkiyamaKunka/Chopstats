@@ -8,18 +8,13 @@
      backup from a transfer to a new phone (requireFlags came with Android
      9), so neither carries any of the app's data here: the one <include>
      names a file the app never writes. With an <include>, Android backs
-     up only what the includes name, and a restore takes only that. The
-     excludes stay as everywhere else. Every rule has two attributes:
-     these versions refuse a third, and a parse that fails half way would
-     leave the excludes alone in force for a later backup, which then
-     takes everything else. Export Data › Save to Device still keeps a
-     copy. -->
+     up only what the includes name, and a restore takes only that, so
+     the local store and the key files stay out with everything else.
+     No <exclude>: outside every included path, lint's FullBackupContent
+     check (fatal, so it stops a release build) refuses one. The rule has
+     two attributes: these versions refuse a third, and a parse that fails
+     half way would leave Android backing up everything else. Export Data
+     › Save to Device still keeps a copy. -->
 <full-backup-content>
-    <exclude domain="file" path="bitewise_local/"/>
-    <exclude domain="sharedpref" path="FlutterSecureStorage.xml"/>
-    <exclude domain="sharedpref" path="FlutterSecureKeyStorage.xml"/>
-    <exclude domain="sharedpref" path="FlutterSecureStorageConfiguration.xml"/>
-    <exclude domain="sharedpref" path="FlutterSecureStorageConfiguration:FlutterSecureStorage.xml"/>
-
     <include domain="file" path="no_backup_before_android_9"/>
 </full-backup-content>

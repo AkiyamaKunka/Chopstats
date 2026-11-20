@@ -1306,14 +1306,17 @@ void main() {
       }
 
       final rules = _read('android/app/src/main/res/xml/data_extraction_rules.xml');
-      // Android 9 to 11 read res/xml-v28, Android 8.1 and lower res/xml.
+      // Android 9 to 11 read res/xml-v28. Android 8.1 and lower read
+      // res/xml, which includes one file the app never writes and so
+      // leaves the key files out with everything else.
       final legacy = _read('android/app/src/main/res/xml-v28/backup_rules.xml');
       final oldest = _read('android/app/src/main/res/xml/backup_rules.xml');
+      expect(section(oldest, 'full-backup-content').trim(),
+          '<include domain="file" path="no_backup_before_android_9"/>');
       for (final (name, block) in [
         ('cloud-backup', section(rules, 'cloud-backup')),
         ('device-transfer', section(rules, 'device-transfer')),
         ('full-backup-content', section(legacy, 'full-backup-content')),
-        ('full-backup-content (8.1)', section(oldest, 'full-backup-content')),
       ]) {
         for (final file in files) {
           expect(block, contains('<exclude domain="sharedpref" path="$file"/>'),
