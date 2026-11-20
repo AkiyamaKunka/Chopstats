@@ -41,6 +41,7 @@ import 'refresh_signal.dart';
 import 'services.dart';
 import 'widgets/grouped.dart' show ContentWidthCap;
 import 'widgets/restaurant_consent_sheet.dart';
+import 'widgets/shared_photos_back_guard.dart';
 
 class _AppleScrollBehavior extends MaterialScrollBehavior {
   const _AppleScrollBehavior();
@@ -780,12 +781,19 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     // flow, say) is asked once that screen is popped. It waited until the
     // prompt changed or the app came back, holding the photos meanwhile.
     // The Play build's Watch Camera Roll notice waits the same way.
-    return _OnRouteReturn(
+    final page = _OnRouteReturn(
         onReturn: () {
           _onBackupPrompt();
           _tellWatchRetiredWhenIdle();
         },
         child: shell);
+    // Android: while a shared photo is on its way to a meal, Back at the
+    // root moves the app to the back; Android would finish a task a share
+    // started, and its engine with it (Q9).
+    final sharing = s.sharedPhotosPending;
+    return sharing == null
+        ? page
+        : SharedPhotosBackGuard(pending: sharing, child: page);
   }
 }
 

@@ -10,6 +10,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show ValueListenable, ValueNotifier;
 import 'package:flutter/services.dart'
     show MethodChannel, MissingPluginException, PlatformException;
 import 'package:path_provider/path_provider.dart' show getTemporaryDirectory;
@@ -255,6 +256,24 @@ class ShareIntake implements ShareDeliveries {
   /// an engine stopped mid-analysis leaves them for the next start.
   final Map<int, Set<String>> _inHand = {};
 
+  /// Android: copies the reader has taken and is reading now, between
+  /// [_untaken] and [_inHand].
+  int _reading = 0;
+
+  /// Android: whether a shared photo this engine took has no verdict
+  /// written yet — its copy waiting unread ([_untaken]), being read, or in
+  /// hand ([_inHand]) — so stopping the engine now would cut it off. The
+  /// app shell keeps Back at the root from finishing the activity
+  /// meanwhile (SharedPhotosBackGuard): with predictive back, Android
+  /// finishes a task a share started, its engine with it, mid-analysis
+  /// (Q9). False once every photo is settled, and always on iOS.
+  ValueListenable<bool> get photosPending => _pending;
+  final ValueNotifier<bool> _pending = ValueNotifier<bool>(false);
+
+  /// [photosPending] after a change to what this intake holds.
+  void _notePending() => _pending.value = _copiesWait &&
+      (_untaken.isNotEmpty || _inHand.isNotEmpty || _reading > 0);
+
   /// The share folder once it is known (the first copy checked against it
   /// asks for it): a Not now checks its copies against it synchronously.
   String? _knownFolder;
@@ -302,6 +321,7 @@ class ShareIntake implements ShareDeliveries {
         _discardNow(path);
       }
     }
+    _notePending();
     // And the reader stops waiting on any of them.
     _wakeReader?.call();
   }
@@ -375,15 +395,21 @@ class ShareIntake implements ShareDeliveries {
         // Cancelled, or declined by the consent gate's Not now: not read,
         // but not left in the cache either.
         if (cancelled || controller.isClosed || declined()) {
+          _notePending();
           await _discard(path);
           continue;
         }
         final IntakePhoto? photo;
+        // Pending while it is read, too: in hand once it gives a photo.
+        _reading++;
         try {
           photo = await _fromPath(path, delivery);
         } catch (_) {
           unreadable();
           continue; // one bad copy (already deleted) never stops the rest
+        } finally {
+          _reading--;
+          _notePending();
         }
         if (photo == null) {
           unreadable();
@@ -412,6 +438,7 @@ class ShareIntake implements ShareDeliveries {
       if (leftOver) _startupBatches.add(delivery);
       _deliverySize[delivery] = paths.length;
       if (_copiesWait) _untaken[delivery] = [...paths];
+      _notePending();
       reading = reading
           .then((_) => emitPaths(paths, delivery))
           .catchError((Object _) {});
@@ -504,9 +531,10 @@ class ShareIntake implements ShareDeliveries {
   /// shared them to be logged, and a copy still on disk has no verdict
   /// written (a copy goes once its photo is settled, [photos]). Most were
   /// never read; the one an engine stopped mid-analysis was maybe sent
-  /// once already, and goes again (its 'processing' row is failed by the
-  /// launch sweep, MealsDao.reclaimStaleProcessing, and its deliberate
-  /// add reclaims that row). The photo ledger keeps a photo whose meal
+  /// once already, and goes again (the launch sweep,
+  /// MealsDao.reclaimStaleProcessing, released its 'processing' row, or
+  /// failed it once 20 minutes old, and its deliberate add takes the
+  /// photo either way). The photo ledger keeps a photo whose meal
   /// was written as its engine stopped from becoming a second meal: the
   /// pipeline answers "already logged" before anything is sent. Older
   /// ones are deleted here, unread: logged days late they would surprise,
@@ -638,6 +666,7 @@ class ShareIntake implements ShareDeliveries {
       if (inHand == null || !inHand.remove(path)) return;
       if (inHand.isEmpty) _inHand.remove(delivery);
       _discardNow(path);
+      _notePending();
     };
   }
 

@@ -237,10 +237,12 @@ abstract class MealsDao {
 
   /// The launch-time sweep (spec §2 delta), run once as the app's own
   /// engine starts, before anything reserves: 'processing' rows whose run
-  /// is gone. A deliberate row (picked or shared) is failed whatever its
-  /// age, since only the app's engine reserves those and the one that
-  /// held it is gone; automatic rows only once stale, since the
-  /// background run may still own them.
+  /// is gone. A deliberate row (picked or shared) younger than the stale
+  /// age is released, since only the app's engine reserves those and the
+  /// one that held it is gone: the photo is free for a deliberate add and
+  /// for the camera-roll scan alike. Older ones are failed (the
+  /// user-visible retry). Automatic rows are released only once stale,
+  /// since the background run may still own them.
   Future<void> reclaimStaleProcessing();
 
   /// Forget every verdict from [source] that did not become a meal

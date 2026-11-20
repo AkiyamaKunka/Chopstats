@@ -1022,6 +1022,124 @@ void main() {
     });
   });
 
+  // Review 2026-11-20: with predictive back, Android finishes a task a
+  // share started when Back reaches the root, and the engine with it,
+  // mid-analysis (Q9). The shell keeps that Back in Flutter while a shared
+  // photo is pending (SharedPhotosBackGuard): from the moment its share
+  // arrives until its verdict is written, through every read, and never on
+  // iOS.
+  group('Android: photosPending, from a share\'s arrival to its last '
+      'verdict', () {
+    late Map<String, Uint8List> held;
+    late Map<String, Completer<void>> readGates;
+
+    ShareIntake android(FakeShareSource source, {bool iOS = false}) =>
+        ShareIntake(
+            source: source,
+            library: FakePhotoLibrary(),
+            readBytes: (path) async {
+              await readGates[path]?.future;
+              return held[path];
+            },
+            cleanup: (path) async => cleaned.add(path),
+            sharedFolder: iOS ? null : () async => '/shared',
+            clock: () => now);
+
+    /// Every value [intake] says from now on, in order.
+    List<bool> said(ShareIntake intake) {
+      final out = <bool>[];
+      intake.photosPending
+          .addListener(() => out.add(intake.photosPending.value));
+      return out;
+    }
+
+    setUp(() {
+      held = {
+        '/shared/1/IMG_a.jpg': Uint8List.fromList([1, 2]),
+        '/shared/2/IMG_b.jpg': Uint8List.fromList([3, 4]),
+        '/shared/2/IMG_c.jpg': Uint8List.fromList([5, 6]),
+      };
+      readGates = {};
+    });
+
+    test('pending until the last photo is settled, and never false in '
+        'between: not while another share\'s copy is being read', () async {
+      final source = FakeShareSource();
+      final intake = android(source);
+      final values = said(intake);
+      final got = <IntakePhoto>[];
+      final sub = intake.photos().listen(got.add);
+      await pumpEventQueue();
+      expect(intake.photosPending.value, isFalse, reason: 'nothing shared');
+
+      source.controller.add(['/shared/1/IMG_a.jpg']);
+      await pumpEventQueue();
+      expect(got, hasLength(1));
+      expect(intake.photosPending.value, isTrue, reason: 'a: no verdict yet');
+      // A second share; its copy is still being read when a's verdict is
+      // written.
+      readGates['/shared/2/IMG_b.jpg'] = Completer<void>();
+      source.controller.add(['/shared/2/IMG_b.jpg']);
+      await pumpEventQueue();
+      expect(got, hasLength(1), reason: 'b is being read');
+      got.single.onSettled!();
+      expect(intake.photosPending.value, isTrue,
+          reason: 'b, being read, is pending too');
+
+      readGates['/shared/2/IMG_b.jpg']!.complete();
+      await pumpEventQueue();
+      expect(got, hasLength(2));
+      expect(intake.photosPending.value, isTrue);
+      got.last.onSettled!();
+      expect(intake.photosPending.value, isFalse);
+      expect(values, [true, false]);
+      await sub.cancel();
+    });
+
+    test('a Not now clears it before its answer returns, read copies and '
+        'unread alike', () async {
+      final source = FakeShareSource();
+      final intake = android(source);
+      late StreamSubscription<IntakePhoto> sub;
+      sub = intake.photos().listen((_) => sub.pause());
+      source.controller.add(['/shared/2/IMG_b.jpg', '/shared/2/IMG_c.jpg']);
+      await pumpEventQueue();
+      expect(intake.photosPending.value, isTrue);
+      intake.declineDeliveries({1});
+      expect(intake.photosPending.value, isFalse);
+      await sub.cancel();
+    });
+
+    test('a copy that gives no photo holds it only while it is read',
+        () async {
+      final source = FakeShareSource();
+      final intake = android(source);
+      final values = said(intake);
+      final sub = intake.photos().listen((_) {});
+      held['/shared/3/notes.txt'] = Uint8List.fromList([1]);
+      source.controller
+          .add(['/shared/3/notes.txt', '/shared/4/IMG_gone.jpg']);
+      await pumpEventQueue();
+      expect(intake.photosPending.value, isFalse);
+      expect(values, [true, false]);
+      await sub.cancel();
+    });
+
+    test('iOS (no share folder): never pending', () async {
+      final source = FakeShareSource();
+      final intake = android(source, iOS: true);
+      final values = said(intake);
+      final got = <IntakePhoto>[];
+      final sub = intake.photos().listen(got.add);
+      source.controller.add(['/shared/1/IMG_a.jpg']);
+      await pumpEventQueue();
+      expect(got, hasLength(1));
+      expect(intake.photosPending.value, isFalse);
+      expect(values, isEmpty);
+      await sub.cancel();
+    });
+  });
+
   // Review 2026-11-13: with the C2 backpressure, copies wait in the share
   // folder for minutes. An app killed mid-batch left the rest there for
   // good — full-size originals in the cache, never logged, nothing said

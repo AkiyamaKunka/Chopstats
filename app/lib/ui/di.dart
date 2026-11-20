@@ -505,6 +505,10 @@ class AppServices {
       processPhoto: pipeline.enqueue,
       announceOutcome: announce,
       sharedPhotoConsent: shareConsent,
+      // Android: Back at the root keeps the app running while a shared
+      // photo is on its way to a meal (SharedPhotosBackGuard).
+      sharedPhotosPending:
+          Platform.isAndroid ? shareIntake.photosPending : null,
       photoLibrary: photoLibraryInBuild ? photoLibrary : null,
       startClaudeAuth: serverAnalyzer.startClaudeAuth,
       completeClaudeAuth: serverAnalyzer.completeClaudeAuth,

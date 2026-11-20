@@ -92,13 +92,18 @@ class MainActivity : FlutterActivity() {
     /// 6.1). Finishing destroyed the engine with it: a shared photo still
     /// being analyzed was never saved (Q9), and every reopen started Dart
     /// cold on Today. Also what SystemNavigator.pop() does from Dart.
-    /// Android 13+ with predictive back on (enableOnBackInvokedCallback,
-    /// the default on Android 16 for targetSdk 36) does not call this for
-    /// Back at the root: Flutter hands that Back to Android, which moves a
-    /// task the home screen started with the launcher intent to the back
-    /// and finishes any other (a task a share started); the photo such a
-    /// finish cuts off is offered again at the next start, since its copy
-    /// is kept until its verdict is written (share_intake.dart).
+    /// Only a Back that Flutter handles gets here. With predictive back on
+    /// (every Android 16 phone for targetSdk 36; Android 13-15 with
+    /// enableOnBackInvokedCallback) Flutter hands Back at an idle root to
+    /// Android, which moves to the back only a task the home screen started
+    /// with the launcher intent and finishes any other: one a share
+    /// started, or one `am start` launched (QA: start from the launcher
+    /// icon). So while a shared photo is pending the shell keeps that Back
+    /// in Flutter (SharedPhotosBackGuard, app.dart), and its
+    /// SystemNavigator.pop() lands here on every Android version. A photo
+    /// a finish still cuts off (a swipe from Recents, a Back before share
+    /// intake has the share) is offered again at the next start, since its
+    /// copy is kept until its verdict is written (share_intake.dart).
     override fun popSystemNavigator(): Boolean {
         moveTaskToBack(true)
         return true

@@ -85,55 +85,104 @@ void main() {
   // Q1, Q9 (2026-11-20): only the app's own engine reserves deliberate
   // (app_photo) rows, and the launch sweep runs as that engine starts: the
   // one that held such a row is gone (Back finished the activity, the
-  // process was killed), whatever the row's age. Left 'processing' it said
-  // "still being analyzed" for 30 minutes, and blocked the shared photo
-  // the start-up sweep offers again.
-  test('a FRESH deliberate row is failed at launch: its engine is gone, and '
-      'a deliberate add reclaims it at once', () async {
+  // process was killed). Left 'processing' it said "still being analyzed"
+  // for 30 minutes, and blocked the shared photo the start-up sweep offers
+  // again. RELEASED, not failed (review 2026-11-20): 'failed' is settled
+  // for the automatic intake, so Watch Camera Roll never logged a pick
+  // killed mid-analysis (the group below has the whole path).
+  test('a FRESH deliberate row is RELEASED at launch: its engine is gone; a '
+      'deliberate add and the camera-roll scan both reserve it at once',
+      () async {
     await seedProcessing('p' * 32, MealSource.appPhoto,
         age: const Duration(seconds: 30));
+    await seedProcessing('q' * 32, MealSource.appPhoto,
+        age: const Duration(minutes: 19, seconds: 59));
+    await seedProcessing('r' * 32, MealSource.appPhoto,
+        age: const Duration(minutes: 20, seconds: 1));
     await seedProcessing('w' * 32, MealSource.appWatch,
         age: const Duration(seconds: 30));
     await dao.reclaimStaleProcessing();
-    expect((await dao.photoStatus('p' * 32))?.status, IngestionStatus.failed);
+    expect(await dao.photoStatus('p' * 32), isNull);
+    expect(await dao.photoStatus('q' * 32), isNull);
+    expect((await dao.photoStatus('r' * 32))?.status, IngestionStatus.failed,
+        reason: 'stale: the user-visible retry state, as before');
     expect((await dao.photoStatus('w' * 32))?.status,
         IngestionStatus.processing,
         reason: 'an automatic row may still be the background run\'s');
-    // Failed is the user-visible retry state: the automatic path counts it
-    // settled, a deliberate add (a share again, the sweep's copy) takes it.
-    expect((await dao.reservePhotoHash('p' * 32, source: MealSource.appWatch))
-            .kind,
-        PhotoReservation.claimed);
+    // A deliberate add (a share again, the sweep's kept copy) takes it...
     final again = await dao.reservePhotoHash('p' * 32,
         source: MealSource.appPhoto, reclaimDeliberate: true);
     expect(again.kind, PhotoReservation.reserved);
     expect(again.stamp, isNotNull);
+    // ...and so does the automatic path: not settled, so not passed over.
+    expect((await dao.reservePhotoHash('q' * 32, source: MealSource.appWatch))
+            .kind,
+        PhotoReservation.reserved);
   });
 
-  test('the launch sweep leaves deliberate rows that are no longer '
-      'processing alone', () async {
-    for (final status in [
-      IngestionStatus.saved,
-      IngestionStatus.skipped,
-      IngestionStatus.failed,
-      IngestionStatus.deleted,
-    ]) {
-      final hash = status.index.toString() * 32;
-      await seedProcessing(hash, MealSource.appPhoto,
-          age: const Duration(seconds: 30));
-      await dao.markPhotoHash(hash, status);
-    }
-    await dao.reclaimStaleProcessing();
-    for (final status in [
-      IngestionStatus.saved,
-      IngestionStatus.skipped,
-      IngestionStatus.failed,
-      IngestionStatus.deleted,
-    ]) {
-      expect((await dao.photoStatus(status.index.toString() * 32))?.status,
-          status);
-    }
-  });
+  // Every settled verdict, of both sources, fresh and days old: the sweep
+  // touches 'processing' rows only. The days-old ones are what the
+  // stale-age branches reach. With fresh rows alone, a slip that leaves a
+  // stale-age clause outside the status one (`... AND source = ? OR
+  // last_seen_at < ?`: an OR that lost its parentheses) passed the whole
+  // suite, while it would fail every logged, not-food and deleted photo
+  // older than 20 minutes at each launch (review 2026-11-20).
+  for (final (label, age) in [
+    ('fresh', const Duration(seconds: 30)),
+    ('days old', const Duration(days: 2)),
+  ]) {
+    test('the launch sweep leaves settled rows alone ($label): saved, '
+        'skipped, failed and deleted, both sources', () async {
+      final seeded = <String, (IngestionStatus, int?)>{};
+      var n = 0;
+      for (final source in [MealSource.appPhoto, MealSource.appWatch]) {
+        for (final status in [
+          IngestionStatus.saved,
+          IngestionStatus.skipped,
+          IngestionStatus.failed,
+          IngestionStatus.deleted,
+        ]) {
+          final hash = (n++).toRadixString(16) * 32;
+          await dao.reservePhotoHash(hash,
+              source: source, reclaimDeliberate: source == MealSource.appPhoto);
+          if (status == IngestionStatus.saved) {
+            await dao.saveMeal(
+                Meal(
+                  id: 0,
+                  date: '2026-07-24',
+                  time: '12:00 PM',
+                  timestamp: now.toIso8601String(),
+                  source: source,
+                  imageHash: hash,
+                  analysis: const {'is_food': true},
+                ),
+                markStatus: IngestionStatus.saved);
+          } else {
+            await dao.markPhotoHash(hash, status);
+          }
+          // Backdated after the verdict: every write stamps last_seen_at.
+          await db.update(
+            'photo_ingestions',
+            {'last_seen_at': now.subtract(age).toIso8601String()},
+            where: 'image_hash = ?',
+            whereArgs: [hash],
+          );
+          final row = (await dao.photoStatus(hash))!;
+          expect(row.status, status);
+          seeded[hash] = (row.status, row.mealId);
+        }
+      }
+      expect(
+          [for (final v in seeded.values) if (v.$1 == IngestionStatus.saved) v.$2],
+          everyElement(isNotNull),
+          reason: 'a saved row names its meal');
+      await dao.reclaimStaleProcessing();
+      for (final MapEntry(key: hash, value: before) in seeded.entries) {
+        final row = await dao.photoStatus(hash);
+        expect((row?.status, row?.mealId), before, reason: hash);
+      }
+    });
+  }
 
   test('a FRESH processing row is IN FLIGHT for both paths until released',
       () async {
@@ -377,6 +426,48 @@ void main() {
       final row = await warm.photoStatus('h' * 32);
       expect(row?.status, IngestionStatus.saved);
       expect(row?.mealId, isNotNull);
+    });
+
+    // Review 2026-11-20: the launch sweep that failed a deliberate row at
+    // any age (Q1, Q9) settled this one for the automatic intake. Every
+    // later scan was told "claimed" and passed the photo for good, and no
+    // copy was left to bring it back: an iPhone share's copy goes as it is
+    // read, a pick's never existed or is cleared at the activity's start.
+    // Lunch was never logged, and nothing said so.
+    test('a pick killed mid-analysis at 12:00, cold launch at 12:05: the '
+        'launch catch-up logs it, one upload, one meal', () async {
+      // 12:00 the add flow's pick (or an iPhone share) reserves the photo,
+      // then the process is killed mid-analysis.
+      expect(
+          (await warm.reservePhotoHash('k' * 32,
+                  source: MealSource.appPhoto, reclaimDeliberate: true))
+              .kind,
+          PhotoReservation.reserved);
+      // 12:05 cold launch: the sweep runs before anything reserves.
+      clock = DateTime(2026, 10, 12, 12, 5);
+      await warm.reclaimStaleProcessing();
+      // Watch Camera Roll's launch catch-up offers the same photo (the
+      // watcher reads the same original bytes, so the same md5).
+      var calls = 0;
+      final analyzer = FakeAnalyzer()
+        ..nextPhotoOutcome = const AnalysisOutcome(
+            analysis: {'is_food': true, 'meal_description': 'Lunch',
+                'total_calories': 650},
+            isFood: true,
+            wall: Duration.zero)
+        ..onAnalyze = () async => calls++;
+      final pipeline = PhotoPipeline(
+          dao: warm, analyzer: analyzer, hasher: (_) async => 'k' * 32);
+      final o = await pipeline.process(IntakePhoto(
+          Uint8List.fromList([7]), 'asset-k', 'IMG_k.jpg',
+          capturedAt: DateTime(2026, 10, 12, 12)));
+      expect(o.kind, PhotoOutcomeKind.saved,
+          reason: 'not passed over as already tracked');
+      expect(calls, 1);
+      final row = await warm.photoStatus('k' * 32);
+      expect(row?.status, IngestionStatus.saved);
+      expect(row?.mealId, isNotNull);
+      expect(await warm.mealsBetween('2026-10-12', '2026-10-12'), hasLength(1));
     });
 
     test('a stale owner\'s late save lands on the meal already logged — '

@@ -1030,14 +1030,20 @@ void main() {
     _expectJvmTests(['isRedelivery', 'ShareHold']);
   });
 
-  // Decision 6.1 (Q9): Back at the root moves the task to the back, so the
-  // engine lives on: FlutterActivity's default finished the activity,
+  // Decision 6.1 (Q9): SystemNavigator.pop moves the task to the back, so
+  // the engine lives on: FlutterActivity's default finished the activity,
   // destroying its engine, and a shared photo still being analyzed was
   // never saved. Flutter's PlatformPlugin runs its default (finish(), or
   // the OnBackPressedDispatcher) only when popSystemNavigator returns
-  // false. The launch mode stays singleTask (decision 6.4), and nothing
-  // else finishes the activity by hand.
-  test('Back at the root moves the task to the back, never finishes it', () {
+  // false. Only a Back Flutter handles reaches it: with predictive back
+  // (Android 16 for targetSdk 36, 13-15 with enableOnBackInvokedCallback)
+  // Android answers Back at an idle root itself and finishes a task a share
+  // started. While a shared photo is pending the shell's guard keeps that
+  // Back in Flutter (test/ui/shared_photos_back_test.dart). The launch
+  // mode stays singleTask (decision 6.4), and nothing else finishes the
+  // activity by hand.
+  test('SystemNavigator.pop moves the task to the back, never finishes it',
+      () {
     final code = _kotlinCode(_mainActivity());
     expect(_kotlinFunction(code, 'override fun popSystemNavigator('),
         '{ moveTaskToBack(true) return true }');

@@ -572,8 +572,8 @@ class SqfliteMealsDao implements MealsDao {
   /// An automatic 'processing' row younger than this may belong to a LIVE
   /// run in the other isolate (the periodic background job vs. the
   /// foreground app) — sweeping it would double-analyze and double-log the
-  /// photo. (A deliberate row is the app engine's own: swept at any age,
-  /// see [reclaimStaleProcessing].) Worst-case
+  /// photo. (A deliberate row is the app engine's own: a younger one is
+  /// released at once, see [reclaimStaleProcessing].) Worst-case
   /// legitimate hold is ~15.3 min (ServerAnalyzer: 3 attempts × its 5-min
   /// deadline + backoffs). Warm paths reclaim on their own after
   /// appProcessingStaleAge (meals_logic.dart).
@@ -596,7 +596,8 @@ class SqfliteMealsDao implements MealsDao {
     // never had: (1) EMUI-class OSes routinely kill the process mid-
     // analysis, and (2) a background isolate may hold live reservations
     // while this launch sweep runs. Only rows stale for [staleProcessingAge]
-    // are touched. AUTOMATED-watch rows are RELEASED (deleted) so the next
+    // are touched, but for the app engine's own deliberate rows (below).
+    // AUTOMATED-watch rows are RELEASED (deleted) so the next
     // scan re-offers the photo — marking them 'failed' silently dropped
     // every interrupted photo forever (watch intake never reclaims failed;
     // observed live 2026-07-23: three of the user's photos burned this way).
@@ -612,9 +613,8 @@ class SqfliteMealsDao implements MealsDao {
         cutoff,
       ],
     );
-    // DELIBERATE rows (picker/share) keep the spec behavior: mark 'failed'
-    // so the user-visible retry path owns them — the app's own (app_photo)
-    // whatever their age. Only the app's engine reserves those (the
+    // DELIBERATE (app_photo) rows younger than that are RELEASED too (Q1,
+    // Q9; review 2026-11-20). Only the app's engine reserves those (the
     // background run takes automatic photos only), and this sweep runs as
     // that engine starts, so the run that held one is gone: Back finished
     // its activity, or Android or iOS stopped its process, mid-analysis.
@@ -622,12 +622,31 @@ class SqfliteMealsDao implements MealsDao {
     // deliberate add for half an hour (appProcessingStaleAge), and a
     // shared photo whose copy the share intake kept (it deletes a copy
     // only once its photo's verdict is written) came back at this start
-    // only to be told so. A failed row is reclaimed by any deliberate
-    // add: that photo, offered again by the start-up sweep, goes through
-    // as before (Q1, Q9). One whose copy is gone stays failed, for Photo
-    // Coverage's retry or a share again. A run that was in fact alive
-    // loses its stamp and drops its verdict (ReservationLost): never a
-    // second meal.
+    // only to be told so. Released, not failed: 'failed' is settled for
+    // the automatic intake, so a pick (or an iPhone share, whose copy is
+    // gone) killed mid-analysis and reopened minutes later was never
+    // logged by Watch Camera Roll, which reclaimed the row once stale
+    // while it stayed 'processing' (2026-10-12: a run killed mid-analysis
+    // does not park the photo). Released, it goes to whoever offers it
+    // next: the kept share copy, a pick again, the launch catch-up. A run
+    // that was in fact alive loses its row and drops its verdict
+    // (ReservationLost): never a second meal.
+    await _db.delete(
+      'photo_ingestions',
+      where:
+          'chat_id = ? AND status = ? AND source = ? AND last_seen_at >= ?',
+      whereArgs: [
+        localChatId,
+        IngestionStatus.processing.name,
+        MealSource.appPhoto,
+        cutoff,
+      ],
+    );
+    // Older DELIBERATE rows (picker/share) keep the spec behavior: mark
+    // 'failed' so the user-visible retry path owns them. A deliberate add
+    // reclaims a failed row, so a shared photo whose copy was kept, offered
+    // again by the start-up sweep, still goes through (Q1, Q9); one whose
+    // copy is gone waits for Photo Coverage's retry or a share again.
     await _db.update(
       'photo_ingestions',
       {
@@ -635,13 +654,8 @@ class SqfliteMealsDao implements MealsDao {
         'meal_id': null,
         'last_seen_at': _clock().toIso8601String(),
       },
-      where: 'chat_id = ? AND status = ? AND (source = ? OR last_seen_at < ?)',
-      whereArgs: [
-        localChatId,
-        IngestionStatus.processing.name,
-        MealSource.appPhoto,
-        cutoff,
-      ],
+      where: 'chat_id = ? AND status = ? AND last_seen_at < ?',
+      whereArgs: [localChatId, IngestionStatus.processing.name, cutoff],
     );
   }
 

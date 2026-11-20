@@ -4,10 +4,12 @@
 // ledger row stayed 'processing' until a launch 20 minutes later failed it.
 //
 // Now the copy is kept until the photo's meal or failure is written
-// (IntakePhoto.onSettled), and the launch sweep fails a deliberate row its
-// engine left at any age, so the next start offers the photo again through
-// the normal path: the consent question once for the batch, the md5 ledger
-// keeping it to one meal. A photo whose copy is gone stays failed.
+// (IntakePhoto.onSettled), and the launch sweep releases a deliberate row
+// its engine left (fails one older than 20 minutes, which a deliberate add
+// reclaims), so the next start offers the photo again through the normal
+// path: the consent question once for the batch, the md5 ledger keeping it
+// to one meal. A photo whose copy is gone is not offered again; released,
+// it is free for a share again or the camera-roll scan.
 //
 // Each "run" below is one engine, wired as di.dart wires the share path:
 // the launch sweep first, then share intake → consent gate → pipeline, on
@@ -57,15 +59,16 @@ class _Run {
   final List<PhotoOutcome> notices;
 
   /// di.dart's order: the launch sweep, before anything reserves, then the
-  /// share stream bound through the consent gate. [clock] is share
-  /// intake's (how old the copies left in the folder look).
+  /// share stream bound through the consent gate. [clock] is this start's
+  /// own: how old the copies left in the folder look to share intake, and
+  /// the rows left in the ledger to the launch sweep.
   static Future<_Run> start(Database db, String folder,
       {required FakeSettings settings,
       required FakeAnalyzer analyzer,
       List<String> launch = const [],
       DateTime Function()? clock,
       Future<Uint8List?> Function(Uint8List)? thumbnailer}) async {
-    final dao = SqfliteMealsDao(db);
+    final dao = SqfliteMealsDao(db, clock: clock);
     await dao.reclaimStaleProcessing();
     final source = FakeShareSource()..initial = launch;
     final intake = ShareIntake(
@@ -181,11 +184,16 @@ void main() {
         reason: 'read and sent, but no verdict written yet');
     expect((await run.dao.photoStatus(hash))?.status,
         IngestionStatus.processing);
+    expect(run.intake.photosPending.value, isTrue,
+        reason: 'Back at the root moves the app to the back meanwhile '
+            '(SharedPhotosBackGuard)');
 
     reply.complete();
     await until(() => !photo.existsSync(), 'the copy deleted');
     expect(await mealCount(), 1);
     expect((await run.dao.photoStatus(hash))?.status, IngestionStatus.saved);
+    expect(run.intake.photosPending.value, isFalse,
+        reason: 'its meal is written: Back is Android\'s own again');
     expect(thumb.isCompleted, isFalse,
         reason: 'gone with the meal row, not after the thumbnail');
     thumb.complete(null);
@@ -210,9 +218,9 @@ void main() {
         IngestionStatus.processing);
     expect(photo.existsSync(), isTrue, reason: 'kept: no verdict written');
 
-    // Run 2, a minute later: the launch sweep fails the row run 1 left,
-    // the start-up sweep offers the copy, and its deliberate add reclaims
-    // the failed row.
+    // Run 2, a minute later: the launch sweep releases the row run 1
+    // left, the start-up sweep offers the copy, and its deliberate add
+    // reserves it afresh.
     final second = analyzer();
     final run2 = await _Run.start(db, folder,
         settings: settings,
@@ -226,6 +234,32 @@ void main() {
     expect(row?.mealId, isNotNull);
     expect(run2.notices.map((o) => o.kind), [PhotoOutcomeKind.saved]);
     expect(leftInFolder(), isEmpty);
+  });
+
+  test('the next start 25 minutes later: the stale row is failed, and the '
+      'kept copy reclaims it: sent again once, logged once', () async {
+    final photo = copy(1);
+    final hash = md5Of(photo);
+    final settings = FakeSettings();
+    final first = analyzer(hold: Completer<void>());
+    await _Run.start(db, folder,
+        settings: settings, analyzer: first.analyzer, launch: [photo.path]);
+    await until(() => first.calls.isNotEmpty, 'the request sent');
+
+    // Past the sweep's 20 minutes, short of the 30 after which any add
+    // reclaims a 'processing' row: only the failed row lets the copy in.
+    final second = analyzer();
+    final run2 = await _Run.start(db, folder,
+        settings: settings,
+        analyzer: second.analyzer,
+        clock: later(const Duration(minutes: 25)));
+    await until(() => !photo.existsSync(), 'the photo logged at last');
+    expect(second.calls, [1]);
+    expect(await mealCount(), 1);
+    final row = await run2.dao.photoStatus(hash);
+    expect(row?.status, IngestionStatus.saved);
+    expect(row?.mealId, isNotNull);
+    expect(run2.notices.map((o) => o.kind), [PhotoOutcomeKind.saved]);
   });
 
   test('killed in the middle of a batch (Q1): the photo in flight, the one '
@@ -269,7 +303,7 @@ void main() {
   });
 
   test('a resumed batch answered Not now: nothing is sent, its copies go, '
-      'and the photo that was in flight stays failed', () async {
+      'and the photo that was in flight keeps no verdict', () async {
     final photos = [copy(1), copy(2)];
     final hashes = [for (final p in photos) md5Of(p)];
     final settings = FakeSettings();
@@ -297,13 +331,14 @@ void main() {
     expect(notSent, [2]);
     expect(second.calls, isEmpty, reason: 'nothing sent without consent');
     expect(await mealCount(), 0);
-    expect((await run2.dao.photoStatus(hashes[0]))?.status,
-        IngestionStatus.failed);
+    expect(await run2.dao.photoStatus(hashes[0]), isNull,
+        reason: 'released at the start; nothing sent since (the send gate '
+            'holds the camera-roll scan without consent as well)');
     expect(await run2.dao.photoStatus(hashes[1]), isNull);
   });
 
-  test('copy missing at the next start: the row is failed, nothing is sent, '
-      'and sharing the photo again logs it', () async {
+  test('copy missing at the next start: the row is released, nothing is '
+      'sent, and sharing the photo again logs it', () async {
     final photo = copy(1);
     final bytes = photo.readAsBytesSync();
     final hash = md5Of(photo);
@@ -322,9 +357,9 @@ void main() {
         analyzer: second.analyzer,
         clock: later(const Duration(minutes: 1)));
     await Future<void>.delayed(const Duration(milliseconds: 200));
-    expect((await run2.dao.photoStatus(hash))?.status, IngestionStatus.failed,
-        reason: 'failed, so a deliberate add reclaims it (and Photo '
-            'Coverage offers it for a retry)');
+    expect(await run2.dao.photoStatus(hash), isNull,
+        reason: 'released: a deliberate add and the camera-roll scan take '
+            'it at once (Photo Coverage lists it as not logged)');
     expect(run2.intake.arrivedDelivery, 0, reason: 'nothing to offer again');
     expect(second.calls, isEmpty);
     expect(run2.notices, isEmpty);
@@ -342,7 +377,7 @@ void main() {
   });
 
   test('a next start more than a day later: the copy is deleted unread and '
-      'the row stays failed', () async {
+      'the row, stale, is failed', () async {
     final photo = copy(1);
     final hash = md5Of(photo);
     final settings = FakeSettings();
