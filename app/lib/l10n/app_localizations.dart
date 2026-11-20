@@ -5720,7 +5720,7 @@ abstract class AppLocalizations {
   /// Test AI provider page (Android), under the intro: which build this is. The Google Play build has no photo-library permission; Log › From recent photos opens Android's photo picker, and the share sheet still works.
   ///
   /// In en, this message translates to:
-  /// **'Build: Google Play. It has no access to your photo library: photos come in only through Android\'s photo picker and photos shared to Chopstats.'**
+  /// **'Build: Google Play. It has no access to your photo library: photos come in only through Android\'s photo picker or by sharing them to Chopstats.'**
   String get diagChannelPlay;
 
   /// Test AI provider page (Android), under the intro: the GitHub APK (or a build from source), which keeps Watch Camera Roll and every other feature.

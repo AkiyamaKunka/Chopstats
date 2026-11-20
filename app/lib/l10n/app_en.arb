@@ -3652,7 +3652,7 @@
   "@watchRetiredBody": {
     "description": "Body of the watchRetiredTitle notice: what changed, that nothing was lost, and the two ways to log a photo in the Play version: Log › From recent photos (fabLog › addFromPhotos, Android's photo picker) and sharing from the gallery."
   },
-  "diagChannelPlay": "Build: Google Play. It has no access to your photo library: photos come in only through Android's photo picker and photos shared to Chopstats.",
+  "diagChannelPlay": "Build: Google Play. It has no access to your photo library: photos come in only through Android's photo picker or by sharing them to Chopstats.",
   "@diagChannelPlay": {
     "description": "Test AI provider page (Android), under the intro: which build this is. The Google Play build has no photo-library permission; Log › From recent photos opens Android's photo picker, and the share sheet still works."
   },

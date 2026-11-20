@@ -3795,7 +3795,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get diagChannelPlay =>
-      'Build: Google Play. It has no access to your photo library: photos come in only through Android\'s photo picker and photos shared to Chopstats.';
+      'Build: Google Play. It has no access to your photo library: photos come in only through Android\'s photo picker or by sharing them to Chopstats.';
 
   @override
   String get diagChannelGithub => 'Build: GitHub (the full app).';
