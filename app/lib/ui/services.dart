@@ -11,6 +11,7 @@ import 'package:flutter/foundation.dart' show Listenable;
 
 import '../core/contracts.dart';
 import '../services/backup/backup_coordinator.dart';
+import '../services/backup/save_file_channel.dart' show SaveFileStatus;
 import '../services/garmin_client.dart';
 import '../services/photo/coverage.dart';
 import '../services/photo/photo_library.dart';
@@ -320,6 +321,13 @@ class UiServices {
   /// shows it over the first frame. Null elsewhere and in most tests.
   final OwedNotice? watchRetiredNotice;
 
+  /// Android: how an Export › Save to Device ended whose call died with an
+  /// earlier engine (Android recreated the activity while the save screen
+  /// was up; the copy still ran), once — the shell says "Export saved."
+  /// (save_file_channel.dart takeLateSaveResult). Null elsewhere and in
+  /// most tests.
+  final Future<SaveFileStatus?> Function()? lateSaveResult;
+
   const UiServices({
     required this.dao,
     required this.analyzer,
@@ -353,5 +361,6 @@ class UiServices {
     this.usualFoods,
     this.cloudBackup,
     this.watchRetiredNotice,
+    this.lateSaveResult,
   });
 }

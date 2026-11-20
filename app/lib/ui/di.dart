@@ -27,6 +27,7 @@ import '../services/assist/assist_places_store.dart';
 import '../services/assist/meal_assist.dart';
 import '../services/backup/backup_coordinator.dart';
 import '../services/backup/cloud_backup_channel.dart';
+import '../services/backup/save_file_channel.dart' show takeLateSaveResult;
 import '../services/nl/executor.dart';
 import '../services/garmin_client.dart';
 import '../services/photo/background_restriction.dart'
@@ -546,6 +547,8 @@ class AppServices {
           : OwedNotice(
               pending: () => watchRetiredNoticeOwed(prefs),
               shown: () => watchRetiredNoticeShown(prefs)),
+      // A Save to Device that outlived its engine (MainActivity).
+      lateSaveResult: Platform.isAndroid ? takeLateSaveResult : null,
     );
     pipeline.bind(photoIntake); // automated watch (deliberate=false)
     // Share sheet (deliberate), each photo held until its AI recipient is

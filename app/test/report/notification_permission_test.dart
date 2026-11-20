@@ -142,6 +142,117 @@ void main() {
     });
   });
 
+  // Android QA Q6: after a reinstall, Auto Backup restored the ask flags
+  // with the rest of the preferences. Settings then offered "Open system
+  // settings" and Android's own dialog never came, though this install had
+  // never asked. MainActivity's installTimes tell such preferences apart.
+  group('preferences restored from another install', () {
+    /// This install's PackageInfo times, as MainActivity answers them.
+    void installed({required int first, required int last}) =>
+        nativeAnswers((call) => call.method == 'installTimes'
+            ? {'firstInstall': first, 'lastUpdate': last}
+            : null);
+
+    /// What Auto Backup restored: an earlier install's preferences, after
+    /// it had asked (1.7.0 kept no install time with them).
+    const restored170 = <String, Object>{
+      'settings.provider': 'server',
+      'settings.meal_logged': true,
+      notificationAskSchemePrefsKey: true,
+      notificationPermissionAskedPrefsKey: true,
+    };
+
+    test('a 1.7.0 backup on a fresh install: not asked here, so the first '
+        'trigger shows Android\'s dialog', () async {
+      SharedPreferences.setMockInitialValues(restored170);
+      installed(first: 5000, last: 5000); // installed, never updated
+      await settleNotificationAskAtLaunch();
+      expect(await notificationPermissionAsked(), isFalse);
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getBool(notificationAskSchemePrefsKey), isTrue,
+          reason: 'past the old every-launch ask');
+      expect(prefs.getInt(notificationAskInstallPrefsKey), 5000);
+      expect(prefs.getBool('settings.meal_logged'), isTrue,
+          reason: 'nothing else is touched');
+      expect(await askNotificationPermissionOnce(), isFalse);
+      expect(requests, 1);
+      // The next launch keeps this install's answer.
+      installed(first: 5000, last: 5000);
+      await settleNotificationAskAtLaunch();
+      expect(await notificationPermissionAsked(), isTrue);
+    });
+
+    test('a later backup carries its install time: another one is reset, '
+        'even on an install updated since', () async {
+      SharedPreferences.setMockInitialValues(
+          {...restored170, notificationAskInstallPrefsKey: 1000});
+      installed(first: 5000, last: 9000);
+      await settleNotificationAskAtLaunch();
+      expect(await notificationPermissionAsked(), isFalse);
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getInt(notificationAskInstallPrefsKey), 5000);
+    });
+
+    test('an install updated from 1.7.0 keeps its own answer', () async {
+      SharedPreferences.setMockInitialValues(restored170);
+      installed(first: 1000, last: 9000); // updated in place
+      await settleNotificationAskAtLaunch();
+      expect(await notificationPermissionAsked(), isTrue);
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getInt(notificationAskInstallPrefsKey), 1000);
+      expect(await askNotificationPermissionOnce(), isNull);
+      expect(requests, 0);
+      // And at its next launches, now stamped.
+      installed(first: 1000, last: 12000);
+      await settleNotificationAskAtLaunch();
+      expect(await notificationPermissionAsked(), isTrue);
+    });
+
+    test('an install from before the scheme still counts as asked',
+        () async {
+      SharedPreferences.setMockInitialValues(
+          {'settings.report_time': '21:30', 'background.last_run_iso': 'x'});
+      installed(first: 1000, last: 9000);
+      await settleNotificationAskAtLaunch();
+      expect(await notificationPermissionAsked(), isTrue);
+    });
+
+    test('a fresh install that restored nothing: not asked, and still not '
+        'at its second launch', () async {
+      SharedPreferences.setMockInitialValues({});
+      installed(first: 5000, last: 5000);
+      await settleNotificationAskAtLaunch();
+      expect(await notificationPermissionAsked(), isFalse);
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('settings.report_time', '21:30');
+      await settleNotificationAskAtLaunch();
+      expect(await notificationPermissionAsked(), isFalse);
+    });
+
+    test('an older native build (no installTimes): as before', () async {
+      SharedPreferences.setMockInitialValues(restored170);
+      nativeAnswers((call) => throw MissingPluginException());
+      await settleNotificationAskAtLaunch();
+      expect(await notificationPermissionAsked(), isTrue);
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getInt(notificationAskInstallPrefsKey), isNull);
+    });
+
+    test('never in a background run, never on iOS', () async {
+      SharedPreferences.setMockInitialValues(restored170);
+      installed(first: 5000, last: 5000);
+      isHeadlessEngine = true;
+      await settleNotificationAskAtLaunch();
+      isHeadlessEngine = false;
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      await settleNotificationAskAtLaunch();
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      expect(channelCalls, isEmpty);
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getBool(notificationPermissionAskedPrefsKey), isTrue);
+    });
+  });
+
   group('fixNotificationsOff (Settings\' notifications-off row)', () {
     /// A request during which Android's dialog comes up: the app loses
     /// focus, then gets it back.

@@ -35,7 +35,7 @@ import '../l10n.dart';
 import '../widgets/grouped.dart';
 import '../../services/settings/app_settings.dart' show maxDailyGoalKcal;
 import '../app_formats.dart';
-import '../format.dart' show formatKcal;
+import '../format.dart' show formatKcal, phoneUses24HourClockIn;
 import '../large_text.dart';
 import '../theme/app_dialog.dart';
 import '../theme/app_theme.dart' show AppButtonStyles;
@@ -277,8 +277,10 @@ class _SettingsScreenState extends State<SettingsScreen>
           ? context.l10n.backgroundScanRestricted
           : context.l10n.backgroundScanDisabled;
 
-  /// "Today 21:30" / "Tomorrow 07:00" / "Yesterday 14:02" / "09-28 14:02".
-  String _dayTime(DateTime when) => dayTimeLabel(context.l10n, when);
+  /// "Today 21:30" / "Tomorrow 07:00" / "Yesterday 14:02" / "09-28 14:02",
+  /// redrawn when the phone's 12/24-hour switch changes.
+  String _dayTime(DateTime when) => dayTimeLabel(context.l10n, when,
+      use24h: phoneUses24HourClockIn(context));
 
   /// Re-probe on resume: the user comes BACK from system settings to this
   /// very screen (it lives in the IndexedStack), so the row must clear

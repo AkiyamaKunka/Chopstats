@@ -354,4 +354,58 @@ class IntakeRulesTest {
         assertEquals(listOf("ok"), first)
         assertEquals(listOf("cancelled"), second)
     }
+
+    // --- A save whose call died with its engine: the restarted app hears
+    // how it ended, once (LateSaveResult; Android QA Q4).
+
+    @Test
+    fun aLateSaveResultIsKeptForOneAsk() {
+        val late = LateSaveResult<String>()
+        val answers = mutableListOf<String?>()
+        late.take { answers.add(it) }
+        assertEquals(listOf<String?>(null), answers) // nothing to say
+        late.started()
+        late.finished("ok")
+        late.take { answers.add(it) }
+        late.take { answers.add(it) }
+        assertEquals(listOf(null, "ok", null), answers)
+    }
+
+    @Test
+    fun anAskDuringTheCopyIsAnsweredWhenItEnds() {
+        val late = LateSaveResult<String>()
+        val answers = mutableListOf<String?>()
+        late.started()
+        late.take { answers.add(it) }
+        assertEquals(emptyList<String?>(), answers)
+        late.finished("failed")
+        assertEquals(listOf<String?>("failed"), answers)
+        // Told once: the next ask hears nothing.
+        late.take { answers.add(it) }
+        assertEquals(listOf("failed", null), answers)
+    }
+
+    @Test
+    fun aSecondAskWhileOneWaitsTakesItsPlace() {
+        val late = LateSaveResult<String>()
+        val first = mutableListOf<String?>()
+        val second = mutableListOf<String?>()
+        late.started()
+        late.take { first.add(it) }
+        late.take { second.add(it) }
+        assertEquals(listOf<String?>(null), first)
+        late.finished("ok")
+        assertEquals(listOf<String?>(null), first)
+        assertEquals(listOf<String?>("ok"), second)
+    }
+
+    @Test
+    fun aDiscardedSaveWithNoCallIsKeptAsFailed() {
+        // No copy ran (its source was gone), so no started(): still said.
+        val late = LateSaveResult<String>()
+        late.finished("failed")
+        val answers = mutableListOf<String?>()
+        late.take { answers.add(it) }
+        assertEquals(listOf<String?>("failed"), answers)
+    }
 }

@@ -1263,16 +1263,15 @@ void main() {
             'IntakeRules.dropSaveSource(cacheDir, source?.path, call != null) '
             'call?.let { saves.answer(it, saveAnswer("cancelled")) } return } '
             'if (step == IntakeRules.SaveStep.DISCARD || source == null) { '
-            'discardDocument(uri) call?.let { saves.answer(it, '
-            'saveAnswer("failed")) } return } Thread { val ok = try { val '
+            'discardDocument(uri) answerSave(call, "failed") return } if '
+            '(call == null) lateSave.started() Thread { val ok = try { val '
             'input = IntakeRules.openSaveSource(cacheDir, source.path) ?: '
             'throw IllegalStateException() input.use { inp -> val out = '
             'IntakeRules.firstStream(IntakeRules.SAVE_MODES) { '
             'contentResolver.openOutputStream(uri, it) } out?.use { o -> '
             'inp.copyTo(o, 64 * 1024) } != null } } catch (e: Exception) { '
             'false } if (!ok) discardDocument(uri) runOnUiThread { '
-            'call?.let { saves.answer(it, if (ok) saveAnswer("ok") else '
-            'saveAnswer("failed")) } } }.start() }'));
+            'answerSave(call, if (ok) "ok" else "failed") } }.start() }'));
     expect('dropSaveSource('.allMatches(saved).length, 1,
         reason: 'only the cancel deletes by name: a copy has deleted its '
             'source on opening it');
@@ -1292,8 +1291,22 @@ void main() {
         endsWith('super.onCreate(savedInstanceState) pendingSaveSource = '
             'cachedFile(savedInstanceState?.getString(STATE_SAVE_SOURCE)) }'),
         reason: 'restored through the same cache check');
+    // The open call is answered; with none (it died with its engine:
+    // Android recreated the activity while the save screen was up), the
+    // result waits for the restarted app, which asks once and says
+    // "Export saved." (Android QA Q4).
+    expect(_kotlinFunction(code, 'private fun answerSave('),
+        '{ if (call != null) saves.answer(call, saveAnswer(status)) else '
+        'lateSave.finished(status) }');
+    expect(code,
+        contains('private val lateSave = LateSaveResult<String>()'));
+    expect(
+        code,
+        contains('"takeSaveResult" -> lateSave.take { status -> '
+            'result.success(status?.let { saveAnswer(it) }) }'));
     _expectJvmTests(['regularFileIn', 'saveStep', 'dropSaveSource',
-        'openSaveSource', 'SAVE_MODES', 'firstStream', 'SingleCall']);
+        'openSaveSource', 'SAVE_MODES', 'firstStream', 'SingleCall',
+        'LateSaveResult']);
   });
 
   // Settings' notifications-off remedy lands on the app's own
@@ -1322,6 +1335,55 @@ void main() {
         '"package", packageName, null)), ) return IntakeRules.openFirst(pages) '
         '{ startActivity(it) } }');
     _expectJvmTests(['openFirst']);
+  });
+
+  // Android QA Q6: preferences restored from another install (Auto Backup
+  // after a reinstall, a device transfer) carried its notification-ask
+  // flags, so Settings offered "Open system settings" and Android's own
+  // dialog never came. Dart tells such preferences from this install's
+  // own by this install's PackageInfo times (notification_permission.dart).
+  test('MainActivity serves installTimes', () {
+    final code = _kotlinCode(_mainActivity());
+    final channel = RegExp(
+            r'MethodChannel\(flutterEngine\.dartExecutor\.binaryMessenger, '
+            r'CHANNEL\)(.*?)\}\s*\}',
+            dotAll: true)
+        .firstMatch(code)
+        ?.group(1);
+    expect(channel,
+        contains('"installTimes" -> result.success(installTimes())'));
+    expect(
+        code,
+        contains('private fun installTimes(): Map<String, Long>? = try { '
+            '@Suppress("DEPRECATION") val info = '
+            'packageManager.getPackageInfo(packageName, 0) '
+            'mapOf("firstInstall" to info.firstInstallTime, "lastUpdate" to '
+            'info.lastUpdateTime) } catch (e: Exception) { null }'));
+  });
+
+  // Android QA Q7: the phone's 12/24-hour switch reached the app only at a
+  // restart or a configuration change: the embedding sends it then, and
+  // turning the switch is neither. MainActivity watches the setting and
+  // hands the FlutterView (its public id) the configuration again, which
+  // re-sends the user settings as a configuration change does.
+  test('MainActivity re-sends the 12/24-hour switch when it changes', () {
+    final code = _kotlinCode(_mainActivity());
+    expect(
+        code,
+        contains('private val clockFormatObserver = object : '
+            'ContentObserver(Handler(Looper.getMainLooper())) { override fun '
+            'onChange(selfChange: Boolean) { findViewById<View>('
+            'FlutterActivity.FLUTTER_VIEW_ID) '
+            '?.dispatchConfigurationChanged(resources.configuration) } }'));
+    expect(
+        _kotlinFunction(code, 'override fun configureFlutterEngine('),
+        startsWith('{ super.configureFlutterEngine(flutterEngine) '
+            'contentResolver.registerContentObserver( '
+            'Settings.System.getUriFor(Settings.System.TIME_12_24), false, '
+            'clockFormatObserver, ) '));
+    expect(_kotlinFunction(code, 'override fun cleanUpFlutterEngine('),
+        '{ contentResolver.unregisterContentObserver(clockFormatObserver) '
+        'super.cleanUpFlutterEngine(flutterEngine) }');
   });
 
   // The JVM unit tests run on CI (mobile-build.yml), and the built APKs'

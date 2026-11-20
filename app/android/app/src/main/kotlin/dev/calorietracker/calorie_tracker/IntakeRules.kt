@@ -225,6 +225,56 @@ internal class SingleCall<V> {
     }
 }
 
+/// The result of a save no call is left to hear: Android recreated the
+/// activity while the create-document screen was up, so the saveFile call
+/// died with its engine, and the copy still runs (onSaveTargetPicked).
+/// The restarted app asks once ("takeSaveResult") and says "Export saved."
+/// or that the save failed; it said nothing before (Android QA Q4). An ask
+/// that comes while the copy still runs is answered when it ends. Main
+/// thread only.
+internal class LateSaveResult<V : Any> {
+    private var copying = false
+    private var kept: V? = null
+    private var waiting: ((V?) -> Unit)? = null
+
+    /// A copy that no call will hear about has started.
+    fun started() {
+        copying = true
+        kept = null
+    }
+
+    /// That copy ended with [value]: to the ask waiting for it, or kept for
+    /// the next ask.
+    fun finished(value: V) {
+        copying = false
+        val reply = waiting
+        if (reply == null) {
+            kept = value
+            return
+        }
+        waiting = null
+        reply(value)
+    }
+
+    /// The app asks: [reply] gets the kept result, once, or the running
+    /// copy's when it ends, or null when there is none. An ask that comes
+    /// while another waits takes its place, and the first gets null.
+    fun take(reply: (V?) -> Unit) {
+        val value = kept
+        if (value != null) {
+            kept = null
+            reply(value)
+            return
+        }
+        if (!copying) {
+            reply(null)
+            return
+        }
+        waiting?.invoke(null)
+        waiting = reply
+    }
+}
+
 /// The shares onNewIntent gets before share intake (Dart) listens for
 /// them. receive_sharing_intent tells only a listener and keeps nothing
 /// for later, and Android hands a share to a stopped app's recreated
