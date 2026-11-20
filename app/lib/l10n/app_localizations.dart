@@ -5704,6 +5704,126 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Chopstats can\'t see all your photos, so new photos are not logged automatically. Allow access to all photos in the Settings app.'**
   String get watcherLimitedFooterIos;
+
+  /// Google Play build only: title of the ONE notice shown after the Play version replaced a GitHub install that had Watch Camera Roll on. The Play version has no automatic camera-roll logging (it has no photo-library permission), so the switch was turned off. Uses settingsRowWatch.
+  ///
+  /// In en, this message translates to:
+  /// **'Watch Camera Roll is off'**
+  String get watchRetiredTitle;
+
+  /// Body of the watchRetiredTitle notice: what changed, that nothing was lost, and the two ways to log a photo in the Play version: Log › From recent photos (fabLog › addFromPhotos, Android's photo picker) and sharing from the gallery.
+  ///
+  /// In en, this message translates to:
+  /// **'Automatic camera-roll logging isn\'t in the Google Play version of Chopstats, so Watch Camera Roll has been turned off. Your meals and settings are all still here.\n\nTo log a meal photo, tap \"Log\" › From recent photos, or share the photo to Chopstats from your gallery app.'**
+  String get watchRetiredBody;
+
+  /// Test AI provider page (Android), under the intro: which build this is. The Google Play build has no photo-library permission; Log › From recent photos opens Android's photo picker, and the share sheet still works.
+  ///
+  /// In en, this message translates to:
+  /// **'Build: Google Play. It has no access to your photo library: photos come in only through Android\'s photo picker or by sharing them to Chopstats.'**
+  String get diagChannelPlay;
+
+  /// Test AI provider page (Android), under the intro: the GitHub APK (or a build from source), which keeps Watch Camera Roll and every other feature.
+  ///
+  /// In en, this message translates to:
+  /// **'Build: GitHub (the full app).'**
+  String get diagChannelGithub;
+
+  /// Google Play build: todayEmptyHint without Watch Camera Roll, which the Play version does not have. Uses fabLog.
+  ///
+  /// In en, this message translates to:
+  /// **'Tap \"Log\" below to add one from a photo, a description or by hand — or share a food photo to Chopstats from your gallery app.'**
+  String get todayEmptyHintPlay;
+
+  /// Google Play build: settingsWelcomeBody without Watch Camera Roll, which the Play version does not have. Uses tabToday and fabLog.
+  ///
+  /// In en, this message translates to:
+  /// **'Pick a provider and paste its API key (it saves as you type), then tap Test This Provider.\nThen tap \"Log\" on Today to add a meal from a photo, or share a food photo to Chopstats from your gallery app.'**
+  String get settingsWelcomeBodyPlay;
+
+  /// Google Play build: aiStopSharingBody without Watch Camera Roll, which the Play version does not have.
+  ///
+  /// In en, this message translates to:
+  /// **'Chopstats stops sending photos and meal text to {provider}. Meals already logged stay on this phone. The next time you use AI analysis, Chopstats asks again.'**
+  String aiStopSharingBodyPlay(String provider);
+
+  /// Google Play build: aiStopSharingBodyWithLookups without Watch Camera Roll, which the Play version does not have.
+  ///
+  /// In en, this message translates to:
+  /// **'Chopstats stops sending photos, meal text and restaurant lookups to {provider}. Restaurant lookups turn off, and pending lookups are cancelled. Meals already logged stay on this phone. Chopstats asks again before it sends anything to {provider}.'**
+  String aiStopSharingBodyWithLookupsPlay(String provider);
+
+  /// Google Play build: errServerFailedFinal without Settings › Photo Coverage, which the Play version does not have. A photo picked or shared again is analyzed again.
+  ///
+  /// In en, this message translates to:
+  /// **'Your server could not analyze this photo: {reason}. To try again, log the photo again from \"Log\" or share it once more.'**
+  String errServerFailedFinalPlay(String reason);
+
+  /// Google Play build: errServerRejected without Settings › Photo Coverage, which the Play version does not have.
+  ///
+  /// In en, this message translates to:
+  /// **'Your server rejected this request ({code}). Update the app and the server to matching versions, then log the photo again.'**
+  String errServerRejectedPlay(String code);
+
+  /// Google Play build: coachEmpty without 'it lands here automatically' — the Play version has no automatic camera-roll logging.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing logged today. Log your next meal from a photo, a description or by hand.'**
+  String get coachEmptyPlay;
+
+  /// Google Play build: coachEmptyYesterday without 'it lands here automatically'.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing logged yesterday. Log your next meal from a photo, a description or by hand.'**
+  String get coachEmptyYesterdayPlay;
+
+  /// Google Play build: coachEmptyOnDay without 'it lands here automatically'.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing logged that day. Log your next meal from a photo, a description or by hand.'**
+  String get coachEmptyOnDayPlay;
+
+  /// Google Play build: settingsAiFooterPaused without 'New photos are kept and retried automatically'. The Play version has no Watch Camera Roll, catch-up or Photo Coverage, so a photo picked or shared during the pause is not analyzed and nothing retries it; the add flow says so too (outcomeQuotaPausedPickMsg).
+  ///
+  /// In en, this message translates to:
+  /// **'Analyses are paused — Gemini\'s daily limit was reached (a free tier allows only a limited number of requests a day). A photo added now is not analyzed: log the meal yourself, or add the photo again after the pause. To resume now, turn on billing in Google AI Studio and run Test This Provider, or change the key or provider on the AI Provider page.'**
+  String get settingsAiFooterPausedPlay;
+
+  /// Google Play build: providerQuotaPaused (the banner on the AI Provider page itself) without 'New photos are kept and retried automatically', which the Play version does not do.
+  ///
+  /// In en, this message translates to:
+  /// **'Analyses are paused — Gemini\'s daily limit was reached (a free tier allows only a limited number of requests a day). A photo added now is not analyzed: log the meal yourself, or add the photo again after the pause. To resume now, turn on billing in Google AI Studio and run Test This Provider, or change the key or provider.'**
+  String get providerQuotaPausedPlay;
+
+  /// Google Play build: providerQuotaPausedUntil without 'New photos are kept and retried automatically'. {time} is the local clock time the pause lifts.
+  ///
+  /// In en, this message translates to:
+  /// **'Analyses are paused until {time} — Gemini\'s daily limit was reached (a free tier allows only a limited number of requests a day). A photo added now is not analyzed: log the meal yourself, or add the photo again after the pause. To resume now, turn on billing in Google AI Studio and run Test This Provider, or change the key or provider.'**
+  String providerQuotaPausedUntilPlay(String time);
+
+  /// Google Play build: diagFixWaitRateLimit (Test This Provider, the fix line under a rate-limited key) without 'photos are kept and retried automatically', which the Play version does not do.
+  ///
+  /// In en, this message translates to:
+  /// **'Wait a minute and re-run. A photo added meanwhile may not be analyzed: add it again afterwards.'**
+  String get diagFixWaitRateLimitPlay;
+
+  /// Google Play build: diagFixPhotoTemp (Test This Provider, the fix line under a temporary photo failure) without 'photos are kept and retried automatically'.
+  ///
+  /// In en, this message translates to:
+  /// **'Usually a rate limit or a busy server — re-run in a minute, and add again any photo that was not analyzed.'**
+  String get diagFixPhotoTempPlay;
+
+  /// Google Play build: diagFixQuota (Test This Provider, the fix line under a quota pause) without '(photos are kept)'.
+  ///
+  /// In en, this message translates to:
+  /// **'Wait it out and add photos again afterwards (they are not analyzed meanwhile), or change the key or provider to resume immediately.'**
+  String get diagFixQuotaPlay;
+
+  /// Google Play build: outcomeFailedKeptMsg (the snackbar for a shared photo, or one picked and backed out of, that failed for good) without 'kept for retry': the Play version has no Photo Coverage to retry it from. {reason} is the failure line, which says what to do when there is something to do.
+  ///
+  /// In en, this message translates to:
+  /// **'Photo analysis failed. {reason}'**
+  String outcomeFailedKeptMsgPlay(String reason);
 }
 
 class _AppLocalizationsDelegate

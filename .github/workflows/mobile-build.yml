@@ -143,26 +143,34 @@ jobs:
 
       # The same release build as an APK (it reuses the bundle's compiled
       # and shrunk code), so aapt2 can read the merged manifest: the
-      # libraries' permissions included, which is what Play reviews.
+      # libraries' permissions included, which is what Play reviews. Kept
+      # aside: the Play build below writes the same path.
       - name: Build APK (release, debug-signed)
         working-directory: app
-        run: flutter build apk --release
+        run: |
+          flutter build apk --release
+          cp build/app/outputs/flutter-apk/app-release.apk "$RUNNER_TEMP/app-github.apk"
+
+      # The Google Play build: the same code with the one switch,
+      # --dart-define=CHOPSTATS_CHANNEL=play, whose manifest overlay
+      # (app/android/app/src/playChannel/AndroidManifest.xml) drops the three
+      # photo permissions (docs/RELEASING.md § 6). arm64 only: permissions
+      # do not depend on the ABI, and one AOT snapshot keeps the job short.
+      - name: Build the Play build's APK (release, debug-signed, arm64)
+        working-directory: app
+        run: |
+          flutter build apk --release --target-platform android-arm64 --dart-define=CHOPSTATS_CHANNEL=play
+          cp build/app/outputs/flutter-apk/app-release.apk "$RUNNER_TEMP/app-play.apk"
 
       # Exactly these, no more and no fewer. A new permission is a Play
       # review question and a Data safety answer: add it here on purpose
       # (manifest_gate_test checks every permission the main manifest
       # declares is on this list). Never FOREGROUND_SERVICE (stripped from
-      # WorkManager) or an exact-alarm permission.
-      - name: The APK asks for exactly the allowed permissions
-        working-directory: app
+      # WorkManager) or an exact-alarm permission. The Play build: the same
+      # list without the three photo permissions its overlay removes.
+      - name: Each APK asks for exactly the allowed permissions
         run: |
           set -euo pipefail
-          sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
-          aapt2="$(ls -d "$sdk"/build-tools/* | sort -V | tail -1)/aapt2"
-          apk=build/app/outputs/flutter-apk/app-release.apk
-          "$aapt2" dump permissions "$apk"
-          got=$("$aapt2" dump permissions "$apk" \
-            | sed -n "s/^uses-permission: name='\([^']*\)'.*/\1/p" | LC_ALL=C sort -u)
           allowed=$(sed 's/^[[:space:]]*//' <<'LIST' | LC_ALL=C sort -u
             android.permission.INTERNET
             android.permission.READ_MEDIA_IMAGES
@@ -176,23 +184,36 @@ jobs:
             dev.calorietracker.calorie_tracker.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION
           LIST
           )
-          for banned in FOREGROUND_SERVICE SCHEDULE_EXACT_ALARM USE_EXACT_ALARM; do
-            if grep -qx "android.permission.$banned" <<<"$got"; then
-              echo "::error::app-release.apk asks for android.permission.$banned"
+          play_removed=$(sed 's/^[[:space:]]*//' <<'LIST' | LC_ALL=C sort -u
+            android.permission.READ_MEDIA_IMAGES
+            android.permission.READ_MEDIA_VISUAL_USER_SELECTED
+            android.permission.READ_EXTERNAL_STORAGE
+          LIST
+          )
+          play_allowed=$(LC_ALL=C comm -23 <(echo "$allowed") <(echo "$play_removed"))
+          check() { # <name> <apk> <allowlist>
+            local name="$1" got unexpected missing banned
+            got=$(scripts/android_permissions.sh "$2")
+            for banned in FOREGROUND_SERVICE SCHEDULE_EXACT_ALARM USE_EXACT_ALARM; do
+              if grep -qx "android.permission.$banned" <<<"$got"; then
+                echo "::error::$name asks for android.permission.$banned"
+                exit 1
+              fi
+            done
+            unexpected=$(LC_ALL=C comm -23 <(echo "$got") <(echo "$3"))
+            missing=$(LC_ALL=C comm -13 <(echo "$got") <(echo "$3"))
+            if [ -n "$unexpected" ]; then
+              echo "::error::$name asks for permissions not on its allowlist: $(echo $unexpected)"
               exit 1
             fi
-          done
-          unexpected=$(LC_ALL=C comm -23 <(echo "$got") <(echo "$allowed"))
-          missing=$(LC_ALL=C comm -13 <(echo "$got") <(echo "$allowed"))
-          if [ -n "$unexpected" ]; then
-            echo "::error::app-release.apk asks for permissions not on the allowlist: $(echo $unexpected)"
-            exit 1
-          fi
-          if [ -n "$missing" ]; then
-            echo "::error::app-release.apk no longer asks for: $(echo $missing). Update the allowlist in .github/workflows/mobile-build.yml with the manifest."
-            exit 1
-          fi
-          echo "Permissions match the allowlist."
+            if [ -n "$missing" ]; then
+              echo "::error::$name no longer asks for: $(echo $missing). Update the allowlist in .github/workflows/mobile-build.yml with the manifest."
+              exit 1
+            fi
+            echo "$name: permissions match its allowlist."
+          }
+          check app-release.apk "$RUNNER_TEMP/app-github.apk" "$allowed"
+          check "the Play build's APK" "$RUNNER_TEMP/app-play.apk" "$play_allowed"
 
       - name: Upload the bundle
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

@@ -181,14 +181,30 @@ String _manifest() =>
 String _uncommented(String xml) =>
     xml.replaceAll(RegExp(r'<!--.*?-->', dotAll: true), '');
 
-/// Every `<uses-permission>` in [manifest], by name: true when the entry is
-/// a `tools:node="remove"` (it strips a library's permission from the
-/// merged manifest rather than declaring one).
+/// The two forms a manifest asks for a permission with:
+/// `<uses-permission>`, and `<uses-permission-sdk-23>` (asked for on
+/// Android 6 and later only). The manifest merger and aapt2 tell them
+/// apart: a tools:node="remove" on one form leaves the other in.
+const _permissionForms = ['uses-permission', 'uses-permission-sdk-23'];
+
+/// Every permission entry in [xml] in either form: (form, name, whether it
+/// is a `tools:node="remove"`).
+Set<(String, String, bool)> _permissionEntries(String xml) => {
+      for (final m in RegExp(r'<(uses-permission(?:-sdk-23)?)\s([^>]*)>')
+          .allMatches(_uncommented(xml)))
+        (
+          m.group(1)!,
+          RegExp(r'android:name="([^"]+)"').firstMatch(m.group(2)!)!.group(1)!,
+          m.group(2)!.contains('tools:node="remove"'),
+        ),
+    };
+
+/// Every permission in [manifest], in either form, by name: true when the
+/// entry is a `tools:node="remove"` (it strips a library's permission from
+/// the merged manifest rather than declaring one).
 Map<String, bool> _permissions(String manifest) => {
-      for (final m in RegExp(r'<uses-permission\b([^>]*)>')
-          .allMatches(_uncommented(manifest)))
-        RegExp(r'android:name="([^"]+)"').firstMatch(m.group(1)!)!.group(1)!:
-            m.group(1)!.contains('tools:node="remove"'),
+      for (final (_, name, remove) in _permissionEntries(manifest))
+        name: remove,
     };
 
 /// The permissions [manifest] declares (removals left out).
@@ -196,6 +212,15 @@ Set<String> _declared(String manifest) => {
       for (final e in _permissions(manifest).entries)
         if (!e.value) e.key,
     };
+
+/// What the Google Play build's manifest overlay removes
+/// (android/app/src/playChannel/AndroidManifest.xml): the three photo
+/// permissions. The GitHub APK keeps them.
+const _playRemoved = {
+  'android.permission.READ_MEDIA_IMAGES',
+  'android.permission.READ_MEDIA_VISUAL_USER_SELECTED',
+  'android.permission.READ_EXTERNAL_STORAGE',
+};
 
 /// Release-manifest drift gate.
 ///
@@ -1266,24 +1291,56 @@ void main() {
     _expectJvmTests(['openFirst']);
   });
 
-  // The JVM unit tests run on CI (mobile-build.yml), and the built APK's
+  // The JVM unit tests run on CI (mobile-build.yml), and the built APKs'
   // permissions are checked there against an allowlist: the merged
   // manifest, which this file cannot see, is what Play reviews. Every
   // permission the main manifest declares must be on that list, so a new
-  // one needs a deliberate edit in both places.
+  // one needs a deliberate edit in both places. The Play build's APK is
+  // checked against the same list without the three its overlay removes.
   test('CI runs the JVM unit tests and checks the APK permissions', () {
     final root = _appRoot().parent.path;
     final workflow =
         File('$root/.github/workflows/mobile-build.yml').readAsStringSync();
     expect(workflow, contains('./gradlew :app:testDebugUnitTest'));
     expect(workflow, contains('flutter build apk --release'));
-    expect(workflow, contains('dump permissions'));
+    // aapt2 reads each APK through the one script (release.yml uses it too).
+    final script = File('$root/scripts/android_permissions.sh');
+    expect(script.existsSync(), isTrue, reason: script.path);
+    expect(script.readAsStringSync(), contains('dump permissions'));
+    expect(workflow, contains('got=\$(scripts/android_permissions.sh "\$2")'));
+    expect(
+        workflow,
+        contains('flutter build apk --release --target-platform android-arm64 '
+            '--dart-define=CHOPSTATS_CHANNEL=play'));
+    expect(
+        workflow,
+        contains('check app-release.apk "\$RUNNER_TEMP/app-github.apk" '
+            '"\$allowed"'));
+    expect(
+        workflow,
+        contains('check "the Play build\'s APK" "\$RUNNER_TEMP/app-play.apk" '
+            '"\$play_allowed"'));
+    final lists = {
+      for (final m in RegExp(
+              r"(\w+)=\$\(sed .*?<<'LIST'.*?\n(.*?)\n\s*LIST\n",
+              dotAll: true)
+          .allMatches(workflow))
+        m.group(1)!: {
+          for (final line in m.group(2)!.split('\n'))
+            if (line.trim().isNotEmpty) line.trim(),
+        },
+    };
+    expect(lists.keys, {'allowed', 'play_removed'});
+    expect(lists['play_removed'], _playRemoved,
+        reason: 'the Play build is checked without exactly what its overlay '
+            'removes');
     final allowed = RegExp(r'^\s+(android\.permission\.[A-Z_]+|'
             r'dev\.calorietracker\.calorie_tracker\.[A-Z_]+)\s*$',
             multiLine: true)
         .allMatches(workflow)
         .map((m) => m.group(1)!)
         .toSet();
+    expect(lists['allowed'], allowed);
     expect(allowed, containsAll(_declared(_manifest())));
     for (final banned in [
       'android.permission.FOREGROUND_SERVICE',
@@ -1295,6 +1352,157 @@ void main() {
     final gradle = File('${_appRoot().path}/android/app/build.gradle.kts')
         .readAsStringSync();
     expect(gradle, contains('testImplementation("junit:junit:'));
+  });
+
+  // Every permission check (mobile-build's allowlists, release.yml's Play
+  // bundle check, the hand check in docs/RELEASING.md § 6) reads aapt2's
+  // listing through scripts/android_permissions.sh. aapt2 prints a
+  // permission asked for through <uses-permission-sdk-23> as its own line
+  // form, which a parse of `uses-permission:` lines alone let past every
+  // gate (review, 2026-11-19). The script's own parse, run on a listing
+  // with both forms, as aapt2 36 prints them.
+  test('the permission script lists the permissions aapt2 prints in both '
+      'forms, and nothing else', () async {
+    final script =
+        File('${_appRoot().parent.path}/scripts/android_permissions.sh');
+    final dir = Directory.systemTemp.createTempSync('aapt2-listing');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final listing = File('${dir.path}/permissions.txt')
+      ..writeAsStringSync([
+        'package: dev.calorietracker.calorie_tracker',
+        "uses-permission: name='android.permission.INTERNET'",
+        "uses-permission-sdk-23: name='android.permission.READ_MEDIA_IMAGES'",
+        "uses-permission: name='android.permission.READ_EXTERNAL_STORAGE' "
+            "maxSdkVersion='32'",
+        'uses-permission-sdk-23: '
+            "name='android.permission.READ_MEDIA_VISUAL_USER_SELECTED' "
+            "maxSdkVersion='34'",
+        'permission: dev.calorietracker.calorie_tracker.'
+            'DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION',
+        'uses-permission: name=\'dev.calorietracker.calorie_tracker.'
+            'DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION\'',
+        "uses-permission: name='android.permission.INTERNET'",
+        '',
+      ].join('\n'));
+    // $0 stays 'bash': the script runs its main only when it is $0.
+    final result = await Process.run('bash', [
+      '-c',
+      r'source "$1" && permission_names < "$2"',
+      'bash',
+      script.path,
+      listing.path,
+    ]);
+    expect(result.exitCode, 0, reason: '${result.stderr}');
+    expect(
+        const LineSplitter().convert(result.stdout as String),
+        [
+          'android.permission.INTERNET',
+          'android.permission.READ_EXTERNAL_STORAGE',
+          'android.permission.READ_MEDIA_IMAGES',
+          'android.permission.READ_MEDIA_VISUAL_USER_SELECTED',
+          'dev.calorietracker.calorie_tracker.'
+              'DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION',
+        ],
+        reason: 'sorted, unique, both forms; a declared <permission> is no '
+            'request');
+    // Sourced, it only defines: nothing ran aapt2 or wanted a file.
+    expect(result.stderr, isEmpty);
+    // What the script prints for an APK or bundle is that parse.
+    expect(script.readAsStringSync(), contains('permission_names <<<"\$dump"'));
+  });
+
+  // The Google Play build ships WITHOUT broad photo access (owner decision
+  // 1, 2026-11-13); the GitHub APK keeps everything. ONE switch makes it,
+  // `--dart-define=CHOPSTATS_CHANNEL=play`: the Dart side reads it
+  // (lib/core/app_channel.dart), and Gradle merges this overlay into every
+  // variant from the same define. Each entry is a tools:node="remove": it
+  // strips the main manifest's permission and any library's (photo_manager
+  // declares READ_EXTERNAL_STORAGE itself), in both forms: a library that
+  // asks through <uses-permission-sdk-23> would keep it past a
+  // <uses-permission> removal (review, 2026-11-19).
+  test("the Play build's overlay removes exactly the three photo permissions",
+      () {
+    final overlay = File(
+        '${_appRoot().path}/android/app/src/playChannel/AndroidManifest.xml');
+    expect(overlay.existsSync(), isTrue, reason: overlay.path);
+    final xml = overlay.readAsStringSync();
+    expect(
+        _permissionEntries(xml),
+        {
+          for (final p in _playRemoved)
+            for (final form in _permissionForms) (form, p, true),
+        },
+        reason: 'each a tools:node="remove" in both forms, and nothing else '
+            'removed');
+    // Nothing but those entries: no component, no other element. A
+    // permission or component added here would ship in the Play build only.
+    final elements = RegExp(r'<([a-zA-Z0-9-]+)')
+        .allMatches(_uncommented(xml))
+        .map((m) => m.group(1))
+        .toSet();
+    expect(elements, {'manifest', ..._permissionForms});
+    expect(xml, contains('xmlns:tools="http://schemas.android.com/tools"'));
+    // The GitHub APK keeps all three: the main manifest still declares them.
+    expect(_declared(_manifest()), containsAll(_playRemoved));
+  });
+
+  test('Gradle merges the overlay into every variant of the Play build, '
+      'from the define Flutter hands it', () {
+    final gradle = _kotlinCode(
+        File('${_appRoot().path}/android/app/build.gradle.kts')
+            .readAsStringSync());
+    // Flutter's dart-defines, decoded: the `dart-defines` property, each
+    // entry base64(utf8("KEY=VALUE")), comma-separated.
+    expect(gradle, contains('project.findProperty("dart-defines")'));
+    expect(gradle, contains(".split(',')"));
+    expect(gradle,
+        contains('String(Base64.getDecoder().decode(entry.trim()), '
+            'Charsets.UTF_8)'));
+    expect(gradle,
+        contains('val playChannel = dartDefines["CHOPSTATS_CHANNEL"] == "play"'));
+    // Every variant (no selector), through the variant API: the debug and
+    // profile source-set manifests (INTERNET) are not replaced.
+    expect(
+        RegExp(r'androidComponents \{ onVariants \{ variant -> '
+                r'if \(playChannel\) \{ variant\.sources\.manifests\.'
+                r'addStaticManifestFile\( "src/playChannel/AndroidManifest\.xml",? \) '
+                r'\} \} \}')
+            .hasMatch(gradle),
+        isTrue,
+        reason: 'the overlay must be added to every variant when playChannel');
+    expect(gradle, isNot(contains('manifest.srcFile')));
+    expect(gradle, isNot(contains('selector()')));
+    for (final variant in ['debug', 'profile']) {
+      expect(
+          _declared(File('${_appRoot().path}/android/app/src/$variant/'
+                  'AndroidManifest.xml')
+              .readAsStringSync()),
+          {'android.permission.INTERNET'},
+          reason: variant);
+    }
+    // The Dart side reads the same define, at compile time.
+    expect(File('${_appRoot().path}/lib/core/app_channel.dart')
+            .readAsStringSync(),
+        contains("String.fromEnvironment('CHOPSTATS_CHANNEL')"));
+  });
+
+  // The decoding above is Flutter's contract, not ours: should a Flutter
+  // upgrade change how dart-defines reach Gradle, the Play build would
+  // silently keep the photo permissions (release.yml's check would stop the
+  // release, late). Read from the SDK pub resolved.
+  test("Flutter still hands dart-defines to Gradle as base64 entries", () {
+    final tools = '${_pluginRoot('flutter')}/../flutter_tools';
+    final buildInfo =
+        File('$tools/lib/src/build_info.dart').readAsStringSync();
+    expect(buildInfo,
+        contains('_defineEncoder = utf8.encoder.fuse(base64.encoder)'));
+    expect(buildInfo,
+        contains("return defines.map(_defineEncoder.convert).join(',');"));
+    expect(buildInfo,
+        contains(r"'-Pdart-defines=${encodeDartDefines(dartDefines)}'"));
+    final plugin = File('$tools/gradle/src/main/kotlin/FlutterPlugin.kt')
+        .readAsStringSync();
+    expect(plugin, contains('project.findProperty("dart-defines")'));
   });
 
   // The daily summary is armed with the OS on Android too (background

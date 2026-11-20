@@ -6,6 +6,7 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../../core/app_channel.dart' show photoLibraryInBuild;
 import '../../core/contracts.dart';
 import '../../services/garmin_client.dart';
 import '../format.dart';
@@ -420,7 +421,11 @@ class TodayScreenState extends State<TodayScreen> {
               key: const Key('todayEmpty'),
               icon: Icons.restaurant_rounded,
               title: context.l10n.todayEmptyTitle,
-              message: context.l10n.todayEmptyHint,
+              // The Play build has no Watch Camera Roll to point to
+              // (core/app_channel.dart).
+              message: photoLibraryInBuild
+                  ? context.l10n.todayEmptyHint
+                  : context.l10n.todayEmptyHintPlay,
             )
           else
             for (final meal in foodMeals)

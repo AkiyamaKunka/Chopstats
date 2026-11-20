@@ -123,6 +123,15 @@ class _FakeAndroid extends Fake
   Future<List<AndroidNotificationChannel>?> getNotificationChannels() async =>
       live.values.toList();
 
+  /// Channel ids deleted, in order.
+  final deleted = <String>[];
+
+  @override
+  Future<void> deleteNotificationChannel({required String channelId}) async {
+    deleted.add(channelId);
+    live.remove(channelId);
+  }
+
   /// The app-level switch.
   bool appEnabled = true;
 
@@ -517,6 +526,42 @@ void main() {
         expect(c.importance, Importance.defaultImportance,
             reason: 'Android lets an app LOWER an unedited channel');
       }
+    });
+
+    // The Google Play build logs nothing on its own (core/app_channel.dart):
+    // no meal-card channel there, whose description promises meals logged
+    // from the camera roll. One a GitHub install left is deleted; the
+    // summary's channel, and the user's settings on it, stay.
+    test('the Play build: no meal-card channel, and a GitHub install\'s is '
+        'deleted', () async {
+      final fresh = _FakeAndroid();
+      await ReportNotifier(plugin: _RecordingPlugin(android: fresh),
+              mealCards: false)
+          .init();
+      expect(fresh.channels.map((c) => c.id), ['calorietracker_reports']);
+      expect(fresh.deleted, isEmpty, reason: 'nothing to delete');
+
+      final upgraded = _FakeAndroid(existing: [
+        const AndroidNotificationChannel('calorietracker_reports', 'x',
+            importance: Importance.low),
+        const AndroidNotificationChannel(
+            ReportNotifier.mealChannelId, 'Logged meals'),
+      ]);
+      final plugin = _RecordingPlugin(android: upgraded);
+      final notifier = ReportNotifier(plugin: plugin, mealCards: false);
+      await notifier.init();
+      expect(upgraded.deleted, [ReportNotifier.mealChannelId]);
+      expect(upgraded.live.keys, ['calorietracker_reports']);
+      expect(upgraded.live['calorietracker_reports']!.importance,
+          Importance.low,
+          reason: 'the summary channel keeps the user\'s settings');
+      await notifier.showDailySummary('Today', '1800 kcal');
+      expect(plugin.shown.single!.android!.channelId,
+          'calorietracker_reports');
+      expect(upgraded.channels.where(
+              (c) => c.id == ReportNotifier.mealChannelId),
+          isEmpty,
+          reason: 'never created again');
     });
 
     test('if Android refuses it, meal cards stay on the summary\'s channel',

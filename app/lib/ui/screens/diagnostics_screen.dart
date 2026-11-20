@@ -8,6 +8,7 @@ import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
 
+import '../../core/app_channel.dart' show AppChannel;
 import '../../services/android_backup_size.dart';
 import '../../services/photo/background_runs.dart';
 import '../../services/photo/glasses_check.dart'
@@ -61,6 +62,12 @@ class DiagnosticsScreen extends StatefulWidget {
   /// per-app limit (android_backup_size.dart). Null reads it from the
   /// phone on Android; elsewhere there is no section.
   final Future<int?> Function()? loadBackupSize;
+
+  /// Which Android build this is (core/app_channel.dart), said under the
+  /// intro. The Google Play build has no background scan and no glasses
+  /// intake, so their sections are left out there. Null: not said (the
+  /// iPhone, most tests).
+  final AppChannel? channel;
   const DiagnosticsScreen(
       {super.key,
       required this.diagnostics,
@@ -70,6 +77,7 @@ class DiagnosticsScreen extends StatefulWidget {
       this.loadRestaurantLookups,
       this.loadConfidence,
       this.loadBackupSize,
+      this.channel,
       this.now = DateTime.now});
 
   @override
@@ -170,6 +178,18 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
             style: theme.textTheme.bodySmall
                 ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
           ),
+          if (widget.channel case final channel?) ...[
+            const SizedBox(height: 8),
+            Text(
+              switch (channel) {
+                AppChannel.play => l.diagChannelPlay,
+                AppChannel.github => l.diagChannelGithub,
+              },
+              key: const Key('diagChannel'),
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+            ),
+          ],
           const SizedBox(height: 12),
           FilledButton.icon(
             key: const Key('runDiagnostics'),
@@ -244,24 +264,28 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
                 child: CircularProgressIndicator(
                     key: Key('diagRunning'))),
           ],
-          FutureBuilder<List<BackgroundRunRecord>>(
-            future: _backgroundRuns,
-            builder: (context, snap) => snap.hasData
-                ? _BackgroundRuns(snap.data!)
-                : const SizedBox.shrink(),
-          ),
-          FutureBuilder<LateImportStats?>(
-            future: _lateImports,
-            builder: (context, snap) => snap.data == null
-                ? const SizedBox.shrink()
-                : _LateImports(snap.data!, now: widget.now()),
-          ),
-          FutureBuilder<List<GlassesCheckEntry>>(
-            future: _glassesChecks,
-            builder: (context, snap) => snap.hasData
-                ? _GlassesChecks(snap.data!)
-                : const SizedBox.shrink(),
-          ),
+          // The camera-roll intake's sections: none in the Play build,
+          // which has no background scan and no glasses intake.
+          if (widget.channel != AppChannel.play) ...[
+            FutureBuilder<List<BackgroundRunRecord>>(
+              future: _backgroundRuns,
+              builder: (context, snap) => snap.hasData
+                  ? _BackgroundRuns(snap.data!)
+                  : const SizedBox.shrink(),
+            ),
+            FutureBuilder<LateImportStats?>(
+              future: _lateImports,
+              builder: (context, snap) => snap.data == null
+                  ? const SizedBox.shrink()
+                  : _LateImports(snap.data!, now: widget.now()),
+            ),
+            FutureBuilder<List<GlassesCheckEntry>>(
+              future: _glassesChecks,
+              builder: (context, snap) => snap.hasData
+                  ? _GlassesChecks(snap.data!)
+                  : const SizedBox.shrink(),
+            ),
+          ],
           FutureBuilder<RestaurantLookupsDiagnostics?>(
             future: _restaurant,
             builder: (context, snap) => snap.data == null

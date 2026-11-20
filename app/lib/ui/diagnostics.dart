@@ -14,6 +14,7 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'package:image/image.dart' as img;
 
+import '../core/app_channel.dart' show photoLibraryInBuild;
 import '../core/coerce.dart'
     show EstimateConfidence, isFoodTruthy, mealContextFields;
 import '../core/contracts.dart';
@@ -21,6 +22,7 @@ import '../core/server_transport.dart' show serverAddressRefused;
 import '../l10n/app_localizations.dart';
 import '../services/assist/assist_local_state.dart' show AssistDecisionEntry;
 import '../services/photo/glasses_check.dart';
+import '../services/server_http_client.dart' show HttpsOnlyServerClient;
 import 'assist_view.dart' show assistProviderLabel;
 import 'format.dart' show formatKcal;
 import 'provider_names.dart';
@@ -92,6 +94,10 @@ class ProviderDiagnostics {
     final l = l10n;
     final provider = settings.provider;
     final isServer = provider == 'server';
+    // The Google Play build keeps no photo for later and retries none on
+    // its own (no Watch Camera Roll, no Photo Coverage;
+    // core/app_channel.dart): its fix lines say to add the photo again.
+    final keepsPhotos = photoLibraryInBuild;
 
     // 1 ── Configuration ────────────────────────────────────────────────
     if (isServer && settings.serverBaseUrl.isEmpty) {
@@ -131,8 +137,14 @@ class ProviderDiagnostics {
     if (probeUrl != null) {
       try {
         // ANY HTTP answer (404 included) proves the network path; only
-        // transport failures mean unreachable.
-        await client
+        // transport failures mean unreachable. A 3xx is such an answer and
+        // is not followed: the probe goes through the https-only client in
+        // front of the server (services/server_http_client.dart), for a
+        // provider's address too, so it reaches that address and no other.
+        // Followed, a redirect to an http:// address or another host had a
+        // request sent there, and the stage went by that address's answer
+        // (Android review 2026-11-19).
+        await HttpsOnlyServerClient.wrap(client)
             .get(Uri.parse(probeUrl))
             .timeout(const Duration(seconds: 10));
         yield DiagResult(
@@ -182,7 +194,10 @@ class ProviderDiagnostics {
       case KeyProbeResult.rateLimited:
         yield DiagResult(
             l.diagStageAuth, DiagStatus.warn, l.diagRateLimited,
-            detail: probe.message, fix: l.diagFixWaitRateLimit);
+            detail: probe.message,
+            fix: keepsPhotos
+                ? l.diagFixWaitRateLimit
+                : l.diagFixWaitRateLimitPlay);
       case KeyProbeResult.modelNotFound:
         // The key is fine; the text and photo stages would fail on the
         // same model id, so stop here with the one fix that helps.
@@ -247,9 +262,11 @@ class ProviderDiagnostics {
           DiagStatus.fail,
           photo.retryable ? l.diagPhotoTempFail : l.diagPhotoPermFail,
           detail: photo.error,
-          fix: photo.retryable
-              ? l.diagFixPhotoTemp
-              : l.diagFixPhotoPerm);
+          fix: !photo.retryable
+              ? l.diagFixPhotoPerm
+              : keepsPhotos
+                  ? l.diagFixPhotoTemp
+                  : l.diagFixPhotoTempPlay);
     }
 
     // 6 ── Quota state ──────────────────────────────────────────────────
@@ -260,7 +277,7 @@ class ProviderDiagnostics {
           detail: until != null
               ? l.diagQuotaPausedUntil(localStamp(until))
               : null,
-          fix: l.diagFixQuota);
+          fix: keepsPhotos ? l.diagFixQuota : l.diagFixQuotaPlay);
     } else {
       yield DiagResult(
           l.diagStageQuota, DiagStatus.pass, l.diagQuotaOk);

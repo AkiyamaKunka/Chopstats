@@ -6,6 +6,7 @@ import 'dart:async' show StreamSubscription, unawaited;
 import 'dart:io' show File, Platform;
 
 import '../core/ai_consent.dart' show aiConsentRoute, aiRoutesInMainlandChina;
+import '../core/app_channel.dart' show photoLibraryInBuild;
 import '../core/setup_link.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
@@ -30,6 +31,7 @@ import 'backup_sheets.dart';
 import 'screens/add_flow.dart';
 import 'screens/body_screen.dart';
 import 'l10n.dart';
+import 'theme/app_dialog.dart' show appAlertDialog;
 import 'theme/app_theme.dart';
 import 'screens/history_screen.dart';
 import 'screens/settings/provider_page.dart';
@@ -236,6 +238,9 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     // The consent text changed what is sent since the current recipient
     // was allowed: asked once, over the first frame.
     _askConsentUpdateWhenIdle();
+    // The Google Play build turned a GitHub install's Watch Camera Roll
+    // off at launch (play_channel.dart): said once, after that question.
+    _tellWatchRetiredWhenIdle();
     // iCloud Backup (iPhone, 1.7.0): starts after the first frame (the
     // database is open by then: init opened it); its notice and restore
     // offer are asked here, one question at a time.
@@ -341,6 +346,52 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     } catch (_) {
       // A failed question is no answer; the link goes on.
     }
+  }
+
+  /// Set while the Watch Camera Roll notice is on screen: shown once.
+  bool _watchNoticeShowing = false;
+
+  /// The Google Play build's ONE notice (play_channel.dart): Watch Camera
+  /// Roll, which the GitHub install it replaced had on, is not in this
+  /// version and is off, and how to log photos instead. After the
+  /// consent-update question, and only over the shell itself, like that
+  /// one; with something on top it waits for the shell to be back on top
+  /// ([_OnRouteReturn]) or for a return to the app. Dismissed in any way,
+  /// it is never shown again.
+  void _tellWatchRetiredWhenIdle() {
+    final notice = widget.services.watchRetiredNotice;
+    if (notice == null || _watchNoticeShowing) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted || _watchNoticeShowing || !notice.pending()) return;
+      _watchNoticeShowing = true;
+      try {
+        await _consentUpdateAnswered();
+        if (!mounted || !notice.pending()) return;
+        if (Navigator.maybeOf(context)?.canPop() ?? false) return;
+        await showDialog<void>(
+          context: context,
+          builder: (ctx) => appAlertDialog(
+            key: const Key('watchRetiredNotice'),
+            title: Text(ctx.l10n.watchRetiredTitle),
+            content: Text(ctx.l10n.watchRetiredBody),
+            actions: [
+              FilledButton(
+                key: const Key('watchRetiredOk'),
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: Text(ctx.l10n.okButton),
+              ),
+            ],
+          ),
+        );
+        await notice.shown();
+      } catch (_) {
+        // Not shown or not forgotten: asked again at the next chance.
+      } finally {
+        _watchNoticeShowing = false;
+      }
+    });
+    // A post-frame callback alone waits for SOME frame; ask for one.
+    WidgetsBinding.instance.ensureVisualUpdate();
   }
 
   @override
@@ -531,6 +582,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     if (_leftApp) {
       _leftApp = false;
       _askConsentUpdateWhenIdle();
+      _tellWatchRetiredWhenIdle();
       s.cloudBackup?.onLifecycle(true);
       _onBackupPrompt();
     }
@@ -538,7 +590,9 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     // IndexedStack keeps stale screens alive, so refresh them now.
     _todayKey.currentState?.reload();
     if (_index == 1) _historyKey.currentState?.reload();
-    if (!s.settings.watcherEnabled) return;
+    // Never in the Google Play build, whatever the setting
+    // (core/app_channel.dart): it has no Watch Camera Roll.
+    if (!s.settings.watcherEnabled || !photoLibraryInBuild) return;
     unawaited(_resumeCatchUp());
   }
 
@@ -725,7 +779,13 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     // A backup question that waited for a screen over the shell (the add
     // flow, say) is asked once that screen is popped. It waited until the
     // prompt changed or the app came back, holding the photos meanwhile.
-    return _OnRouteReturn(onReturn: _onBackupPrompt, child: shell);
+    // The Play build's Watch Camera Roll notice waits the same way.
+    return _OnRouteReturn(
+        onReturn: () {
+          _onBackupPrompt();
+          _tellWatchRetiredWhenIdle();
+        },
+        child: shell);
   }
 }
 

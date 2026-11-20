@@ -3,7 +3,9 @@
 For the QA step that owns the emulators (`docs/RELEASING.md` § 6.5). No
 screenshot is in this folder yet: they are captured from the **release
 build of the Play variant** (no Watch Camera Roll, no Photo Coverage;
-decision 1, 2026-11-13), never from a debug build (the DEBUG banner) and
+decision 1, 2026-11-13: `flutter build apk --release
+--dart-define=CHOPSTATS_CHANNEL=play`, `docs/RELEASING.md` § 6.3), never
+from a debug build (the DEBUG banner) and
 never from the iPhone sets, which Play refuses (1320×2868 and 1206×2622
 are about 2.17:1).
 

@@ -334,17 +334,20 @@ When merging #22 after this PR:
 - **Never hand-merge the generated `app_localizations*.dart`.** Take
   either side, then run `flutter gen-l10n` in `app/`.
 - `app/test/ui/usual_copy_test.dart` pins the number of keys in each ARB
-  file: 809 on `main` since #22 merged, 931 on the iCloud Backup branch
-  merged with #33, the review-171 fixes and the Android photos, privacy,
-  background and ui lanes (`feat/icloud-backup` adds 72 `backup*` and
-  `import*` keys, #33's source-link label 1, the Test AI provider page's
-  three `diagStatus*` check states 3, the Body tab's three failure lines 3,
-  the coverage window slider's screen-reader name `covWindowLabel` 1, the
-  Leftovers screen's two failure lines 2, Android's system photo picker
-  `addChooseAllPhotos`, `addPickerNote`, `addPickerUnavailable` and
-  `addOldPhotoLoggedToday` 4, `android/privacy`'s privacy and https
-  strings 23, the Android background lane's block 10, the ui lane's
-  discard-changes question 4, none shared; review r171 deleted
+  file: 809 on `main` since #22 merged, 951 on the iCloud Backup branch
+  merged with #33, the review-171 fixes, the Android photos, privacy,
+  background and ui lanes and the Play channel (`feat/icloud-backup` adds
+  72 `backup*` and `import*` keys, #33's source-link label 1, the Test AI
+  provider page's three `diagStatus*` check states 3, the Body tab's three
+  failure lines 3, the coverage window slider's screen-reader name
+  `covWindowLabel` 1, the Leftovers screen's two failure lines 2,
+  Android's system photo picker `addChooseAllPhotos`, `addPickerNote`,
+  `addPickerUnavailable` and `addOldPhotoLoggedToday` 4,
+  `android/privacy`'s privacy and https strings 23, the Android background
+  lane's block 10, the ui lane's discard-changes question 4, the Play
+  channel's block 20 (its notice, Diagnostics' build line and the `*Play`
+  variants of the copy that names Watch Camera Roll or Photo Coverage or
+  says a photo is kept or retried), none shared; review r171 deleted
   `bodyEmptyHintImperial`, the same text as `bodyEmptyHint`). If either
   side adds keys before both merge, change the number in that test to the
   merged count, and here too (the test checks this line); both files must
@@ -1072,7 +1075,8 @@ position. The paste-ready answers live next to the app in
    Log and Leftovers use Android's system photo picker. The GitHub APK
    keeps them. No photo-permission declaration for the first submission;
    asking Google for broad access later is an update (§ 6.5). The Play
-   build itself is a follow-up (§ 6.3, *The Play build*).
+   build is `--dart-define=CHOPSTATS_CHANNEL=play` (§ 6.3, *The Play
+   build*).
 2. **`http://` own-server addresses are refused** on every platform, so
    Data safety answers "encrypted in transit: Yes" (§ 6.5).
    <!-- gated: release_decisions_test (kRequireHttpsServer = true) and release.yml's Android job -->
@@ -1269,34 +1273,62 @@ no protection rules, so **nothing in the workflow changes**:
 4. Only then delete the repository-level copies. In this order every run
    stays signed.
 
-**The Play build (decision 1) — a follow-up, not built yet.** Today
-release.yml builds the bundle and the GitHub APK from one manifest, and
-that manifest declares `READ_MEDIA_IMAGES`, `READ_MEDIA_VISUAL_USER_SELECTED`
-and (up to API 32) `READ_EXTERNAL_STORAGE` for Watch Camera Roll and
-Photo Coverage. **Do not upload a bundle to Play, internal testing
-included, until the Play build exists**: Play would ask for the Photo and
-video permissions declaration. The plan for that follow-up lane:
+**The Play build (decision 1).** One switch makes it,
+`--dart-define=CHOPSTATS_CHANNEL=play`; the GitHub APK is built without
+it and keeps everything. By hand (release.yml does the same):
 
-- a Gradle property (for example `-Pchopstats.channel=play`) whose
-  manifest transform removes the three permissions from the Play
-  bundle's merged manifest (`tools:node="remove"`), or product flavors;
-- a `--dart-define` (for example `CHOPSTATS_CHANNEL=play`) that hides
-  Settings › Photos (Watch Camera Roll, Meta glasses photos, Backfill
-  Lookback, Background scan) and Photo Coverage, and never registers the
-  photo scan; Log and Leftovers already use the system photo picker
-  without full access <!-- gated: release_decisions_test (system_photo_picker.dart and its use in add_flow.dart) -->;
-- release.yml builds both: the Play bundle with the property and the
-  define, the GitHub APK as today, and its verify step fails a Play
-  bundle that declares any `READ_MEDIA_*` permission;
-- a notice for a phone that moves from the GitHub APK, with Watch Camera
-  Roll on, to the Play build (same signer): the watcher is turned off,
-  and the app says why.
+```bash
+cd app && flutter build appbundle --release --dart-define=CHOPSTATS_CHANNEL=play
+```
 
-Before the first upload, check the bundle you are about to upload:
-`bundletool dump manifest --bundle app-release.aab` must list no
-`READ_MEDIA_*` and no `READ_EXTERNAL_STORAGE` permission.
+- **The manifest.** `app/android/app/build.gradle.kts` reads the same
+  define from the `dart-defines` property Flutter hands Gradle and merges
+  `app/android/app/src/playChannel/AndroidManifest.xml` into every variant;
+  its `tools:node="remove"` entries strip `READ_MEDIA_IMAGES`,
+  `READ_MEDIA_VISUAL_USER_SELECTED` and `READ_EXTERNAL_STORAGE` (the main
+  manifest's and photo_manager's), as `<uses-permission>` and as
+  `<uses-permission-sdk-23>`, which the merger keeps apart. The bundle
+  then asks for `INTERNET`, `POST_NOTIFICATIONS`,
+  `RECEIVE_BOOT_COMPLETED`, `VIBRATE`, `WAKE_LOCK`,
+  `ACCESS_NETWORK_STATE` and the app's own
+  `DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION`, nothing else.
+- **The app** (`app/lib/core/app_channel.dart`). Settings has no Photos
+  group (Watch Camera Roll, Meta glasses photos, Backfill Lookback,
+  Background scan, Photo Coverage); no WorkManager job is registered and
+  no launch or resume catch-up runs; the app never asks for photo access.
+  Log › From recent photos and Leftovers open Android's photo picker,
+  even on a phone that granted the GitHub APK full access
+  <!-- gated: release_decisions_test (system_photo_picker.dart and its use in add_flow.dart) -->;
+  the share sheet, Describe, manual entry, the daily summary and Save to
+  device work as before. Text that pointed to Watch Camera Roll or Photo
+  Coverage (Today's empty hint, the first-run card, Stop sharing, the
+  empty-day summary, the own server's final refusals) has Play wording,
+  and so has text that said a photo is kept or retried (the quota-pause
+  footer and banner, Test This Provider's fix lines, a failed photo's
+  snackbar), since nothing keeps or retries a photo in this build. There
+  is no "Logged meals" notification channel. AI Provider › Test This
+  Provider says "Build: Google Play".
+- **A phone moving from the GitHub APK** (same signer, so it updates in
+  place, data kept): if Watch Camera Roll was on, the Play build's first
+  launch turns it off, cancels its background job and shows one notice
+  saying the Google Play version has no automatic camera-roll logging and
+  how to log photos instead. Meals and settings stay. Back on the GitHub
+  APK, Watch Camera Roll is turned on again in Settings.
+- **CI.** release.yml builds the bundle with the define and the GitHub APK
+  without it, and stops the run, before any upload, if the bundle asks for
+  any of the three permissions or the APK no longer asks for
+  `READ_MEDIA_IMAGES`. mobile-build.yml checks a Play build APK against
+  the allowlist without the three on every PR.
 
-**The first upload.** Once the Play build exists:
+**No Photo and video permissions declaration is needed for the Play
+build**: it declares none of those permissions
+(`app/android/store/app_content.md`). Before uploading a bundle by hand,
+check it: `scripts/android_permissions.sh app-release.aab` (aapt2, from
+the bundle's own manifest, both forms) must list no `READ_MEDIA_*` and no
+`READ_EXTERNAL_STORAGE`; `bundletool dump manifest --bundle
+app-release.aab` says the same.
+
+**The first upload.**
 
 1. Actions › Release › Run workflow › branch `main` › lane `play` (leave
    *play_track* at `internal`). A dispatch creates no tag and no GitHub
@@ -1527,9 +1559,10 @@ mainland China, so the GitHub Release APK stays (§ 7). With one signer
 (decision 3), a phone can move between the GitHub APK and the Play build
 by installing the other over it, as long as the version code is higher;
 the data stays. The Play build has no Watch Camera Roll (decision 1), so
-someone who moves from the GitHub APK to Play loses it (the follow-up's
-notice says so). Until § 6.3's check has passed, tell people to export
-first (Settings › Your Data › *Export Data…*). The notes release.yml
+someone who moves from the GitHub APK to Play loses it (the Play build's
+first launch turns it off and says so in one notice, § 6.3). Until
+§ 6.3's check has passed, tell people to export first (Settings › Your
+Data › *Export Data…*). The notes release.yml
 writes on `v*` tags still say the two "can carry different signatures";
 make them definitive after that check.
 
@@ -1727,7 +1760,9 @@ git tag v1.7.0 && git push origin v1.7.0     # iOS + Android lanes, external-eli
 Artifacts kept 90 days on the run page: the IPA + dSYMs + Dart symbols
 (`flutter symbolize -d app.ios-arm64.symbols` for crash reports), the AAB
 with its own R8 mapping as `aab-mapping.txt` (the one Play received), the
-arm64 APK with its own as `mapping.txt`, the Android Dart symbols.
+arm64 APK with its own as `mapping.txt`, the Android Dart symbols (the
+Play bundle's in `play/`, the GitHub APK's in `github/`: two builds of
+different Dart code).
 
 ---
 

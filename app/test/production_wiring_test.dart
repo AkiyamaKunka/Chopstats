@@ -978,6 +978,260 @@ void main() {
     });
   });
 
+  // The Google Play build (owner decision 1, 2026-11-13): one switch,
+  // `--dart-define=CHOPSTATS_CHANNEL=play`. The behaviour is tested both
+  // ways through debugAppChannelOverride (play_channel_test and the
+  // screens' suites); these pins hold the lines that hand the switch to
+  // production, which no widget test runs: AppServices.init and the
+  // background run open real plugins.
+  group('the Google Play build (core/app_channel.dart)', () {
+    String init() => _body(
+      _source('lib/ui/di.dart'),
+      'static Future<AppServices> init(',
+      indent: '  ',
+    );
+
+    test('production reads the compile-time define; only tests override it',
+        () {
+      final channel = _source('lib/core/app_channel.dart');
+      expect(
+        channel,
+        contains(
+          "const String kAppChannelDefine = "
+          "String.fromEnvironment('CHOPSTATS_CHANNEL');",
+        ),
+      );
+      expect(
+        channel,
+        _wired(
+          r'AppChannel get appChannel => debugAppChannelOverride \?\? '
+          r"\(kAppChannelDefine == 'play' && Platform\.isAndroid "
+          r'\? AppChannel\.play : AppChannel\.github\);',
+        ),
+      );
+      expect(
+        channel,
+        _wired(
+          r'bool get photoLibraryInBuild => appChannel != AppChannel\.play;',
+        ),
+      );
+      for (final file
+          in Directory(
+            '${_appRoot().path}/lib',
+          ).listSync(recursive: true).whereType<File>()) {
+        if (!file.path.endsWith('.dart')) continue;
+        expect(
+          file.readAsStringSync(),
+          isNot(contains('debugAppChannelOverride =')),
+          reason: '${file.path} sets the test override',
+        );
+      }
+    });
+
+    // After the notification ask's settling (which must see the launch's
+    // preferences unwritten) and the launch sweep, before anything reads
+    // the switch.
+    test('di.dart turns a GitHub install\'s Watch Camera Roll off at '
+        'launch, before anything starts it', () {
+      final body = init();
+      expect(
+        body,
+        _wired(
+          r'await dao\.reclaimStaleProcessing\(\);\s*'
+          r'(//[^\n]*\n\s*)*'
+          r'final prefs = await SharedPreferences\.getInstance\(\);\s*'
+          r'try \{ await retireWatchCameraRoll\(settings, prefs\); \}',
+        ),
+      );
+      expect(
+        body.indexOf('await settleNotificationAskAtLaunch();'),
+        lessThan(body.indexOf('retireWatchCameraRoll(')),
+      );
+      expect('settings.watcherEnabled'.allMatches(
+              body.substring(0, body.indexOf('retireWatchCameraRoll('))),
+          isEmpty,
+          reason: 'nothing reads the switch before it is settled');
+      final retire = body.indexOf('retireWatchCameraRoll(');
+      for (final later in [
+        'await photoIntake.start();',
+        'launchCatchUp()',
+        'await syncBackgroundScan(settings);',
+      ]) {
+        expect(body.indexOf(later), greaterThan(retire), reason: later);
+      }
+      // And whatever the setting, the live watcher and the launch catch-up
+      // never start in that build: both sit behind this one check.
+      expect(
+        body,
+        _wired(
+          r'if \(settings\.watcherEnabled && photoLibraryInBuild\) \{ '
+          r'await photoIntake\.start\(\);',
+        ),
+      );
+      expect(
+        body.indexOf('if (settings.watcherEnabled && photoLibraryInBuild)'),
+        lessThan(body.indexOf('launchCatchUp()')),
+      );
+      // Nor the resume catch-up.
+      expect(
+        _body(
+          _source('lib/ui/app.dart'),
+          '  void didChangeAppLifecycleState(AppLifecycleState state) {',
+          indent: '  ',
+        ),
+        _wired(
+          r'if \(!s\.settings\.watcherEnabled \|\| !photoLibraryInBuild\) '
+          r'return; unawaited\(_resumeCatchUp\(\)\);',
+        ),
+      );
+    });
+
+    test('di.dart never asks for photo access in the Play build, and wires '
+        'its one notice', () {
+      final body = init();
+      expect(
+        body,
+        _wired(
+          r'Future<bool> requestPhotos\(\) async => photoLibraryInBuild && '
+          r'await photoLibrary\.requestPermission\(\);',
+        ),
+      );
+      expect(
+        body,
+        _wired(
+          r'watchRetiredNotice: photoLibraryInBuild \? null : OwedNotice\( '
+          r'pending: \(\) => watchRetiredNoticeOwed\(prefs\), '
+          r'shown: \(\) => watchRetiredNoticeShown\(prefs\)\)',
+        ),
+      );
+      expect(body, contains('requestPhotoPermission: requestPhotos,'));
+      // No meal-card channel either (notifications_test covers what it does).
+      expect(body, _wired(r'mealCards: photoLibraryInBuild,'));
+      // No library for the screens either: no meal thumbnails looked up,
+      // no coverage auditor, no library handed to Settings or Log.
+      expect(
+        body,
+        _wired(
+          r'MealThumbResolver\( dao: dao, '
+          r'library: photoLibraryInBuild \? photoLibrary : null\)',
+        ),
+      );
+      expect(
+        body,
+        _wired(r'coverage: photoLibraryInBuild \? CoverageAuditor\('),
+      );
+      expect(
+        body,
+        _wired(r'photoLibrary: photoLibraryInBuild \? photoLibrary : null,'),
+      );
+    });
+
+    test('the job is never wanted there, and the launch sync cancels it', () {
+      expect(
+        _source('lib/services/photo/background.dart'),
+        _wired(
+          r'bool backgroundJobWanted\(\{required bool watcherEnabled\}\) => '
+          r'\(debugIsIOSOverride \?\? Platform\.isIOS\) \|\| '
+          r'\(watcherEnabled && photoLibraryInBuild\);',
+        ),
+      );
+      expect(
+        _source('lib/ui/background_glue.dart'),
+        _wired(
+          r'enableBackgroundScan\( '
+          r'backgroundJobWanted\(watcherEnabled: settings\.watcherEnabled\),',
+        ),
+      );
+    });
+
+    test('the background run, should the old job run first: the move, no '
+        'scan, and its own cancel', () {
+      final run = _body(
+        _source('lib/ui/background_glue.dart'),
+        'Future<bool> _runAfterLaunch({',
+      );
+      expect(
+        run,
+        _wired(
+          r'if \(!photoLibraryInBuild\) \{ '
+          r'try \{ await retireWatchCameraRoll\(settings, prefs\); \} '
+          r'catch \(_\) \{[^}]*\} '
+          r'await recorder\.finish\(BackgroundStop\.watcherOff\); '
+          r'try \{ await syncBackgroundScan\(settings\); \} catch \(_\) \{'
+          r'[^}]*\} return true; \}',
+        ),
+      );
+      expect(
+        run.indexOf('if (!photoLibraryInBuild)'),
+        lessThan(run.indexOf('createPhotoIntake(')),
+        reason: 'before any intake (or library read) exists',
+      );
+    });
+
+    test('the shell says it once: at launch, on a return to the app, and '
+        'once the shell is back on top', () {
+      final app = _source('lib/ui/app.dart');
+      expect(
+        _body(app, '  void initState() {', indent: '  '),
+        contains('_tellWatchRetiredWhenIdle();'),
+      );
+      expect(
+        _body(
+          app,
+          '  void didChangeAppLifecycleState(AppLifecycleState state) {',
+          indent: '  ',
+        ),
+        _wired(
+          r'if \(_leftApp\) \{[^}]*_tellWatchRetiredWhenIdle\(\);[^}]*\}',
+        ),
+      );
+      expect(
+        app,
+        _wired(
+          r'_OnRouteReturn\( onReturn: \(\) \{ _onBackupPrompt\(\); '
+          r'_tellWatchRetiredWhenIdle\(\); \}',
+        ),
+      );
+    });
+
+    test('the screens leave the library alone: no Photos group in Settings, '
+        'and the picker alone in Log and Leftovers', () {
+      final settings = _source('lib/ui/screens/settings_screen.dart');
+      expect(
+        settings,
+        _wired(r'if \(photoLibraryInBuild\) \.\.\._photoGroup\(theme\),'),
+      );
+      expect('_photoGroup(theme)'.allMatches(settings), hasLength(1));
+      expect(
+        settings,
+        _wired(r'if \(lib == null \|\| !photoLibraryInBuild\) return;'),
+      );
+      for (final screen in [
+        'lib/ui/screens/add_flow.dart',
+        'lib/ui/screens/leftover_flow.dart',
+      ]) {
+        final source = _source(screen);
+        expect(
+          source,
+          _wired(
+            r'final full = photoLibraryInBuild && '
+            r'await system\.hasBroadAccess\(\);',
+          ),
+          reason: screen,
+        );
+        expect(
+          'hasBroadAccess()'.allMatches(source),
+          hasLength(1),
+          reason: '$screen reads broad access in one place',
+        );
+      }
+      expect(
+        _source('lib/ui/screens/settings/provider_page.dart'),
+        _wired(r'channel: Platform\.isAndroid \? appChannel : null,'),
+      );
+    });
+  });
+
   // Review 171, C7: the fake schedulers see the policy enableBackgroundScan
   // asks for; only this line hands it to WorkManager. Without it the plugin
   // default applies (UPDATE in workmanager_android 0.9.0+2, but a default
