@@ -1,7 +1,7 @@
 // Deliberate intake (spec §6, §2.3): share-sheet stream + pickFromRecent,
 // all deliberate=true; §6.1 extension filter; §8 25 MB cap.
 import 'dart:async';
-import 'dart:convert' show base64Decode;
+import 'dart:convert' show base64Decode, jsonEncode;
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -10,11 +10,14 @@ import 'package:calorie_tracker/services/analyzer/normalize.dart'
     show normalizeForAnalysis;
 import 'package:calorie_tracker/services/analyzer/platform_decode.dart'
     show looksLikeJpeg;
+import 'package:calorie_tracker/services/backup/file_pick_channel.dart'
+    show filesChannelName;
 import 'package:calorie_tracker/services/photo/photo_library.dart';
 import 'package:calorie_tracker/services/photo/share_intake.dart';
 import 'package:calorie_tracker/ui/ai_consent.dart' show SharedPhotoConsentGate;
 import 'package:calorie_tracker/ui/photo_pipeline.dart' show PhotoPipeline;
-import 'package:flutter/services.dart' show MethodChannel;
+import 'package:flutter/services.dart'
+    show MethodChannel, PlatformException, StandardMethodCodec;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
 
@@ -254,7 +257,33 @@ void main() {
       final copy = create!.indexOf('setIntent(withSafeShares(it))');
       expect(copy, greaterThanOrEqualTo(0));
       expect(create.indexOf('super.onCreate('), greaterThan(copy));
-      expect(kotlin, contains('super.onNewIntent(withSafeShares(intent))'));
+      final renewed =
+          RegExp(r'override fun onNewIntent\(.*?\n    \}', dotAll: true)
+              .firstMatch(kotlin)
+              ?.group(0);
+      expect(renewed, isNotNull);
+      final safe = renewed!.indexOf('val safe = withSafeShares(intent)');
+      expect(safe, greaterThanOrEqualTo(0));
+      expect(renewed.indexOf('super.onNewIntent(safe)'), greaterThan(safe));
+    });
+
+    // The word share intake sends once it listens (R0, below) is the one
+    // MainActivity answers, on the channel it serves.
+    test('MainActivity.kt answers shareIntakeReady on the files channel', () {
+      final kotlin = File('android/app/src/main/kotlin/dev/calorietracker/'
+              'calorie_tracker/MainActivity.kt')
+          .readAsStringSync();
+      expect(kotlin, contains('const val FILES_CHANNEL = "$filesChannelName"'));
+      expect(kotlin,
+          contains('"$shareIntakeReadyMethod" -> result.success(releaseHeldShares())'));
+      final factory = File('lib/services/photo/share_intake.dart')
+          .readAsStringSync()
+          .replaceAll(RegExp(r'\s+'), ' ');
+      expect(
+          factory,
+          contains('listening: Platform.isAndroid ? androidShareIntakeReady '
+              ': null,'),
+          reason: 'createShareIntake tells MainActivity on Android only');
     });
 
     // The same folder from the Dart side: the share folder in
@@ -937,7 +966,10 @@ void main() {
       final sub = android(FakeShareSource(), read).photos().listen((_) {});
       await until(() => read.isNotEmpty, 'the sweep reached the sentinel');
       expect(read, [sentinel.path],
-          reason: 'it may still be being copied; its event delivers it');
+          reason: 'it may still be being copied, and its own event '
+              'delivers it: MainActivity holds a share that comes before '
+              'share intake listens until it does (R0, below); one whose '
+              'event never comes is taken by the second look (below)');
       expect(fresh.existsSync(), isTrue);
       await sub.cancel();
     });
@@ -985,6 +1017,110 @@ void main() {
       for (final f in [...launch, ...left]) {
         expect(f.existsSync(), isFalse, reason: f.path);
       }
+      await sub.cancel();
+    });
+
+    // Review 2026-11-19, R1: a Not now covers a share made while its
+    // question was open. Queued behind the start-up batch (which asks
+    // alone), its copies used to wait until that whole batch had been
+    // read; an app stopped meanwhile left them for the next start's sweep,
+    // which sent them unasked once the batch's own question was answered
+    // Allow. They go as the answer is given now.
+    test('Not now deletes a share queued behind the start-up batch at once; '
+        'the next start never sends it', () async {
+      final left = [
+        for (var i = 0; i < 3; i++)
+          copyAt('l$i', 'IMG_left$i.jpg', Duration(hours: 3 - i)),
+      ];
+      final launch = copyAt('n0', 'IMG_new0.jpg', Duration.zero);
+      final source = FakeShareSource()..initial = [launch.path];
+      final intake = android(source, <String>[]);
+      final settings = FakeSettings(apiKey: 'k')..aiConsent = {};
+      final gate = SharedPhotoConsentGate(settings);
+      final declined = <File>[];
+      final notSent = <int>[];
+      List<bool>? onDiskAtAnswer;
+      var asked = 0;
+      gate.attach(() async {
+        asked++;
+        if (asked > 1) {
+          // The start-up batch's own question: Allow.
+          settings.aiConsent = {'gemini'};
+          return true;
+        }
+        // The launch share's question is open while the start-up batch
+        // arrives and the user shares two more photos; then Not now.
+        await until(() => intake.arrivedDelivery >= 2, 'the start-up batch');
+        declined
+          ..add(copyAt('x0', 'IMG_x0.jpg', Duration.zero))
+          ..add(copyAt('x1', 'IMG_x1.jpg', Duration.zero));
+        source.controller.add([for (final f in declined) f.path]);
+        await until(() => intake.arrivedDelivery >= 3, 'the share made then');
+        notSent.add(gate.declineOpenQuestion());
+        onDiskAtAnswer = [for (final f in declined) f.existsSync()];
+        return false;
+      });
+      final passed = <String>[];
+      late StreamSubscription<IntakePhoto> sub;
+      // The pipeline holds the first photo it gets (a long analysis).
+      sub = gate.gate(intake.photos(), deliveries: intake).listen((p) {
+        passed.add(p.fileName);
+        sub.pause();
+      });
+      await until(() => passed.isNotEmpty, 'a start-up photo in the pipeline');
+      expect(asked, 2);
+      expect(intake.asksAlone(2), isTrue);
+      expect(notSent, [3], reason: 'the launch share and the two shared then');
+      expect(onDiskAtAnswer, [false, false],
+          reason: 'deleted as the answer is given, not once the start-up '
+              'batch in front of them has been read');
+
+      // The app is stopped here: nothing more of this run happens. The
+      // next start, 5 minutes on, with the recipient now allowed, logs what
+      // is left of the start-up batch, up to a copy newer than any other.
+      final newest = copyAt('z', 'IMG_z.jpg', const Duration(seconds: -1));
+      final next = <String>[];
+      final sub2 = SharedPhotoConsentGate(settings)
+          .gate(ShareIntake(
+                  source: FakeShareSource(),
+                  library: FakePhotoLibrary(),
+                  readBytes: (path) => File(path).readAsBytes(),
+                  sharedFolder: () async => folder,
+                  clock: () => now.add(const Duration(minutes: 5)))
+              .photos())
+          .listen((p) => next.add(p.fileName));
+      await until(() => next.contains('IMG_z.jpg'), "the next start's sweep");
+      expect(next.where((n) => n.startsWith('IMG_x')), isEmpty,
+          reason: 'photos answered Not now are never sent');
+      expect(newest.existsSync(), isFalse);
+      expect(left.last.existsSync(), isFalse);
+      await sub2.cancel();
+      await sub.cancel();
+    });
+
+    test('a Not now deletes the copies of a share queued behind another '
+        'before it returns, while the reader still waits', () async {
+      // Seconds old: the start-up sweep leaves them to their own shares.
+      final first = [
+        for (var i = 0; i < 3; i++) copyAt('a$i', 'IMG_a$i.jpg', Duration.zero),
+      ];
+      final source = FakeShareSource();
+      final intake = android(source, <String>[]);
+      late StreamSubscription<IntakePhoto> sub;
+      sub = intake.photos().listen((_) => sub.pause());
+      source.controller.add([for (final f in first) f.path]);
+      await until(() => sub.isPaused, 'the first photo handed on');
+      final second = [
+        for (var i = 0; i < 2; i++) copyAt('b$i', 'IMG_b$i.jpg', Duration.zero),
+      ];
+      source.controller.add([for (final f in second) f.path]);
+      await until(() => intake.arrivedDelivery >= 2, 'the second share');
+      intake.declineDeliveries({2});
+      // No wait at all: an app stopped right after the answer keeps none.
+      expect([for (final f in second) f.existsSync()], [false, false]);
+      expect(first.last.existsSync(), isTrue,
+          reason: 'the share not declined still waits its turn');
+      expect(sub.isPaused, isTrue);
       await sub.cancel();
     });
 
@@ -1043,6 +1179,212 @@ void main() {
       expect(read, isEmpty);
       expect(left.existsSync(), isTrue);
       await sub.cancel();
+    });
+
+    // Review 2026-11-19, R0: a share made after Android stopped the app's
+    // process reaches MainActivity's onNewIntent in the same launch that
+    // recreates it, before this engine's Dart has run. The plugin tells
+    // only a listener and keeps nothing for later, and the sweep leaves a
+    // copy seconds old to its own share: the meal was never logged that
+    // run. MainActivity now holds such a share until share intake says it
+    // listens (shareIntakeReady), then hands it to the plugin once, whose
+    // event comes like any live share's (IntakeRulesTest: ShareHold).
+    test('share intake says it listens once the live stream is listened '
+        'to, not before, and once', () async {
+      final source = FakeShareSource();
+      final order = <String>[];
+      source.controller.onListen = () => order.add('listen');
+      final sub = ShareIntake(
+              source: source,
+              library: FakePhotoLibrary(),
+              readBytes: (_) async => null,
+              sharedFolder: () async => folder,
+              listening: () async => order.add('ready'),
+              clock: () => now)
+          .photos()
+          .listen((_) {});
+      await pumpEventQueue(times: 50);
+      expect(order, ['listen', 'ready']);
+      await sub.cancel();
+    });
+
+    test('the share MainActivity held is logged once share intake listens, '
+        'once, though the sweep saw its copy', () async {
+      TestWidgetsFlutterBinding.ensureInitialized();
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      const plugin = MethodChannel('receive_sharing_intent/messages');
+      const events = MethodChannel('receive_sharing_intent/events-media');
+      const activity = MethodChannel(filesChannelName);
+      // onNewIntent copied the photo 2 s before Dart listened; an earlier
+      // run left a sentinel (once it is logged, the sweep has run).
+      final meal = copyAt('n1', 'IMG_meal.jpg', const Duration(seconds: 2));
+      copyAt('s1', 'IMG_s.jpg', const Duration(hours: 1));
+      final calls = <String>[];
+      var listener = false; // the plugin's event sink
+      // The recreated activity's own intent is empty: no launch share.
+      messenger.setMockMethodCallHandler(plugin, (call) async {
+        calls.add(call.method);
+        return null;
+      });
+      messenger.setMockMethodCallHandler(events, (call) async {
+        calls.add(call.method);
+        listener = call.method == 'listen';
+        return null;
+      });
+      // MainActivity hands the held share to the plugin, which tells its
+      // listener, and nobody without one.
+      messenger.setMockMethodCallHandler(activity, (call) async {
+        calls.add(call.method);
+        if (call.method != shareIntakeReadyMethod || !listener) return 0;
+        await messenger.handlePlatformMessage(
+            events.name,
+            const StandardMethodCodec().encodeSuccessEnvelope(jsonEncode([
+              {'path': meal.path, 'type': 'image', 'mimeType': 'image/jpeg'},
+            ])),
+            (_) {});
+        return 1;
+      });
+      addTearDown(() {
+        for (final channel in [plugin, events, activity]) {
+          messenger.setMockMethodCallHandler(channel, null);
+        }
+      });
+      final emitted = <String>[];
+      final sub = ShareIntake(
+              source: ReceiveSharingIntentSource(),
+              library: FakePhotoLibrary(),
+              readBytes: (path) => File(path).readAsBytes(),
+              sharedFolder: () async => folder,
+              listening: androidShareIntakeReady,
+              clock: () => now)
+          .photos()
+          .listen((p) => emitted.add(p.fileName));
+      await until(() => emitted.length >= 2, 'the held share and the sentinel');
+      expect(emitted.toSet(), {'IMG_meal.jpg', 'IMG_s.jpg'});
+      expect(emitted.where((n) => n == 'IMG_meal.jpg'), hasLength(1),
+          reason: 'once, not once by its event and again by the sweep');
+      expect(calls.indexOf('listen'), greaterThanOrEqualTo(0));
+      expect(calls.indexOf(shareIntakeReadyMethod),
+          greaterThan(calls.indexOf('listen')),
+          reason: 'the plugin has its listener before the share is handed '
+              'over');
+      expect(meal.existsSync(), isFalse, reason: 'read, so deleted');
+      await sub.cancel();
+    });
+
+    test('androidShareIntakeReady asks MainActivity on the files channel; a '
+        'native side without it is no error', () async {
+      TestWidgetsFlutterBinding.ensureInitialized();
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      const activity = MethodChannel(filesChannelName);
+      final calls = <String>[];
+      messenger.setMockMethodCallHandler(activity, (call) async {
+        calls.add(call.method);
+        return 0;
+      });
+      addTearDown(() => messenger.setMockMethodCallHandler(activity, null));
+      await androidShareIntakeReady();
+      expect(calls, [shareIntakeReadyMethod]);
+      messenger.setMockMethodCallHandler(
+          activity, (call) async => throw PlatformException(code: 'gone'));
+      await androidShareIntakeReady();
+      messenger.setMockMethodCallHandler(activity, null);
+      await androidShareIntakeReady(); // MissingPluginException
+    });
+
+    // Review of the R0 fix: the share MainActivity holds goes with that
+    // activity if it goes before share intake listens (Back or a swipe
+    // during the cold start, a crash). Its copy stays in the share folder,
+    // but a start within seconds found it too young for the sweep, and no
+    // event ever came for it: the meal waited for a later start, possibly
+    // a day later, or was deleted unread. The copies the sweep found too
+    // young are looked at again once they are old enough
+    // (strandedRecheck, shortened here; the production delay takes this
+    // test 15 s).
+    ShareIntake rechecking(FakeShareSource source,
+            {FileBytesReader? readBytes}) =>
+        ShareIntake(
+            source: source,
+            library: FakePhotoLibrary(),
+            readBytes: readBytes ?? (path) => File(path).readAsBytes(),
+            sharedFolder: () async => folder,
+            recheckAfter: const Duration(milliseconds: 50),
+            clock: () => now);
+
+    test('a share held by an activity that went before share intake '
+        'listened is logged in the run that starts seconds later, once',
+        () async {
+      expect(ShareIntake.strandedRecheck > ShareIntake.strandedMinAge, isTrue,
+          reason: 'every copy too young for the sweep is old enough then');
+      final orphan = copyAt('o1', 'IMG_meal.jpg', const Duration(seconds: 3));
+      final sentinel = copyAt('s1', 'IMG_s.jpg', const Duration(hours: 1));
+      final intake = rechecking(FakeShareSource());
+      final emitted = <IntakePhoto>[];
+      final sub = intake.photos().listen(emitted.add);
+      await until(() => emitted.length >= 2, 'the sentinel and the meal');
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      expect([for (final p in emitted) p.fileName],
+          ['IMG_s.jpg', 'IMG_meal.jpg']);
+      expect(intake.asksAlone(emitted.last.shareDelivery!), isTrue,
+          reason: 'no share being made now: a question of its own');
+      expect(orphan.existsSync(), isFalse, reason: 'read, so deleted');
+      expect(sentinel.existsSync(), isFalse);
+      await sub.cancel();
+    });
+
+    test('the second look gives no copy twice: one whose share was handed '
+        'over is not given again', () async {
+      // Both seconds old when share intake starts: MainActivity handed one
+      // over (its event comes), the other's activity went.
+      final live = copyAt('l1', 'IMG_live.jpg', const Duration(seconds: 2));
+      final orphan =
+          copyAt('o1', 'IMG_orphan.jpg', const Duration(seconds: 3));
+      final source = FakeShareSource();
+      source.controller.add([live.path]);
+      final intake = rechecking(source);
+      final emitted = <IntakePhoto>[];
+      // Paused from the start (a question open, say): nothing is read, so
+      // both copies are still on disk for the sweep and the second look.
+      final sub = intake.photos().listen(emitted.add)..pause();
+      await until(() => intake.arrivedDelivery >= 2, 'the second look');
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      expect(intake.arrivedDelivery, 2,
+          reason: 'the live share, then the other copy alone, once');
+      expect(intake.asksAlone(1), isFalse);
+      expect(intake.asksAlone(2), isTrue);
+      expect(intake.photoCountOf(2), 1);
+      expect(live.existsSync(), isTrue);
+      sub.resume();
+      await until(() => emitted.length >= 2, 'both read');
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      expect([for (final p in emitted) (p.fileName, p.shareDelivery)],
+          [('IMG_live.jpg', 1), ('IMG_orphan.jpg', 2)]);
+      expect(live.existsSync(), isFalse);
+      expect(orphan.existsSync(), isFalse);
+      await sub.cancel();
+    });
+
+    test('stopped before the second look: a copy too young for the sweep is '
+        'left for the next start, unread', () async {
+      final orphan =
+          copyAt('o1', 'IMG_orphan.jpg', const Duration(seconds: 3));
+      final sentinel = copyAt('s1', 'IMG_s.jpg', const Duration(hours: 1));
+      final read = <String>[];
+      late StreamSubscription<IntakePhoto> sub;
+      final intake = rechecking(FakeShareSource(), readBytes: (path) async {
+        read.add(path);
+        unawaited(sub.cancel()); // the app goes as the sweep's copy is read
+        return File(path).readAsBytes();
+      });
+      sub = intake.photos().listen((_) {});
+      await until(() => read.isNotEmpty, 'the sweep reached the sentinel');
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+      expect(read, [sentinel.path]);
+      expect(intake.arrivedDelivery, 1, reason: 'no second look once stopped');
+      expect(orphan.existsSync(), isTrue,
+          reason: 'never deleted unread: the next start logs it');
     });
   });
 }

@@ -40,6 +40,30 @@ class IntakeRulesTest {
         assertFalse(IntakeRules.isRedelivery(false, 0x10000000 or 0x00000001))
     }
 
+    // --- A share that comes before share intake listens waits for it
+    // (ShareHold): the plugin tells only a listener, and Android delivers
+    // the share a stopped app was started again for before Dart runs.
+
+    @Test
+    fun sharesBeforeShareIntakeListensAreHeldThenHandedOverOnceInOrder() {
+        val hold = ShareHold<String>()
+        assertFalse(hold.pass("first"))
+        assertFalse(hold.pass("second"))
+        assertEquals(listOf("first", "second"), hold.ready())
+        // From then on a share goes at once, and none is handed over twice.
+        assertTrue(hold.pass("third"))
+        assertEquals(emptyList<String>(), hold.ready())
+        assertTrue(hold.pass("fourth"))
+    }
+
+    @Test
+    fun aShareHoldWithNothingHeldHandsOverNothing() {
+        val hold = ShareHold<String>()
+        assertEquals(emptyList<String>(), hold.ready())
+        assertTrue(hold.pass("later"))
+        assertEquals(emptyList<String>(), hold.ready())
+    }
+
     // --- The app's own share-out files are no meal.
 
     @Test
@@ -176,6 +200,36 @@ class IntakeRulesTest {
         assertTrue(File(fresh, "IMG_1.jpg").isFile)
     }
 
+    @Test
+    fun startingClearsEveryCopyEarlierPicksLeftButNotTheFolder() {
+        val root = tmp.newFolder("picked_photos")
+        val now = System.currentTimeMillis()
+        // Seconds old: a copy whose engine died before Dart read it, which
+        // a later pick's tidy keeps for a day.
+        val young = File(root, "young").apply { mkdirs() }
+        File(young, "IMG_1.jpg").writeText("x")
+        IntakeRules.tidyPickFolders(root, now)
+        assertTrue(File(young, "IMG_1.jpg").isFile)
+        // A copy cut short, a stray file, an empty folder, a copy dated
+        // ahead of the clock: none has a reader once the activity starts.
+        File(root, "partial").mkdirs()
+        File(root, "partial/IMG_2.jpg").writeText("")
+        File(root, "stray.jpg").writeText("x")
+        File(root, "empty").mkdirs()
+        File(root, "ahead").mkdirs()
+        File(root, "ahead/IMG_3.jpg").apply {
+            writeText("x")
+            setLastModified(now + IntakeRules.DAY_MS)
+        }
+        IntakeRules.clearPickFolders(root)
+        assertTrue(root.isDirectory)
+        assertEquals(emptyList<String>(), root.list()!!.toList())
+        // Nothing left, or no folder at all, is no error.
+        IntakeRules.clearPickFolders(root)
+        IntakeRules.clearPickFolders(File(root, "missing"))
+        assertTrue(root.isDirectory)
+    }
+
     // --- A create-document result.
 
     @Test
@@ -186,6 +240,51 @@ class IntakeRulesTest {
         assertEquals(IntakeRules.SaveStep.CANCEL, IntakeRules.saveStep(false, false, false))
         // The document exists but nothing is left to copy into it.
         assertEquals(IntakeRules.SaveStep.DISCARD, IntakeRules.saveStep(true, true, false))
+    }
+
+    @Test
+    fun aSaveWithNoCallerLeftDeletesItsSourceAndOnlyThen() {
+        val (_, cache, db) = layout()
+        val export = File(cache, "chopstats-2026-11-19.json").apply { writeText("{}") }
+        // A caller waits for the answer: it deletes the export itself.
+        assertFalse(IntakeRules.dropSaveSource(cache, export.path, callOpen = true))
+        assertTrue(export.isFile)
+        // None is left (Android recreated the activity while the
+        // create-document screen was up): the native side deletes it.
+        assertTrue(IntakeRules.dropSaveSource(cache, export.path, callOpen = false))
+        assertFalse(export.exists())
+        // Never a file outside the cache, and no source is no error.
+        assertFalse(IntakeRules.dropSaveSource(cache, db.path, callOpen = false))
+        assertFalse(
+            IntakeRules.dropSaveSource(cache, "${cache.path}/../databases/calorie_tracker.db", callOpen = false),
+        )
+        assertTrue(db.isFile)
+        assertFalse(IntakeRules.dropSaveSource(cache, null, callOpen = false))
+        assertFalse(IntakeRules.dropSaveSource(cache, export.path, callOpen = false))
+    }
+
+    @Test
+    fun aSaveCopyHoldsItsSourceOpenAndLeavesItsNameToLaterFiles() {
+        val (_, cache, db) = layout()
+        val export = File(cache, "chopstats-2026-11-19.json").apply { writeText("first export") }
+        val input = IntakeRules.openSaveSource(cache, export.path)!!
+        // Out of the cache as soon as the copy has it open, whatever
+        // happens to the copy, its call or the app afterwards...
+        assertFalse(export.exists())
+        // ...and the export the restarted app writes under the same name
+        // (one per day) while a slow copy still runs is not this save's:
+        // the copy still reads all of its own, and nothing deletes the new
+        // one when it ends.
+        export.writeText("second export")
+        assertEquals("first export", input.use { String(it.readBytes()) })
+        assertEquals("second export", export.readText())
+        // Never a file outside the cache, and nothing to open is no error.
+        assertNull(IntakeRules.openSaveSource(cache, db.path))
+        assertNull(IntakeRules.openSaveSource(cache, "${cache.path}/../databases/calorie_tracker.db"))
+        assertTrue(db.isFile)
+        assertNull(IntakeRules.openSaveSource(cache, null))
+        assertNull(IntakeRules.openSaveSource(cache, File(cache, "missing.json").path))
+        assertEquals("second export", export.readText())
     }
 
     @Test

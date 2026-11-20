@@ -992,7 +992,11 @@ void main() {
   // went to the AI again. A recreated activity (saved state) or a launch
   // from Recents therefore hands the plugins an empty intent — no copy —
   // which also keeps a bitewise://setup link from reopening its dialog.
-  // New shares still arrive through onNewIntent, unchanged.
+  // New shares still arrive through onNewIntent, but one that comes before
+  // share intake listens waits for it (review 2026-11-19, R0): the launch
+  // that recreates a stopped app delivers the share it was started for
+  // before Dart has run, and the plugin tells only a listener. It is held
+  // (ShareHold) until Dart says it listens, then handed to the plugin once.
   test('a recreated MainActivity never re-delivers its launch share', () {
     final code = _kotlinCode(_mainActivity());
     final create = _kotlinFunction(code, 'override fun onCreate(');
@@ -1005,15 +1009,25 @@ void main() {
             'savedInstanceState)'),
         reason: 'replay → the empty intent, else the safe copies, both '
             'before the plugins read it in super.onCreate');
-    expect(_kotlinFunction(code, 'override fun onNewIntent('),
-        '{ super.onNewIntent(withSafeShares(intent)) }');
+    expect(
+        _kotlinFunction(code, 'override fun onNewIntent('),
+        '{ val safe = withSafeShares(intent) val copied = safe !== intent && '
+        'safe.action != null if (copied && !heldShares.pass(safe)) return '
+        'super.onNewIntent(safe) }');
+    expect(code, contains('private val heldShares = ShareHold<Intent>()'));
+    expect(
+        _kotlinFunction(code, 'private fun releaseHeldShares('),
+        '{ val held = heldShares.ready() for (share in held) '
+        'super.onNewIntent(share) return held.size }');
+    expect(code,
+        contains('"shareIntakeReady" -> result.success(releaseHeldShares())'));
     final rules = _kotlinCode(_intakeRules());
     expect(
         rules,
         contains('fun isRedelivery(hasSavedState: Boolean, flags: Int): '
             'Boolean = hasSavedState || (flags and '
             'Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0'));
-    _expectJvmTests(['isRedelivery']);
+    _expectJvmTests(['isRedelivery', 'ShareHold']);
   });
 
   // Chopstats is a target in its own sharesheet: Today's day image and the
@@ -1070,6 +1084,9 @@ void main() {
   // with no registerForActivityResult, so MainActivity runs AndroidX's
   // contracts by hand: createIntent, startActivityForResult, parseResult.
   // Copies go to cacheDir/picked_photos/<uuid>/<name>, under the share cap.
+  // A pick's call dies with its engine, so what earlier picks left there
+  // when the activity starts has no reader: cleared before any pick of its
+  // own can open (review 2026-11-19, R6).
   // One call at a time, answered exactly once (SingleCall): a reply sent
   // twice crashes, and a call never answered leaves every later pick busy.
   // The ModuleDependencies entry asks Play services for the backported
@@ -1142,6 +1159,11 @@ void main() {
             'IntakeRules.tidyPickFolders(root, System.currentTimeMillis())'));
     expect(picked, isNot(contains('deleteRecursively')),
         reason: 'only tidyPickFolders clears earlier picks');
+    expect(
+        _kotlinFunction(code, 'override fun onCreate('),
+        startsWith('{ IntakeRules.clearPickFolders(File(cacheDir, '
+            'PICKED_PHOTO_FOLDER)) '),
+        reason: 'what picks of an earlier activity left goes at its start');
     expect(picked, contains('copyAtMost(uri, out, MAX_SHARE_BYTES)'));
     expect(picked, contains('val dir = File(root, UUID.randomUUID().toString())'));
     expect(picked, contains('dateTaken(uri)?.let { item["dateTakenMs"] = it }'));
@@ -1153,7 +1175,8 @@ void main() {
         reason: 'answers only through SingleCall, which answers once');
     expect('photoPicks.answer('.allMatches(picked), hasLength(2));
     expect(code, contains('MediaStore.MediaColumns.DATE_TAKEN'));
-    _expectJvmTests(['pickMax', 'firstPicks', 'tidyPickFolders', 'SingleCall']);
+    _expectJvmTests(['pickMax', 'firstPicks', 'tidyPickFolders',
+        'clearPickFolders', 'SingleCall']);
 
     final gradle = File('${_appRoot().path}/android/app/build.gradle.kts')
         .readAsStringSync();
@@ -1194,6 +1217,11 @@ void main() {
   // copy removes it. If Android recreates the activity while the screen is
   // up, the source survives in the saved state, so the user's pick still
   // gets the file (or, with no source, the empty document is removed).
+  // The copy takes its source out of the cache as soon as it has it open
+  // (the open file still reads in full): no export is left behind
+  // whatever happens to the call, and one written later under the same
+  // name is never deleted by an earlier copy. A cancel with no caller
+  // left to delete the source deletes it there (review 2026-11-19, R14).
   test('MainActivity serves saveFile, from the cache only', () {
     final code = _kotlinCode(_mainActivity());
     expect(
@@ -1231,18 +1259,23 @@ void main() {
             '= data?.data val source = pendingSaveSource pendingSaveSource = '
             'null val step = IntakeRules.saveStep(resultCode == '
             'Activity.RESULT_OK, uri != null, source != null) if (step == '
-            'IntakeRules.SaveStep.CANCEL || uri == null) { call?.let { '
-            'saves.answer(it, saveAnswer("cancelled")) } return } if (step == '
-            'IntakeRules.SaveStep.DISCARD || source == null) { '
+            'IntakeRules.SaveStep.CANCEL || uri == null) { '
+            'IntakeRules.dropSaveSource(cacheDir, source?.path, call != null) '
+            'call?.let { saves.answer(it, saveAnswer("cancelled")) } return } '
+            'if (step == IntakeRules.SaveStep.DISCARD || source == null) { '
             'discardDocument(uri) call?.let { saves.answer(it, '
             'saveAnswer("failed")) } return } Thread { val ok = try { val '
-            'file = cachedFile(source.path) ?: throw IllegalStateException() '
-            'val out = IntakeRules.firstStream(IntakeRules.SAVE_MODES) { '
+            'input = IntakeRules.openSaveSource(cacheDir, source.path) ?: '
+            'throw IllegalStateException() input.use { inp -> val out = '
+            'IntakeRules.firstStream(IntakeRules.SAVE_MODES) { '
             'contentResolver.openOutputStream(uri, it) } out?.use { o -> '
-            'file.inputStream().use { it.copyTo(o, 64 * 1024) } } != null } '
-            'catch (e: Exception) { false } if (!ok) discardDocument(uri) '
-            'runOnUiThread { call?.let { saves.answer(it, if (ok) '
-            'saveAnswer("ok") else saveAnswer("failed")) } } }.start() }'));
+            'inp.copyTo(o, 64 * 1024) } != null } } catch (e: Exception) { '
+            'false } if (!ok) discardDocument(uri) runOnUiThread { '
+            'call?.let { saves.answer(it, if (ok) saveAnswer("ok") else '
+            'saveAnswer("failed")) } } }.start() }'));
+    expect('dropSaveSource('.allMatches(saved).length, 1,
+        reason: 'only the cancel deletes by name: a copy has deleted its '
+            'source on opening it');
     expect('.success('.allMatches(saved), isEmpty,
         reason: 'answers only through SingleCall, which answers once');
     expect(code, isNot(contains('openOutputStream(uri, "w")')),
@@ -1259,8 +1292,8 @@ void main() {
         endsWith('super.onCreate(savedInstanceState) pendingSaveSource = '
             'cachedFile(savedInstanceState?.getString(STATE_SAVE_SOURCE)) }'),
         reason: 'restored through the same cache check');
-    _expectJvmTests(
-        ['regularFileIn', 'saveStep', 'SAVE_MODES', 'firstStream', 'SingleCall']);
+    _expectJvmTests(['regularFileIn', 'saveStep', 'dropSaveSource',
+        'openSaveSource', 'SAVE_MODES', 'firstStream', 'SingleCall']);
   });
 
   // Settings' notifications-off remedy lands on the app's own

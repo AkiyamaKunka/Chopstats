@@ -46,7 +46,15 @@ class MainActivity : FlutterActivity() {
     /// its engine, but the user still picked a place for the file).
     private var pendingSaveSource: File? = null
 
+    /// Shares onNewIntent got before share intake listened for them, until
+    /// it does (onNewIntent, releaseHeldShares). Main thread only.
+    private val heldShares = ShareHold<Intent>()
+
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Picked-photo copies an earlier activity left (its engine died
+        // before Dart read them) have no reader: no pick of this one is
+        // open yet.
+        IntakeRules.clearPickFolders(File(cacheDir, PICKED_PHOTO_FOLDER))
         // receive_sharing_intent reads the launch intent while
         // super.onCreate attaches it: the copies must be there already.
         // A share is delivered once. An activity Android recreates (saved
@@ -54,7 +62,10 @@ class MainActivity : FlutterActivity() {
         // or relaunches from Recents still carries the intent that first
         // started its task, so the plugins get an empty one, with nothing
         // copied; that also keeps a bitewise://setup link from reopening
-        // its dialog. New shares arrive through onNewIntent, as before. The
+        // its dialog. New shares arrive through onNewIntent, the one the
+        // activity was recreated for too: Android delivers it in this same
+        // launch, after onStart, before Dart has run, so onNewIntent holds
+        // a share until share intake listens (ShareHold). The launch
         // intent is not re-delivered, but copies of a several-photo share
         // cut short by the stop that were never read stay in shared_photos:
         // share intake (Dart) picks those up at its next start, within a
@@ -75,8 +86,27 @@ class MainActivity : FlutterActivity() {
         pendingSaveSource?.let { outState.putString(STATE_SAVE_SOURCE, it.path) }
     }
 
+    /// A share (withSafeShares made copies: a new SEND) goes to the plugins
+    /// only once share intake listens: receive_sharing_intent tells only a
+    /// listener and keeps nothing for later, and the share Android started
+    /// a stopped process again for arrives before Dart has run. Until then
+    /// it is held (ShareHold), not handed on, so the plugin cannot tell
+    /// Dart twice. Anything else passes as before.
     override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(withSafeShares(intent))
+        val safe = withSafeShares(intent)
+        val copied = safe !== intent && safe.action != null
+        if (copied && !heldShares.pass(safe)) return
+        super.onNewIntent(safe)
+    }
+
+    /// Share intake listens now ("shareIntakeReady", sent after its listen
+    /// on the same main thread): the shares onNewIntent held until then go
+    /// to the plugins, in order, as onNewIntent would have handed them.
+    /// How many there were.
+    private fun releaseHeldShares(): Int {
+        val held = heldShares.ready()
+        for (share in held) super.onNewIntent(share)
+        return held.size
     }
 
     /// receive_sharing_intent copied each shared stream into the cache on
@@ -273,9 +303,12 @@ class MainActivity : FlutterActivity() {
         // which grants the picked photos only, with no permission at all.
         // saveFile: Export › Save to device, written where the user picks
         // (ACTION_CREATE_DOCUMENT grants that one document only).
+        // shareIntakeReady: share intake listens to shares now, so those
+        // onNewIntent held go to the plugins (releaseHeldShares).
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, FILES_CHANNEL)
             .setMethodCallHandler { call, result ->
                 when (call.method) {
+                    "shareIntakeReady" -> result.success(releaseHeldShares())
                     "pickFiles" -> pickFiles(result)
                     "pickImages" -> pickImages(
                         (call.argument<Any?>("max") as? Number)?.toInt() ?: 1,
@@ -392,7 +425,8 @@ class MainActivity : FlutterActivity() {
     /// cacheDir/PICKED_PHOTO_FOLDER/<uuid>/<name>, under the share cap,
     /// with its capture time when the provider gives one. First it tidies
     /// what earlier picks left (IntakeRules.tidyPickFolders: empty or
-    /// day-old folders only). Off the UI thread; the call stays open
+    /// day-old folders only; onCreate clears what an earlier activity's
+    /// picks left). Off the UI thread; the call stays open
     /// (busy) until the answer. The grants last only while the app runs,
     /// hence the copies. With no open call (Android recreated the activity
     /// while the picker was up, and the call died with its engine) nothing
@@ -515,11 +549,15 @@ class MainActivity : FlutterActivity() {
     /// COPY: the checked source (checked again) goes into the new document
     /// off the UI thread, opened only in a truncating mode
     /// (IntakeRules.SAVE_MODES); a failed copy removes the document rather
-    /// than leave an empty or partial file. DISCARD: the document exists
-    /// but its source is gone, so it is removed. The open call, if any, is
+    /// than leave an empty or partial file. The copy deletes its source as
+    /// it opens it (IntakeRules.openSaveSource), so no export stays in the
+    /// cache whatever happens next. DISCARD: the document exists but its
+    /// source is gone, so it is removed. The open call, if any, is
     /// answered; with none (Android recreated the activity while the screen
     /// was up) the copy still finishes, from the source saved in the
-    /// activity's state, since the user did choose a place for it.
+    /// activity's state, since the user did choose a place for it, and a
+    /// cancel deletes the source here: its caller, which would have, is
+    /// gone (IntakeRules.dropSaveSource).
     private fun onSaveTargetPicked(resultCode: Int, data: Intent?) {
         val call = if (saves.isOpen) saveCall else null
         val uri = data?.data
@@ -527,6 +565,7 @@ class MainActivity : FlutterActivity() {
         pendingSaveSource = null
         val step = IntakeRules.saveStep(resultCode == Activity.RESULT_OK, uri != null, source != null)
         if (step == IntakeRules.SaveStep.CANCEL || uri == null) {
+            IntakeRules.dropSaveSource(cacheDir, source?.path, call != null)
             call?.let { saves.answer(it, saveAnswer("cancelled")) }
             return
         }
@@ -537,9 +576,11 @@ class MainActivity : FlutterActivity() {
         }
         Thread {
             val ok = try {
-                val file = cachedFile(source.path) ?: throw IllegalStateException()
-                val out = IntakeRules.firstStream(IntakeRules.SAVE_MODES) { contentResolver.openOutputStream(uri, it) }
-                out?.use { o -> file.inputStream().use { it.copyTo(o, 64 * 1024) } } != null
+                val input = IntakeRules.openSaveSource(cacheDir, source.path) ?: throw IllegalStateException()
+                input.use { inp ->
+                    val out = IntakeRules.firstStream(IntakeRules.SAVE_MODES) { contentResolver.openOutputStream(uri, it) }
+                    out?.use { o -> inp.copyTo(o, 64 * 1024) } != null
+                }
             } catch (e: Exception) {
                 false
             }

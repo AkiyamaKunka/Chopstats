@@ -443,9 +443,11 @@ class _DataSectionState extends State<DataSection> {
   }
 
   /// Save to Device… with the export at [file]. The temp export is deleted
-  /// afterwards whatever the answer (the native side never deletes it),
-  /// except on [SaveFileStatus.unavailable]: then it is shared instead,
-  /// and the share target still has to read it.
+  /// afterwards whatever the answer (the native side already deletes it as
+  /// its copy opens it, and on a cancel after this call died with its
+  /// engine, Android having recreated the activity), except on
+  /// [SaveFileStatus.unavailable]: then it is shared instead, and the
+  /// share target still has to read it.
   Future<void> _saveToDevice(File file, AppLocalizations l10n) async {
     final name = file.path.split('/').last;
     final status = await widget.fileSaver

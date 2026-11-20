@@ -10,10 +10,13 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:flutter/services.dart'
+    show MethodChannel, MissingPluginException, PlatformException;
 import 'package:path_provider/path_provider.dart' show getTemporaryDirectory;
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 
 import '../../core/contracts.dart';
+import '../backup/file_pick_channel.dart' show filesChannelName;
 import '../settings/app_settings.dart' show AppSettings;
 import 'filename_dates.dart';
 import 'glasses.dart' show captureMetaFor;
@@ -87,6 +90,31 @@ const String androidShareFolderName = 'shared_photos';
 Future<String> androidSharedPhotoFolder() async =>
     '${(await getTemporaryDirectory()).path}/$androidShareFolderName';
 
+/// The method MainActivity.kt answers on [filesChannelName] once share
+/// intake listens to the plugin's live stream.
+const String shareIntakeReadyMethod = 'shareIntakeReady';
+
+/// Android: tells MainActivity that share intake listens to the plugin's
+/// live stream now. receive_sharing_intent tells only a listener and keeps
+/// nothing for later, and a share made after Android stopped the app's
+/// process reaches MainActivity (onNewIntent, in the launch that recreates
+/// it) before this engine's Dart has run: MainActivity holds such a share
+/// until this word, then hands it to the plugin, whose event share intake
+/// reads like any live share's (review 2026-11-19, R0). The word follows
+/// the plugin's listen on the same main thread, so the plugin has its
+/// listener by then. Never throws.
+Future<void> androidShareIntakeReady(
+    {MethodChannel channel = const MethodChannel(filesChannelName)}) async {
+  try {
+    await channel.invokeMethod<Object?>(shareIntakeReadyMethod);
+  } on MissingPluginException {
+    // No native side to tell (tests, an older build): nothing is held.
+  } on PlatformException {
+    // Its copies wait in the share folder for the sweep
+    // (ShareIntake.strandedRecheck).
+  }
+}
+
 /// Whether the absolute POSIX [path] lies inside [folder] once '.' and '..'
 /// are resolved; a relative path never does.
 bool isWithinFolder(String path, String folder) {
@@ -132,7 +160,7 @@ String _normalized(String path) {
 }
 
 typedef FileBytesReader = Future<Uint8List?> Function(String path);
-typedef SharedFileCleanup = Future<void> Function(String path);
+typedef SharedFileCleanup = FutureOr<void> Function(String path);
 
 Future<Uint8List?> _readFileBytes(String path) async {
   try {
@@ -146,9 +174,12 @@ Future<Uint8List?> _readFileBytes(String path) async {
 /// Android app dir) and its API contract says the consumer deletes the copy
 /// after use — nothing else ever purges them, so skipping this leaks the
 /// full-size original of every shared photo forever (storage + privacy).
-Future<void> _deleteSharedFile(String path) async {
+/// Synchronous: a Not now's copies are gone before its answer returns
+/// ([ShareIntake.declineDeliveries]), so an app stopped right after keeps
+/// none for the next start's sweep.
+void _deleteSharedFile(String path) {
   try {
-    await File(path).delete();
+    File(path).deleteSync();
   } catch (_) {
     // Best effort: a vanished/locked file must not break intake.
   }
@@ -162,6 +193,7 @@ ShareIntake createShareIntake(AppSettings settings) => ShareIntake(
     source: ReceiveSharingIntentSource(),
     library: PhotoManagerLibrary(),
     readBytes: _readFileBytes,
+    listening: Platform.isAndroid ? androidShareIntakeReady : null,
     sharedFolder: Platform.isAndroid ? androidSharedPhotoFolder : null);
 
 class ShareIntake implements ShareDeliveries {
@@ -173,14 +205,24 @@ class ShareIntake implements ShareDeliveries {
       DateTime Function()? clock,
       // §8 CAPTURED_AT_MAX_AGE_DAYS: default 45, not user-editable.
       this._capturedAtMaxAgeDays = 45,
-      this._sharedFolder})
+      this._listening,
+      this._sharedFolder,
+      this._recheckAfter = strandedRecheck})
       : _cleanup = cleanup ?? _deleteSharedFile,
         _clock = clock ?? DateTime.now;
+
+  /// [strandedRecheck]; shorter in tests.
+  final Duration _recheckAfter;
 
   /// The folder a shared file must lie in to be read or deleted (Android:
   /// [androidSharedPhotoFolder]); null: any path (iOS, where the share
   /// extension writes the copies, and tests).
   final Future<String> Function()? _sharedFolder;
+
+  /// Told once share intake listens to the live share stream (Android:
+  /// [androidShareIntakeReady], so MainActivity hands over a share it held
+  /// until then); null: nobody to tell (iOS, tests).
+  final Future<void> Function()? _listening;
 
   /// Whether a copy may wait on disk for its turn: only where every copy
   /// has a path of its own (Android's share folder). See [photos].
@@ -202,10 +244,18 @@ class ShareIntake implements ShareDeliveries {
   /// deleted unread.
   final Set<int> _declined = {};
 
+  /// Android: each delivery's copies the reader has not taken yet, so a
+  /// Not now deletes them at once, wherever the reader waits.
+  final Map<int, List<String>> _untaken = {};
+
+  /// The share folder once it is known (the first copy checked against it
+  /// asks for it): a Not now checks its copies against it synchronously.
+  String? _knownFolder;
+
   /// Android: every copy path handed to a delivery so far (normalized).
-  /// The start-up sweep and a live share can name the same copy (one
-  /// older than [strandedMinAge] whose event comes late): it goes to the
-  /// first delivery only, so it is counted, and read, once.
+  /// The start-up sweep (or its second look, [strandedRecheck]) and a live
+  /// share can name the same copy (one whose event comes late): it goes
+  /// to the first delivery only, so it is counted, and read, once.
   final Set<String> _delivered = {};
 
   /// Wakes the reader from its pause-wait (set by [photos]).
@@ -227,7 +277,18 @@ class ShareIntake implements ShareDeliveries {
   @override
   void declineDeliveries(Set<int> deliveries) {
     _declined.addAll(deliveries);
-    // Their unread copies go now, not when the stream resumes.
+    // Their copies the reader has not taken go now, before this returns,
+    // not when the reader reaches them: one queued behind a delivery that
+    // is not declined (the start-up batch) waited for all of it to be
+    // read, and an app stopped meanwhile left them for the next start's
+    // sweep, which sent them unasked once the recipient was allowed
+    // (review 2026-11-19, R1).
+    for (final delivery in deliveries) {
+      for (final path in _untaken.remove(delivery) ?? const <String>[]) {
+        _discardNow(path);
+      }
+    }
+    // And the reader stops waiting on any of them.
     _wakeReader?.call();
   }
 
@@ -248,7 +309,7 @@ class ShareIntake implements ShareDeliveries {
   /// ([ShareDeliveries], IntakePhoto.shareDelivery), so the consent gate's
   /// Not now covers the whole share it was asked about — and any that
   /// arrived before the answer — and their copies not read yet are deleted
-  /// here unread ([declineThrough]).
+  /// here unread, at once ([declineDeliveries]).
   ///
   /// iOS reads each copy the moment it arrives, as before: the share
   /// extension writes `<appGroup>/<file name>` and replaces a file of the
@@ -259,6 +320,7 @@ class ShareIntake implements ShareDeliveries {
   Stream<IntakePhoto> photos() {
     late final StreamController<IntakePhoto> controller;
     StreamSubscription<List<String>>? liveSub;
+    Timer? recheck;
     var cancelled = false;
     Completer<void>? resumed;
     var reading = Future<void>.value();
@@ -281,6 +343,9 @@ class ShareIntake implements ShareDeliveries {
             !declined()) {
           await (resumed ??= Completer<void>()).future;
         }
+        // Taken from here on (Android); one a Not now deleted already is
+        // not this reader's any more.
+        if (_copiesWait && !_take(delivery, path)) continue;
         // Cancelled, or declined by the consent gate's Not now: not read,
         // but not left in the cache either.
         if (cancelled || controller.isClosed || declined()) {
@@ -316,6 +381,7 @@ class ShareIntake implements ShareDeliveries {
       final delivery = ++_deliveries;
       if (leftOver) _startupBatches.add(delivery);
       _deliverySize[delivery] = paths.length;
+      if (_copiesWait) _untaken[delivery] = [...paths];
       reading = reading
           .then((_) => emitPaths(paths, delivery))
           .catchError((Object _) {});
@@ -333,15 +399,41 @@ class ShareIntake implements ShareDeliveries {
         liveSub = _source.imagePathBatches().listen(enqueue,
             onError: controller.addError,
             onDone: () => reading = reading.then((_) => controller.close()));
+        // Only now has the plugin a listener to tell: MainActivity hands
+        // over the shares it held until then (Android; R0), whose events
+        // come like any live share's.
+        try {
+          unawaited(_listening?.call().catchError((Object _) {}));
+        } catch (_) {
+          // Nobody to tell: their copies wait for the sweep (below).
+        }
         if (_copiesWait) {
-          final left = await _leftOver(initial);
+          final (left, young) = await _leftOver(initial);
           if (!cancelled && left.isNotEmpty) enqueue(left, leftOver: true);
+          // The copies too young for it: once each is old enough that its
+          // share's event has come if it ever will, those still on disk
+          // and given to no delivery are taken ([strandedRecheck]).
+          if (!cancelled && young.isNotEmpty) {
+            recheck = Timer(_recheckAfter, () async {
+              final waiting = <String>[];
+              for (final path in young) {
+                try {
+                  if (await File(path).exists()) waiting.add(path);
+                } catch (_) {
+                  // Cannot tell: left for the next start's sweep.
+                }
+              }
+              if (cancelled || controller.isClosed) return;
+              enqueue(waiting, leftOver: true);
+            });
+          }
         }
       },
       onResume: wake,
       onCancel: () async {
         _wakeReader = null;
         cancelled = true;
+        recheck?.cancel();
         wake();
         await liveSub?.cancel();
       },
@@ -354,8 +446,23 @@ class ShareIntake implements ShareDeliveries {
   static const strandedMaxAge = Duration(hours: 24);
 
   /// A copy younger than this may still be being written for a share
-  /// whose own event delivers it: the start-up sweep leaves it alone.
+  /// whose own event delivers it: the start-up sweep leaves it alone. The
+  /// event comes even for a share Android delivered before this engine's
+  /// Dart ran (MainActivity holds it until share intake listens,
+  /// [androidShareIntakeReady]), but not for one held by an activity that
+  /// went before then (Back or a swipe during the cold start, a crash):
+  /// that copy is taken at [strandedRecheck].
   static const strandedMinAge = Duration(seconds: 10);
+
+  /// How long after the start-up sweep the copies it left for being
+  /// younger than [strandedMinAge] are looked at again (Android). Each is
+  /// older than that by then, so its share's event has come if it ever
+  /// will; one still on disk and given to no delivery is taken then, as a
+  /// start-up batch ([asksAlone]), through the same consent gate. Without
+  /// this, a share whose activity went before this engine's Dart listened
+  /// waited, when the app was opened again within seconds, for a later
+  /// start: possibly a day late, or deleted unread (review 2026-11-19).
+  static const strandedRecheck = Duration(seconds: 15);
 
   /// The share folder's copies an earlier run never read (Android, review
   /// 2026-11-13): with the C2 backpressure they wait there for minutes,
@@ -367,18 +474,20 @@ class ShareIntake implements ShareDeliveries {
   /// shared them to be logged, and a copy still on disk was never read
   /// (reading deletes it), so nothing is sent twice. Older ones are
   /// deleted here, unread: logged days late they would surprise, and
-  /// could land on the wrong day. The launch share's own copies, and any
-  /// younger than [strandedMinAge], are left out.
-  Future<List<String>> _leftOver(List<String> launch) async {
+  /// could land on the wrong day. The launch share's own copies are left
+  /// out, and those younger than [strandedMinAge] come back second, for
+  /// [strandedRecheck].
+  Future<(List<String>, List<String>)> _leftOver(List<String> launch) async {
     final String root;
     try {
-      root = await _sharedFolder!();
+      root = _knownFolder ??= await _sharedFolder!();
     } catch (_) {
-      return const [];
+      return (const <String>[], const <String>[]);
     }
     final skip = {for (final p in launch) _normalized(p)};
     final now = _clock();
     final keep = <(DateTime, String)>[];
+    final young = <(DateTime, String)>[];
     try {
       await for (final entry
           in Directory(root).list(recursive: true, followLinks: false)) {
@@ -391,7 +500,10 @@ class ShareIntake implements ShareDeliveries {
           continue;
         }
         final age = now.difference(modified);
-        if (age < strandedMinAge) continue;
+        if (age < strandedMinAge) {
+          young.add((modified, entry.path));
+          continue;
+        }
         if (age > strandedMaxAge) {
           await _cleanup(entry.path);
           continue;
@@ -401,8 +513,18 @@ class ShareIntake implements ShareDeliveries {
     } catch (_) {
       // No folder yet, or it cannot be listed: nothing left over.
     }
-    keep.sort((a, b) => a.$1.compareTo(b.$1));
-    return [for (final k in keep) k.$2];
+    List<String> oldestFirst(List<(DateTime, String)> copies) =>
+        [for (final c in copies..sort((a, b) => a.$1.compareTo(b.$1))) c.$2];
+    return (oldestFirst(keep), oldestFirst(young));
+  }
+
+  /// The reader takes [path] of [delivery]: false when it is no longer
+  /// waiting (a Not now deleted it).
+  bool _take(int delivery, String path) {
+    final untaken = _untaken[delivery];
+    if (untaken == null || !untaken.remove(path)) return false;
+    if (untaken.isEmpty) _untaken.remove(delivery);
+    return true;
   }
 
   /// Deletes [path] unread when it is a copy this intake may delete.
@@ -410,12 +532,24 @@ class ShareIntake implements ShareDeliveries {
     if (await _isShareCopy(path)) await _cleanup(path);
   }
 
+  /// [_discard] at once (the production cleanup is synchronous) once the
+  /// share folder is known, as it is by the time any question is open:
+  /// the photo asked about was checked against it.
+  void _discardNow(String path) {
+    final folder = _knownFolder;
+    if (folder == null) {
+      unawaited(_discard(path));
+    } else if (isWithinFolder(path, folder)) {
+      unawaited(Future.sync(() => _cleanup(path)).catchError((Object _) {}));
+    }
+  }
+
   /// Whether [path] is a copy this intake may read and delete.
   Future<bool> _isShareCopy(String path) async {
     final folder = _sharedFolder;
     if (folder == null) return true;
     try {
-      return isWithinFolder(path, await folder());
+      return isWithinFolder(path, _knownFolder ??= await folder());
     } catch (_) {
       return false; // cannot tell: leave it alone
     }

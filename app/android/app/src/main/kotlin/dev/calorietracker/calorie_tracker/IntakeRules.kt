@@ -2,6 +2,7 @@ package dev.calorietracker.calorie_tracker
 
 import android.content.Intent
 import java.io.File
+import java.io.InputStream
 
 /// MainActivity's decisions, kept free of Android objects so the JVM unit
 /// tests (src/test, `./gradlew :app:testDebugUnitTest`, run by
@@ -88,6 +89,23 @@ internal object IntakeRules {
         }
     }
 
+    /// Removes everything under [root], whatever its age, never [root]
+    /// itself: what picks of an earlier activity left. MainActivity.onCreate
+    /// runs it before a pick of its own can open, and a pick's call dies
+    /// with the engine that made it (onPhotosPicked copies nothing without
+    /// an open call), so a copy still there has no reader: one an app
+    /// stopped mid-pick left, partial or whole, used to stay until a pick
+    /// at least a day later (tidyPickFolders), or for good.
+    fun clearPickFolders(root: File) {
+        root.listFiles()?.forEach { entry ->
+            try {
+                entry.deleteRecursively()
+            } catch (e: Exception) {
+                // The next start tries again.
+            }
+        }
+    }
+
     /// What a create-document result leads to: CANCEL when nothing was
     /// created, COPY the checked source into it, DISCARD the new (empty)
     /// document when there is no source to copy (the call that asked for
@@ -98,6 +116,48 @@ internal object IntakeRules {
         !resultOk || !hasTarget -> SaveStep.CANCEL
         hasSource -> SaveStep.COPY
         else -> SaveStep.DISCARD
+    }
+
+    /// Deletes a cancelled save's source at [path] when no call is left to
+    /// answer ([callOpen] false). An open call's Dart caller deletes the
+    /// export itself once the call returns; with none (Android recreated
+    /// the activity while the create-document screen was up, and the
+    /// caller died with its engine) nothing else would, and the export,
+    /// the whole food log with every picture, stayed in the cache until
+    /// the next export. (A copy deletes its source as it opens it:
+    /// openSaveSource.) Only a regular file in [cacheDir] (regularFileIn).
+    /// True when one was deleted.
+    fun dropSaveSource(cacheDir: File, path: String?, callOpen: Boolean): Boolean {
+        if (callOpen) return false
+        val file = regularFileIn(cacheDir, path) ?: return false
+        return try {
+            file.delete()
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /// Opens a save's source at [path] (only a regular file in [cacheDir],
+    /// regularFileIn) for its copy, and deletes it from the cache at once:
+    /// the open stream still reads every byte. So no export is left behind
+    /// whatever happens to the copy, its call or the app meanwhile, and a
+    /// file written later under the same name is never this save's to
+    /// delete: deleting by name once a copy was done could take the export
+    /// the restarted app wrote under that name (one per day) while a slow
+    /// copy still ran. Null when there is nothing to open.
+    fun openSaveSource(cacheDir: File, path: String?): InputStream? {
+        val file = regularFileIn(cacheDir, path) ?: return null
+        val input = try {
+            file.inputStream()
+        } catch (e: Exception) {
+            return null
+        }
+        try {
+            file.delete()
+        } catch (e: Exception) {
+            // Left for the Dart caller, or the next export's sweep.
+        }
+        return input
     }
 
     /// The modes a save opens its new document with, in order. Both
@@ -162,5 +222,36 @@ internal class SingleCall<V> {
         pending = null
         reply(value)
         return true
+    }
+}
+
+/// The shares onNewIntent gets before share intake (Dart) listens for
+/// them. receive_sharing_intent tells only a listener and keeps nothing
+/// for later, and Android hands a share to a stopped app's recreated
+/// activity in the launch that recreates it, before its Dart has run: such
+/// a share waits here until Dart says it listens ("shareIntakeReady"),
+/// then goes to the plugin once. An activity that goes before then (Back
+/// or a swipe during the cold start) takes what it holds with it; those
+/// copies stay in shared_photos, where share intake's sweep takes them
+/// (share_intake.dart, strandedRecheck). Main thread only.
+internal class ShareHold<T> {
+    private val held = ArrayList<T>()
+    private var listening = false
+
+    /// Whether [share] goes to the plugins now; false: it is held until
+    /// [ready].
+    fun pass(share: T): Boolean {
+        if (listening) return true
+        held.add(share)
+        return false
+    }
+
+    /// Share intake listens from now on: the shares held so far, in the
+    /// order they came, each handed out once. Later ones pass at once.
+    fun ready(): List<T> {
+        listening = true
+        val out = ArrayList(held)
+        held.clear()
+        return out
     }
 }
