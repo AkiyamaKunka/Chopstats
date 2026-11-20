@@ -26,7 +26,9 @@
 ///   * titles name the day ('Thu: 1,850 kcal'), since a card can come late;
 ///   * a card still pending past its slot (a late inexact alarm, or one a
 ///     force stop took) is posted before the set replaces it — once, by
-///     whichever engine gets there first;
+///     whichever engine gets there first; so is today's card when the time
+///     is moved to before now, which the set for the new time would
+///     replace before it came;
 ///   * the first arm after the update posts today's summary if its slot
 ///     passed and the old scheme had not posted it.
 library;
@@ -35,7 +37,7 @@ import 'dart:async';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../core/coerce.dart' show addCalendarDays;
+import '../core/coerce.dart' show addCalendarDays, calendarDaysBetween;
 import '../core/contracts.dart';
 import '../services/report/coach_summary.dart' show CoachStrings, CoachSummary;
 import '../services/report/daily_summary.dart';
@@ -151,6 +153,16 @@ Future<void> _armOnce({
       toPost = await _updateDayCard(dao, settings, strings, naming!, time, at);
     }
     toPost ??= await _overdueCard(
+      dao,
+      settings,
+      notifier,
+      strings,
+      naming!,
+      time,
+      at,
+      p,
+    );
+    toPost ??= await _unsaidCard(
       dao,
       settings,
       notifier,
@@ -278,6 +290,49 @@ _overdueCard(
     card: await summaryForDay(
       dao: dao,
       day: day,
+      calorieGoal: settings.calorieGoal,
+      strings: strings,
+      onDay: naming,
+    ),
+  );
+}
+
+/// A card the OS still holds for a later slot whose day no card of the
+/// new set describes: the time was moved to before now (Settings), so the
+/// set re-armed for it starts with a later day, and would replace the
+/// card of a day still unsaid — today's, armed for the old, later time.
+/// The old scheme's 30-minute job posted the passed slot that evening
+/// (review 2026-11-19); it is posted now, claimed like an overdue card,
+/// with the day's meals as they stand.
+Future<({DateTime slot, PendingDailyCard? pending, CoachSummary card})?>
+_unsaidCard(
+  MealsDao dao,
+  AppSettings settings,
+  ReportNotifier notifier,
+  CoachStrings strings,
+  SummaryDayNaming naming,
+  ({int hour, int minute}) time,
+  DateTime at,
+  SharedPreferences? p,
+) async {
+  final firstDay = summaryDayFor(
+    ReportNotifier.nextDailyOccurrence(time, at),
+    slotHour: time.hour,
+  );
+  DateTime dayOf(PendingDailyCard c) => c.day ?? summaryDayFor(c.slot);
+  final unsaid = [
+    for (final c in await notifier.pendingDailyCards())
+      if (c.slot.isAfter(at) && calendarDaysBetween(dayOf(c), firstDay) > 0) c,
+  ];
+  if (unsaid.isEmpty) return null;
+  final card = unsaid.last; // the latest day
+  if (!await _claim(p, card.slot)) return null;
+  return (
+    slot: card.slot,
+    pending: card,
+    card: await summaryForDay(
+      dao: dao,
+      day: dayOf(card),
       calorieGoal: settings.calorieGoal,
       strings: strings,
       onDay: naming,

@@ -285,6 +285,71 @@ void main() {
       });
     });
 
+    // Review 2026-11-19 (R7): the set re-armed for a time already passed
+    // today starts tomorrow, and replaced today's card, armed for the old
+    // time and not come yet: that day had no summary. The 30-minute job of
+    // the old scheme posted the passed slot that evening.
+    group('the time moved to before now', () {
+      test('today\'s card is posted then, once, with the day as it stands',
+          () async {
+        final s = await settingsAt(); // 21:30
+        dao.seed(_meal('2026-11-13', 1200));
+        await arm(s, fri19);
+        await s.setReportTime('20:00');
+        os.log.clear();
+        await arm(s, DateTime(2026, 11, 13, 20, 30));
+        expect(os.shown.map((c) => c.title), ['Fri: 1,200 kcal']);
+        expect(os.log.last, 'show:$_id',
+            reason: 'the set is re-armed first: ${os.log}');
+        expect(os.pending[_id]!.when, DateTime(2026, 11, 14, 20, 0));
+        expect(os.pending[_id]!.title, 'Sat: 0 kcal');
+        // Later arms, from either engine, post nothing more, and the OS
+        // has no second Friday card to deliver.
+        for (final at in [
+          DateTime(2026, 11, 13, 20, 31),
+          DateTime(2026, 11, 13, 21, 45),
+          DateTime(2026, 11, 14, 1, 0),
+        ]) {
+          await arm(s, at);
+          await arm(s, at, via: os.notifier());
+        }
+        os.deliverDue(DateTime(2026, 11, 14, 23, 0));
+        expect(os.shown, hasLength(1));
+        expect(os.delivered.map((c) => c.title), ['Sat: 0 kcal']);
+      });
+
+      test('a night slot moved to the evening: the day it would have '
+          'described is posted', () async {
+        final s = await settingsAt(reportTime: '01:00');
+        dao.seed(_meal('2026-11-13', 900));
+        await arm(s, fri19); // Sat 01:00 holds Friday
+        await s.setReportTime('20:00');
+        await arm(s, DateTime(2026, 11, 13, 20, 30));
+        expect(os.shown.map((c) => c.title), ['Fri: 900 kcal']);
+        expect(os.pending[_id]!.title, 'Sat: 0 kcal');
+      });
+
+      test('a later time is armed for today; nothing posted', () async {
+        final s = await settingsAt();
+        await arm(s, fri19);
+        await s.setReportTime('22:00');
+        await arm(s, DateTime(2026, 11, 13, 20, 30));
+        expect(os.shown, isEmpty);
+        expect(os.pending[_id]!.when, DateTime(2026, 11, 13, 22, 0));
+      });
+
+      test('a card already past its slot is the overdue rule\'s: posted '
+          'once', () async {
+        final s = await settingsAt();
+        await arm(s, fri19);
+        await s.setReportTime('20:00');
+        await arm(s, DateTime(2026, 11, 13, 21, 40)); // 21:30 alarm late
+        await arm(s, DateTime(2026, 11, 13, 21, 41), via: os.notifier());
+        expect(os.shown, hasLength(1));
+        expect(os.pending[_id]!.when, DateTime(2026, 11, 14, 20, 0));
+      });
+    });
+
     group('the update day', () {
       test('today\'s slot passed and the old scheme had not posted it: '
           'posted once', () async {
