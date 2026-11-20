@@ -1094,6 +1094,8 @@ void main() {
         ),
       );
       expect(body, contains('requestPhotoPermission: requestPhotos,'));
+      // No meal-card channel either (notifications_test covers what it does).
+      expect(body, _wired(r'mealCards: photoLibraryInBuild,'));
       // No library for the screens either: no meal thumbnails looked up,
       // no coverage auditor, no library handed to Settings or Log.
       expect(

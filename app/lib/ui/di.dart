@@ -187,6 +187,8 @@ class AppServices {
       channelStrings: () => notificationChannelFor(settings.appLanguage),
       mealChannelStrings: () =>
           mealNotificationChannelFor(settings.appLanguage),
+      // The Play build posts no meal cards: no channel for them.
+      mealCards: photoLibraryInBuild,
       dailyBody: (slotDate) async {
         await postSummary();
         // NULL, not '': postSummary has ALREADY presented the coach summary
