@@ -1544,7 +1544,8 @@ on any `v*` tag, and the iOS lane stops until the iCloud container exists
    other **only after** § 6.3's step 2 check has passed, and say that the
    Play build has no Watch Camera Roll.
 
-Later, when the iPhone 1.7.0 is ready, tag `v1.7.0` on `main` as usual.
+Later, when the iPhone 1.7.0 is ready, tag `v1.7.0` on `main` as usual
+(but read the next paragraph first).
 That run also builds Android again, with a higher build number: it puts
 that APK on the `v1.7.0` release and, with `PLAY_SERVICE_ACCOUNT_JSON`
 set, sends the bundle to the internal track. Both are harmless (an
