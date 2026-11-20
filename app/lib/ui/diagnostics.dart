@@ -22,6 +22,7 @@ import '../core/server_transport.dart' show serverAddressRefused;
 import '../l10n/app_localizations.dart';
 import '../services/assist/assist_local_state.dart' show AssistDecisionEntry;
 import '../services/photo/glasses_check.dart';
+import '../services/server_http_client.dart' show HttpsOnlyServerClient;
 import 'assist_view.dart' show assistProviderLabel;
 import 'format.dart' show formatKcal;
 import 'provider_names.dart';
@@ -136,8 +137,14 @@ class ProviderDiagnostics {
     if (probeUrl != null) {
       try {
         // ANY HTTP answer (404 included) proves the network path; only
-        // transport failures mean unreachable.
-        await client
+        // transport failures mean unreachable. A 3xx is such an answer and
+        // is not followed: the probe goes through the https-only client in
+        // front of the server (services/server_http_client.dart), for a
+        // provider's address too, so it reaches that address and no other.
+        // Followed, a redirect to an http:// address or another host had a
+        // request sent there, and the stage went by that address's answer
+        // (Android review 2026-11-19).
+        await HttpsOnlyServerClient.wrap(client)
             .get(Uri.parse(probeUrl))
             .timeout(const Duration(seconds: 10));
         yield DiagResult(
