@@ -78,7 +78,10 @@ void main() {
       expect(photo.bytes, [1, 2, 3]);
       // Plugin contract: the container copy is deleted once consumed —
       // without this every shared photo leaks in the app group forever.
+      // iOS: as it is read (its share extension reuses file names), so the
+      // photo has nothing left to settle.
       expect(cleaned, ['/shared/IMG_20260716_193042.jpg']);
+      expect(photo.onSettled, isNull);
       await sub.cancel();
     });
 
@@ -161,8 +164,8 @@ void main() {
           ..createSync(recursive: true)
           ..writeAsBytesSync(bytes);
 
-    test('a path outside the folder is left alone; the copy inside is read '
-        'and deleted', () async {
+    test('a path outside the folder is left alone; the copy inside is read, '
+        'and deleted once its photo is settled', () async {
       final db = appFile('databases/calorie_tracker.db', [1, 2, 3]);
       final prefs =
           appFile('shared_prefs/FlutterSharedPreferences.xml', [4]);
@@ -191,8 +194,10 @@ void main() {
       final photo = await intake.photos().first;
       expect(photo.fileName, 'IMG_20260716_193042.jpg');
       expect(read, [copy.path]);
-      expect(copy.existsSync(), isFalse,
-          reason: 'the copy is still deleted once read');
+      expect(copy.existsSync(), isTrue,
+          reason: 'kept until the photo is settled (Q1, Q9)');
+      photo.onSettled!();
+      expect(copy.existsSync(), isFalse, reason: 'deleted once settled');
       expect(db.existsSync(), isTrue);
       expect(prefs.existsSync(), isTrue);
       expect(private.existsSync(), isTrue);
@@ -509,8 +514,10 @@ void main() {
       final paths = share(20);
       final emitted = <String>[];
       late StreamSubscription<IntakePhoto> sub;
+      // Each photo's turn ends as it arrives, as the pipeline's would.
       sub = counting(source).photos().listen((p) {
         emitted.add(p.fileName);
+        p.onSettled!();
         sub.pause();
       });
       source.controller.add(paths);
@@ -523,11 +530,15 @@ void main() {
       expect(emitted, hasLength(2));
       expect(reads.length, lessThanOrEqualTo(3));
       // Keep going without pausing: everything arrives, in order.
-      sub.onData((p) => emitted.add(p.fileName));
+      sub.onData((p) {
+        emitted.add(p.fileName);
+        p.onSettled!();
+      });
       sub.resume();
       await pumpEventQueue();
       expect(emitted, [for (final p in paths) fileBaseName(p)]);
-      expect(cleaned, paths, reason: 'every copy still deleted once read');
+      expect(cleaned, paths,
+          reason: 'every copy deleted once its photo is settled');
       await sub.cancel();
     });
 
@@ -584,7 +595,10 @@ void main() {
           sharedFolder: () async => '/shared',
           clock: () => now);
       final emitted = <String>[];
-      final sub = intake.photos().listen((p) => emitted.add(p.fileName));
+      final sub = intake.photos().listen((p) {
+        emitted.add(p.fileName);
+        p.onSettled!();
+      });
       source.controller.add(paths);
       await pumpEventQueue();
       final later = share(1, prefix: 'later');
@@ -592,7 +606,8 @@ void main() {
       await pumpEventQueue();
       expect(emitted,
           [fileBaseName(paths[0]), fileBaseName(paths[2]), 'later_0.jpg']);
-      expect(cleaned, [...paths, ...later]);
+      expect(cleaned, unorderedEquals([...paths, ...later]),
+          reason: 'the unreadable one at once, the others once settled');
       await sub.cancel();
     });
 
@@ -625,20 +640,30 @@ void main() {
       await sub.cancel();
     });
 
-    test('cancelled while paused: the unread copies are deleted unread',
-        () async {
+    test('cancelled while paused: the unread copies are deleted unread; one '
+        'handed on waits for its verdict', () async {
       final source = FakeShareSource();
       final paths = share(6);
+      final got = <IntakePhoto>[];
       late StreamSubscription<IntakePhoto> sub;
-      sub = counting(source).photos().listen((_) => sub.pause());
+      sub = counting(source).photos().listen((p) {
+        got.add(p);
+        sub.pause();
+      });
       source.controller.add(paths);
       await pumpEventQueue();
       final readBefore = reads.length;
       await sub.cancel();
       await pumpEventQueue();
       expect(reads.length, readBefore, reason: 'nothing more is read');
-      expect(cleaned.toSet(), paths.toSet(),
-          reason: 'no copy left behind in the cache');
+      expect(cleaned.toSet(), paths.skip(readBefore).toSet(),
+          reason: 'no unread copy left behind in the cache');
+      // The photo the listener took is still being worked on: its copy
+      // goes with its verdict, not with the stream (Q1, Q9).
+      expect(got.map((p) => p.fileName), [fileBaseName(paths[0])]);
+      expect(cleaned, isNot(contains(paths[0])));
+      got.single.onSettled!();
+      expect(cleaned, contains(paths[0]));
     });
 
     test('a 20-photo share through the consent gate and the pipeline, the '
@@ -873,14 +898,261 @@ void main() {
     });
   });
 
+  // Q1, Q9 (2026-11-20): on Android a photo's copy waits on disk until the
+  // photo is settled (IntakePhoto.onSettled: its verdict written, or it was
+  // dropped unsent). It used to go as its bytes were read, so an engine
+  // that went mid-analysis lost the photo in flight and the one read
+  // ahead. share_resume_test.dart runs the whole path across two starts.
+  group('Android: a copy waits for its photo\'s verdict (Q1, Q9)', () {
+    late Map<String, Uint8List> held;
+    late List<String> reads;
+
+    ShareIntake android(FakeShareSource source) => ShareIntake(
+        source: source,
+        library: FakePhotoLibrary(),
+        readBytes: (path) async {
+          reads.add(path);
+          return held[path];
+        },
+        cleanup: (path) async => cleaned.add(path),
+        sharedFolder: () async => '/shared',
+        clock: () => now);
+
+    setUp(() {
+      held = {};
+      reads = [];
+    });
+
+    test('a photo\'s copy stays until the photo is settled, then goes, once',
+        () async {
+      final source = FakeShareSource();
+      held['/shared/1/IMG_a.jpg'] = Uint8List.fromList([1, 2]);
+      final got = <IntakePhoto>[];
+      final sub = android(source).photos().listen(got.add);
+      source.controller.add(['/shared/1/IMG_a.jpg']);
+      await pumpEventQueue();
+      expect(got, hasLength(1));
+      expect(cleaned, isEmpty, reason: 'read and handed on, no verdict yet');
+      got.single.onSettled!();
+      expect(cleaned, ['/shared/1/IMG_a.jpg']);
+      got.single.onSettled!();
+      expect(cleaned, hasLength(1), reason: 'a second call does nothing');
+      await sub.cancel();
+    });
+
+    test('a copy being read as a Not now covers its share is deleted once '
+        'read, never handed on', () async {
+      const path = '/shared/1/IMG_a.jpg';
+      held[path] = Uint8List.fromList([1, 2]);
+      final reading = Completer<void>();
+      final source = FakeShareSource();
+      final intake = ShareIntake(
+          source: source,
+          library: FakePhotoLibrary(),
+          readBytes: (p) async {
+            reads.add(p);
+            await reading.future;
+            return held[p];
+          },
+          cleanup: (p) async => cleaned.add(p),
+          sharedFolder: () async => '/shared',
+          clock: () => now);
+      final got = <IntakePhoto>[];
+      final sub = intake.photos().listen(got.add);
+      source.controller.add([path]);
+      await pumpEventQueue();
+      expect(reads, [path], reason: 'being read');
+      intake.declineDeliveries({1});
+      reading.complete();
+      await pumpEventQueue();
+      expect(got, isEmpty);
+      expect(cleaned, [path]);
+      await sub.cancel();
+    });
+
+    test('a copy that gives no photo still goes as it is read: another '
+        'type, over 25 MB, nothing to read', () async {
+      final source = FakeShareSource();
+      held['/shared/1/notes.txt'] = Uint8List.fromList([1]);
+      held['/shared/2/IMG_big.jpg'] = Uint8List(maxPhotoBytes + 1);
+      final paths = [
+        '/shared/1/notes.txt',
+        '/shared/2/IMG_big.jpg',
+        '/shared/3/IMG_gone.jpg', // reads as nothing
+      ];
+      final got = <IntakePhoto>[];
+      final sub = android(source).photos().listen(got.add);
+      source.controller.add(paths);
+      await pumpEventQueue();
+      expect(got, isEmpty);
+      expect(cleaned, paths);
+      await sub.cancel();
+    });
+
+    test('a Not now deletes the copies already read (the photo asked about, '
+        'the one read ahead) with the rest, before its answer returns',
+        () async {
+      final source = FakeShareSource();
+      final paths = [for (var i = 0; i < 4; i++) '/shared/$i/IMG_$i.jpg'];
+      for (final p in paths) {
+        held[p] = Uint8List.fromList([p.hashCode & 0xFF, 1]);
+      }
+      final settings = FakeSettings(apiKey: 'k')..aiConsent = {};
+      final gate = SharedPhotoConsentGate(settings);
+      final intake = android(source);
+      List<String>? cleanedAtAnswer;
+      var readAtAnswer = 0;
+      gate.attach(() async {
+        await pumpEventQueue(); // the copy read ahead has landed
+        readAtAnswer = reads.length;
+        gate.declineOpenQuestion();
+        cleanedAtAnswer = [...cleaned];
+        return false;
+      });
+      final sub =
+          gate.gate(intake.photos(), deliveries: intake).listen((_) {});
+      source.controller.add(paths);
+      await pumpEventQueue(times: 50);
+      expect(readAtAnswer, inInclusiveRange(1, 2));
+      expect(cleanedAtAnswer?.toSet(), paths.toSet(),
+          reason: 'read or not, gone as the answer is given: an app stopped '
+              'right after keeps none for the next start');
+      expect(reads, hasLength(readAtAnswer), reason: 'nothing more is read');
+      await sub.cancel();
+    });
+  });
+
+  // Review 2026-11-20: with predictive back, Android 14 and later finish a
+  // task the launcher intent started from somewhere other than the home
+  // screen (Play's Open button) when Back reaches the root, and the engine
+  // with it, mid-analysis (Q9); MainActivity keeps Back in Flutter
+  // in the other tasks they would finish. The shell keeps that Back in
+  // Flutter in every task while a shared photo is pending
+  // (SharedPhotosBackGuard): from the moment its share arrives until the
+  // photo is settled, through every read, and never on iOS.
+  group('Android: photosPending, from a share\'s arrival to its last '
+      'verdict', () {
+    late Map<String, Uint8List> held;
+    late Map<String, Completer<void>> readGates;
+
+    ShareIntake android(FakeShareSource source, {bool iOS = false}) =>
+        ShareIntake(
+            source: source,
+            library: FakePhotoLibrary(),
+            readBytes: (path) async {
+              await readGates[path]?.future;
+              return held[path];
+            },
+            cleanup: (path) async => cleaned.add(path),
+            sharedFolder: iOS ? null : () async => '/shared',
+            clock: () => now);
+
+    /// Every value [intake] says from now on, in order.
+    List<bool> said(ShareIntake intake) {
+      final out = <bool>[];
+      intake.photosPending
+          .addListener(() => out.add(intake.photosPending.value));
+      return out;
+    }
+
+    setUp(() {
+      held = {
+        '/shared/1/IMG_a.jpg': Uint8List.fromList([1, 2]),
+        '/shared/2/IMG_b.jpg': Uint8List.fromList([3, 4]),
+        '/shared/2/IMG_c.jpg': Uint8List.fromList([5, 6]),
+      };
+      readGates = {};
+    });
+
+    test('pending until the last photo is settled, and never false in '
+        'between: not while another share\'s copy is being read', () async {
+      final source = FakeShareSource();
+      final intake = android(source);
+      final values = said(intake);
+      final got = <IntakePhoto>[];
+      final sub = intake.photos().listen(got.add);
+      await pumpEventQueue();
+      expect(intake.photosPending.value, isFalse, reason: 'nothing shared');
+
+      source.controller.add(['/shared/1/IMG_a.jpg']);
+      await pumpEventQueue();
+      expect(got, hasLength(1));
+      expect(intake.photosPending.value, isTrue, reason: 'a: no verdict yet');
+      // A second share; its copy is still being read when a's verdict is
+      // written.
+      readGates['/shared/2/IMG_b.jpg'] = Completer<void>();
+      source.controller.add(['/shared/2/IMG_b.jpg']);
+      await pumpEventQueue();
+      expect(got, hasLength(1), reason: 'b is being read');
+      got.single.onSettled!();
+      expect(intake.photosPending.value, isTrue,
+          reason: 'b, being read, is pending too');
+
+      readGates['/shared/2/IMG_b.jpg']!.complete();
+      await pumpEventQueue();
+      expect(got, hasLength(2));
+      expect(intake.photosPending.value, isTrue);
+      got.last.onSettled!();
+      expect(intake.photosPending.value, isFalse);
+      expect(values, [true, false]);
+      await sub.cancel();
+    });
+
+    test('a Not now clears it before its answer returns, read copies and '
+        'unread alike', () async {
+      final source = FakeShareSource();
+      final intake = android(source);
+      late StreamSubscription<IntakePhoto> sub;
+      sub = intake.photos().listen((_) => sub.pause());
+      source.controller.add(['/shared/2/IMG_b.jpg', '/shared/2/IMG_c.jpg']);
+      await pumpEventQueue();
+      expect(intake.photosPending.value, isTrue);
+      intake.declineDeliveries({1});
+      expect(intake.photosPending.value, isFalse);
+      await sub.cancel();
+    });
+
+    test('a copy that gives no photo holds it only while it is read',
+        () async {
+      final source = FakeShareSource();
+      final intake = android(source);
+      final values = said(intake);
+      final sub = intake.photos().listen((_) {});
+      held['/shared/3/notes.txt'] = Uint8List.fromList([1]);
+      source.controller
+          .add(['/shared/3/notes.txt', '/shared/4/IMG_gone.jpg']);
+      await pumpEventQueue();
+      expect(intake.photosPending.value, isFalse);
+      expect(values, [true, false]);
+      await sub.cancel();
+    });
+
+    test('iOS (no share folder): never pending', () async {
+      final source = FakeShareSource();
+      final intake = android(source, iOS: true);
+      final values = said(intake);
+      final got = <IntakePhoto>[];
+      final sub = intake.photos().listen(got.add);
+      source.controller.add(['/shared/1/IMG_a.jpg']);
+      await pumpEventQueue();
+      expect(got, hasLength(1));
+      expect(intake.photosPending.value, isFalse);
+      expect(values, isEmpty);
+      await sub.cancel();
+    });
+  });
+
   // Review 2026-11-13: with the C2 backpressure, copies wait in the share
   // folder for minutes. An app killed mid-batch left the rest there for
   // good — full-size originals in the cache, never logged, nothing said
   // (MainActivity removes only EMPTY folders, and a recreated activity
   // does not hand the launch share over again). The next start logs the
   // ones shared within a day, through the same consent gate and pipeline:
-  // a copy still on disk was never read, since reading deletes it, so
-  // nothing is sent twice. Older ones are deleted unread.
+  // a copy still on disk has no verdict written yet (on Android a photo's
+  // copy goes only once the photo is settled). Most were never read; one
+  // whose engine stopped mid-analysis may have been sent already and is
+  // sent again, and the md5 photo ledger keeps it to one meal
+  // (share_resume_test.dart). Older ones are deleted unread.
   group('Android: copies a killed app left unread', () {
     late Directory cache;
     late String folder;
@@ -935,9 +1207,10 @@ void main() {
       final source = FakeShareSource()..initial = [launch.path];
       final read = <String>[];
       final emitted = <String>[];
-      final sub = android(source, read)
-          .photos()
-          .listen((p) => emitted.add(p.fileName));
+      final sub = android(source, read).photos().listen((p) {
+        emitted.add(p.fileName);
+        p.onSettled!();
+      });
       await until(() => emitted.length >= 3, 'three copies emitted');
       expect(emitted, ['IMG_c.jpg', 'IMG_a.jpg', 'IMG_b.jpg']);
       expect(emitted.length, 3, reason: 'the launch share once, not twice');
@@ -1007,9 +1280,10 @@ void main() {
         settings.aiConsent = {'gemini'};
         return true;
       });
-      final sub = gate
-          .gate(intake.photos(), deliveries: intake)
-          .listen((p) => passed.add(p.fileName));
+      final sub = gate.gate(intake.photos(), deliveries: intake).listen((p) {
+        passed.add(p.fileName);
+        p.onSettled!();
+      });
       await until(() => passed.length >= 3, 'the copies left unread logged');
       expect(notSent, [2], reason: 'the launch share, not 5');
       expect(asked, 2);
@@ -1077,7 +1351,9 @@ void main() {
 
       // The app is stopped here: nothing more of this run happens. The
       // next start, 5 minutes on, with the recipient now allowed, logs what
-      // is left of the start-up batch, up to a copy newer than any other.
+      // is left of the start-up batch (the photo that was in the pipeline
+      // included: its copy waited for a verdict), up to a copy newer than
+      // any other.
       final newest = copyAt('z', 'IMG_z.jpg', const Duration(seconds: -1));
       final next = <String>[];
       final sub2 = SharedPhotoConsentGate(settings)
@@ -1088,10 +1364,15 @@ void main() {
                   sharedFolder: () async => folder,
                   clock: () => now.add(const Duration(minutes: 5)))
               .photos())
-          .listen((p) => next.add(p.fileName));
+          .listen((p) {
+        next.add(p.fileName);
+        p.onSettled!();
+      });
       await until(() => next.contains('IMG_z.jpg'), "the next start's sweep");
       expect(next.where((n) => n.startsWith('IMG_x')), isEmpty,
           reason: 'photos answered Not now are never sent');
+      expect(next, containsAll(['IMG_left0.jpg', 'IMG_left2.jpg']),
+          reason: 'the one in the pipeline when the app stopped comes back');
       expect(newest.existsSync(), isFalse);
       expect(left.last.existsSync(), isFalse);
       await sub2.cancel();
@@ -1259,7 +1540,10 @@ void main() {
               listening: androidShareIntakeReady,
               clock: () => now)
           .photos()
-          .listen((p) => emitted.add(p.fileName));
+          .listen((p) {
+        emitted.add(p.fileName);
+        p.onSettled!();
+      });
       await until(() => emitted.length >= 2, 'the held share and the sentinel');
       expect(emitted.toSet(), {'IMG_meal.jpg', 'IMG_s.jpg'});
       expect(emitted.where((n) => n == 'IMG_meal.jpg'), hasLength(1),
@@ -1269,7 +1553,7 @@ void main() {
           greaterThan(calls.indexOf('listen')),
           reason: 'the plugin has its listener before the share is handed '
               'over');
-      expect(meal.existsSync(), isFalse, reason: 'read, so deleted');
+      expect(meal.existsSync(), isFalse, reason: 'settled, so deleted');
       await sub.cancel();
     });
 
@@ -1322,14 +1606,17 @@ void main() {
       final sentinel = copyAt('s1', 'IMG_s.jpg', const Duration(hours: 1));
       final intake = rechecking(FakeShareSource());
       final emitted = <IntakePhoto>[];
-      final sub = intake.photos().listen(emitted.add);
+      final sub = intake.photos().listen((p) {
+        emitted.add(p);
+        p.onSettled!();
+      });
       await until(() => emitted.length >= 2, 'the sentinel and the meal');
       await Future<void>.delayed(const Duration(milliseconds: 200));
       expect([for (final p in emitted) p.fileName],
           ['IMG_s.jpg', 'IMG_meal.jpg']);
       expect(intake.asksAlone(emitted.last.shareDelivery!), isTrue,
           reason: 'no share being made now: a question of its own');
-      expect(orphan.existsSync(), isFalse, reason: 'read, so deleted');
+      expect(orphan.existsSync(), isFalse, reason: 'settled, so deleted');
       expect(sentinel.existsSync(), isFalse);
       await sub.cancel();
     });
@@ -1347,7 +1634,11 @@ void main() {
       final emitted = <IntakePhoto>[];
       // Paused from the start (a question open, say): nothing is read, so
       // both copies are still on disk for the sweep and the second look.
-      final sub = intake.photos().listen(emitted.add)..pause();
+      final sub = intake.photos().listen((p) {
+        emitted.add(p);
+        p.onSettled!();
+      })
+        ..pause();
       await until(() => intake.arrivedDelivery >= 2, 'the second look');
       await Future<void>.delayed(const Duration(milliseconds: 200));
       expect(intake.arrivedDelivery, 2,

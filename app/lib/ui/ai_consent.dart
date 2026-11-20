@@ -278,9 +278,10 @@ Future<bool> askAiConsentUpdate(
 /// Holds each photo shared into the app until the current recipient is
 /// allowed. A photo whose recipient is already allowed (or that nothing
 /// could send — no key) passes straight through; otherwise the app shell's
-/// dialog ([attach]) asks, and Not now drops the photo (its container copy
-/// is already deleted by the share intake). Photos keep their order: the
-/// stream waits while a question is open.
+/// dialog ([attach]) asks, and Not now drops the photo. A dropped photo is
+/// settled (IntakePhoto.onSettled), so the share intake deletes its copy:
+/// a photo answered Not now is never offered again at the next start.
+/// Photos keep their order: the stream waits while a question is open.
 ///
 /// Pause-transparent: a plain asyncMap, so while a question is open (and
 /// while the pipeline holds a photo) the share intake reads no further
@@ -412,9 +413,15 @@ class SharedPhotoConsentGate {
       return photo;
     }
 
+    // Dropped unsent: settled, so its share copy goes.
+    IntakePhoto? dropped() {
+      photo.onSettled?.call();
+      return null;
+    }
+
     while (true) {
       // Its share was answered Not now: dropped unasked, never sent.
-      if (delivery != null && _declined.contains(delivery)) return null;
+      if (delivery != null && _declined.contains(delivery)) return dropped();
       // Re-read after every wait: the user may have allowed it meanwhile.
       if (!aiConsentNeeded(_settings)) return passed();
       final ask = _ask;
@@ -431,7 +438,7 @@ class SharedPhotoConsentGate {
         answer = await ask();
       } catch (_) {
         _asking = null;
-        return null; // a failed dialog is not consent
+        return dropped(); // a failed dialog is not consent
       }
       if (answer == true) {
         _asking = null;
@@ -442,7 +449,7 @@ class SharedPhotoConsentGate {
         // the dialog's own line did not.
         if (!_declineMarked) declineOpenQuestion();
         _asking = null;
-        return null;
+        return dropped();
       }
       // No dialog could be shown: no answer. Nothing is declined; the
       // photo waits for the next shell's question.

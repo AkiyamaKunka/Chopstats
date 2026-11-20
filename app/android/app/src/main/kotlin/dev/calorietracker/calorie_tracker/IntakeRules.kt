@@ -48,7 +48,10 @@ internal object IntakeRules {
     /// share, the setup link or a notification created, its engine with
     /// it. Android 13 moves every task whose root is a launcher activity
     /// to the back (onBackPressedOnTaskRoot), and Android 12 and lower have
-    /// no back callback: Back reaches Flutter through onBackPressed.
+    /// no back callback: Back reaches Flutter through onBackPressed. Where
+    /// the callback stays, as on Android 12 and lower, Back at the root
+    /// goes through Flutter's SystemNavigator.pop to
+    /// MainActivity.popSystemNavigator, which moves the task to the back.
     fun keepsBackCallbackAtRoot(sdk: Int, launcherTask: Boolean): Boolean =
         sdk >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE && !launcherTask
 
@@ -264,10 +267,13 @@ internal class SingleCall<V> {
 /// for later, and Android hands a share to a stopped app's recreated
 /// activity in the launch that recreates it, before its Dart has run: such
 /// a share waits here until Dart says it listens ("shareIntakeReady"),
-/// then goes to the plugin once. An activity that goes before then (Back
-/// or a swipe during the cold start) takes what it holds with it; those
-/// copies stay in shared_photos, where share intake's sweep takes them
-/// (share_intake.dart, strandedRecheck). Main thread only.
+/// then goes to the plugin once. An activity that goes before then (a
+/// swipe from Recents during the cold start; a Back Android answers by
+/// finishing it, which Android 14 and later still do in a task the
+/// launcher intent started from somewhere other than the home screen:
+/// MainActivity.setFrameworkHandlesBack) takes what it holds with it;
+/// those copies stay in shared_photos, where share intake's sweep takes
+/// them (share_intake.dart, strandedRecheck). Main thread only.
 internal class ShareHold<T> {
     private val held = ArrayList<T>()
     private var listening = false

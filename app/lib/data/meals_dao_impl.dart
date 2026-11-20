@@ -569,9 +569,11 @@ class SqfliteMealsDao implements MealsDao {
     if (rows.isEmpty) throw const ReservationLost();
   }
 
-  /// A 'processing' row younger than this may belong to a LIVE run in the
-  /// other isolate (the periodic background job vs. the foreground app) —
-  /// sweeping it would double-analyze and double-log the photo. Worst-case
+  /// An automatic 'processing' row younger than this may belong to a LIVE
+  /// run in the other isolate (the periodic background job vs. the
+  /// foreground app) — sweeping it would double-analyze and double-log the
+  /// photo. (A deliberate row is the app engine's own: a younger one is
+  /// released at once, see [reclaimStaleProcessing].) Worst-case
   /// legitimate hold is ~15.3 min (ServerAnalyzer: 3 attempts × its 5-min
   /// deadline + backoffs). Warm paths reclaim on their own after
   /// appProcessingStaleAge (meals_logic.dart).
@@ -594,7 +596,8 @@ class SqfliteMealsDao implements MealsDao {
     // never had: (1) EMUI-class OSes routinely kill the process mid-
     // analysis, and (2) a background isolate may hold live reservations
     // while this launch sweep runs. Only rows stale for [staleProcessingAge]
-    // are touched. AUTOMATED-watch rows are RELEASED (deleted) so the next
+    // are touched, but for the app engine's own deliberate rows (below).
+    // AUTOMATED-watch rows are RELEASED (deleted) so the next
     // scan re-offers the photo — marking them 'failed' silently dropped
     // every interrupted photo forever (watch intake never reclaims failed;
     // observed live 2026-07-23: three of the user's photos burned this way).
@@ -610,8 +613,46 @@ class SqfliteMealsDao implements MealsDao {
         cutoff,
       ],
     );
-    // DELIBERATE rows (picker/share) keep the spec behavior: mark 'failed'
-    // so the user-visible retry path owns them.
+    // DELIBERATE (app_photo) rows younger than that are RELEASED too (Q1,
+    // Q9; review 2026-11-20). Only the app's engine reserves those (the
+    // background run takes automatic photos only), and this sweep runs as
+    // that engine starts, so the run that held one is gone: Back finished
+    // its activity, or Android or iOS stopped its process, mid-analysis.
+    // Left 'processing' it answered "still being analyzed" to every
+    // deliberate add for half an hour (appProcessingStaleAge), and a
+    // shared photo whose copy the share intake kept (it deletes a copy
+    // only once its photo is settled) came back at this start only to be
+    // told so. Released, not failed: 'failed' is settled for the automatic
+    // intake, so a pick (or an iPhone share, whose copy is gone) killed
+    // mid-analysis and reopened minutes later was never logged by Watch
+    // Camera Roll, which reclaimed the row once stale while it stayed
+    // 'processing' (2026-10-12: a run killed mid-analysis does not park
+    // the photo). Released, it goes to whoever offers it next: the kept
+    // share copy, a share again, or, for a photo in the phone's library, a
+    // pick again and the launch catch-up. A run that was in fact alive
+    // loses its row (ReservationLost): a deliberate one settles the
+    // verdict it holds once more under a fresh reservation, with no second
+    // upload, unless the photo is saved or held by another run by then
+    // (PhotoPipeline._afterLost); never a second meal.
+    await _db.delete(
+      'photo_ingestions',
+      where:
+          'chat_id = ? AND status = ? AND source = ? AND last_seen_at >= ?',
+      whereArgs: [
+        localChatId,
+        IngestionStatus.processing.name,
+        MealSource.appPhoto,
+        cutoff,
+      ],
+    );
+    // Older DELIBERATE rows (picker/share) keep the spec behavior: mark
+    // 'failed' so the user-visible retry path owns them. A deliberate add
+    // reclaims a failed row, so a shared photo whose copy was kept, offered
+    // again by the start-up sweep, still goes through (Q1, Q9). One whose
+    // copy is gone waits for a share or pick again, or for Photo
+    // Coverage's retry if it is also in the phone's library (not in the
+    // Play build). One shared from another app (a chat app, a browser)
+    // usually is not: only sharing it again logs it, and nothing says so.
     await _db.update(
       'photo_ingestions',
       {

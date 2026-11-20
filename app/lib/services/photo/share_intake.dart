@@ -10,6 +10,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show ValueListenable, ValueNotifier;
 import 'package:flutter/services.dart'
     show MethodChannel, MissingPluginException, PlatformException;
 import 'package:path_provider/path_provider.dart' show getTemporaryDirectory;
@@ -174,6 +175,9 @@ Future<Uint8List?> _readFileBytes(String path) async {
 /// Android app dir) and its API contract says the consumer deletes the copy
 /// after use — nothing else ever purges them, so skipping this leaks the
 /// full-size original of every shared photo forever (storage + privacy).
+/// "After use" is once the photo is settled on Android
+/// (IntakePhoto.onSettled: its verdict written, or let go: released by
+/// the pipeline or dropped unsent), at once on iOS.
 /// Synchronous: a Not now's copies are gone before its answer returns
 /// ([ShareIntake.declineDeliveries]), so an app stopped right after keeps
 /// none for the next start's sweep.
@@ -248,6 +252,31 @@ class ShareIntake implements ShareDeliveries {
   /// Not now deletes them at once, wherever the reader waits.
   final Map<int, List<String>> _untaken = {};
 
+  /// Android: each delivery's copies read and handed on whose photo is
+  /// not settled yet (IntakePhoto.onSettled): kept on disk until then, so
+  /// an engine stopped mid-analysis leaves them for the next start.
+  final Map<int, Set<String>> _inHand = {};
+
+  /// Android: copies the reader has taken and is reading now, between
+  /// [_untaken] and [_inHand].
+  int _reading = 0;
+
+  /// Android: whether a shared photo this engine took is not settled yet
+  /// (IntakePhoto.onSettled) — its copy waiting unread ([_untaken]), being
+  /// read, or in hand ([_inHand]) — so stopping the engine now would cut
+  /// it off. The app shell keeps Back at the root from finishing the
+  /// activity meanwhile, in every task (SharedPhotosBackGuard): with
+  /// predictive back, Android 14 and later finish a task the launcher
+  /// intent started from somewhere other than the home screen (Play's Open
+  /// button), its engine with it, mid-analysis (Q9). False once every
+  /// photo is settled, and always on iOS.
+  ValueListenable<bool> get photosPending => _pending;
+  final ValueNotifier<bool> _pending = ValueNotifier<bool>(false);
+
+  /// [photosPending] after a change to what this intake holds.
+  void _notePending() => _pending.value = _copiesWait &&
+      (_untaken.isNotEmpty || _inHand.isNotEmpty || _reading > 0);
+
   /// The share folder once it is known (the first copy checked against it
   /// asks for it): a Not now checks its copies against it synchronously.
   String? _knownFolder;
@@ -287,7 +316,15 @@ class ShareIntake implements ShareDeliveries {
       for (final path in _untaken.remove(delivery) ?? const <String>[]) {
         _discardNow(path);
       }
+      // So do those already read and handed on, which the gate drops
+      // unsent as they reach it: the photo the question was about, the
+      // one read ahead. (While a question is open no photo of a share is
+      // in the pipeline: each waits for the one before it.)
+      for (final path in _inHand.remove(delivery) ?? const <String>{}) {
+        _discardNow(path);
+      }
     }
+    _notePending();
     // And the reader stops waiting on any of them.
     _wakeReader?.call();
   }
@@ -310,6 +347,18 @@ class ShareIntake implements ShareDeliveries {
   /// Not now covers the whole share it was asked about — and any that
   /// arrived before the answer — and their copies not read yet are deleted
   /// here unread, at once ([declineDeliveries]).
+  ///
+  /// KEPT UNTIL SETTLED (Android, 2026-11-20, Q1/Q9): a photo's copy stays
+  /// on disk after it is read, until the photo is settled
+  /// (IntakePhoto.onSettled: its verdict written, or let go: released by
+  /// the pipeline or dropped unsent). It used to go as its bytes were
+  /// read, so an engine stopped mid-analysis (Back finished the activity,
+  /// Android stopped the process) lost the photo in flight and the one
+  /// read ahead: the meal was never saved, and nothing could offer it
+  /// again. Now the next start's sweep ([_leftOver]) offers them again
+  /// with the copies never read. A copy that gives no photo (another
+  /// type, empty, over 25 MB, unreadable) still goes at once, and on a
+  /// cancel the copies read but not handed on go with those not read.
   ///
   /// iOS reads each copy the moment it arrives, as before: the share
   /// extension writes `<appGroup>/<file name>` and replaces a file of the
@@ -349,20 +398,30 @@ class ShareIntake implements ShareDeliveries {
         // Cancelled, or declined by the consent gate's Not now: not read,
         // but not left in the cache either.
         if (cancelled || controller.isClosed || declined()) {
+          _notePending();
           await _discard(path);
           continue;
         }
         final IntakePhoto? photo;
+        // Pending while it is read, too: in hand once it gives a photo.
+        _reading++;
         try {
           photo = await _fromPath(path, delivery);
         } catch (_) {
           unreadable();
           continue; // one bad copy (already deleted) never stops the rest
+        } finally {
+          _reading--;
+          _notePending();
         }
         if (photo == null) {
           unreadable();
-        } else if (!cancelled && !controller.isClosed) {
+        } else if (!cancelled && !controller.isClosed && !declined()) {
           controller.add(photo);
+        } else {
+          // Read as the stream went, or as a Not now covered its share:
+          // handed to nobody, so not kept.
+          photo.onSettled?.call();
         }
       }
     }
@@ -382,6 +441,7 @@ class ShareIntake implements ShareDeliveries {
       if (leftOver) _startupBatches.add(delivery);
       _deliverySize[delivery] = paths.length;
       if (_copiesWait) _untaken[delivery] = [...paths];
+      _notePending();
       reading = reading
           .then((_) => emitPaths(paths, delivery))
           .catchError((Object _) {});
@@ -441,7 +501,7 @@ class ShareIntake implements ShareDeliveries {
     return controller.stream;
   }
 
-  /// How long a copy a killed app left unread is still logged at the next
+  /// How long a copy a killed app left behind is still logged at the next
   /// start (Android); older ones are deleted unread.
   static const strandedMaxAge = Duration(hours: 24);
 
@@ -471,12 +531,19 @@ class ShareIntake implements ShareDeliveries {
   /// empty folders, and a recreated activity hands no share over again).
   /// Those shared within [strandedMaxAge] come back, oldest first, to go
   /// through the same consent gate and pipeline as any share: the user
-  /// shared them to be logged, and a copy still on disk was never read
-  /// (reading deletes it), so nothing is sent twice. Older ones are
-  /// deleted here, unread: logged days late they would surprise, and
-  /// could land on the wrong day. The launch share's own copies are left
-  /// out, and those younger than [strandedMinAge] come back second, for
-  /// [strandedRecheck].
+  /// shared them to be logged, and a copy still on disk has no verdict
+  /// written (a copy goes once its photo is settled, [photos]). Most were
+  /// never read; the one an engine stopped mid-analysis was maybe sent
+  /// once already, and goes again (the launch sweep,
+  /// MealsDao.reclaimStaleProcessing, released its 'processing' row, or
+  /// failed it once 20 minutes old, and its deliberate add takes the
+  /// photo either way). The photo ledger keeps a photo whose meal
+  /// was written as its engine stopped from becoming a second meal: the
+  /// pipeline answers "already logged" before anything is sent. Older
+  /// ones are deleted here, unread: logged days late they would surprise,
+  /// and could land on the wrong day. The launch share's own copies are
+  /// left out, and those younger than [strandedMinAge] come back second,
+  /// for [strandedRecheck].
   Future<(List<String>, List<String>)> _leftOver(List<String> launch) async {
     final String root;
     try {
@@ -562,6 +629,7 @@ class ShareIntake implements ShareDeliveries {
     // it looked like a photo and deleted either way: the meal database,
     // the settings. Only MainActivity's copies are touched now.
     if (!await _isShareCopy(path)) return null;
+    var kept = false;
     try {
       final name = fileBaseName(path);
       if (!hasSupportedPhotoExtension(name)) return null; // §6.1
@@ -574,17 +642,35 @@ class ShareIntake implements ShareDeliveries {
           fileName: name, now: _clock(), maxAgeDays: _capturedAtMaxAgeDays);
       // How it was taken, from its own bytes (design G2a): no asset, so no
       // creation date and no album.
-      return IntakePhoto(bytes, '', name,
+      final photo = IntakePhoto(bytes, '', name,
           capturedAt: capturedAt,
           deliberate: true,
           capture: captureMetaFor(bytes, name),
-          shareDelivery: delivery);
+          shareDelivery: delivery,
+          onSettled: _copiesWait ? _settler(delivery, path) : null);
+      kept = _copiesWait;
+      return photo;
     } finally {
-      // Always remove the plugin's container copy — accepted, rejected, or
-      // unreadable, it has served its purpose once we've looked at it (the
-      // bytes above are already in memory when accepted).
-      await _cleanup(path);
+      // The plugin's container copy goes once it has served its purpose:
+      // at once when it gives no photo (rejected or unreadable) and on
+      // iOS, whose share extension reuses file names (a copy left there
+      // would be overwritten by the next share of that name); on Android
+      // a photo's copy waits until the photo is settled ([photos]).
+      if (!kept) await _cleanup(path);
     }
+  }
+
+  /// [IntakePhoto.onSettled] for [delivery]'s copy at [path], which is in
+  /// hand from now on: deletes it, once, unless a Not now did already.
+  void Function() _settler(int delivery, String path) {
+    (_inHand[delivery] ??= {}).add(path);
+    return () {
+      final inHand = _inHand[delivery];
+      if (inHand == null || !inHand.remove(path)) return;
+      if (inHand.isEmpty) _inHand.remove(delivery);
+      _discardNow(path);
+      _notePending();
+    };
   }
 
   /// Recent library assets for the UI's own picker grid (the UI renders the

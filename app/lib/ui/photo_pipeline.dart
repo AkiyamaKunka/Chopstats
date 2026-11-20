@@ -554,16 +554,25 @@ class PhotoPipeline {
   /// the next copy only then — one original resident, as bind() keeps the
   /// watcher's. Without it every shared original sat chained on the tail
   /// at once (a 40-photo share: about 160 MB).
+  ///
+  /// KEPT UNTIL SETTLED (Q1, Q9): each photo is settled
+  /// (IntakePhoto.onSettled) once process() has returned — its verdict
+  /// written, or it was let go — and the share intake deletes its copy
+  /// only then. An engine stopped mid-analysis leaves the copy, and the
+  /// next start offers the photo again.
   void bindStream(Stream<IntakePhoto> photos) {
     late final StreamSubscription<IntakePhoto> sub;
     sub = photos.listen((p) {
       sub.pause();
       final slot = _chain(p);
-      slot.whenComplete(sub.resume).ignore();
+      slot.whenComplete(() {
+        _settle(p);
+        sub.resume();
+      }).ignore();
       _tail = slot.then((o) {
-        // A transient failure was released, and the share copy is already
-        // gone: nothing will ever re-offer it, so silence read as "it
-        // worked" — it comes back flagged [PhotoOutcome.shared] and the
+        // A transient failure was released, and the share copy goes with
+        // this verdict: nothing will ever re-offer it, so silence read as
+        // "it worked" — it comes back flagged [PhotoOutcome.shared] and the
         // snackbar asks for a re-share (outcomeSnackbar words it).
         final say = unannouncedOutcome(o, shared: true);
         if (say == null) return;
@@ -584,6 +593,14 @@ class PhotoPipeline {
       await s.cancel();
     }
     _subs.clear();
+  }
+
+  /// [IntakePhoto.onSettled], contained: a throw never stalls the stream
+  /// or turns a written verdict into a failure.
+  static void _settle(IntakePhoto photo) {
+    try {
+      photo.onSettled?.call();
+    } catch (_) {}
   }
 
   /// Ends this pipeline's work for good (2026-10-19): the iOS background
@@ -1428,6 +1445,10 @@ class PhotoPipeline {
       ownerStamp: stamp,
     );
     _held = null; // saved: no longer a reservation
+    // Written: a shared photo's copy goes now, not after the thumbnail
+    // below (seconds for a large photo), so an engine stopped meanwhile
+    // leaves no copy for the next start to offer as "already logged".
+    _settle(photo);
     // History thumbnail from the ORIGINAL bytes we already hold (spec §9
     // app-only). Best-effort AND awaited: the pipeline is serialized, so
     // finishing the thumb before the next photo keeps memory flat; any

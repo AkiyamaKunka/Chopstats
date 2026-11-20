@@ -7,7 +7,7 @@ library;
 
 import 'dart:typed_data';
 
-import 'package:flutter/foundation.dart' show Listenable;
+import 'package:flutter/foundation.dart' show Listenable, ValueListenable;
 
 import '../core/contracts.dart';
 import '../services/backup/backup_coordinator.dart';
@@ -249,6 +249,14 @@ class UiServices {
   /// Null in tests that never share.
   final SharedPhotoConsentGate? sharedPhotoConsent;
 
+  /// Android: true while a shared photo is not settled yet
+  /// (ShareIntake.photosPending); the shell's Back at the root then moves
+  /// the app to the back in every task instead of leaving that Back to
+  /// Android, which on Android 14 and later finishes a task the launcher
+  /// intent started from somewhere other than the home screen
+  /// (SharedPhotosBackGuard). Null on iPhone and in most tests.
+  final ValueListenable<bool>? sharedPhotosPending;
+
   /// Library access for coverage thumbnails; null in tests.
   final PhotoLibrary? photoLibrary;
 
@@ -334,6 +342,7 @@ class UiServices {
     this.processPhoto,
     this.announceOutcome,
     this.sharedPhotoConsent,
+    this.sharedPhotosPending,
     this.photoLibrary,
     this.startClaudeAuth,
     this.completeClaudeAuth,
