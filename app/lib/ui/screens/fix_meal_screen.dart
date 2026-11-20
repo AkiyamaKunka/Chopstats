@@ -37,7 +37,8 @@ class FixMealScreen extends StatefulWidget {
   /// leaves at once then) lands after the screen has closed, and so after
   /// Today reloaded for it (openAddFlow's onChanged): Today showed the old
   /// totals until a tab switch (Android QA Q3). Called when such a request
-  /// has changed a meal. Null: nothing to tell.
+  /// has changed a meal, whether it lands during the screen's exit
+  /// transition or after it. Null: nothing to tell.
   final Future<void> Function()? onChangedAfterClose;
   const FixMealScreen(
       {super.key,
@@ -104,9 +105,15 @@ class _FixMealScreenState extends State<FixMealScreen> {
       } finally {
         hold?.release();
       }
-      if (!mounted) {
-        // Left during the send: the executor wrote the change by now (a
-        // staged delete needs this screen's question, so it never lands).
+      // Left during the send: the executor wrote the change by now (a
+      // staged delete needs this screen's question, so it never lands).
+      // Left means popped, not only unmounted: Back completes the push at
+      // once, so Today reloads then, but the screen stays mounted through
+      // its exit transition (500 ms with the Cupertino one), and a reply
+      // landing in it was presented over Today and never reloaded it. The
+      // route stops being active at the pop (a dialog on top leaves it
+      // active).
+      if (!mounted || !(ModalRoute.of(context)?.isActive ?? true)) {
         if (changedAfterClose != null && replies.any((r) => r.applied)) {
           await changedAfterClose();
         }
