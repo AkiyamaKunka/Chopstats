@@ -1305,6 +1305,26 @@ void main() {
       expect(job('github-release'), isNot(contains('needs.play')));
     });
 
+    // § 9 said to add `debugSymbols: <native-debug-symbols.zip>` on the
+    // upload step. After R4 that step is the play job's, which sees only
+    // the android job's artifact, and the artifact does not keep the zip:
+    // r0adkll fails the whole upload on a debugSymbols path that is not
+    // there. Any path the docs give the upload step must be kept.
+    test('RELEASING § 9 gives the Play upload no file its artifact lacks',
+        () {
+      final releasing = _readRepo('docs/RELEASING.md');
+      final android = job('android');
+      final keep = android.substring(
+          android.indexOf('- name: Keep the bundle, APKs, mapping'));
+      for (final m in RegExp(r'debugSymbols: (\S+)').allMatches(releasing)) {
+        final path = m.group(1)!.replaceAll('`', '');
+        expect(keep, contains(path),
+            reason: '$path is not in the android job\'s artifact');
+      }
+      expect(releasing, contains('The upload needs no `debugSymbols:` input'));
+      expect(job('play'), isNot(contains('debugSymbols:')));
+    });
+
     // R5: the check passed for any key but the debug key, so a wrong
     // keystore in the secrets shipped a green APK no installed copy could
     // update to.

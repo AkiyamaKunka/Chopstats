@@ -1901,14 +1901,25 @@ App signing → *Request upload key reset* with the new certificate.
 entry above; the same rule.
 
 **Play: "This App Bundle contains native code, and you've not uploaded debug
-symbols"** — informational, on every upload. The Flutter engine's `.so`
-symbols are only produced when `app/android/app/build.gradle.kts` sets
-`ndk { debugSymbolLevel = "SYMBOL_TABLE" }` inside `buildTypes.release`,
-which needs Flutter's NDK (28.2) on the runner; the Ubuntu image ships
-27.3/29/30, so AGP would download ~1 GB on every run. The lane leaves it
-off. Add it, plus
-`debugSymbols: app/build/app/outputs/native-debug-symbols/release/native-debug-symbols.zip`
-on the upload step, if native crash traces ever matter.
+symbols"** — informational. The upload needs no `debugSymbols:` input for
+a bundle: AGP packs the native symbol tables into the `.aab` itself
+(`BUNDLE-METADATA/com.android.tools.build.debugsymbols/<abi>/…`), and Play
+reads them from the bundle (a separate symbols file is for APKs; Android's
+[Include native symbols](https://developer.android.com/build/include-native-symbols)
+page). See what a bundle carries with
+`unzip -l app-release.aab | grep debugsymbols`: a release bundle built on
+the Mac (2026-10-10) carried `libflutter.so.sym` and `libapp.so.sym` for
+every ABI with nothing set in `app/android/app/build.gradle.kts`. If a CI
+bundle ever lacks them and native crash traces matter, set
+`ndk { debugSymbolLevel = "SYMBOL_TABLE" }` inside `buildTypes.release`;
+that needs Flutter's NDK (28.2), which the Ubuntu image does not ship
+(27.3/29/30), so AGP would download ~1 GB on every run. Never give the
+upload step a file path the `play` job does not have: that job sees only
+the android job's artifact, so a file must first be added to the Keep
+step's paths under `app/build` (the artifact's root stays `app/build`, so
+it lands at the same path), then passed through a step output set only
+when the file exists, as "Find the bundle's mapping" does. r0adkll stats a
+`debugSymbols:` path and fails the whole upload when it is missing.
 
 **Play: `403 The caller does not have permission` / "Package not found"** —
 the service account is not invited to the app (§ 6.4), the permission has
