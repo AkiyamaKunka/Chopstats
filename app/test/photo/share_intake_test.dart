@@ -1,7 +1,7 @@
 // Deliberate intake (spec §6, §2.3): share-sheet stream + pickFromRecent,
 // all deliberate=true; §6.1 extension filter; §8 25 MB cap.
 import 'dart:async';
-import 'dart:convert' show base64Decode;
+import 'dart:convert' show base64Decode, jsonEncode;
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -10,11 +10,14 @@ import 'package:calorie_tracker/services/analyzer/normalize.dart'
     show normalizeForAnalysis;
 import 'package:calorie_tracker/services/analyzer/platform_decode.dart'
     show looksLikeJpeg;
+import 'package:calorie_tracker/services/backup/file_pick_channel.dart'
+    show filesChannelName;
 import 'package:calorie_tracker/services/photo/photo_library.dart';
 import 'package:calorie_tracker/services/photo/share_intake.dart';
 import 'package:calorie_tracker/ui/ai_consent.dart' show SharedPhotoConsentGate;
 import 'package:calorie_tracker/ui/photo_pipeline.dart' show PhotoPipeline;
-import 'package:flutter/services.dart' show MethodChannel;
+import 'package:flutter/services.dart'
+    show MethodChannel, PlatformException, StandardMethodCodec;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
 
@@ -254,7 +257,33 @@ void main() {
       final copy = create!.indexOf('setIntent(withSafeShares(it))');
       expect(copy, greaterThanOrEqualTo(0));
       expect(create.indexOf('super.onCreate('), greaterThan(copy));
-      expect(kotlin, contains('super.onNewIntent(withSafeShares(intent))'));
+      final renewed =
+          RegExp(r'override fun onNewIntent\(.*?\n    \}', dotAll: true)
+              .firstMatch(kotlin)
+              ?.group(0);
+      expect(renewed, isNotNull);
+      final safe = renewed!.indexOf('val safe = withSafeShares(intent)');
+      expect(safe, greaterThanOrEqualTo(0));
+      expect(renewed.indexOf('super.onNewIntent(safe)'), greaterThan(safe));
+    });
+
+    // The word share intake sends once it listens (R0, below) is the one
+    // MainActivity answers, on the channel it serves.
+    test('MainActivity.kt answers shareIntakeReady on the files channel', () {
+      final kotlin = File('android/app/src/main/kotlin/dev/calorietracker/'
+              'calorie_tracker/MainActivity.kt')
+          .readAsStringSync();
+      expect(kotlin, contains('const val FILES_CHANNEL = "$filesChannelName"'));
+      expect(kotlin,
+          contains('"$shareIntakeReadyMethod" -> result.success(releaseHeldShares())'));
+      final factory = File('lib/services/photo/share_intake.dart')
+          .readAsStringSync()
+          .replaceAll(RegExp(r'\s+'), ' ');
+      expect(
+          factory,
+          contains('listening: Platform.isAndroid ? androidShareIntakeReady '
+              ': null,'),
+          reason: 'createShareIntake tells MainActivity on Android only');
     });
 
     // The same folder from the Dart side: the share folder in
@@ -937,7 +966,9 @@ void main() {
       final sub = android(FakeShareSource(), read).photos().listen((_) {});
       await until(() => read.isNotEmpty, 'the sweep reached the sentinel');
       expect(read, [sentinel.path],
-          reason: 'it may still be being copied; its event delivers it');
+          reason: 'it may still be being copied, and its own event '
+              'delivers it: MainActivity holds a share that comes before '
+              'share intake listens until it does (R0, below)');
       expect(fresh.existsSync(), isTrue);
       await sub.cancel();
     });
@@ -1043,6 +1074,119 @@ void main() {
       expect(read, isEmpty);
       expect(left.existsSync(), isTrue);
       await sub.cancel();
+    });
+
+    // Review 2026-11-19, R0: a share made after Android stopped the app's
+    // process reaches MainActivity's onNewIntent in the same launch that
+    // recreates it, before this engine's Dart has run. The plugin tells
+    // only a listener and keeps nothing for later, and the sweep leaves a
+    // copy seconds old to its own share: the meal was never logged that
+    // run. MainActivity now holds such a share until share intake says it
+    // listens (shareIntakeReady), then hands it to the plugin once, whose
+    // event comes like any live share's (IntakeRulesTest: ShareHold).
+    test('share intake says it listens once the live stream is listened '
+        'to, not before, and once', () async {
+      final source = FakeShareSource();
+      final order = <String>[];
+      source.controller.onListen = () => order.add('listen');
+      final sub = ShareIntake(
+              source: source,
+              library: FakePhotoLibrary(),
+              readBytes: (_) async => null,
+              sharedFolder: () async => folder,
+              listening: () async => order.add('ready'),
+              clock: () => now)
+          .photos()
+          .listen((_) {});
+      await pumpEventQueue(times: 50);
+      expect(order, ['listen', 'ready']);
+      await sub.cancel();
+    });
+
+    test('the share MainActivity held is logged once share intake listens, '
+        'once, though the sweep saw its copy', () async {
+      TestWidgetsFlutterBinding.ensureInitialized();
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      const plugin = MethodChannel('receive_sharing_intent/messages');
+      const events = MethodChannel('receive_sharing_intent/events-media');
+      const activity = MethodChannel(filesChannelName);
+      // onNewIntent copied the photo 2 s before Dart listened; an earlier
+      // run left a sentinel (once it is logged, the sweep has run).
+      final meal = copyAt('n1', 'IMG_meal.jpg', const Duration(seconds: 2));
+      copyAt('s1', 'IMG_s.jpg', const Duration(hours: 1));
+      final calls = <String>[];
+      var listener = false; // the plugin's event sink
+      // The recreated activity's own intent is empty: no launch share.
+      messenger.setMockMethodCallHandler(plugin, (call) async {
+        calls.add(call.method);
+        return null;
+      });
+      messenger.setMockMethodCallHandler(events, (call) async {
+        calls.add(call.method);
+        listener = call.method == 'listen';
+        return null;
+      });
+      // MainActivity hands the held share to the plugin, which tells its
+      // listener, and nobody without one.
+      messenger.setMockMethodCallHandler(activity, (call) async {
+        calls.add(call.method);
+        if (call.method != shareIntakeReadyMethod || !listener) return 0;
+        await messenger.handlePlatformMessage(
+            events.name,
+            const StandardMethodCodec().encodeSuccessEnvelope(jsonEncode([
+              {'path': meal.path, 'type': 'image', 'mimeType': 'image/jpeg'},
+            ])),
+            (_) {});
+        return 1;
+      });
+      addTearDown(() {
+        for (final channel in [plugin, events, activity]) {
+          messenger.setMockMethodCallHandler(channel, null);
+        }
+      });
+      final emitted = <String>[];
+      final sub = ShareIntake(
+              source: ReceiveSharingIntentSource(),
+              library: FakePhotoLibrary(),
+              readBytes: (path) => File(path).readAsBytes(),
+              sharedFolder: () async => folder,
+              listening: androidShareIntakeReady,
+              clock: () => now)
+          .photos()
+          .listen((p) => emitted.add(p.fileName));
+      await until(() => emitted.length >= 2, 'the held share and the sentinel');
+      expect(emitted.toSet(), {'IMG_meal.jpg', 'IMG_s.jpg'});
+      expect(emitted.where((n) => n == 'IMG_meal.jpg'), hasLength(1),
+          reason: 'once, not once by its event and again by the sweep');
+      expect(calls.indexOf('listen'), greaterThanOrEqualTo(0));
+      expect(calls.indexOf(shareIntakeReadyMethod),
+          greaterThan(calls.indexOf('listen')),
+          reason: 'the plugin has its listener before the share is handed '
+              'over');
+      expect(meal.existsSync(), isFalse, reason: 'read, so deleted');
+      await sub.cancel();
+    });
+
+    test('androidShareIntakeReady asks MainActivity on the files channel; a '
+        'native side without it is no error', () async {
+      TestWidgetsFlutterBinding.ensureInitialized();
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      const activity = MethodChannel(filesChannelName);
+      final calls = <String>[];
+      messenger.setMockMethodCallHandler(activity, (call) async {
+        calls.add(call.method);
+        return 0;
+      });
+      addTearDown(() => messenger.setMockMethodCallHandler(activity, null));
+      await androidShareIntakeReady();
+      expect(calls, [shareIntakeReadyMethod]);
+      messenger.setMockMethodCallHandler(
+          activity, (call) async => throw PlatformException(code: 'gone'));
+      await androidShareIntakeReady();
+      messenger.setMockMethodCallHandler(activity, null);
+      await androidShareIntakeReady(); // MissingPluginException
     });
   });
 }

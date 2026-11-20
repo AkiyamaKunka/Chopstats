@@ -164,3 +164,31 @@ internal class SingleCall<V> {
         return true
     }
 }
+
+/// The shares onNewIntent gets before share intake (Dart) listens for
+/// them. receive_sharing_intent tells only a listener and keeps nothing
+/// for later, and Android hands a share to a stopped app's recreated
+/// activity in the launch that recreates it, before its Dart has run: such
+/// a share waits here until Dart says it listens ("shareIntakeReady"),
+/// then goes to the plugin once. Main thread only.
+internal class ShareHold<T> {
+    private val held = ArrayList<T>()
+    private var listening = false
+
+    /// Whether [share] goes to the plugins now; false: it is held until
+    /// [ready].
+    fun pass(share: T): Boolean {
+        if (listening) return true
+        held.add(share)
+        return false
+    }
+
+    /// Share intake listens from now on: the shares held so far, in the
+    /// order they came, each handed out once. Later ones pass at once.
+    fun ready(): List<T> {
+        listening = true
+        val out = ArrayList(held)
+        held.clear()
+        return out
+    }
+}

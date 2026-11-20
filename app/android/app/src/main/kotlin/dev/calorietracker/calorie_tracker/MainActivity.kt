@@ -46,6 +46,10 @@ class MainActivity : FlutterActivity() {
     /// its engine, but the user still picked a place for the file).
     private var pendingSaveSource: File? = null
 
+    /// Shares onNewIntent got before share intake listened for them, until
+    /// it does (onNewIntent, releaseHeldShares). Main thread only.
+    private val heldShares = ShareHold<Intent>()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         // receive_sharing_intent reads the launch intent while
         // super.onCreate attaches it: the copies must be there already.
@@ -54,7 +58,10 @@ class MainActivity : FlutterActivity() {
         // or relaunches from Recents still carries the intent that first
         // started its task, so the plugins get an empty one, with nothing
         // copied; that also keeps a bitewise://setup link from reopening
-        // its dialog. New shares arrive through onNewIntent, as before. The
+        // its dialog. New shares arrive through onNewIntent, the one the
+        // activity was recreated for too: Android delivers it in this same
+        // launch, after onStart, before Dart has run, so onNewIntent holds
+        // a share until share intake listens (ShareHold). The launch
         // intent is not re-delivered, but copies of a several-photo share
         // cut short by the stop that were never read stay in shared_photos:
         // share intake (Dart) picks those up at its next start, within a
@@ -75,8 +82,27 @@ class MainActivity : FlutterActivity() {
         pendingSaveSource?.let { outState.putString(STATE_SAVE_SOURCE, it.path) }
     }
 
+    /// A share (withSafeShares made copies: a new SEND) goes to the plugins
+    /// only once share intake listens: receive_sharing_intent tells only a
+    /// listener and keeps nothing for later, and the share Android started
+    /// a stopped process again for arrives before Dart has run. Until then
+    /// it is held (ShareHold), not handed on, so the plugin cannot tell
+    /// Dart twice. Anything else passes as before.
     override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(withSafeShares(intent))
+        val safe = withSafeShares(intent)
+        val copied = safe !== intent && safe.action != null
+        if (copied && !heldShares.pass(safe)) return
+        super.onNewIntent(safe)
+    }
+
+    /// Share intake listens now ("shareIntakeReady", sent after its listen
+    /// on the same main thread): the shares onNewIntent held until then go
+    /// to the plugins, in order, as onNewIntent would have handed them.
+    /// How many there were.
+    private fun releaseHeldShares(): Int {
+        val held = heldShares.ready()
+        for (share in held) super.onNewIntent(share)
+        return held.size
     }
 
     /// receive_sharing_intent copied each shared stream into the cache on
@@ -273,9 +299,12 @@ class MainActivity : FlutterActivity() {
         // which grants the picked photos only, with no permission at all.
         // saveFile: Export › Save to device, written where the user picks
         // (ACTION_CREATE_DOCUMENT grants that one document only).
+        // shareIntakeReady: share intake listens to shares now, so those
+        // onNewIntent held go to the plugins (releaseHeldShares).
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, FILES_CHANNEL)
             .setMethodCallHandler { call, result ->
                 when (call.method) {
+                    "shareIntakeReady" -> result.success(releaseHeldShares())
                     "pickFiles" -> pickFiles(result)
                     "pickImages" -> pickImages(
                         (call.argument<Any?>("max") as? Number)?.toInt() ?: 1,

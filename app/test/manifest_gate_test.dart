@@ -967,7 +967,11 @@ void main() {
   // went to the AI again. A recreated activity (saved state) or a launch
   // from Recents therefore hands the plugins an empty intent — no copy —
   // which also keeps a bitewise://setup link from reopening its dialog.
-  // New shares still arrive through onNewIntent, unchanged.
+  // New shares still arrive through onNewIntent, but one that comes before
+  // share intake listens waits for it (review 2026-11-19, R0): the launch
+  // that recreates a stopped app delivers the share it was started for
+  // before Dart has run, and the plugin tells only a listener. It is held
+  // (ShareHold) until Dart says it listens, then handed to the plugin once.
   test('a recreated MainActivity never re-delivers its launch share', () {
     final code = _kotlinCode(_mainActivity());
     final create = _kotlinFunction(code, 'override fun onCreate(');
@@ -980,15 +984,25 @@ void main() {
             'savedInstanceState)'),
         reason: 'replay → the empty intent, else the safe copies, both '
             'before the plugins read it in super.onCreate');
-    expect(_kotlinFunction(code, 'override fun onNewIntent('),
-        '{ super.onNewIntent(withSafeShares(intent)) }');
+    expect(
+        _kotlinFunction(code, 'override fun onNewIntent('),
+        '{ val safe = withSafeShares(intent) val copied = safe !== intent && '
+        'safe.action != null if (copied && !heldShares.pass(safe)) return '
+        'super.onNewIntent(safe) }');
+    expect(code, contains('private val heldShares = ShareHold<Intent>()'));
+    expect(
+        _kotlinFunction(code, 'private fun releaseHeldShares('),
+        '{ val held = heldShares.ready() for (share in held) '
+        'super.onNewIntent(share) return held.size }');
+    expect(code,
+        contains('"shareIntakeReady" -> result.success(releaseHeldShares())'));
     final rules = _kotlinCode(_intakeRules());
     expect(
         rules,
         contains('fun isRedelivery(hasSavedState: Boolean, flags: Int): '
             'Boolean = hasSavedState || (flags and '
             'Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0'));
-    _expectJvmTests(['isRedelivery']);
+    _expectJvmTests(['isRedelivery', 'ShareHold']);
   });
 
   // Chopstats is a target in its own sharesheet: Today's day image and the

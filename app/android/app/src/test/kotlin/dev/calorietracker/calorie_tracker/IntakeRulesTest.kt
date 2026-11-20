@@ -40,6 +40,30 @@ class IntakeRulesTest {
         assertFalse(IntakeRules.isRedelivery(false, 0x10000000 or 0x00000001))
     }
 
+    // --- A share that comes before share intake listens waits for it
+    // (ShareHold): the plugin tells only a listener, and Android delivers
+    // the share a stopped app was started again for before Dart runs.
+
+    @Test
+    fun sharesBeforeShareIntakeListensAreHeldThenHandedOverOnceInOrder() {
+        val hold = ShareHold<String>()
+        assertFalse(hold.pass("first"))
+        assertFalse(hold.pass("second"))
+        assertEquals(listOf("first", "second"), hold.ready())
+        // From then on a share goes at once, and none is handed over twice.
+        assertTrue(hold.pass("third"))
+        assertEquals(emptyList<String>(), hold.ready())
+        assertTrue(hold.pass("fourth"))
+    }
+
+    @Test
+    fun aShareHoldWithNothingHeldHandsOverNothing() {
+        val hold = ShareHold<String>()
+        assertEquals(emptyList<String>(), hold.ready())
+        assertTrue(hold.pass("later"))
+        assertEquals(emptyList<String>(), hold.ready())
+    }
+
     // --- The app's own share-out files are no meal.
 
     @Test

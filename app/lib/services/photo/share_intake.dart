@@ -10,10 +10,13 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:flutter/services.dart'
+    show MethodChannel, MissingPluginException, PlatformException;
 import 'package:path_provider/path_provider.dart' show getTemporaryDirectory;
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 
 import '../../core/contracts.dart';
+import '../backup/file_pick_channel.dart' show filesChannelName;
 import '../settings/app_settings.dart' show AppSettings;
 import 'filename_dates.dart';
 import 'glasses.dart' show captureMetaFor;
@@ -86,6 +89,30 @@ const String androidShareFolderName = 'shared_photos';
 /// [androidShareFolderName] in the cache directory MainActivity copies into.
 Future<String> androidSharedPhotoFolder() async =>
     '${(await getTemporaryDirectory()).path}/$androidShareFolderName';
+
+/// The method MainActivity.kt answers on [filesChannelName] once share
+/// intake listens to the plugin's live stream.
+const String shareIntakeReadyMethod = 'shareIntakeReady';
+
+/// Android: tells MainActivity that share intake listens to the plugin's
+/// live stream now. receive_sharing_intent tells only a listener and keeps
+/// nothing for later, and a share made after Android stopped the app's
+/// process reaches MainActivity (onNewIntent, in the launch that recreates
+/// it) before this engine's Dart has run: MainActivity holds such a share
+/// until this word, then hands it to the plugin, whose event share intake
+/// reads like any live share's (review 2026-11-19, R0). The word follows
+/// the plugin's listen on the same main thread, so the plugin has its
+/// listener by then. Never throws.
+Future<void> androidShareIntakeReady(
+    {MethodChannel channel = const MethodChannel(filesChannelName)}) async {
+  try {
+    await channel.invokeMethod<Object?>(shareIntakeReadyMethod);
+  } on MissingPluginException {
+    // No native side to tell (tests, an older build): nothing is held.
+  } on PlatformException {
+    // Its copies wait in the share folder for the next start's sweep.
+  }
+}
 
 /// Whether the absolute POSIX [path] lies inside [folder] once '.' and '..'
 /// are resolved; a relative path never does.
@@ -162,6 +189,7 @@ ShareIntake createShareIntake(AppSettings settings) => ShareIntake(
     source: ReceiveSharingIntentSource(),
     library: PhotoManagerLibrary(),
     readBytes: _readFileBytes,
+    listening: Platform.isAndroid ? androidShareIntakeReady : null,
     sharedFolder: Platform.isAndroid ? androidSharedPhotoFolder : null);
 
 class ShareIntake implements ShareDeliveries {
@@ -173,6 +201,7 @@ class ShareIntake implements ShareDeliveries {
       DateTime Function()? clock,
       // §8 CAPTURED_AT_MAX_AGE_DAYS: default 45, not user-editable.
       this._capturedAtMaxAgeDays = 45,
+      this._listening,
       this._sharedFolder})
       : _cleanup = cleanup ?? _deleteSharedFile,
         _clock = clock ?? DateTime.now;
@@ -181,6 +210,11 @@ class ShareIntake implements ShareDeliveries {
   /// [androidSharedPhotoFolder]); null: any path (iOS, where the share
   /// extension writes the copies, and tests).
   final Future<String> Function()? _sharedFolder;
+
+  /// Told once share intake listens to the live share stream (Android:
+  /// [androidShareIntakeReady], so MainActivity hands over a share it held
+  /// until then); null: nobody to tell (iOS, tests).
+  final Future<void> Function()? _listening;
 
   /// Whether a copy may wait on disk for its turn: only where every copy
   /// has a path of its own (Android's share folder). See [photos].
@@ -333,6 +367,14 @@ class ShareIntake implements ShareDeliveries {
         liveSub = _source.imagePathBatches().listen(enqueue,
             onError: controller.addError,
             onDone: () => reading = reading.then((_) => controller.close()));
+        // Only now has the plugin a listener to tell: MainActivity hands
+        // over the shares it held until then (Android; R0), whose events
+        // come like any live share's.
+        try {
+          unawaited(_listening?.call().catchError((Object _) {}));
+        } catch (_) {
+          // Nobody to tell: their copies wait for the next start's sweep.
+        }
         if (_copiesWait) {
           final left = await _leftOver(initial);
           if (!cancelled && left.isNotEmpty) enqueue(left, leftOver: true);
@@ -354,7 +396,10 @@ class ShareIntake implements ShareDeliveries {
   static const strandedMaxAge = Duration(hours: 24);
 
   /// A copy younger than this may still be being written for a share
-  /// whose own event delivers it: the start-up sweep leaves it alone.
+  /// whose own event delivers it: the start-up sweep leaves it alone. The
+  /// event does come, even for a share Android delivered before this
+  /// engine's Dart ran: MainActivity holds it until share intake listens
+  /// ([androidShareIntakeReady]).
   static const strandedMinAge = Duration(seconds: 10);
 
   /// The share folder's copies an earlier run never read (Android, review
