@@ -415,6 +415,50 @@ void main() {
         expect(os.shown, hasLength(1));
         expect(os.pending[_id]!.when, DateTime(2026, 11, 14, 20, 0));
       });
+
+      // Review of the fix: moved back later the same evening, the set
+      // armed Friday's card again for the later time, and the OS delivered
+      // a second Friday card after the one the app had posted.
+      for (final (old, sunday) in [
+        ('21:30', false), // Friday's slot
+        ('01:00', true), // Saturday 01:00, which describes Friday
+      ]) {
+        test('moved later again the same evening ($old): no second card for '
+            'the day already posted', () async {
+          final s = await settingsAt(reportTime: old);
+          dao.seed(_meal('2026-11-13', 1200));
+          await arm(s, fri19);
+          await s.setReportTime('20:00');
+          await arm(s, DateTime(2026, 11, 13, 20, 30));
+          expect(os.shown.map((c) => c.title), ['Fri: 1,200 kcal']);
+          await s.setReportTime(old);
+          await arm(s, DateTime(2026, 11, 13, 20, 45));
+          await arm(s, DateTime(2026, 11, 13, 20, 50), via: os.notifier());
+          expect(os.pending.keys.toList()..sort(), ReportNotifier.dailySetIds);
+          final next = os.pending[_id]!;
+          expect(next.title, 'Sat: 0 kcal', reason: 'the night after');
+          expect(next.when.day, sunday ? 15 : 14);
+          os.deliverDue(DateTime(2026, 11, 15, 23, 0));
+          expect(os.shown, hasLength(1));
+          expect(os.delivered.map((c) => c.title),
+              ['Sat: 0 kcal', if (!sunday) 'Sun: 0 kcal']);
+        });
+      }
+
+      test('a late card the app posted, then a later time that evening: no '
+          'second card either', () async {
+        final s = await settingsAt(reportTime: '20:00');
+        dao.seed(_meal('2026-11-13', 1200));
+        await arm(s, fri19);
+        await arm(s, DateTime(2026, 11, 13, 20, 40)); // the alarm is late
+        expect(os.shown.map((c) => c.title), ['Fri: 1,200 kcal']);
+        await s.setReportTime('21:30');
+        await arm(s, DateTime(2026, 11, 13, 20, 45));
+        expect(os.pending[_id]!.when, DateTime(2026, 11, 14, 21, 30));
+        os.deliverDue(DateTime(2026, 11, 14, 23, 0));
+        expect(os.shown, hasLength(1));
+        expect(os.delivered.map((c) => c.title), ['Sat: 0 kcal']);
+      });
     });
 
     group('the update day', () {

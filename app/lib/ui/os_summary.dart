@@ -28,7 +28,8 @@
 ///     force stop took) is posted before the set replaces it — once, by
 ///     whichever engine gets there first; so is today's card when the time
 ///     is moved to before now, which the set for the new time would
-///     replace before it came;
+///     replace before it came. A day whose card the app posted is not
+///     armed again (the time moved later that evening);
 ///   * the first arm after the update posts the last slot's summary if it
 ///     passed within the grace window and the old scheme had not posted
 ///     it.
@@ -48,8 +49,10 @@ import 'coach_strings.dart';
 import 'format.dart' show isoDate;
 
 /// The slot (UTC instant) of the last daily card the app posted itself —
-/// an overdue one, or the update day's. Both engines read it fresh before
-/// posting and write it first, so the two never post the same slot.
+/// an overdue one, today's when the time is moved to before now, or the
+/// update day's. Both engines read it fresh before posting and write it
+/// first, so the two never post the same slot; an arm does not arm that
+/// card's day again.
 const String summaryLastPostedSlotPrefsKey = 'summary.last_posted_slot';
 
 /// Set by the first Android arm of this scheme; until then the update-day
@@ -148,8 +151,9 @@ Future<void> _armOnce({
   // 1. A card for a slot that has passed, to post: the update day's, or
   //    one the OS still holds past its time. Built, not posted yet.
   ({DateTime slot, PendingDailyCard? pending, CoachSummary card})? toPost;
+  SharedPreferences? p;
   if (android) {
-    final p = await _freshPrefs(prefs);
+    p = await _freshPrefs(prefs);
     if (p != null && !(p.getBool(summaryOsSchemePrefsKey) ?? false)) {
       toPost = await _updateDayCard(dao, settings, strings, naming!, time, at);
     }
@@ -180,9 +184,19 @@ Future<void> _armOnce({
   //    begun yet (no meal can be in it; logging re-arms and rebuilds
   //    them). A slot before 04:00 armed between midnight and the slot
   //    describes on its next night the day already begun: built as it
-  //    stands too (review 2026-11-19).
+  //    stands too (review 2026-11-19). On Android a day whose card this
+  //    app has posted itself is not armed again: the time moved to before
+  //    now, then later again that evening, would say it twice. The set
+  //    starts the night after — one card a day.
   final today = DateTime(at.year, at.month, at.day);
-  final first = ReportNotifier.nextDailyOccurrence(time, at);
+  final next = ReportNotifier.nextDailyOccurrence(time, at);
+  final first =
+      android && _postedDay(p, summaryDayFor(next, slotHour: time.hour))
+      ? (() {
+          final d = addCalendarDays(next, 1);
+          return DateTime(d.year, d.month, d.day, time.hour, time.minute);
+        })()
+      : next;
   final slots = [
     for (var k = 0; k < (android ? ReportNotifier.dailySetSize : 1); k++)
       k == 0
@@ -394,6 +408,14 @@ _updateDayCard(
       onDay: naming,
     ),
   );
+}
+
+/// Whether [day] is the one the card this app last posted itself (either
+/// engine, [_claim]) described: the claimed slot read as its card's day.
+bool _postedDay(SharedPreferences? p, DateTime day) {
+  final mark = p?.getString(summaryLastPostedSlotPrefsKey);
+  final slot = mark == null ? null : DateTime.tryParse(mark)?.toLocal();
+  return slot != null && calendarDaysBetween(summaryDayFor(slot), day) == 0;
 }
 
 /// Claims [slot] for this engine's post: false when either engine already
