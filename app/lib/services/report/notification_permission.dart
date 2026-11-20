@@ -8,8 +8,11 @@
 /// user is doing something notifications are for:
 ///   * switching the daily summary on (Settings);
 ///   * switching Watch Camera Roll on, after its photo prompt (Settings);
-///   * after the first meal saved in the app's own engine (di.dart), while
-///     the summary or the watcher is on and the app is in front.
+///   * after the first meal saved in the app's own engine, by any path — a
+///     photo, Describe, manual entry, Log manually, a usual food — while
+///     the summary or the watcher is on and the app is in front
+///     ([askNotificationPermissionAfterMealSaved], on di.dart's
+///     meals-changed signal).
 /// Never in a background run. An install from before this scheme counts as
 /// asked ([settleNotificationAskAtLaunch]): the old build asked it at every
 /// start. After the one ask, Settings' notifications-off row opens the
@@ -29,6 +32,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../analyzer/platform_decode.dart' show isHeadlessEngine;
 import '../photo/background_restriction.dart' show backgroundRestrictionChannel;
+import '../photo/background_time.dart' show appEngineInForeground;
 
 /// Set once a request has run (whatever the answer), or for an install
 /// from before this scheme. The app's own engine is the only writer.
@@ -85,6 +89,32 @@ Future<bool> notificationPermissionAsked() async {
 /// failed). Never throws.
 Future<bool?> askNotificationPermissionOnce() async =>
     (await _askOnce())?.granted;
+
+/// The first meal saved: [askNotificationPermissionOnce], while [notifies]
+/// (the daily summary or the watcher's cards would use the permission)
+/// and the app is in front. di.dart calls it on the meals-changed signal,
+/// which every save path sends — the photo pipeline's hook only covered
+/// photos, and Describe, manual entry and usual foods never asked (review
+/// 2026-11-19). The signal also comes when nothing was saved (an add
+/// screen left as it was), so nothing is asked until [hasMeal] says the
+/// store holds a meal. Returns the answer, or null when it did not ask.
+/// Never throws.
+Future<bool?> askNotificationPermissionAfterMealSaved({
+  required bool Function() notifies,
+  required Future<bool> Function() hasMeal,
+}) async {
+  bool wanted() =>
+      notificationPermissionInContext && appEngineInForeground() && notifies();
+  if (!wanted() || await notificationPermissionAsked()) return null;
+  try {
+    if (!await hasMeal()) return null;
+  } catch (_) {
+    return null;
+  }
+  // The app may have gone to the background meanwhile.
+  if (!wanted()) return null;
+  return askNotificationPermissionOnce();
+}
 
 /// True while a request runs: a second trigger meanwhile (a meal saved
 /// while the dialog is up, say) asks nothing.

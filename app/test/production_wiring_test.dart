@@ -772,21 +772,27 @@ void main() {
 
     // Android 13+ asks for the notification permission once, in context:
     // the first meal saved with the app in front is one of the moments
-    // (notification_permission.dart). Never in a background run.
-    test('di.dart asks after a meal saved, while the summary or the '
-        'watcher would notify', () {
+    // (notification_permission.dart). Never in a background run. On the
+    // meals-changed signal, which every save path sends (review
+    // 2026-11-19: Describe, manual entry and usual foods never reached the
+    // pipeline's hook); notification_ask_on_save_test drives those paths.
+    test('di.dart asks after a meal saved, by any path, while the summary '
+        'or the watcher would notify', () {
       final init = _body(
         _source('lib/ui/di.dart'),
         'static Future<AppServices> init(',
         indent: '  ',
       );
+      expect(init, _wired(r'onMealSaved: signalMealsChanged,'));
       expect(
         init,
         _wired(
-          r'onMealSaved: \(\) \{ signalMealsChanged\(\); '
-          r'if \(appEngineInForeground\(\) && '
-          r'\(settings\.summaryEnabled \|\| settings\.watcherEnabled\)\) \{ '
-          r'unawaited\(askNotificationPermissionOnce\(\)\);',
+          r'mealsChangedSignal\.addListener\(\(\) => unawaited\( '
+          r'askNotificationPermissionAfterMealSaved\( '
+          r'notifies: \(\) => '
+          r'settings\.summaryEnabled \|\| settings\.watcherEnabled, '
+          r'hasMeal: \(\) async => '
+          r'\(await dao\.backupCounts\(\)\)\.meals > 0\)\)\);',
         ),
       );
       // An upgrader counts as asked: settled right after the settings
