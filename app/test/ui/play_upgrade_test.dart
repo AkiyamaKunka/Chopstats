@@ -5,6 +5,8 @@
 // the job sync cancels the job (background_glue_test), and the app shell
 // shows ONE notice saying so and how to log photos instead. Nothing is
 // lost.
+import 'dart:async';
+
 import 'package:calorie_tracker/core/app_channel.dart';
 import 'package:calorie_tracker/l10n/app_localizations.dart';
 import 'package:calorie_tracker/l10n/app_localizations_en.dart';
@@ -38,6 +40,24 @@ Future<(AppSettings, SharedPreferences)> _load(
   SharedPreferences.setMockInitialValues(values);
   final prefs = await SharedPreferences.getInstance();
   return (await AppSettings.load(prefs: prefs, keyStore: _Keys()), prefs);
+}
+
+/// Gemini allowed under the consent text from before versions were
+/// recorded, so the shell asks the consent-update question at launch; its
+/// Not now is saved only once [saved] completes.
+class _OlderGrant extends FakeSettings {
+  _OlderGrant(this.saved) : super(apiKey: 'k') {
+    aiConsent = {'gemini'};
+    aiConsentVersions = {};
+  }
+
+  final Future<void> saved;
+
+  @override
+  Future<void> declineAiConsentUpdate(String route) async {
+    await saved;
+    await super.declineAiConsentUpdate(route);
+  }
 }
 
 /// A GitHub install with Watch Camera Roll on and a few other settings.
@@ -116,11 +136,12 @@ void main() {
       shownCalls = 0;
     });
 
-    UiServices services({bool withNotice = true}) => UiServices(
+    UiServices services({bool withNotice = true, SettingsStore? settings}) =>
+        UiServices(
       dao: FakeDao(),
       analyzer: FakeAnalyzer(),
       executor: FakeExecutor(),
-      settings: FakeSettings(apiKey: 'k'),
+      settings: settings ?? FakeSettings(apiKey: 'k'),
       picker: FakePicker(),
       requestPhotoPermission: () async => true,
       watchRetiredNotice: withNotice
@@ -181,6 +202,68 @@ void main() {
         expect(shownCalls, 1);
       });
     }
+
+    // One question at a time (app.dart _tellWatchRetiredWhenIdle): a
+    // pending consent-wording update is asked first, and the notice waits
+    // until that question is answered and its answer saved.
+    testWidgets('after the consent-update question: never over it, and not '
+        'before its answer is saved', (tester) async {
+      final saved = Completer<void>();
+      final settings = _OlderGrant(saved.future);
+      final update = find.byKey(const Key('aiConsentUpdateDialog'));
+      await launch(tester, services(settings: settings));
+      expect(update, findsOneWidget);
+      expect(notice, findsNothing, reason: 'not over the consent question');
+
+      await tester.tap(find.byKey(const Key('aiConsentUpdateNotNow')));
+      await tester.pumpAndSettle();
+      expect(update, findsNothing);
+      expect(notice, findsNothing,
+          reason: 'the question is answered once Not now is saved');
+
+      saved.complete();
+      await tester.pumpAndSettle();
+      expect(settings.aiConsentUpdateDeclines, {'gemini'});
+      expect(notice, findsOneWidget);
+      await tester.tap(find.byKey(const Key('watchRetiredOk')));
+      await tester.pumpAndSettle();
+      expect(notice, findsNothing);
+      expect(update, findsNothing);
+      expect(shownCalls, 1);
+    });
+
+    // Only over the shell itself: a return to the app with a screen open
+    // (Log, Settings › a page, Leftovers) does not show it on top of that
+    // screen; it shows once the shell is back on top (_OnRouteReturn).
+    testWidgets('with a screen over the shell it waits, and shows once the '
+        'shell is back on top', (tester) async {
+      owed = false;
+      await launch(tester, services());
+      expect(notice, findsNothing);
+      final shell =
+          tester.state(find.byType(HomeShell)) as WidgetsBindingObserver;
+      final navigator = Navigator.of(tester.element(find.byType(HomeShell)));
+      unawaited(navigator.push(MaterialPageRoute<void>(
+          builder: (_) => const Scaffold(body: Text('a screen')))));
+      await tester.pumpAndSettle();
+
+      owed = true;
+      shell.didChangeAppLifecycleState(AppLifecycleState.paused);
+      shell.didChangeAppLifecycleState(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+      expect(find.text('a screen'), findsOneWidget);
+      expect(notice, findsNothing, reason: 'not over another screen');
+      expect(shownCalls, 0);
+
+      navigator.pop();
+      await tester.pumpAndSettle();
+      expect(find.text('a screen'), findsNothing);
+      expect(notice, findsOneWidget);
+      await tester.tap(find.byKey(const Key('watchRetiredOk')));
+      await tester.pumpAndSettle();
+      expect(notice, findsNothing);
+      expect(shownCalls, 1);
+    });
 
     testWidgets('dismissed any other way, it is forgotten too', (tester) async {
       await launch(tester, services());
