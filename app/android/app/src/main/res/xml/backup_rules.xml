@@ -1,16 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Android 11 and lower (android:fullBackupContent; Android 12+ reads
-     data_extraction_rules.xml instead). Keeps the backup-excluded local
-     store (lib/services/local_store.dart, files/bitewise_local/) and
-     flutter_secure_storage's shared_prefs files (the API keys, encrypted
-     with a Keystore key that never leaves this phone) out of Auto Backup
-     and device-to-device transfer; data_extraction_rules.xml says why.
-     Exclude-only on purpose: with no <include>, everything else is backed
-     up exactly as before. -->
+<!-- Android 7.0 to 8.1 (API 24-27, android:fullBackupContent; Android 9 to
+     11 read res/xml-v28/backup_rules.xml, Android 12+
+     data_extraction_rules.xml). Owner decision 5 (2026-11-20): the app's
+     data goes to the cloud only end-to-end encrypted, which Android does
+     from Android 9 on, with the phone's screen lock. These versions
+     cannot encrypt a backup end to end, and they cannot tell a cloud
+     backup from a transfer to a new phone (requireFlags came with Android
+     9), so neither carries any of the app's data here: the one <include>
+     names a file the app never writes. With an <include>, Android backs
+     up only what the includes name, and a restore takes only that, so
+     the local store and the key files stay out with everything else.
+     No <exclude>: outside every included path, lint's FullBackupContent
+     check (fatal, so it stops a release build) refuses one. The rule has
+     two attributes: these versions refuse a third, and a parse that fails
+     half way would leave Android backing up everything else. Export Data
+     › Save to Device still keeps a copy. -->
 <full-backup-content>
-    <exclude domain="file" path="bitewise_local/"/>
-    <exclude domain="sharedpref" path="FlutterSecureStorage.xml"/>
-    <exclude domain="sharedpref" path="FlutterSecureKeyStorage.xml"/>
-    <exclude domain="sharedpref" path="FlutterSecureStorageConfiguration.xml"/>
-    <exclude domain="sharedpref" path="FlutterSecureStorageConfiguration:FlutterSecureStorage.xml"/>
+    <include domain="file" path="no_backup_before_android_9"/>
 </full-backup-content>

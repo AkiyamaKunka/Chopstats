@@ -114,6 +114,8 @@ void main() {
       }
       expect(find.byKey(const Key('backgroundScanRow')), findsOneWidget);
       expect(find.text(_en.settingsRowLookback), findsOneWidget);
+      // Android: why Meta glasses photos starts off (owner decision 8).
+      expect(find.textContaining(_en.watchGlassesAndroidNote), findsOneWidget);
     });
 
     testWidgets('the Play build: no Photos group at all, and the library is '
@@ -129,6 +131,8 @@ void main() {
       expect(find.text(_en.settingsRowLookback), findsNothing);
       expect(find.text(_en.settingsRowCoverage), findsNothing);
       expect(find.textContaining(_en.settingsPhotosFooter(2)), findsNothing);
+      // No glasses switch, so no line about its default either.
+      expect(find.textContaining(_en.watchGlassesAndroidNote), findsNothing);
       expect(library.fullAccessAsks, 0);
       expect(library.permissionRequests, 0);
       // Everything else is where it was.

@@ -818,7 +818,12 @@ class _SettingsScreenState extends State<SettingsScreen>
             ? l10n.watcherLimitedFooter
             : l10n.watcherLimitedFooterIos)
         : null;
-    return [?limited, ?paused, ?stuck, footer].join('\n');
+    // Android: why Meta glasses photos starts off there (owner decision 8,
+    // AppSettings.defaultWatchGlasses): no food check on the phone.
+    final glasses = defaultTargetPlatform == TargetPlatform.android
+        ? l10n.watchGlassesAndroidNote
+        : null;
+    return [?limited, ?paused, ?stuck, footer, ?glasses].join('\n');
   }
 
   /// Whether the 后台扫描 row (and its iOS footer line) shows: only while
@@ -897,9 +902,11 @@ class _SettingsScreenState extends State<SettingsScreen>
               onChanged: (v) => _toggleWatcher(v),
             ),
             // Design G3: photos recognized as taken with Meta glasses. Off,
-            // the automatic scan does not offer them at all; on (the
-            // default), an iPhone checks each one for food on the phone
-            // before anything is sent (docs/PRIVACY.md).
+            // the automatic scan does not offer them at all; on, an iPhone
+            // checks each one for food on the phone before anything is
+            // sent (docs/PRIVACY.md). On by default on iPhone, off on
+            // Android, which has no such check (AppSettings.
+            // defaultWatchGlasses; the footer's last line says why).
             GroupedToggleRow(
               key: const Key('watchGlassesRow'),
               switchKey: const Key('watchGlassesToggle'),

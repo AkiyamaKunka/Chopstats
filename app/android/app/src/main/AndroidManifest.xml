@@ -42,17 +42,41 @@
          the backup-excluded local store (lib/services/local_store.dart),
          and flutter_secure_storage's files (the API keys, which no other
          phone could decrypt): res/xml/data_extraction_rules.xml on Android
-         12+, backup_rules.xml below it.
+         12+, res/xml-v28/backup_rules.xml on Android 9 to 11. A cloud
+         backup happens only when it is end-to-end encrypted, which needs a
+         screen lock (owner decision 5, 2026-11-20); on Android 9 and later
+         a transfer to a new phone goes as before. Android 8.1 and lower
+         cannot encrypt a backup end to end, nor tell it from a transfer:
+         res/xml/backup_rules.xml gives them none of the app's data for
+         either (an export still keeps a copy).
          hasFragileUserData: on Android 10+ the uninstall dialog offers to
          keep the app's data, since the meal log lives only on the phone. A
          reinstall with the same signer then finds the log. Should the
          kept key store have lost its Keystore key, AndroidSecureKeyStore
-         (app_settings.dart) reads it as no key and the app asks again. -->
+         (app_settings.dart) reads it as no key and the app asks again.
+         enableOnBackInvokedCallback (owner decision 6, 2026-11-20): back
+         reaches the app through Android's back callback on Android 13 and
+         later, as Android 16 does by default for targetSdk 36; from
+         Android 14 it comes with the gesture's progress, so the
+         predictive-back page transition (lib/ui/theme/app_theme.dart)
+         follows the finger. A screen with unsaved changes still asks
+         before it closes (DiscardChangesGuard). At the root route Flutter
+         leaves Back to Android: Android 13 moves the task to the back, but
+         Android 14 and later do that only for a task the home screen
+         started with the launcher's intent and finish any other, with its
+         engine. So a task a share, the bitewise://setup link or a
+         notification started keeps Flutter's callback
+         (MainActivity.setFrameworkHandlesBack), and Back at its root goes
+         through Flutter's SystemNavigator.pop, as on Android 12 and lower.
+         A launcher-intent start that did not come from the home screen
+         (Play's Open button) looks the same to the app, and Android 14
+         and later still finish it. -->
     <application
         android:label="@string/app_name"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:hasFragileUserData="true"
+        android:enableOnBackInvokedCallback="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules">
         <!-- singleTask (review 171, C6): a share while the app runs reaches
@@ -60,11 +84,17 @@
              receive_sharing_intent's live stream). singleTop started a second
              MainActivity for a share from the sharesheet, with its own engine
              and a second set of services, in a task of its own. A share with
-             no instance running still starts one, as before. -->
+             no instance running still starts one, as before.
+             screenOrientation portrait (owner decision 7, 2026-11-20): phones
+             stay upright, like the iPhone app (Info.plist). For targetSdk 36,
+             Android 16 ignores the lock on displays 600 dp and wider (tablets,
+             unfolded foldables), where the width-capped layout
+             (ContentWidthCap) keeps the content readable in any orientation. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTask"
+            android:screenOrientation="portrait"
             android:taskAffinity=""
             android:theme="@style/LaunchTheme"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"

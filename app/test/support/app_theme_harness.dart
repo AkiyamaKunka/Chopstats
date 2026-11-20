@@ -1,6 +1,12 @@
 /// Widget-test harness for the run-7 design system: the app's REAL theme
 /// (AppTheme), optionally measured with the iPhone's own system fonts.
 ///
+/// The theme carries Apple's tracking, as the iPhone draws it, at whatever
+/// platform the test runs (flutter_test's default is Android, where the
+/// app itself sets no tracking: owner decision 6). Everything else that
+/// depends on the platform (page transitions, scrolling, adaptive widgets)
+/// is the test's own: a test that wants iOS behaviour sets iOS.
+///
 /// row_fit_layout_test and large_text_overflow_test build their own bare
 /// ThemeData, so they cannot catch a regression from the iOS type scale.
 /// New layout cases use this instead (in new test files).
@@ -44,7 +50,7 @@ Future<void> loadIphoneFonts() async {
 }
 
 /// The app theme with the iPhone fonts (when present) in place of the
-/// platform families.
+/// platform families, and Apple's tracking on any test platform.
 ThemeData iphoneAppTheme(Brightness brightness,
         {bool cjk = false, bool highContrast = false}) =>
     AppTheme.build(
@@ -53,6 +59,7 @@ ThemeData iphoneAppTheme(Brightness brightness,
       highContrast: highContrast,
       debugFontFamily: haveIphoneFonts ? _sfFamily : null,
       debugFontFallback: haveIphoneFonts ? const [_cjkFamily] : null,
+      debugAppleTracking: true,
     );
 
 /// Pumps [home] in a MaterialApp with the app theme at a phone [size],

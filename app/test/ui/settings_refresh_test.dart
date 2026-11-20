@@ -99,12 +99,15 @@ Widget _settings(
 );
 
 /// Scrolls the page's list until [target] is built and on screen (the
-/// Settings list builds its rows lazily).
+/// Settings list builds its rows lazily). At AX5 without the iPhone fonts
+/// (CI) the list is about 13,000 px tall, and Android's clamping physics
+/// glide less per drag than the iOS bounce did, so allow more drags.
 Future<void> _scrollTo(WidgetTester tester, Finder target) async {
   await tester.scrollUntilVisible(
     target,
     200,
     scrollable: find.byType(Scrollable).first,
+    maxScrolls: 200,
   );
   await tester.pumpAndSettle();
 }

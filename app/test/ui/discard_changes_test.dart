@@ -19,6 +19,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart' show SemanticsAction;
 import 'package:flutter_test/flutter_test.dart';
 
+import '../support/back_gesture.dart';
 import 'fakes.dart';
 
 Meal _meal() => Meal(
@@ -628,6 +629,175 @@ void main() {
       expect(find.byKey(const Key('bodySheetSave')), findsNothing);
       expect(dao.weightsByDate['2026-08-02']?.kg, 72.5);
     });
+  });
+
+  // Owner decision 6 (2026-11-20): Android pages move with the predictive
+  // back gesture (the app theme's PredictiveBackPageTransitionsBuilder and
+  // android:enableOnBackInvokedCallback). A held pop turns the preview
+  // off, and the gesture's end reaches the guard as a system back, so
+  // every screen above still asks before it drops what was typed. A clean
+  // screen follows the finger and closes.
+  group('Android predictive back', () {
+    final android = TargetPlatformVariant.only(TargetPlatform.android);
+    ThemeData appTheme() => AppTheme.build(Brightness.light);
+
+    testWidgets('Edit meal, untouched: the gesture shows the page underneath '
+        'and closes it, no question', (tester) async {
+      final dao = FakeDao()..seed(_meal());
+      await _push(tester,
+          MealEditorScreen(dao: dao, meal: dao.meals.first, now: _clock),
+          theme: appTheme());
+      await backGestureStart(tester);
+      await backGestureProgress(tester, 0.35);
+      expect(predictiveBackTransition, findsWidgets);
+      expect(tester.getTopLeft(find.byType(MealEditorScreen)).dx,
+          greaterThan(0));
+      await backGestureCommit(tester);
+      expect(find.byKey(_dialog), findsNothing);
+      expect(find.byType(MealEditorScreen), findsNothing);
+      expect(find.byKey(_open), findsOneWidget);
+    }, variant: android);
+
+    testWidgets('Edit meal, edited: no preview, the gesture\'s end asks; '
+        'Keep editing keeps the typing, Discard leaves without saving',
+        (tester) async {
+      final dao = FakeDao()..seed(_meal());
+      await _push(tester,
+          MealEditorScreen(dao: dao, meal: dao.meals.first, now: _clock),
+          theme: appTheme());
+      await tester.enterText(find.byKey(const Key('editorCalories')), '600');
+      await tester.pump();
+
+      await backGestureStart(tester);
+      await backGestureProgress(tester, 0.35);
+      expect(predictiveBackTransition, findsNothing,
+          reason: 'a held pop shows no preview');
+      expect(tester.getTopLeft(find.byType(MealEditorScreen)).dx, 0);
+      await backGestureCommit(tester);
+      expect(find.byKey(_dialog), findsOneWidget);
+      await tester.tap(find.byKey(_keep));
+      await tester.pumpAndSettle();
+      expect(find.byType(MealEditorScreen), findsOneWidget);
+      expect(find.text('600'), findsOneWidget);
+
+      await predictiveBack(tester);
+      expect(find.byKey(_dialog), findsOneWidget);
+      await tester.tap(find.byKey(_discard));
+      await tester.pumpAndSettle();
+      expect(find.byType(MealEditorScreen), findsNothing);
+      expect(dao.meals.first.analysis['total_calories'], 450,
+          reason: 'nothing saved');
+    }, variant: android);
+
+    testWidgets('a gesture let go early asks nothing and keeps the typing',
+        (tester) async {
+      final dao = FakeDao()..seed(_meal());
+      await _push(tester,
+          MealEditorScreen(dao: dao, meal: dao.meals.first, now: _clock),
+          theme: appTheme());
+      await tester.enterText(
+          find.byKey(const Key('editorDescription')), 'Chicken salad, no dressing');
+      await tester.pump();
+      await backGestureStart(tester);
+      await backGestureProgress(tester, 0.2);
+      await backGestureCancel(tester);
+      expect(find.byKey(_dialog), findsNothing);
+      expect(find.byType(MealEditorScreen), findsOneWidget);
+      expect(find.text('Chicken salad, no dressing'), findsOneWidget);
+    }, variant: android);
+
+    testWidgets('manual entry: typed numbers ask', (tester) async {
+      final dao = FakeDao();
+      await _push(tester, MealEditorScreen(dao: dao, now: _clock),
+          theme: appTheme());
+      await tester.enterText(find.byKey(const Key('editorCalories')), '320');
+      await tester.pump();
+      await predictiveBack(tester);
+      expect(find.byKey(_dialog), findsOneWidget);
+      await tester.tap(find.byKey(_discard));
+      await tester.pumpAndSettle();
+      expect(find.byType(MealEditorScreen), findsNothing);
+      expect(dao.meals, isEmpty);
+    }, variant: android);
+
+    testWidgets('Fix meals: an empty field follows the gesture out; a typed '
+        'request asks', (tester) async {
+      final executor = FakeExecutor();
+      await _push(tester,
+          FixMealScreen(executor: executor, settings: FakeSettings()),
+          theme: appTheme());
+      await backGestureStart(tester);
+      await backGestureProgress(tester, 0.35);
+      expect(predictiveBackTransition, findsWidgets);
+      await backGestureCommit(tester);
+      expect(find.byType(FixMealScreen), findsNothing);
+
+      await tester.tap(find.byKey(_open));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+          find.byKey(const Key('fixMealField')), 'the latte was oat milk');
+      await tester.pump();
+      await predictiveBack(tester);
+      expect(find.byKey(_dialog), findsOneWidget);
+      await tester.tap(find.byKey(_keep));
+      await tester.pumpAndSettle();
+      expect(find.text('the latte was oat milk'), findsOneWidget);
+      expect(executor.handledTexts, isEmpty, reason: 'nothing was sent');
+    }, variant: android);
+
+    testWidgets('Describe a meal: typed text asks', (tester) async {
+      final executor = FakeExecutor();
+      await _push(
+          tester,
+          AddTextScreen(
+              executor: executor, dao: FakeDao(), settings: FakeSettings()),
+          theme: appTheme());
+      await tester.enterText(
+          find.byKey(const Key('addTextField')), 'two eggs and toast');
+      await tester.pump();
+      await predictiveBack(tester);
+      expect(find.byKey(_dialog), findsOneWidget);
+      await tester.tap(find.byKey(_discard));
+      await tester.pumpAndSettle();
+      expect(find.byType(AddTextScreen), findsNothing);
+      expect(executor.describedTexts, isEmpty);
+    }, variant: android);
+
+    testWidgets('the Body log sheet: a typed weight asks; an untouched sheet '
+        'closes', (tester) async {
+      tester.view.physicalSize = const Size(800, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      final dao = FakeDao();
+      await tester.pumpWidget(MaterialApp(
+          theme: appTheme(),
+          home: BodyScreen(dao: dao, clock: () => DateTime(2026, 8, 2, 10))));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('logBodyButton')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('bodyWeightField')), '72.5');
+      await tester.pump();
+
+      await predictiveBack(tester);
+      expect(find.byKey(_dialog), findsOneWidget);
+      await tester.tap(find.byKey(_keep));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('bodySheetSave')), findsOneWidget);
+      expect(find.text('72.5'), findsOneWidget);
+
+      await predictiveBack(tester);
+      await tester.tap(find.byKey(_discard));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('bodySheetSave')), findsNothing);
+      expect(dao.weightsByDate, isEmpty);
+
+      await tester.tap(find.byKey(const Key('logBodyButton')));
+      await tester.pumpAndSettle();
+      await predictiveBack(tester);
+      expect(find.byKey(_dialog), findsNothing);
+      expect(find.byKey(const Key('bodySheetSave')), findsNothing,
+          reason: 'an untouched sheet closes at once');
+    }, variant: android);
   });
 
   group('DiscardChangesGuard', () {

@@ -2,9 +2,10 @@
 ///
 /// Material 3 underneath, iOS on top: every ColorScheme role is mapped
 /// onto the neutral tokens (no seed tone leaks into dialogs, sheets,
-/// menus or placeholders), text uses Apple's sizes and tracking on the
-/// system fonts, depth comes from the page/cell tone inversion rather
-/// than elevation, and presses highlight instead of rippling on iOS.
+/// menus or placeholders), text uses Apple's sizes on the system fonts
+/// (with Apple's tracking on iOS; Roboto keeps its own spacing on
+/// Android), depth comes from the page/cell tone inversion rather than
+/// elevation, and presses highlight instead of rippling on iOS.
 ///
 /// Screens pick up most of the look from here alone; the shared
 /// components in widgets/grouped.dart and widgets/states.dart do the rest.
@@ -27,27 +28,36 @@ abstract final class AppTheme {
   /// The full theme for [brightness].
   ///
   /// [cjk]: the effective locale is Chinese, so every letterSpacing is 0
-  /// (Apple's SF tracking table is for Latin text).
+  /// (Apple's SF tracking table is for Latin text). On Android every
+  /// letterSpacing is 0 in either language: Roboto at its own spacing
+  /// (owner decision 6, 2026-11-20).
   /// [highContrast]: iOS Increase Contrast (MaterialApp.highContrastTheme).
   /// [debugFontFamily]/[debugFontFallback]: tests measure with the
   /// iPhone's real fonts loaded under a test family name.
+  /// [debugAppleTracking]: tests set Apple's tracking (true) or none
+  /// (false) whatever the platform, which otherwise decides it; the
+  /// iPhone layout harness measures with Apple's tracking under
+  /// flutter_test's default platform, Android. The app never sets it.
   static ThemeData build(
     Brightness brightness, {
     bool cjk = false,
     bool highContrast = false,
     @visibleForTesting String? debugFontFamily,
     @visibleForTesting List<String>? debugFontFallback,
+    @visibleForTesting bool? debugAppleTracking,
   }) {
-    if (debugFontFamily != null || debugFontFallback != null) {
+    if (debugFontFamily != null ||
+        debugFontFallback != null ||
+        debugAppleTracking != null) {
       return _build(brightness, cjk, highContrast, defaultTargetPlatform,
-          debugFontFamily, debugFontFallback);
+          debugFontFamily, debugFontFallback, debugAppleTracking);
     }
     // One instance per combination: the app rebuilds MaterialApp on every
     // settings change, and an unequal ThemeData (the extensions compare by
     // identity) would restart AnimatedTheme's lerp each time.
     final platform = defaultTargetPlatform;
     return _cache[(brightness, cjk, highContrast, platform)] ??=
-        _build(brightness, cjk, highContrast, platform, null, null);
+        _build(brightness, cjk, highContrast, platform, null, null, null);
   }
 
   static final Map<(Brightness, bool, bool, TargetPlatform), ThemeData>
@@ -60,6 +70,7 @@ abstract final class AppTheme {
     TargetPlatform platform,
     String? debugFontFamily,
     List<String>? debugFontFallback,
+    bool? debugAppleTracking,
   ) {
     final c = AppColors.forBrightness(brightness, highContrast: highContrast);
     final scheme = colorSchemeFor(c);
@@ -81,12 +92,17 @@ abstract final class AppTheme {
     final textFamily = t.bodyLarge?.fontFamily;
     final displayFamily = t.displayLarge?.fontFamily;
     final fallback = t.bodyLarge?.fontFamilyFallback;
+    // Apple's tracking table is for SF: on Android, Roboto keeps its own
+    // spacing, letterSpacing 0 (owner decision 6, 2026-11-20). Sizes and
+    // line heights stay Apple's on both.
+    final appleTracking = debugAppleTracking ?? ios;
     TextStyle role(TextStyle? s, double size, double line, FontWeight w,
             double tracking) =>
         appTextRole(s, size, line, w, tracking,
             family: size >= 20 ? displayFamily : textFamily,
             fallback: fallback,
-            cjk: cjk);
+            cjk: cjk,
+            appleTracking: appleTracking);
 
     final text = t.copyWith(
       // SliverAppBar.large's expanded title.
@@ -142,11 +158,13 @@ abstract final class AppTheme {
         AppTypography.from(text,
             mutedColor: c.secondaryLabel,
             cjk: cjk,
+            appleTracking: appleTracking,
             textFamily: textFamily,
             displayFamily: displayFamily,
             fallback: fallback),
         AppNumerals.from(text,
             cjk: cjk,
+            appleTracking: appleTracking,
             textFamily: textFamily,
             displayFamily: displayFamily,
             fallback: fallback),
@@ -166,11 +184,19 @@ abstract final class AppTheme {
       highlightColor: ios
           ? (c.isDark ? const Color(0x22FFFFFF) : const Color(0x2E000000))
           : base.highlightColor,
-      // iOS push transition + swipe-back on BOTH platforms (scope back to
-      // per-platform if the Android edge-swipe double-pop, #83087, bites).
-      pageTransitionsTheme: const PageTransitionsTheme(builders: {
-        TargetPlatform.android: CupertinoPageTransitionsBuilder(),
-        TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+      // iOS: the push transition and its edge swipe-back. Android: the
+      // predictive-back transition (owner decision 6, 2026-11-20; with
+      // android:enableOnBackInvokedCallback in AndroidManifest.xml): the
+      // back gesture shows the page underneath as it moves, and a push,
+      // or a pop by a button, uses Flutter's fade-forwards transition.
+      // Behind that fade, the page tone rather than the cell's
+      // (ColorScheme.surface, the builder's default). A pop that is held
+      // (DiscardChangesGuard's PopScope) shows no preview: the gesture's
+      // end asks first.
+      pageTransitionsTheme: PageTransitionsTheme(builders: {
+        TargetPlatform.android:
+            PredictiveBackPageTransitionsBuilder(fallbackColor: c.page),
+        TargetPlatform.iOS: const CupertinoPageTransitionsBuilder(),
       }),
       appBarTheme: AppBarThemeData(
         backgroundColor: c.page,
