@@ -35,10 +35,14 @@ class MemoryKeyStore implements SecureKeyStore {
   Future<void> delete(String key) async => data.remove(key);
 }
 
+/// The user's own server on the Claude plan. [allowed]: the user allowed
+/// it (the AI consent); Settings' own checks (serverLoginState,
+/// serverFeatures) send nothing without that.
 Future<AppSettings> serverSettings({
   String? url = 'https://10.0.0.5',
   String? key = 'upload-key',
   String profile = '',
+  bool allowed = false,
 }) async {
   SharedPreferences.setMockInitialValues({});
   final s = await AppSettings.load(
@@ -48,6 +52,7 @@ Future<AppSettings> serverSettings({
   if (url != null) await s.setServerBaseUrl(url);
   if (key != null) await s.setServerApiKey(key);
   if (profile.isNotEmpty) await s.setDietaryProfile(profile);
+  if (allowed) await s.setAiConsent('server:claude', granted: true);
   return s;
 }
 
@@ -790,7 +795,7 @@ void main() {
 
   test('serverLoginState: only a JSON 401/403 is a rejected key; a portal '
       'or filter page answering one is "unreachable"', () async {
-    final s = await serverSettings();
+    final s = await serverSettings(allowed: true);
     Future<String?> state(http.Response reply) => ServerAnalyzer(s,
             client: MockClient((_) async => reply))
         .serverLoginState();
@@ -812,11 +817,76 @@ void main() {
     expect(await state(http.Response('{}', 500)), 'unreachable');
   });
 
+  // Android QA Q2: with sharing stopped, a cold start still sent POST
+  // /api/auth_check with the upload key (Settings' Restaurant nutrition
+  // group asks the server what it supports). The consent says nothing is
+  // sent before Allow and nothing more after Stop Sharing, so Settings' own
+  // two checks send nothing then either.
+  group('Settings\' checks send nothing while the server is not allowed', () {
+    Future<(ServerAnalyzer, List<http.BaseRequest>)> counted(
+        AppSettings s) async {
+      final seen = <http.BaseRequest>[];
+      final analyzer = ServerAnalyzer(s, client: MockClient((req) async {
+        seen.add(req);
+        return http.Response(
+            jsonEncode({
+              'ok': true,
+              'claude_login': 'token',
+              'features': {'restaurant_lookup': true, 'lookup_jobs': true},
+            }),
+            200);
+      }));
+      return (analyzer, seen);
+    }
+
+    test('never allowed: no request, so no upload key', () async {
+      final (a, seen) = await counted(await serverSettings());
+      expect(await a.serverLoginState(), isNull);
+      expect(await a.serverFeatures(), isNull);
+      expect(seen, isEmpty);
+    });
+
+    test('Stop Sharing: no request from then on; Allow again: one each',
+        () async {
+      final s = await serverSettings(allowed: true);
+      final (a, seen) = await counted(s);
+      expect(await a.serverLoginState(), 'token');
+      expect(await a.serverFeatures(), isNotNull);
+      expect(seen.map((r) => r.url.path),
+          ['/api/auth_check', '/api/auth_check']);
+
+      seen.clear();
+      await s.setAiConsent('server:claude', granted: false); // Stop Sharing
+      expect(await a.serverLoginState(), isNull);
+      expect(await a.serverFeatures(), isNull);
+      expect(seen, isEmpty);
+
+      await s.setAiConsent('server:claude', granted: true);
+      expect(await a.serverLoginState(), 'token');
+      expect(await a.serverFeatures(), isNotNull);
+      expect(seen, hasLength(2));
+    });
+
+    test('another plan allowed is not this one', () async {
+      final s = await serverSettings();
+      await s.setAiConsent('server:glm', granted: true);
+      await s.setAiConsent('gemini', granted: true);
+      final (a, seen) = await counted(s);
+      expect(await a.serverLoginState(), isNull);
+      expect(await a.serverFeatures(), isNull);
+      expect(seen, isEmpty);
+      // On the GLM plan, that grant is the one that counts.
+      await s.setServerBackend('glm');
+      expect(await a.serverFeatures(), isNotNull);
+      expect(seen, hasLength(1));
+    });
+  });
+
   group('serverFeatures (restaurant assist R1)', () {
     Future<(ServerFeatures?, List<http.BaseRequest>)> probe(
         http.Response Function() reply,
         {String? url = 'https://10.0.0.5', String? key = 'upload-key'}) async {
-      final s = await serverSettings(url: url, key: key);
+      final s = await serverSettings(url: url, key: key, allowed: true);
       final seen = <http.BaseRequest>[];
       final analyzer = ServerAnalyzer(s, client: MockClient((req) async {
         seen.add(req);
@@ -1637,7 +1707,8 @@ void main() {
 
     Future<(ServerAnalyzer, List<http.BaseRequest>, List<int>)> analyzerAt(
         String url) async {
-      final s = await serverSettings(url: url);
+      // Allowed: what holds the requests back here is the address alone.
+      final s = await serverSettings(url: url, allowed: true);
       final seen = <http.BaseRequest>[];
       final decodes = <int>[];
       final analyzer = ServerAnalyzer(s,

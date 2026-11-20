@@ -130,6 +130,17 @@ class ServerAnalyzer extends _HttpVisionAnalyzer {
   /// call, before anything is built, decoded or sent, like the address.
   bool get _refused => serverAddressRefused(settings.serverBaseUrl);
 
+  /// Whether the user allows the server on its current plan
+  /// (aiConsentRoute). The consent says nothing is sent before Allow, and
+  /// nothing more after Stop Sharing; the free auth_check that Settings
+  /// reads by itself carries the upload key, so [serverLoginState] and
+  /// [serverFeatures] send nothing without it either (a cold start sent
+  /// one while sharing was stopped: Android QA Q2). The photo, text and
+  /// leftover calls are let through by the consent before they get here
+  /// (AiSendGate, ensureAiConsent).
+  bool get _allowed =>
+      settings.hasAiConsent(aiConsentRoute('server', settings.serverBackend));
+
   /// Whether the saved address parses (an empty one is reported on its
   /// own, by [buildRequest]).
   bool get _addressParses {
@@ -471,13 +482,14 @@ class ServerAnalyzer extends _HttpVisionAnalyzer {
   /// is required (2026-09-28). 'token' | 'none' from the server;
   /// 'unreachable' / 'rejected' when it could not be asked (the page shows
   /// "could not check"); null for a 200 without the field — an older
-  /// server — where the page hides the row rather than guess, and for an
+  /// server — where the page hides the row rather than guess, for an
   /// address nothing is sent to ([_refused]), where the page says
-  /// "needs https" instead.
+  /// "needs https" instead, and while the server is not allowed
+  /// ([_allowed]), where nothing is sent at all.
   Future<String?> serverLoginState() async {
     final base = settings.serverBaseUrl;
     final key = (settings.serverApiKey ?? '').trim();
-    if (base.isEmpty || key.isEmpty || _refused) return null;
+    if (base.isEmpty || key.isEmpty || _refused || !_allowed) return null;
     try {
       final req = http.Request('POST', _uri('/api/auth_check'))
         ..headers['content-type'] = 'application/json'
@@ -505,14 +517,15 @@ class ServerAnalyzer extends _HttpVisionAnalyzer {
 
   /// What the server says it supports: the `features` map of the FREE
   /// /api/auth_check (restaurant assist, R1). Null when the server could not
-  /// be asked — no address or key, unreachable, a rejected key, or a reply
-  /// that is not a JSON object (a captive portal, a proxy page). A JSON 200
-  /// WITHOUT the map is an older server: [ServerFeatures.oldServer], every
-  /// capability off, so nothing new is ever attempted against it.
+  /// be asked — no address or key, the server not allowed ([_allowed]:
+  /// nothing is sent), unreachable, a rejected key, or a reply that is not
+  /// a JSON object (a captive portal, a proxy page). A JSON 200 WITHOUT the
+  /// map is an older server: [ServerFeatures.oldServer], every capability
+  /// off, so nothing new is ever attempted against it.
   Future<ServerFeatures?> serverFeatures() async {
     final base = settings.serverBaseUrl;
     final key = (settings.serverApiKey ?? '').trim();
-    if (base.isEmpty || key.isEmpty) return null;
+    if (base.isEmpty || key.isEmpty || !_allowed) return null;
     try {
       final req = http.Request('POST', _uri('/api/auth_check'))
         ..headers['content-type'] = 'application/json'

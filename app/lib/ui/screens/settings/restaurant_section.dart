@@ -19,6 +19,7 @@ import 'dart:async' show unawaited;
 
 import 'package:flutter/material.dart';
 
+import '../../../core/ai_consent.dart' show aiConsentRoute;
 import '../../../core/server_transport.dart' show serverAddressRefused;
 import '../../../services/assist/clients/lookup_client.dart'
     show LookupRecipient, LookupSupport, LookupUnsupportedReason;
@@ -103,11 +104,16 @@ class RestaurantAssistSectionState extends State<RestaurantAssistSection> {
 
   /// Claude Plan on the claude backend: what the server says about
   /// lookups, once per address (asked again when the address changes).
+  /// Only while the user allows that server: before Allow, and after Stop
+  /// Sharing, nothing is sent to it, not even this free check with the
+  /// upload key (the group is built at launch, so a cold start sent it:
+  /// Android QA Q2). The rebuild after an Allow asks.
   void _maybeAskServer() {
     final ask = _c.serverState;
     final ownServer = _s.provider == 'server' &&
         _s.serverBackend == 'claude' &&
-        _s.serverBaseUrl.trim().isNotEmpty;
+        _s.serverBaseUrl.trim().isNotEmpty &&
+        _s.hasAiConsent(aiConsentRoute('server', 'claude'));
     final key = ownServer && ask != null ? _s.serverBaseUrl.trim() : '';
     if (key == _serverAskedFor) return;
     _serverAskedFor = key;
