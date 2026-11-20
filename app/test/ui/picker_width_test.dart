@@ -45,9 +45,55 @@ final bool _haveRoboto = _robotoPaths().isNotEmpty;
 const _cjk = 'CjkTest';
 final bool _haveCjk = File(cjkFontPath).existsSync();
 
+/// The text scaler Android 14 and later give Flutter at font size 2.0.
+/// From Android 14 text scales non-linearly, small sizes more than large
+/// (AOSP FontScaleConverterFactory's 2.0 table, the same on main): 32 sp
+/// draws at 39.8 dp (1.24x), 29 sp at 37.7 (1.30x). Flutter asks the
+/// platform for each whole size and interpolates in between
+/// (PlatformDispatcher.scaleFontSize); the platform interpolates between
+/// its table's points (FontScaleConverter.convertSpToDp).
+class _Android14FontSize2 extends TextScaler {
+  const _Android14FontSize2();
+
+  static const _sp = <double>[8, 10, 12, 14, 18, 20, 24, 30, 100];
+  static const _dp = <double>[16, 20, 24, 26, 30, 34, 36, 38, 100];
+
+  /// convertSpToDp for a whole [size]: from 0 below the first point, the
+  /// last point's ratio above the last.
+  static double _platform(int size) {
+    final sp = size.toDouble();
+    var fromSp = 0.0, fromDp = 0.0;
+    for (var i = 0; i < _sp.length; i++) {
+      if (sp <= _sp[i]) {
+        return fromDp + (_dp[i] - fromDp) * (sp - fromSp) / (_sp[i] - fromSp);
+      }
+      fromSp = _sp[i];
+      fromDp = _dp[i];
+    }
+    return sp * _dp.last / _sp.last;
+  }
+
+  @override
+  double scale(double fontSize) {
+    final floor = fontSize.floor();
+    final low = _platform(floor);
+    return low + (_platform(fontSize.ceil()) - low) * (fontSize - floor);
+  }
+
+  @override
+  double get textScaleFactor => 2.0;
+
+  @override
+  bool operator ==(Object other) => other is _Android14FontSize2;
+
+  @override
+  int get hashCode => textScaleFactor.hashCode;
+}
+
 Future<void> _pump(WidgetTester tester, Size size, double scale,
     {Locale locale = const Locale('en'),
     bool cjkFont = false,
+    TextScaler? textScaler,
     required Future<void> Function(BuildContext) open}) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1.0;
@@ -61,7 +107,8 @@ Future<void> _pump(WidgetTester tester, Size size, double scale,
     localizationsDelegates: AppLocalizations.localizationsDelegates,
     supportedLocales: AppLocalizations.supportedLocales,
     builder: (context, child) => MediaQuery(
-      data: MediaQuery.of(context).copyWith(textScaler: TextScaler.linear(scale)),
+      data: MediaQuery.of(context)
+          .copyWith(textScaler: textScaler ?? TextScaler.linear(scale)),
       child: child!,
     ),
     home: Scaffold(
@@ -269,6 +316,45 @@ void main() {
       expect(style?.fontSize, greaterThanOrEqualTo(20),
           reason: 'still a headline');
     }, skip: !_haveCjk);
+
+    test('the Android 14 stand-in scales as the platform does at 2.0', () {
+      const scaler = _Android14FontSize2();
+      expect(scaler.scale(14), 26);
+      expect(scaler.scale(32), closeTo(39.771, 0.001));
+      expect(scaler.scale(29), closeTo(37.667, 0.001));
+      expect(scaler.scale(28.5), closeTo(37.5, 0.001));
+      expect(scaler.scale(29) / 29, greaterThan(scaler.scale(32) / 32),
+          reason: 'a smaller size is scaled more');
+    });
+
+    // Android 14 and later scale text non-linearly ([_Android14FontSize2]).
+    // A headline shrunk in proportion to its 32-sp width drew wider than
+    // that, the smaller size being scaled more, so where the clamp let the
+    // scale through the Chinese date was still cut at font size 2.0:
+    // '12月30日周…' at 345.6 dp (one Display size under the largest on a
+    // 411-dp Pixel) and at every width from about 342 to 358 dp.
+    for (final lang in const ['en', 'zh']) {
+      for (final width in [
+        for (var w = 341; w <= 359; w++) w.toDouble(),
+        345.6,
+        352.65,
+      ]) {
+        testWidgets('$lang at $width dp, Android 14 font size 2.0: the '
+            'longest date is whole', (tester) async {
+          final date = longest[lang]!;
+          await _pump(tester, Size(width, 760), 2.0,
+              locale: Locale(lang),
+              cjkFont: true,
+              textScaler: const _Android14FontSize2(),
+              open: openAt(date));
+          expectWhole(tester, date, 'calendar');
+          final style = tester.widget<Text>(headline(tester, date)).style;
+          expect(style?.fontSize, greaterThanOrEqualTo(20),
+              reason: 'still a headline');
+          expect(tester.takeException(), isNull);
+        }, skip: lang == 'zh' && !_haveCjk);
+      }
+    }
   });
 
   testWidgets('the time picker keeps its 1.6 clamp at 320 dp', (tester) async {

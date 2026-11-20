@@ -96,8 +96,23 @@ TextStyle? fittedDatePickerHeadline(BuildContext context) {
     }
   }
   if (widest <= room) return null;
-  // A whole pixel under the room, for the rounding a real layout does.
-  final fitted = (size * (room - 1) / widest * 2).floorToDouble() / 2;
+  // The largest half point at which the widest date leaves a whole pixel
+  // of the room, for the rounding a real layout does. A date's width
+  // follows its scaled font size (headlineLarge has no letter spacing,
+  // which a scaler leaves alone), so the measurement at [size] gives the
+  // width at any other size through the header's own scaler. Start from
+  // the size in proportion and come down half a point while that is too
+  // wide: Android 14 and later scale a smaller size by more (at font size
+  // 2.0, 32 sp draws 1.24x and 29 sp 1.30x), where the size in proportion
+  // still cut the date ('12月30日周…' at 345.6 dp). With a linear scaler
+  // (iOS, Android 13 and earlier) it already fits, and the 1e-6 keeps a
+  // rounding error from stepping it down. The steps stop at 8 sp.
+  final at = titleScaler.scale(size);
+  var fitted = (size * (room - 1) / widest * 2).floorToDouble() / 2;
+  while (fitted > 8 &&
+      widest * titleScaler.scale(fitted) / at > room - 1 + 1e-6) {
+    fitted -= 0.5;
+  }
   return style.copyWith(fontSize: fitted);
 }
 
