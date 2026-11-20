@@ -160,6 +160,42 @@ void main() {
     expect(probed, [Uri.parse('http://h.test')]);
   });
 
+  // Android review 2026-11-19 (R13): the reachability probe went around
+  // the https-only client in front of the server
+  // (services/server_http_client.dart) and followed a 3xx, so a server, or
+  // a proxy or sign-in gateway in front of it, that redirected to an
+  // http:// address or another host had a request sent there, and the
+  // stage passed on that other address's answer. A 3xx is now the answer
+  // itself: the address answered, and the probe goes no further.
+  // diagnostics_redirect_test.dart runs this on real sockets.
+  for (final (provider, address) in const [
+    ('server', 'https://h.test'),
+    ('openai', 'https://api.openai.com/'),
+  ]) {
+    test('the $provider probe follows no redirect: a 302 is the answer',
+        () async {
+      final settings = FakeSettings()
+        ..provider = provider
+        ..apiKey = 'k'
+        ..serverBaseUrl = provider == 'server' ? address : '';
+      final probed = <http.BaseRequest>[];
+      final results = await _diag(
+              settings: settings,
+              client: MockClient((req) async {
+                probed.add(req);
+                return http.Response('', 302,
+                    headers: {'location': 'http://203.0.113.5:5000/'});
+              }))
+          .run()
+          .toList();
+      expect(probed.map((r) => r.url), [Uri.parse(address)]);
+      expect(probed.single.followRedirects, isFalse);
+      expect(results[1].stage, 'Endpoint reachability');
+      expect(results[1].status, DiagStatus.pass);
+      expect(results, hasLength(6));
+    });
+  }
+
   test('a passing key probe tells the store the credentials work — the '
       'automatic-scan pause lifts without a key edit', () async {
     // Review 2026-10-12: the owner who fixed the account at the provider's
