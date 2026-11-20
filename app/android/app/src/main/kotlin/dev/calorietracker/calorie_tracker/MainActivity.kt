@@ -68,10 +68,11 @@ class MainActivity : FlutterActivity() {
         // a share until share intake listens (ShareHold). The launch
         // intent is not re-delivered, but the copies of a share cut short
         // by the stop stay in shared_photos, those never read and those
-        // whose photo had no verdict written yet (share intake deletes a
-        // copy only then): share intake (Dart) picks them up at its next
-        // start, within a day, through the same consent gate, and the
-        // photo ledger keeps one already logged from being logged twice.
+        // whose photo was not settled yet (share intake deletes a copy
+        // once its photo's verdict is written or the photo is let go):
+        // share intake (Dart) picks them up at its next start, within a
+        // day, through the same consent gate, and the photo ledger keeps
+        // one already logged from being logged twice.
         val replay = IntakeRules.isRedelivery(savedInstanceState != null, intent?.flags ?: 0)
         if (replay) {
             intent?.let { setIntent(emptyShare(it)) }
@@ -95,15 +96,17 @@ class MainActivity : FlutterActivity() {
     /// Only a Back that Flutter handles gets here. With predictive back on
     /// (every Android 16 phone for targetSdk 36; Android 13-15 with
     /// enableOnBackInvokedCallback) Flutter hands Back at an idle root to
-    /// Android, which moves to the back only a task the home screen started
-    /// with the launcher intent and finishes any other: one a share
-    /// started, or one `am start` launched (QA: start from the launcher
-    /// icon). So while a shared photo is pending the shell keeps that Back
-    /// in Flutter (SharedPhotosBackGuard, app.dart), and its
+    /// Android (setFrameworkHandlesBack(false)). Android 14 and later move
+    /// to the back only a task the home screen started with the launcher
+    /// intent, and finish any other: one a share started, or one
+    /// `am start` launched (QA: start from the launcher icon). Android 13
+    /// also moves back a task whose root is a launcher activity, as
+    /// MainActivity is. So while a shared photo is pending the shell keeps
+    /// that Back in Flutter (SharedPhotosBackGuard, app.dart), and its
     /// SystemNavigator.pop() lands here on every Android version. A photo
     /// a finish still cuts off (a swipe from Recents, a Back before share
     /// intake has the share) is offered again at the next start, since its
-    /// copy is kept until its verdict is written (share_intake.dart).
+    /// copy is kept until the photo is settled (share_intake.dart).
     override fun popSystemNavigator(): Boolean {
         moveTaskToBack(true)
         return true

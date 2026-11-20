@@ -175,8 +175,9 @@ Future<Uint8List?> _readFileBytes(String path) async {
 /// Android app dir) and its API contract says the consumer deletes the copy
 /// after use — nothing else ever purges them, so skipping this leaks the
 /// full-size original of every shared photo forever (storage + privacy).
-/// "After use" is once the photo is settled on Android (its verdict
-/// written, or dropped unsent: IntakePhoto.onSettled), at once on iOS.
+/// "After use" is once the photo is settled on Android
+/// (IntakePhoto.onSettled: its verdict written, or let go: released by
+/// the pipeline or dropped unsent), at once on iOS.
 /// Synchronous: a Not now's copies are gone before its answer returns
 /// ([ShareIntake.declineDeliveries]), so an app stopped right after keeps
 /// none for the next start's sweep.
@@ -260,13 +261,14 @@ class ShareIntake implements ShareDeliveries {
   /// [_untaken] and [_inHand].
   int _reading = 0;
 
-  /// Android: whether a shared photo this engine took has no verdict
-  /// written yet — its copy waiting unread ([_untaken]), being read, or in
-  /// hand ([_inHand]) — so stopping the engine now would cut it off. The
-  /// app shell keeps Back at the root from finishing the activity
-  /// meanwhile (SharedPhotosBackGuard): with predictive back, Android
-  /// finishes a task a share started, its engine with it, mid-analysis
-  /// (Q9). False once every photo is settled, and always on iOS.
+  /// Android: whether a shared photo this engine took is not settled yet
+  /// (IntakePhoto.onSettled) — its copy waiting unread ([_untaken]), being
+  /// read, or in hand ([_inHand]) — so stopping the engine now would cut
+  /// it off. The app shell keeps Back at the root from finishing the
+  /// activity meanwhile (SharedPhotosBackGuard): with predictive back,
+  /// Android 14 and later finish a task a share started, its engine with
+  /// it, mid-analysis (Q9). False once every photo is settled, and always
+  /// on iOS.
   ValueListenable<bool> get photosPending => _pending;
   final ValueNotifier<bool> _pending = ValueNotifier<bool>(false);
 
@@ -347,15 +349,15 @@ class ShareIntake implements ShareDeliveries {
   ///
   /// KEPT UNTIL SETTLED (Android, 2026-11-20, Q1/Q9): a photo's copy stays
   /// on disk after it is read, until the photo is settled
-  /// (IntakePhoto.onSettled: its verdict written, or dropped unsent). It
-  /// used to go as its bytes were read, so an engine stopped mid-analysis
-  /// (Back finished the activity, Android stopped the process) lost the
-  /// photo in flight and the one read ahead: the meal was never saved,
-  /// and nothing could offer it again. Now the next start's sweep
-  /// ([_leftOver]) offers them again with the copies never read. A copy
-  /// that gives no photo (another type, empty, over 25 MB, unreadable)
-  /// still goes at once, and on a cancel the copies read but not handed
-  /// on go with those not read.
+  /// (IntakePhoto.onSettled: its verdict written, or let go: released by
+  /// the pipeline or dropped unsent). It used to go as its bytes were
+  /// read, so an engine stopped mid-analysis (Back finished the activity,
+  /// Android stopped the process) lost the photo in flight and the one
+  /// read ahead: the meal was never saved, and nothing could offer it
+  /// again. Now the next start's sweep ([_leftOver]) offers them again
+  /// with the copies never read. A copy that gives no photo (another
+  /// type, empty, over 25 MB, unreadable) still goes at once, and on a
+  /// cancel the copies read but not handed on go with those not read.
   ///
   /// iOS reads each copy the moment it arrives, as before: the share
   /// extension writes `<appGroup>/<file name>` and replaces a file of the
@@ -498,7 +500,7 @@ class ShareIntake implements ShareDeliveries {
     return controller.stream;
   }
 
-  /// How long a copy a killed app left unread is still logged at the next
+  /// How long a copy a killed app left behind is still logged at the next
   /// start (Android); older ones are deleted unread.
   static const strandedMaxAge = Duration(hours: 24);
 

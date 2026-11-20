@@ -10,8 +10,8 @@ import 'package:flutter/services.dart' show SystemNavigator;
 import 'package:flutter/widgets.dart';
 
 /// Keeps the app running when Back reaches the root while [pending] is
-/// true (ShareIntake.photosPending: a shared photo with no verdict written
-/// yet), on Android.
+/// true (ShareIntake.photosPending: a shared photo not settled yet), on
+/// Android.
 ///
 /// MainActivity.popSystemNavigator moves the task to the back instead of
 /// finishing it, but only a Back that Flutter handles gets there. At the
@@ -19,11 +19,13 @@ import 'package:flutter/widgets.dart';
 /// (setFrameworkHandlesBack(false)). With predictive back on (every
 /// Android 16 phone, since the app targets SDK 36, and Android 13-15 with
 /// android:enableOnBackInvokedCallback) Android then answers that Back
-/// itself: it moves to the back only a task the home screen started with
-/// the launcher intent, and FINISHES any other, such as the task a share
-/// from Gallery started, destroying the engine in the middle of the
-/// analysis. The photo came back only at the next start, sent to the AI a
-/// second time, or never when that start was a day later.
+/// itself. Android 14 and later move to the back only a task the home
+/// screen started with the launcher intent, and FINISH any other, such as
+/// the task a share from Gallery started, destroying the engine in the
+/// middle of the analysis. The photo came back only at the next start,
+/// sent to the AI a second time, or never when that start was a day
+/// later. (Android 13 also moves back a task whose root is a launcher
+/// activity, as MainActivity is: there the guard does what Android would.)
 ///
 /// So while [pending] is true the root route does not pop (PopScope with
 /// canPop false): Flutter keeps the Back (setFrameworkHandlesBack(true))

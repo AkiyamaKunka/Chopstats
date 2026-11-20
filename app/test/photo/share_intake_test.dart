@@ -195,7 +195,7 @@ void main() {
       expect(photo.fileName, 'IMG_20260716_193042.jpg');
       expect(read, [copy.path]);
       expect(copy.existsSync(), isTrue,
-          reason: 'kept until its verdict is written (Q1, Q9)');
+          reason: 'kept until the photo is settled (Q1, Q9)');
       photo.onSettled!();
       expect(copy.existsSync(), isFalse, reason: 'deleted once settled');
       expect(db.existsSync(), isTrue);
@@ -1022,12 +1022,12 @@ void main() {
     });
   });
 
-  // Review 2026-11-20: with predictive back, Android finishes a task a
-  // share started when Back reaches the root, and the engine with it,
-  // mid-analysis (Q9). The shell keeps that Back in Flutter while a shared
-  // photo is pending (SharedPhotosBackGuard): from the moment its share
-  // arrives until its verdict is written, through every read, and never on
-  // iOS.
+  // Review 2026-11-20: with predictive back, Android 14 and later finish a
+  // task a share started when Back reaches the root, and the engine with
+  // it, mid-analysis (Q9). The shell keeps that Back in Flutter while a
+  // shared photo is pending (SharedPhotosBackGuard): from the moment its
+  // share arrives until the photo is settled, through every read, and
+  // never on iOS.
   group('Android: photosPending, from a share\'s arrival to its last '
       'verdict', () {
     late Map<String, Uint8List> held;
@@ -1146,8 +1146,11 @@ void main() {
   // (MainActivity removes only EMPTY folders, and a recreated activity
   // does not hand the launch share over again). The next start logs the
   // ones shared within a day, through the same consent gate and pipeline:
-  // a copy still on disk was never read, since reading deletes it, so
-  // nothing is sent twice. Older ones are deleted unread.
+  // a copy still on disk has no verdict written yet (on Android a photo's
+  // copy goes only once the photo is settled). Most were never read; one
+  // whose engine stopped mid-analysis may have been sent already and is
+  // sent again, and the md5 photo ledger keeps it to one meal
+  // (share_resume_test.dart). Older ones are deleted unread.
   group('Android: copies a killed app left unread', () {
     late Directory cache;
     late String folder;

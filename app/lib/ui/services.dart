@@ -248,9 +248,10 @@ class UiServices {
   /// Null in tests that never share.
   final SharedPhotoConsentGate? sharedPhotoConsent;
 
-  /// Android: true while a shared photo has no verdict written yet
+  /// Android: true while a shared photo is not settled yet
   /// (ShareIntake.photosPending); the shell's Back at the root then moves
-  /// the app to the back instead of letting Android finish it
+  /// the app to the back instead of leaving that Back to Android, which
+  /// finishes a task a share started on Android 14 and later
   /// (SharedPhotosBackGuard). Null on iPhone and in most tests.
   final ValueListenable<bool>? sharedPhotosPending;
 

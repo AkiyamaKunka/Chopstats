@@ -3,13 +3,14 @@
 // middle of a batch). Its copy was deleted as its bytes were read, and its
 // ledger row stayed 'processing' until a launch 20 minutes later failed it.
 //
-// Now the copy is kept until the photo's meal or failure is written
-// (IntakePhoto.onSettled), and the launch sweep releases a deliberate row
-// its engine left (fails one older than 20 minutes, which a deliberate add
-// reclaims), so the next start offers the photo again through the normal
-// path: the consent question once for the batch, the md5 ledger keeping it
-// to one meal. A photo whose copy is gone is not offered again; released,
-// it is free for a share again or the camera-roll scan.
+// Now the copy is kept until the photo is settled (IntakePhoto.onSettled:
+// its meal or failure written, or the photo let go), and the launch sweep
+// releases a deliberate row its engine left (fails one older than 20
+// minutes, which a deliberate add reclaims), so the next start offers the
+// photo again through the normal path: the consent question once for the
+// batch, the md5 ledger keeping it to one meal. A photo whose copy is gone
+// is not offered again; released, it is free for a share again, and for
+// the camera-roll scan if it is also in the library.
 //
 // Each "run" below is one engine, wired as di.dart wires the share path:
 // the launch sweep first, then share intake → consent gate → pipeline, on
@@ -358,8 +359,9 @@ void main() {
         clock: later(const Duration(minutes: 1)));
     await Future<void>.delayed(const Duration(milliseconds: 200));
     expect(await run2.dao.photoStatus(hash), isNull,
-        reason: 'released: a deliberate add and the camera-roll scan take '
-            'it at once (Photo Coverage lists it as not logged)');
+        reason: 'released: a deliberate add takes it at once (the '
+            'camera-roll scan and Photo Coverage too, but only for a photo '
+            'also in the library: not this one)');
     expect(run2.intake.arrivedDelivery, 0, reason: 'nothing to offer again');
     expect(second.calls, isEmpty);
     expect(run2.notices, isEmpty);

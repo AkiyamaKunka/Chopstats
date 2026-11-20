@@ -788,8 +788,8 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
         },
         child: shell);
     // Android: while a shared photo is on its way to a meal, Back at the
-    // root moves the app to the back; Android would finish a task a share
-    // started, and its engine with it (Q9).
+    // root moves the app to the back; Android 14 and later would finish a
+    // task a share started, and its engine with it (Q9).
     final sharing = s.sharedPhotosPending;
     return sharing == null
         ? page

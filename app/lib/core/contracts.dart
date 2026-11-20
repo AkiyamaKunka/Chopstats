@@ -239,10 +239,12 @@ abstract class MealsDao {
   /// engine starts, before anything reserves: 'processing' rows whose run
   /// is gone. A deliberate row (picked or shared) younger than the stale
   /// age is released, since only the app's engine reserves those and the
-  /// one that held it is gone: the photo is free for a deliberate add and
-  /// for the camera-roll scan alike. Older ones are failed (the
-  /// user-visible retry). Automatic rows are released only once stale,
-  /// since the background run may still own them.
+  /// one that held it is gone: the photo is free for a deliberate add, and
+  /// for the camera-roll scan when it is in the library. Older ones are
+  /// failed (the user-visible retry: a deliberate add, or Photo Coverage
+  /// for a photo in the library, outside the Play build). Automatic rows
+  /// are released only once stale, since the background run may still own
+  /// them.
   Future<void> reclaimStaleProcessing();
 
   /// Forget every verdict from [source] that did not become a meal
@@ -661,14 +663,16 @@ class IntakePhoto {
 
   /// A shared photo whose copy waits on disk until its turn ends (Android:
   /// share_intake.dart): whoever ends the turn calls this — the pipeline
-  /// once the photo's verdict is written (PhotoPipeline.bindStream, and a
-  /// save as soon as the meal row is), the consent gate for a photo it
-  /// drops unsent — and the share intake deletes the copy then. Until
-  /// then the copy stays, so a photo whose engine stopped mid-analysis
-  /// (Back finished the activity, Android stopped the process) is offered
-  /// again at the next start rather than lost. A second call does nothing.
-  /// Null: nothing waits (iOS deletes its copy as it reads it; picked and
-  /// watched photos have none).
+  /// once process() has returned for it (PhotoPipeline.bindStream: its
+  /// verdict written, or the photo let go, released or never sent, as
+  /// after a transient failure, a refused http:// address, not allowed or
+  /// in flight), and a save as soon as the meal row is; the consent gate
+  /// for a photo it drops unsent — and the share intake deletes the copy
+  /// then. Until then the copy stays, so a photo whose engine stopped
+  /// mid-analysis (Back finished the activity, Android stopped the
+  /// process) is offered again at the next start rather than lost. A
+  /// second call does nothing. Null: nothing waits (iOS deletes its copy
+  /// as it reads it; picked and watched photos have none).
   final void Function()? onSettled;
   const IntakePhoto(this.bytes, this.assetId, this.fileName,
       {this.capturedAt,

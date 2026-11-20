@@ -621,16 +621,19 @@ class SqfliteMealsDao implements MealsDao {
     // Left 'processing' it answered "still being analyzed" to every
     // deliberate add for half an hour (appProcessingStaleAge), and a
     // shared photo whose copy the share intake kept (it deletes a copy
-    // only once its photo's verdict is written) came back at this start
-    // only to be told so. Released, not failed: 'failed' is settled for
-    // the automatic intake, so a pick (or an iPhone share, whose copy is
-    // gone) killed mid-analysis and reopened minutes later was never
-    // logged by Watch Camera Roll, which reclaimed the row once stale
-    // while it stayed 'processing' (2026-10-12: a run killed mid-analysis
-    // does not park the photo). Released, it goes to whoever offers it
-    // next: the kept share copy, a pick again, the launch catch-up. A run
-    // that was in fact alive loses its row and drops its verdict
-    // (ReservationLost): never a second meal.
+    // only once its photo is settled) came back at this start only to be
+    // told so. Released, not failed: 'failed' is settled for the automatic
+    // intake, so a pick (or an iPhone share, whose copy is gone) killed
+    // mid-analysis and reopened minutes later was never logged by Watch
+    // Camera Roll, which reclaimed the row once stale while it stayed
+    // 'processing' (2026-10-12: a run killed mid-analysis does not park
+    // the photo). Released, it goes to whoever offers it next: the kept
+    // share copy, a share again, or, for a photo in the phone's library, a
+    // pick again and the launch catch-up. A run that was in fact alive
+    // loses its row (ReservationLost): a deliberate one settles the
+    // verdict it holds once more under a fresh reservation, with no second
+    // upload, unless the photo is saved or held by another run by then
+    // (PhotoPipeline._afterLost); never a second meal.
     await _db.delete(
       'photo_ingestions',
       where:
@@ -645,8 +648,11 @@ class SqfliteMealsDao implements MealsDao {
     // Older DELIBERATE rows (picker/share) keep the spec behavior: mark
     // 'failed' so the user-visible retry path owns them. A deliberate add
     // reclaims a failed row, so a shared photo whose copy was kept, offered
-    // again by the start-up sweep, still goes through (Q1, Q9); one whose
-    // copy is gone waits for Photo Coverage's retry or a share again.
+    // again by the start-up sweep, still goes through (Q1, Q9). One whose
+    // copy is gone waits for a share or pick again, or for Photo
+    // Coverage's retry if it is also in the phone's library (not in the
+    // Play build). One shared from another app (a chat app, a browser)
+    // usually is not: only sharing it again logs it, and nothing says so.
     await _db.update(
       'photo_ingestions',
       {
