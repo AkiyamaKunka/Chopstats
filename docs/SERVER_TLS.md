@@ -425,9 +425,10 @@ In the app: **Settings → AI Provider → Your own server → Server
 address** → `https://$HOST` (no port, no trailing slash). Keep the same
 upload key. The app sends the key only to the host it was saved for: on
 route A the host stays the same, so nothing more is needed; on route B
-it changes from the address to the name, and the key field says the key
-was saved for the old address. Tap **Use this key for $HOST** under it
-(or paste the key again). Go back one page, tap **Test This Provider**
+it changes from the address to the name, and the key field is then
+empty, with a line saying the key was saved for the old address (the
+key itself is kept). Tap **Use this key for $HOST** under it. Go back
+one page, tap **Test This Provider**
 and then **Run the checks**. The test must reach the server, accept the key and get an
 answer for its test picture; it spends one text run and one photo run on
 your plan. Then take one food photo and check that it analyzes.
