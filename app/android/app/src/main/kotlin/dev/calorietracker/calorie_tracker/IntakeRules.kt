@@ -117,6 +117,24 @@ internal object IntakeRules {
         else -> SaveStep.DISCARD
     }
 
+    /// Deletes a save's source at [path] once its step is done (copied or
+    /// cancelled) when no call is left to answer ([callOpen] false). An
+    /// open call's Dart caller deletes the export itself once the call
+    /// returns; with none (Android recreated the activity while the
+    /// create-document screen was up, and the caller died with its engine)
+    /// nothing else would, and the export, the whole food log with every
+    /// picture, stayed in the cache until the next export. Only a regular
+    /// file in [cacheDir] (regularFileIn). True when one was deleted.
+    fun dropSaveSource(cacheDir: File, path: String?, callOpen: Boolean): Boolean {
+        if (callOpen) return false
+        val file = regularFileIn(cacheDir, path) ?: return false
+        return try {
+            file.delete()
+        } catch (e: Exception) {
+            false
+        }
+    }
+
     /// The modes a save opens its new document with, in order. Both
     /// truncate; plain "w" may leave a longer file's old bytes at the end
     /// on some providers, so it is never tried: no stream is a failed save.

@@ -553,7 +553,9 @@ class MainActivity : FlutterActivity() {
     /// but its source is gone, so it is removed. The open call, if any, is
     /// answered; with none (Android recreated the activity while the screen
     /// was up) the copy still finishes, from the source saved in the
-    /// activity's state, since the user did choose a place for it.
+    /// activity's state, since the user did choose a place for it, and
+    /// the source is deleted here once copied or cancelled: its caller,
+    /// which would have, is gone (IntakeRules.dropSaveSource).
     private fun onSaveTargetPicked(resultCode: Int, data: Intent?) {
         val call = if (saves.isOpen) saveCall else null
         val uri = data?.data
@@ -561,6 +563,7 @@ class MainActivity : FlutterActivity() {
         pendingSaveSource = null
         val step = IntakeRules.saveStep(resultCode == Activity.RESULT_OK, uri != null, source != null)
         if (step == IntakeRules.SaveStep.CANCEL || uri == null) {
+            IntakeRules.dropSaveSource(cacheDir, source?.path, call != null)
             call?.let { saves.answer(it, saveAnswer("cancelled")) }
             return
         }
@@ -578,6 +581,7 @@ class MainActivity : FlutterActivity() {
                 false
             }
             if (!ok) discardDocument(uri)
+            IntakeRules.dropSaveSource(cacheDir, source.path, call != null)
             runOnUiThread { call?.let { saves.answer(it, if (ok) saveAnswer("ok") else saveAnswer("failed")) } }
         }.start()
     }

@@ -1192,6 +1192,8 @@ void main() {
   // copy removes it. If Android recreates the activity while the screen is
   // up, the source survives in the saved state, so the user's pick still
   // gets the file (or, with no source, the empty document is removed).
+  // With no caller left to delete it then, the native side deletes the
+  // source once the step is done (review 2026-11-19, R14).
   test('MainActivity serves saveFile, from the cache only', () {
     final code = _kotlinCode(_mainActivity());
     expect(
@@ -1229,9 +1231,10 @@ void main() {
             '= data?.data val source = pendingSaveSource pendingSaveSource = '
             'null val step = IntakeRules.saveStep(resultCode == '
             'Activity.RESULT_OK, uri != null, source != null) if (step == '
-            'IntakeRules.SaveStep.CANCEL || uri == null) { call?.let { '
-            'saves.answer(it, saveAnswer("cancelled")) } return } if (step == '
-            'IntakeRules.SaveStep.DISCARD || source == null) { '
+            'IntakeRules.SaveStep.CANCEL || uri == null) { '
+            'IntakeRules.dropSaveSource(cacheDir, source?.path, call != null) '
+            'call?.let { saves.answer(it, saveAnswer("cancelled")) } return } '
+            'if (step == IntakeRules.SaveStep.DISCARD || source == null) { '
             'discardDocument(uri) call?.let { saves.answer(it, '
             'saveAnswer("failed")) } return } Thread { val ok = try { val '
             'file = cachedFile(source.path) ?: throw IllegalStateException() '
@@ -1239,6 +1242,7 @@ void main() {
             'contentResolver.openOutputStream(uri, it) } out?.use { o -> '
             'file.inputStream().use { it.copyTo(o, 64 * 1024) } } != null } '
             'catch (e: Exception) { false } if (!ok) discardDocument(uri) '
+            'IntakeRules.dropSaveSource(cacheDir, source.path, call != null) '
             'runOnUiThread { call?.let { saves.answer(it, if (ok) '
             'saveAnswer("ok") else saveAnswer("failed")) } } }.start() }'));
     expect('.success('.allMatches(saved), isEmpty,
@@ -1257,8 +1261,8 @@ void main() {
         endsWith('super.onCreate(savedInstanceState) pendingSaveSource = '
             'cachedFile(savedInstanceState?.getString(STATE_SAVE_SOURCE)) }'),
         reason: 'restored through the same cache check');
-    _expectJvmTests(
-        ['regularFileIn', 'saveStep', 'SAVE_MODES', 'firstStream', 'SingleCall']);
+    _expectJvmTests(['regularFileIn', 'saveStep', 'dropSaveSource',
+        'SAVE_MODES', 'firstStream', 'SingleCall']);
   });
 
   // Settings' notifications-off remedy lands on the app's own

@@ -243,6 +243,27 @@ class IntakeRulesTest {
     }
 
     @Test
+    fun aSaveWithNoCallerLeftDeletesItsSourceAndOnlyThen() {
+        val (_, cache, db) = layout()
+        val export = File(cache, "chopstats-2026-11-19.json").apply { writeText("{}") }
+        // A caller waits for the answer: it deletes the export itself.
+        assertFalse(IntakeRules.dropSaveSource(cache, export.path, callOpen = true))
+        assertTrue(export.isFile)
+        // None is left (Android recreated the activity while the
+        // create-document screen was up): the native side deletes it.
+        assertTrue(IntakeRules.dropSaveSource(cache, export.path, callOpen = false))
+        assertFalse(export.exists())
+        // Never a file outside the cache, and no source is no error.
+        assertFalse(IntakeRules.dropSaveSource(cache, db.path, callOpen = false))
+        assertFalse(
+            IntakeRules.dropSaveSource(cache, "${cache.path}/../databases/calorie_tracker.db", callOpen = false),
+        )
+        assertTrue(db.isFile)
+        assertFalse(IntakeRules.dropSaveSource(cache, null, callOpen = false))
+        assertFalse(IntakeRules.dropSaveSource(cache, export.path, callOpen = false))
+    }
+
+    @Test
     fun aSaveOpensOnlyTruncatingModes() {
         assertEquals(listOf("wt", "rwt"), IntakeRules.SAVE_MODES)
         val tried = mutableListOf<String>()
