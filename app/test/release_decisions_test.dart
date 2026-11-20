@@ -12,6 +12,13 @@
 /// - R-F9: the English name is Chopstats everywhere (renamed from BiteWise
 ///   2026-10-29); 筷拍 in Chinese.
 /// - R-F7: the privacy policy's third-party and consent section.
+/// - Google Play (2026-11-13, docs/RELEASING.md § 6): the listing pack in
+///   app/android/store/ within Play's limits and with Google's health
+///   disclaimer, the graphics Play accepts, the What's new texts, the
+///   themed icon and the Android 12+ splash, release.yml's play_track and
+///   its v*-only tag trigger (decision 4: android-v* tags start no run),
+///   CI builds that never use the Aliyun mirrors (C44), § 6's corrected
+///   answers, and the policy's "Who we are".
 library;
 
 import 'dart:convert';
@@ -21,6 +28,7 @@ import 'package:calorie_tracker/l10n/app_localizations_en.dart';
 import 'package:calorie_tracker/l10n/app_localizations_zh.dart';
 import 'package:calorie_tracker/ui/screens/settings/provider_page.dart'
     show kApiKeyChoices, kKnownModels, modelChoiceLabel, noteLabel;
+import 'package:calorie_tracker/ui/theme/tokens.dart' show AppColors;
 import 'package:flutter_test/flutter_test.dart';
 
 import 'support/store_listing_files.dart';
@@ -163,6 +171,51 @@ const _collectedTypes = [
 
 /// Chinese, Japanese and full-width characters.
 final _cjk = RegExp(r'[⺀-鿿豈-﫿＀-￯　-〿]');
+
+/// Characters as Play counts them: one per Unicode code point, full-width
+/// and half-width alike (answer/9866151). A file's final newline is not
+/// part of the pasted text.
+int _playLength(String fileText) =>
+    fileText.replaceFirst(RegExp(r'\n$'), '').runes.length;
+
+/// (width, height, bit depth, colour type) from a PNG's IHDR chunk; colour
+/// type 6 is RGBA (with 8-bit depth: "32-bit"), 2 is RGB ("24-bit").
+(int, int, int, int) _pngHeader(File file) {
+  final b = file.readAsBytesSync();
+  expect(b.sublist(0, 8), [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A],
+      reason: '${file.path} is not a PNG');
+  expect(String.fromCharCodes(b.sublist(12, 16)), 'IHDR', reason: file.path);
+  int u32(int at) =>
+      (b[at] << 24) | (b[at + 1] << 16) | (b[at + 2] << 8) | b[at + 3];
+  return (u32(16), u32(20), b[24], b[25]);
+}
+
+/// GitHub Actions' filter pattern for a tag (`*` matches anything but `/`,
+/// `**` anything), enough for the patterns release.yml uses.
+bool _githubTagMatches(String pattern, String tag) {
+  final re = StringBuffer('^');
+  for (var i = 0; i < pattern.length; i++) {
+    final c = pattern[i];
+    if (c == '*') {
+      if (i + 1 < pattern.length && pattern[i + 1] == '*') {
+        re.write('.*');
+        i++;
+      } else {
+        re.write('[^/]*');
+      }
+    } else {
+      re.write(RegExp.escape(c));
+    }
+  }
+  re.write(r'$');
+  return RegExp(re.toString()).hasMatch(tag);
+}
+
+/// The privacy policy's effective date, in one place: docs/PRIVACY.md's
+/// "Effective date:" line must say the same. Whoever merges a branch that
+/// changes the policy sets both to the merge date (docs/RELEASING.md § 6.8);
+/// this pin can only check that they agree, not that the date is new.
+const kPolicyEffectiveDate = '2026-11-19';
 
 void main() {
   group('R-F8: App Privacy answer B in the manifests', () {
@@ -600,9 +653,16 @@ void main() {
       // 1.7.0 iCloud Backup (PR #36: the iCloud Backup section). Review
       // r171 changed it on 2026-11-13: activities in what an export holds,
       // and that iOS can keep API keys in the Keychain after uninstalling.
-      // If that branch merges on a later day, set the date and this pin to
-      // the merge date.
-      expect(policy, contains('Effective date: 2026-11-13'));
+      // The Google Play release (android/release, 2026-11-13) changed it
+      // again: Who we are, adults only, https only, and Android's backup
+      // leaving the keys out. If that branch merges on a later day, set the
+      // date and kPolicyEffectiveDate to the merge date.
+      expect(
+          RegExp(r'^Effective date: (\S+)$', multiLine: true)
+              .allMatches(policy)
+              .map((m) => m.group(1))
+              .toList(),
+          [kPolicyEffectiveDate]);
       expect(policy, contains('### Third parties and your consent'));
       expect(policy, contains('### 第三方与你的同意'));
       expect(policy, contains('Stop Sharing with …'));
@@ -663,6 +723,60 @@ void main() {
       );
     });
 
+    // Google Play's User Data policy wants the developer and a privacy
+    // contact in the policy (answer/10144311). Nothing personal is written
+    // here: the policy points at the store pages and GitHub issues, not at
+    // the iPhone-only support page.
+    test('Who we are: the store pages and a contact, adults only, '
+        'in English and 中文', () {
+      final flat = policy.replaceAll(RegExp(r'\s+'), ' ');
+      expect(policy, contains('### Who we are'));
+      expect(policy, contains('### 我们是谁'));
+      expect(flat, contains("the developer email shown on Chopstats' Google "
+          'Play page'));
+      expect(flat, contains('筷拍 Google Play 页面上显示的开发者邮箱'));
+      final who = flat.substring(
+          flat.indexOf('### Who we are'), flat.indexOf('### What stays'));
+      expect(who, contains('https://github.com/AkiyamaKunka/Chopstats/issues'));
+      expect(who, isNot(contains('SUPPORT.md')));
+      final zhWho = flat.substring(
+          flat.indexOf('### 我们是谁'), flat.indexOf('### 留在你手机上的数据'));
+      expect(zhWho, contains('https://github.com/AkiyamaKunka/Chopstats/issues'));
+      expect(zhWho, isNot(contains('SUPPORT.md')));
+      expect(flat, contains('Chopstats is meant for adults (18 and over).'));
+      expect(flat, contains('筷拍面向成年人（18 岁及以上）'));
+      // No address of its own: the one public address lives on the
+      // support page (R-F14 above).
+      expect(
+          RegExp(r'[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+\.[A-Za-z]').hasMatch(policy),
+          isFalse);
+    });
+
+    // Owner decision 2 (2026-11-13): plain http:// server addresses are
+    // refused everywhere from 1.7.0, so nothing goes unencrypted. The
+    // policy is also the App Store's for every 1.6.x copy, which still
+    // accepts http://, so it says from which version (review finding M1).
+    test('your own server is https only from 1.7.0, in English and 中文', () {
+      final flat = policy.replaceAll(RegExp(r'\s+'), ' ');
+      expect(
+          flat,
+          contains('From version 1.7.0 the address must start with '
+              '`https://`: the app refuses an `http://` address and sends '
+              'nothing to it'));
+      expect(flat, contains('(Earlier versions also accepted an `http://` address'));
+      expect(flat,
+          contains('从 1.7.0 版本起，服务器地址必须以 `https://` 开头：应用会拒绝 '
+              '`http://` 地址'));
+      expect(flat,
+          contains('From version 1.7.0, every request leaves the phone over an '
+              'encrypted HTTPS connection.'));
+      expect(flat, contains('从 1.7.0 版本起，所有请求都通过加密的 HTTPS 连接离开手机。'));
+      expect(flat, contains('From version 1.7.0, on Android, API keys'));
+      expect(flat, contains('从 1.7.0 版本起，在 Android 上，API Key'));
+      expect(flat,
+          isNot(contains('over `http://` lookups use printed brands only')));
+    });
+
     test('Describe sends no meals; Fix sends the last 7 days', () {
       expect(policy, contains('today\'s date. No other meals are sent.'));
       expect(policy, contains('不发送其他餐食'));
@@ -678,6 +792,517 @@ void main() {
       final zh = AppLocalizationsZh().aiConsentBody('X');
       expect(zh, contains('• 你为描述一餐输入的文字\n'));
       expect(zh, contains('• 你为修正餐食输入的文字，连同最近 7 天的餐食'));
+    });
+  });
+  group('Google Play listing (app/android/store/metadata)', () {
+    const locales = ['en-US', 'zh-CN'];
+    String listing(String locale, String name) =>
+        _read('android/store/metadata/$locale/$name.txt');
+
+    test("title, short and full descriptions fit Play's limits", () {
+      for (final locale in locales) {
+        final title = listing(locale, 'title');
+        final short = listing(locale, 'short_description');
+        final full = listing(locale, 'full_description');
+        expect(title.trim(), 'Chopstats · 筷拍', reason: locale);
+        expect(_playLength(title), lessThanOrEqualTo(30), reason: locale);
+        expect(_playLength(short), inInclusiveRange(10, 80), reason: locale);
+        expect(_playLength(full), inInclusiveRange(500, 4000), reason: locale);
+        // Google's advice for the short description: no special characters
+        // (the title's single · is fine there), no closing period.
+        expect(short, isNot(contains('·')), reason: locale);
+        expect(short.trim(), isNot(endsWith('.')), reason: locale);
+      }
+      expect(_playLength('筷拍\n'), 2, reason: 'one per character');
+    });
+
+    // The Health Content and Services policy (answer/16679511): Google's
+    // disclaimer in the description, word for word, and the reminder to
+    // consult a healthcare professional.
+    test("the full descriptions end with Google's health disclaimer", () {
+      final en = listing('en-US', 'full_description')
+          .replaceAll(RegExp(r'\s+'), ' ')
+          .trim();
+      expect(
+          en,
+          contains('Chopstats is not a medical device and does not diagnose, '
+              'treat, cure, or prevent any medical condition.'));
+      expect(
+          en,
+          endsWith('Consult a healthcare professional for medical advice, '
+              'diagnosis, or treatment.'));
+      final zh = listing('zh-CN', 'full_description').trim();
+      expect(zh, contains('筷拍不是医疗器械，不能诊断、治疗、治愈或预防任何疾病。'));
+      expect(zh, endsWith('如需医疗建议、诊断或治疗，请咨询医疗专业人士。'));
+    });
+
+    // Android facts only; nothing the first Play build lacks (decision 1:
+    // no Watch Camera Roll on Play), nothing about the sideload channel,
+    // and no claim nobody can check.
+    test('says nothing iPhone-only, sideload-only or unverifiable', () {
+      final banned = RegExp(
+        r'github|\bapk\b|sideload|telegram|\bvpn\b|\bios\b|iphone|keychain|'
+        r'apple maps|camera roll|glasses|photo coverage|\b174\b|%|#1|\bbest\b|'
+        r'accura|worldwide|监控相册|眼镜|钥匙串|照片覆盖|准确率',
+        caseSensitive: false,
+      );
+      for (final locale in locales) {
+        for (final name in ['title', 'short_description', 'full_description']) {
+          expect(banned.firstMatch(listing(locale, name))?.group(0), isNull,
+              reason: '$locale/$name');
+        }
+      }
+    });
+
+    // Review L5: the listing says what Data safety declares as approximate
+    // location: a lookup carries the country code US.
+    test('the restaurant line names the country code a lookup sends', () {
+      expect(listing('en-US', 'full_description'),
+          contains('chain and food names and the country code US'));
+      expect(listing('zh-CN', 'full_description'),
+          contains('连锁店和食物名称以及国家代码 US'));
+    });
+
+    test("names the app's controls as the app does", () {
+      final en = AppLocalizationsEn();
+      final zh = AppLocalizationsZh();
+      final enText = listing('en-US', 'full_description');
+      final zhText = listing('zh-CN', 'full_description');
+      expect(enText, contains(en.addUsual));
+      expect(enText, contains(en.settingsSectionRestaurant));
+      expect(zhText, contains(zh.addUsual));
+      expect(zhText, contains('「${zh.settingsSectionRestaurant}」'));
+    });
+
+    // The zh text quotes examples and control names in 「」, as the app and
+    // the policy's 中文 half do: no ASCII or curly double quotes.
+    test('zh-CN quotes in 「」 only', () {
+      for (final name in ['title', 'short_description', 'full_description']) {
+        final text = listing('zh-CN', name);
+        for (final quote in ['"', '“', '”']) {
+          expect(text, isNot(contains(quote)), reason: '$name $quote');
+        }
+      }
+      final full = listing('zh-CN', 'full_description');
+      for (final example in [
+        '米饭（~150 克）',
+        '那碗面其实是烧鸭饭',
+        '一碗牛肉面加一个鸡蛋',
+        'two eggs and toast with butter',
+        '素食',
+        '家常菜，少油',
+      ]) {
+        expect(full, contains('「$example」'), reason: example);
+      }
+    });
+
+    test('the answers files hold no key and no email address', () {
+      for (final name in ['app_content.md', 'data_safety.md']) {
+        final text = _read('android/store/$name');
+        expect(RegExp(r'AIza[0-9A-Za-z_-]{20,}').hasMatch(text), isFalse,
+            reason: '$name: a Google API key');
+        expect(RegExp(r'\bsk-[A-Za-z0-9-]{8,}').hasMatch(text), isFalse,
+            reason: '$name: an API key');
+        expect(
+            RegExp(r'[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+\.[A-Za-z]').hasMatch(text),
+            isFalse,
+            reason: '$name: an email address');
+      }
+      expect(_read('android/store/app_content.md'),
+          contains("<the demo key from the owner's release notes>"));
+    });
+
+    // Data safety by Google's definitions (answer/10787469): anything sent
+    // off the phone is collected; not ephemeral; the exemptions named.
+    test("data_safety.md answers by Google's definitions", () {
+      final text =
+          _read('android/store/data_safety.md').replaceAll(RegExp(r'\s+'), ' ');
+      for (final type in [
+        '**Photos and videos › Photos**',
+        '**Health and fitness › Health info**',
+        '**Health and fitness › Fitness info**',
+        '**App activity › Other user-generated content**',
+        '**Location › Approximate location**',
+      ]) {
+        expect(text, contains(type), reason: type);
+      }
+      expect(text, contains('**Shared:** No'));
+      expect(text, contains('**Processed ephemerally:** No'));
+      expect(text, contains('**App functionality** only'));
+      expect(text, contains('My app does not allow users to create an account'));
+      expect(text, contains('a specific user-initiated action'));
+      expect(text,
+          contains("a prominent in-app disclosure and the user's consent"));
+    });
+  });
+
+  group("Play What's new (app/android/whatsnew)", () {
+    test('both texts exist, fit 500 characters and point nowhere else', () {
+      for (final locale in ['en-US', 'zh-CN']) {
+        final text = _read('android/whatsnew/whatsnew-$locale');
+        expect(text.trim(), isNotEmpty, reason: locale);
+        expect(text.runes.length, lessThanOrEqualTo(500), reason: locale);
+        expect(
+            RegExp(r'github|\bapk\b|release notes|发布说明|camera roll|监控相册',
+                    caseSensitive: false)
+                .firstMatch(text)
+                ?.group(0),
+            isNull,
+            reason: locale);
+      }
+    });
+  });
+
+  group('Play graphics, the themed icon and the Android 12+ splash', () {
+    test('icon-512 is a 512 x 512 32-bit PNG of at most 1024 KB', () {
+      final icon =
+          File('${_appRoot().path}/android/store/graphics/icon-512.png');
+      expect(_pngHeader(icon), (512, 512, 8, 6));
+      expect(icon.lengthSync(), lessThanOrEqualTo(1024 * 1024));
+    });
+
+    test('the feature graphics are 1024 x 500 24-bit PNGs, no alpha', () {
+      for (final name in ['feature-graphic.png', 'feature-graphic-zh-CN.png']) {
+        final f = File('${_appRoot().path}/android/store/graphics/$name');
+        expect(_pngHeader(f), (1024, 500, 8, 2), reason: name);
+      }
+    });
+
+    test('the shot list asks for what Play accepts', () {
+      final shots = _read('android/store/screenshots/SHOTS.md')
+          .replaceAll(RegExp(r'\s+'), ' ');
+      expect(shots, contains('at least 4 portrait shots, 9:16, 1080×1920'));
+      expect(shots, contains('24-bit PNG with no alpha'));
+    });
+
+    // Android 13+ themed icons need a monochrome layer (lint
+    // MonochromeLauncherIcon). flutter_launcher_icons writes it from
+    // pubspec.yaml, from the layers scripts/play_graphics.py --launcher
+    // makes out of assets/app_icon.png.
+    test('the adaptive icon has its monochrome layer at every density', () {
+      final xml =
+          _read('android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml');
+      expect(xml, contains('<monochrome>'));
+      expect(xml, contains('@drawable/ic_launcher_monochrome'));
+      final pubspec = _read('pubspec.yaml');
+      expect(pubspec,
+          contains('adaptive_icon_foreground: assets/app_icon_foreground.png'));
+      expect(pubspec,
+          contains('adaptive_icon_monochrome: assets/app_icon_monochrome.png'));
+      for (final name in ['app_icon_foreground.png', 'app_icon_monochrome.png']) {
+        expect(_pngHeader(File('${_appRoot().path}/assets/$name')),
+            (1024, 1024, 8, 6),
+            reason: name);
+      }
+      const sizes = {
+        'mdpi': 108,
+        'hdpi': 162,
+        'xhdpi': 216,
+        'xxhdpi': 324,
+        'xxxhdpi': 432,
+      };
+      for (final MapEntry(key: density, value: px) in sizes.entries) {
+        for (final layer in ['foreground', 'monochrome']) {
+          final f = File('${_appRoot().path}/android/app/src/main/res/'
+              'drawable-$density/ic_launcher_$layer.png');
+          expect(_pngHeader(f), (px, px, 8, 6), reason: '$density $layer');
+        }
+      }
+    });
+
+    // Android 12+ draws its own splash screen from the launch theme: the
+    // app's page colour, light and dark, instead of Theme.Light's white.
+    test('the Android 12+ splash uses the page colours', () {
+      String argb(int v) =>
+          '#${v.toRadixString(16).padLeft(8, '0').toUpperCase()}';
+      final light = argb(AppColors.light.page.toARGB32());
+      final dark = argb(AppColors.dark.page.toARGB32());
+      expect(light, '#FFF2F2F7');
+      expect(dark, '#FF000000');
+      for (final (folder, colour) in [
+        ('values-v31', light),
+        ('values-night-v31', dark),
+      ]) {
+        final xml = _read('android/app/src/main/res/$folder/styles.xml');
+        expect(xml, contains('<style name="LaunchTheme"'), reason: folder);
+        expect(
+            xml,
+            contains('<item name="android:windowSplashScreenBackground">'
+                '$colour</item>'),
+            reason: folder);
+        expect(xml,
+            contains('<item name="android:colorBackground">$colour</item>'),
+            reason: folder);
+        expect(xml, isNot(contains('<style name="NormalTheme"')),
+            reason: folder);
+      }
+    });
+  });
+
+  group('release.yml: tags, Play tracks and the Gradle mirrors', () {
+    final workflow = _readRepo('.github/workflows/release.yml');
+
+    // Decision 4 (2026-11-13): Android 1.7.0 ships with a hand-made GitHub
+    // Release under android-v1.7.0, so v1.7.0 stays free for the iPhone.
+    // That tag must start no run: the only push trigger is tags v*.
+    test('only v* tags start a run, so android-v* tags start none', () {
+      final on = RegExp(r'^on:\n((?:[ \t]+.*\n|\n)*)', multiLine: true)
+          .firstMatch(workflow)!
+          .group(1)!;
+      final push = RegExp(r'^  push:\n((?:    .*\n)*)', multiLine: true)
+          .firstMatch(on)!
+          .group(1)!;
+      expect(push.trim().split('\n').map((l) => l.trim()).toList(),
+          ['tags:', "- 'v*'"]);
+      expect(on, isNot(contains('pull_request')));
+      expect(_githubTagMatches('v*', 'v1.7.0'), isTrue);
+      expect(_githubTagMatches('v*', 'v1.7.0+207'), isTrue);
+      expect(_githubTagMatches('v*', 'android-v1.7.0'), isFalse);
+      // The plan job treats only refs/tags/v* as a tag build.
+      expect(workflow,
+          contains(r'if [[ "$GITHUB_REF" == refs/tags/v* ]]; then'));
+    });
+
+    test('Run workflow can send the bundle to the closed test; tag pushes '
+        'stay on internal', () {
+      const input = '''
+      play_track:
+        description: Play track the bundle goes to when PLAY_SERVICE_ACCOUNT_JSON is set (alpha = the closed test; a tag push always uses internal)
+        type: choice
+        options:
+          - internal
+          - alpha
+        default: internal
+''';
+      expect(workflow, contains(input));
+      expect(
+          workflow,
+          contains(r"tracks: ${{ github.event_name == 'workflow_dispatch' && "
+              r"inputs.play_track || 'internal' }}"));
+      expect(RegExp(r'^\s*tracks:', multiLine: true).allMatches(workflow),
+          hasLength(1));
+      expect(workflow, contains('status: completed'));
+    });
+
+    // C44: the owner's Mac needs the Aliyun mirrors; CI must never use
+    // them (GitHub Actions sets CI=true). Every mirror line sits inside the
+    // guarded block, in both Gradle files.
+    test('the Aliyun mirrors are for local builds only', () {
+      for (final (file, flag) in [
+        ('android/settings.gradle.kts', 'useMirror'),
+        ('android/build.gradle.kts', 'useAliyunMirror'),
+      ]) {
+        final text = _read(file);
+        expect(text, contains('System.getenv("CI") != "true"'), reason: file);
+        expect(
+            text,
+            contains(
+                'providers.gradleProperty("chopstats.noMirror").orNull != "true"'),
+            reason: file);
+        final guarded =
+            RegExp('if \\($flag\\) \\{\\n((?:[ \\t]+maven \\{[^\\n]*\\n)+)')
+                .firstMatch(text);
+        expect(guarded, isNotNull, reason: file);
+        final inside = 'maven.aliyun.com'.allMatches(guarded!.group(1)!).length;
+        expect(inside, greaterThan(0), reason: file);
+        expect('maven.aliyun.com'.allMatches(text), hasLength(inside),
+            reason: '$file: an Aliyun repository outside the guard');
+      }
+    });
+  });
+
+  group('RELEASING § 6 (Google Play)', () {
+    final releasing = _readRepo('docs/RELEASING.md');
+    final s6 = releasing
+        .substring(releasing.indexOf('## 6. Google Play'),
+            releasing.indexOf('## 7. China mainland'))
+        .replaceAll(RegExp(r'\s+'), ' ');
+
+    test('the old wrong answers are gone', () {
+      expect(s6, isNot(contains('processed ephemerally, not stored')));
+      expect(s6, isNot(contains('questionnaire → Utility/Health')));
+      expect(s6,
+          isNot(contains('Describe the camera-roll watcher as the core')));
+      expect(s6, isNot(contains('the package name is taken from the first')));
+    });
+
+    test('carries the verified answers and the owner decisions', () {
+      for (final fact in [
+        'Utility, Productivity, Communication, or Other',
+        "My app doesn't provide any financial features",
+        'Nutrition and Weight Management',
+        'Activity and Fitness',
+        'at least 12 testers opted in continuously for at least 14 days',
+        'internal testing does not count',
+        'Trader status',
+        'physical, non-rooted Android 10+ phone',
+        'Provide a copy of your app signing key',
+        'android-v1.7.0',
+        '### 6.7 Android platform checks',
+        '### 6.8 Owner checklist, in order',
+        'Do not roll it out yet.',
+        'Do NOT revoke the demo Gemini key',
+        'Not decided yet',
+      ]) {
+        expect(s6, contains(fact), reason: fact);
+      }
+    });
+
+    test('every Google page it cites carries its read date', () {
+      final urls = RegExp(r'<(https://(?:support\.google\.com|developer\.'
+              r'android\.com)[^>]*)>')
+          .allMatches(s6)
+          .map((m) => m.group(1)!)
+          .toSet();
+      expect(urls.length, greaterThanOrEqualTo(12));
+      for (final url in urls) {
+        final at = s6.indexOf(url);
+        final after =
+            s6.substring(at, (at + url.length + 120).clamp(0, s6.length));
+        expect(after, contains('read 2026-11-13'), reason: url);
+      }
+    });
+
+    // The support page stays iPhone-only (R-F14 above) until Android is in
+    // production; its Android text waits in § 6.9.
+    test("§ 6.9 holds the support page's Android text", () {
+      final en = AppLocalizationsEn();
+      const heading =
+          '### 6.9 When Android ships on Google Play: the support page';
+      expect(s6, contains(heading));
+      final s69 = s6.substring(s6.indexOf(heading));
+      for (final label in [
+        en.addFromPhotos,
+        en.settingsRowWatch,
+        en.settingsRowExport,
+      ]) {
+        expect(s69, contains(label), reason: label);
+      }
+    });
+  });
+  // Review finding M1: the policy, the listing and § 6 state facts that
+  // other lanes' code delivers. These gates read that code as text, so this
+  // branch cannot merge with docs that are ahead of the app. They fail
+  // until android/privacy, android/native and android/photos are merged.
+  group('gates: what the docs say, the code has', () {
+    test('plain-http servers are refused (privacy lane, decision 2)', () {
+      final f = File('${_appRoot().path}/lib/core/server_transport.dart');
+      expect(f.existsSync(), isTrue, reason: 'android/privacy not merged');
+      expect(
+          RegExp(r'^const bool kRequireHttpsServer = true;$', multiLine: true)
+              .hasMatch(f.readAsStringSync()),
+          isTrue);
+    });
+
+    test("API keys stay out of Android's backup and device transfer "
+        '(native lane)', () {
+      const files = [
+        'FlutterSecureStorage.xml',
+        'FlutterSecureKeyStorage.xml',
+        'FlutterSecureStorageConfiguration.xml',
+        'FlutterSecureStorageConfiguration:FlutterSecureStorage.xml',
+      ];
+      String section(String xml, String tag) {
+        final m = RegExp('<$tag>(.*?)</$tag>', dotAll: true).firstMatch(xml);
+        expect(m, isNotNull, reason: tag);
+        return m!.group(1)!;
+      }
+
+      final rules = _read('android/app/src/main/res/xml/data_extraction_rules.xml');
+      final legacy = _read('android/app/src/main/res/xml/backup_rules.xml');
+      for (final (name, block) in [
+        ('cloud-backup', section(rules, 'cloud-backup')),
+        ('device-transfer', section(rules, 'device-transfer')),
+        ('full-backup-content', section(legacy, 'full-backup-content')),
+      ]) {
+        for (final file in files) {
+          expect(block, contains('<exclude domain="sharedpref" path="$file"/>'),
+              reason: '$name $file');
+        }
+      }
+    });
+
+    test('the app reminds users to consult a healthcare professional '
+        '(privacy lane)', () {
+      final en = (jsonDecode(_read('lib/l10n/app_en.arb')) as Map)
+          .cast<String, Object?>();
+      final zh = (jsonDecode(_read('lib/l10n/app_zh.arb')) as Map)
+          .cast<String, Object?>();
+      expect(en['settingsHealthReminder'],
+          contains('consult a healthcare professional'));
+      expect(zh['settingsHealthReminder'], contains('请咨询医疗专业人士'));
+      expect(_read('lib/ui/screens/settings/data_section.dart'),
+          contains('settingsHealthReminder'));
+    });
+
+    test("Log › From recent photos uses Android's photo picker "
+        '(photos lane)', () {
+      expect(
+          File('${_appRoot().path}/lib/services/photo/system_photo_picker.dart')
+              .existsSync(),
+          isTrue,
+          reason: 'android/photos not merged');
+      expect(_read('lib/ui/screens/add_flow.dart'),
+          contains('platformSystemPhotoPicker()'));
+    });
+  });
+
+  group('review fixes: release.yml, scripts and § 6', () {
+    final workflow = _readRepo('.github/workflows/release.yml');
+
+    // M2: Data safety's "encrypted in transit" rests on the https switch;
+    // the Android job refuses to build without it.
+    test('the Android job checks kRequireHttpsServer before it builds', () {
+      const step = '- name: Check the app refuses plain-http servers';
+      expect(workflow, contains(step));
+      expect(workflow,
+          contains("grep -Eq '^const bool kRequireHttpsServer = true;' \"\$f\""));
+      final android = workflow.substring(workflow.indexOf('  android:'));
+      expect(android.indexOf(step), greaterThan(0));
+      expect(android.indexOf(step),
+          lessThan(android.indexOf('- name: Build the signed app bundle')));
+    });
+
+    // L11: a later v1.7.0's generated notes must not start from the
+    // hand-made android-v1.7.0 release.
+    test('generated release notes start at the previous v* release', () {
+      expect(workflow, contains('--notes-start-tag "\$prev"'));
+      expect(workflow, contains("grep -E '^v[0-9]'"));
+    });
+
+    test('the setup-link script takes https servers only', () {
+      final script = _readRepo('scripts/provision_phone.sh');
+      expect(script, isNot(contains('SERVER_URL=http://')));
+      expect(script, contains(r'[[ "$SERVER_URL" == https://* ]]'));
+    });
+
+    // L9: Apple's system fonts are not licensed for artwork like this.
+    test('the feature graphics use Roboto and Noto Sans SC only', () {
+      final script = _readRepo('scripts/play_graphics.py');
+      for (final apple in ['/System/Library/Fonts', 'SFNS', 'Hiragino', 'PingFang']) {
+        expect(script, isNot(contains(apple)), reason: apple);
+      }
+      expect(script, contains('Roboto-Bold.ttf'));
+      expect(script, contains('NotoSansSC-Bold'));
+    });
+
+    test('§ 6 has the review fixes', () {
+      final releasing = _readRepo('docs/RELEASING.md');
+      final flat = releasing.replaceAll(RegExp(r'\s+'), ' ');
+      expect(releasing, isNot(contains('~/upload-keystore.jks')));
+      for (final fact in [
+        'adi-registration.properties',
+        'keytool -list -v -keystore <that keystore> -alias upload',
+        'the log of the **v1.6.0** Release run',
+        '**Done; never regenerate it.**',
+        '*Request upload key reset* does not fix (it only replaces the key you upload with)',
+        '`hotfix/*`',
+        'Monitor and improve › Policy and programs › App content',
+        'kRequireHttpsServer = true` at the run\'s commit',
+        'kPolicyEffectiveDate',
+      ]) {
+        expect(flat, contains(fact), reason: fact);
+      }
     });
   });
 }
