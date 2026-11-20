@@ -202,6 +202,12 @@ class _SubscriptionProviderPageState
   /// OFFICIAL Anthropic authorize URL from our server, open it in the
   /// system browser (RFC 8252: never an in-app login form), then collect
   /// the pasted code and hand it back. No credential touches this device.
+  ///
+  /// It sends the server the upload key, then the authorization code the
+  /// user pastes (the server hands it to `claude setup-token`), so it asks
+  /// first, as every send does: before the first Allow, and after Stop
+  /// Sharing, nothing goes to the server (ensureAiConsent; Not now says
+  /// "Nothing was sent.").
   Future<void> _connectClaude() async {
     final start = widget.startClaudeAuth;
     final complete = widget.completeClaudeAuth;
@@ -223,8 +229,14 @@ class _SubscriptionProviderPageState
           SnackBar(content: Text(context.l10n.errServerNeedsHttps)));
       return;
     }
+    // Busy from the question on, so a second tap stacks no second dialog.
     setState(() => _authBusy = true);
     try {
+      // After the address checks: the question names the host Connect
+      // would reach, and a missing or refused address asks nothing.
+      if (!await ensureAiConsent(context, widget.settings) || !mounted) {
+        return;
+      }
       final started = await start();
       if (!mounted) return;
       if (started.error != null || started.url == null) {

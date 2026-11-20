@@ -135,7 +135,8 @@ class ServerAnalyzer extends _HttpVisionAnalyzer {
   /// nothing more after Stop Sharing; the free auth_check that Settings
   /// reads by itself carries the upload key, so [serverLoginState] and
   /// [serverFeatures] send nothing without it either (a cold start sent
-  /// one while sharing was stopped: Android QA Q2). The photo, text and
+  /// one while sharing was stopped: Android QA Q2), nor does
+  /// [startClaudeAuth], whose page asks first. The photo, text and
   /// leftover calls are let through by the consent before they get here
   /// (AiSendGate, ensureAiConsent).
   bool get _allowed =>
@@ -399,6 +400,9 @@ class ServerAnalyzer extends _HttpVisionAnalyzer {
       return (url: null, error: 'Set the server address and key first.');
     }
     if (_refused) return (url: null, error: kServerNeedsHttpsMessage);
+    // Connect Claude asks first (ensureAiConsent); this is the backstop,
+    // with no words of its own: the page says it could not start.
+    if (!_allowed) return (url: null, error: null);
     try {
       final req = http.Request('POST', _uri('/api/claude_auth/start'))
         ..headers['content-type'] = 'application/json'

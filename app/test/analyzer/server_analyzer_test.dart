@@ -998,7 +998,7 @@ void main() {
 
   test('startClaudeAuth returns the official URL; completes with null on 200',
       () async {
-    final s = await serverSettings();
+    final s = await serverSettings(allowed: true);
     final calls = <http.Request>[];
     final analyzer = ServerAnalyzer(s, client: MockClient((req) async {
       calls.add(req);
@@ -1024,7 +1024,7 @@ void main() {
   });
 
   test('auth failures surface the server reason, never a crash', () async {
-    final s = await serverSettings();
+    final s = await serverSettings(allowed: true);
     final analyzer = ServerAnalyzer(s, client: MockClient((req) async {
       // charset header matters: Flask sends UTF-8, and http.Response's
       // default (latin-1) cannot encode the reason's em dash.
@@ -1045,7 +1045,7 @@ void main() {
     // The deadline covered only the headers, so a body that stalled after
     // them left Connect Claude spinning until the user left the page —
     // right after pasting the one-time code, for the complete call.
-    final s = await serverSettings();
+    final s = await serverSettings(allowed: true);
     final bodies = <StreamController<List<int>>>[];
     addTearDown(() {
       for (final b in bodies) {
@@ -1069,6 +1069,30 @@ void main() {
         onTimeout: () => fail('complete outlived its deadline'));
     expect(completed, isNotNull);
     expect(bodies, hasLength(2));
+  });
+
+  // Connect Claude asks first (subscription_page.dart); without the
+  // consent the analyzer sends nothing either, with no words of its own
+  // (the page says it could not start).
+  test('startClaudeAuth sends nothing while the server is not allowed',
+      () async {
+    final s = await serverSettings();
+    final seen = <http.BaseRequest>[];
+    final analyzer = ServerAnalyzer(s, client: MockClient((req) async {
+      seen.add(req);
+      return http.Response(
+          jsonEncode({'ok': true, 'url': 'https://claude.ai/oauth/x'}), 200);
+    }));
+    var started = await analyzer.startClaudeAuth();
+    expect((started.url, started.error), (null, null), reason: 'never allowed');
+    await s.setAiConsent('server:claude', granted: true);
+    started = await analyzer.startClaudeAuth();
+    expect(started.url, 'https://claude.ai/oauth/x');
+    expect(seen, hasLength(1));
+    await s.setAiConsent('server:claude', granted: false); // Stop Sharing
+    started = await analyzer.startClaudeAuth();
+    expect((started.url, started.error), (null, null), reason: 'stopped');
+    expect(seen, hasLength(1));
   });
 
   test('startClaudeAuth refuses without an address/key', () async {
