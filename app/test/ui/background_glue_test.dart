@@ -18,6 +18,8 @@ import 'package:calorie_tracker/services/analyzer/normalize.dart'
     show kAnalysisJpegQuality, kAnalysisLongSidePx, normalizeForAnalysis;
 import 'package:calorie_tracker/services/analyzer/platform_decode.dart'
     show decodeForUpload, imageIOChannel, isHeadlessEngine;
+import 'package:calorie_tracker/services/analyzer/provider_analyzers.dart'
+    show ServerAnalyzer;
 import 'package:calorie_tracker/services/photo/background.dart';
 import 'package:calorie_tracker/services/photo/background_runs.dart';
 import 'package:calorie_tracker/services/photo/deferred_assets.dart';
@@ -811,6 +813,61 @@ void main() {
               1);
         });
 
+        // Review 2026-11-19 (R9): Android's run has 9 minutes and stops
+        // offering at 7, so every photo had more than iOS's 15 s left and
+        // every cut counted: a photo offered late, as a hung server
+        // answered nothing, was passed over after three such runs and got
+        // no background log or meal card until the app opened.
+        group('Android', () {
+          /// One Android run cut off at its deadline, the photo offered
+          /// [offeredAfter] into the run, as runHeadlessBackfill builds it.
+          Future<void> androidCut(FakeDao dao, Duration offeredAfter) async {
+            final pipeline = PhotoPipeline(
+                dao: dao,
+                analyzer: FakeAnalyzer()
+                  ..onAnalyze = () => Completer<void>().future,
+                hasher: (b) async => md5.convert(b).toString());
+            final run = RunInFlight(
+                deadline: t0.add(androidRunDeadline),
+                window: androidSlowPhotoWindow,
+                clock: () => t0.add(offeredAfter))
+              ..pipeline = pipeline
+              ..deferred = await DeferredAssets.load(prefs);
+            run.offered();
+            unawaited(pipeline.process(photo(1)));
+            while (!dao.ledger.values.contains(IngestionStatus.processing)) {
+              await Future<void>.delayed(const Duration(milliseconds: 1));
+            }
+            await run.endAtDeadline();
+            expect(dao.ledger.values,
+                isNot(contains(IngestionStatus.processing)));
+          }
+
+          test('a photo offered late (6:50 in) is never counted against',
+              () async {
+            final dao = FakeDao();
+            for (var run = 0; run < 4; run++) {
+              await androidCut(
+                  dao, const Duration(minutes: 6, seconds: 50));
+            }
+            expect(prefs.getString(deferredAssetsPrefsKey), isNull,
+                reason: '2:10 is not one full attempt of the slowest '
+                    'analyzer');
+            expect((await DeferredAssets.load(prefs)).passOver('asset1'),
+                isFalse);
+          });
+
+          test('a photo that had a full attempt and still hung counts: '
+              'three pass it over, as on iOS', () async {
+            final dao = FakeDao();
+            for (var run = 0; run < 3; run++) {
+              await androidCut(dao, const Duration(seconds: 5));
+            }
+            expect((await DeferredAssets.load(prefs)).passOver('asset1'),
+                isTrue);
+          });
+        });
+
         // P1: the server (or a VPN, or the network) hangs through two
         // runs. The photo used to be passed over for good in the third,
         // healthy run: the watermark moved past it and it got no
@@ -1013,6 +1070,17 @@ void main() {
         expect(androidRunDeadline, const Duration(minutes: 9));
         expect(androidBackgroundBudget, const Duration(minutes: 7));
         expect(androidRunDeadline, lessThan(const Duration(minutes: 10)));
+      });
+
+      // Review 2026-11-19 (R9): a cut counts only for a photo that had one
+      // full attempt of the slowest analyzer, the user's own server's.
+      test('Android: a cut counts for a photo offered in the first 4 '
+          'minutes, one full own-server attempt before the deadline',
+          () async {
+        expect(androidSlowPhotoWindow,
+            ServerAnalyzer(await settingsWith(key: 'k')).deadline);
+        expect(androidRunDeadline - androidSlowPhotoWindow,
+            const Duration(minutes: 4));
       });
 
       test('Android: past the offer budget, and at the run\'s pace past the '

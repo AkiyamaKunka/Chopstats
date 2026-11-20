@@ -709,8 +709,10 @@ Future<bool> runHeadlessBackfill({
           readStoredInstant(prefs.getString(backgroundWatermarkPrefsKey)),
       bootLead: enteredDart.difference(startedAt));
   final runDeadline = ios ? iosRunDeadline : androidRunDeadline;
-  final inFlight =
-      RunInFlight(deadline: startedAt.add(runDeadline), clock: clock);
+  final inFlight = RunInFlight(
+      deadline: startedAt.add(runDeadline),
+      window: ios ? slowPhotoWindow : androidSlowPhotoWindow,
+      clock: clock);
   final run = _runAfterLaunch(
       ios: ios,
       prefs: prefs,
@@ -736,24 +738,39 @@ const Duration iosAbandonLimit = Duration(milliseconds: 1500);
 /// [androidRunDeadline] and WorkManager's 10-minute stop.
 const Duration androidDeadlineWrapUp = Duration(seconds: 30);
 
-/// How long a photo must have had to itself, before the run's deadline,
-/// for a cut-off to count against it ([DeferredAssets.cutOff]): offered no
-/// later than 7 s into the run. Most first photos of a run have it; a photo
-/// offered after another was processed mostly has not, and its cut-off
-/// says nothing about the photo (review, 2026-10-19).
+/// How long a photo must have had to itself, before the iOS run's
+/// deadline, for a cut-off to count against it ([DeferredAssets.cutOff]):
+/// offered no later than 7 s into the run. Most first photos of a run have
+/// it; a photo offered after another was processed mostly has not, and its
+/// cut-off says nothing about the photo (review, 2026-10-19).
 const Duration slowPhotoWindow = Duration(seconds: 15);
 
-/// What the iOS deadline needs from a run still going: its pipeline once
-/// built, its deferral notes once loaded, and when the photo in flight was
-/// offered.
+/// Android's [slowPhotoWindow]: one full attempt of the slowest analyzer
+/// (ServerAnalyzer.deadline, 5 minutes) before [androidRunDeadline], so
+/// offered no later than 4 minutes into the run. iOS's 15 s counted every
+/// Android cut — offers stop 2 minutes before the deadline — and a photo
+/// offered late while the server hung was passed over (review
+/// 2026-11-19).
+const Duration androidSlowPhotoWindow = Duration(minutes: 5);
+
+/// What the run's deadline needs from a run still going: its pipeline
+/// once built, its deferral notes once loaded, and when the photo in
+/// flight was offered.
 @visibleForTesting
 class RunInFlight {
-  RunInFlight({this.deadline, DateTime Function()? clock})
+  RunInFlight(
+      {this.deadline,
+      this.window = slowPhotoWindow,
+      DateTime Function()? clock})
       : _clock = clock ?? DateTime.now;
 
   /// When the run must be over ([iosRunDeadline] or [androidRunDeadline]
   /// from its start); null: no deadline (tests).
   final DateTime? deadline;
+
+  /// How long a photo must have had before [deadline] for its cut-off to
+  /// count ([slowPhotoWindow] on iOS, [androidSlowPhotoWindow]).
+  final Duration window;
   final DateTime Function() _clock;
   PhotoPipeline? pipeline;
   DeferredAssets? deferred;
@@ -792,7 +809,7 @@ class RunInFlight {
 
   /// Releases the photo in flight ([PhotoPipeline.abandon]). It stays
   /// eligible, and the next run offers it again. When it had at least
-  /// [slowPhotoWindow] to itself, the cut also counts against it: after
+  /// [window] to itself, the cut also counts against it: after
   /// [cutsBeforePassOver] of those, later runs pass it over (the app's
   /// catch-up still logs it), so a photo too slow for any run does not hold
   /// the watermark — and every photo after it — until the app opens. A
@@ -802,9 +819,7 @@ class RunInFlight {
     final assetId = await pipeline?.abandon();
     if (assetId == null || assetId.isEmpty) return;
     final at = _offeredAt, end = deadline;
-    if (at == null || end == null || end.difference(at) < slowPhotoWindow) {
-      return;
-    }
+    if (at == null || end == null || end.difference(at) < window) return;
     await deferred?.cutOff(assetId);
   }
 }

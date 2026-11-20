@@ -958,14 +958,19 @@ void main() {
 
     // Review, 2026-10-19: without these the run admits a photo that cannot
     // finish, and every deadline cut counts against the photo, so a slow
-    // patch of the server passes photos over for good.
-    test('iOS: a photo that cannot finish by the deadline is not started, '
-        'and a cut counts only for a photo that had the full window', () {
+    // patch of the server passes photos over for good. Review 2026-11-19:
+    // Android's window is its own (one full own-server attempt); iOS's
+    // 15 s counted every Android cut.
+    test('a photo that cannot finish by the deadline is not started, and a '
+        'cut counts only for a photo that had the platform\'s full window',
+        () {
       expect(
         launch(),
         _wired(
           r'final inFlight = RunInFlight\( deadline: '
-          r'startedAt\.add\(runDeadline\), clock: clock\);',
+          r'startedAt\.add\(runDeadline\), '
+          r'window: ios \? slowPhotoWindow : androidSlowPhotoWindow, '
+          r'clock: clock\);',
         ),
       );
       expect(after(), _wired(r'\n\s*finishBy: inFlight\.deadline,'));
