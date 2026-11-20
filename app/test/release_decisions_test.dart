@@ -1218,6 +1218,10 @@ void main() {
       expect(s6,
           isNot(contains('Describe the camera-roll watcher as the core')));
       expect(s6, isNot(contains('the package name is taken from the first')));
+      // Decisions 5–12 were made on 2026-11-20, and this branch ships
+      // several of them.
+      expect(s6, isNot(contains('Not decided yet')));
+      expect(s6, isNot(contains('Decisions 5–12 can wait')));
     });
 
     test('carries the verified answers and the owner decisions', () {
@@ -1236,7 +1240,8 @@ void main() {
         '### 6.8 Owner checklist, in order',
         'Do not roll it out yet.',
         'Do NOT revoke the demo Gemini key',
-        'Not decided yet',
+        "The owner's decisions (2026-11-20):",
+        'Read decisions 1–12 above; they are settled.',
       ]) {
         expect(s6, contains(fact), reason: fact);
       }

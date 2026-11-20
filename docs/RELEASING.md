@@ -1091,13 +1091,47 @@ position. The paste-ready answers live next to the app in
    under the tag `android-v1.7.0` (§ 6.6), so `v1.7.0` stays free for the
    iPhone 1.7.0.
 
-Not decided yet: decision 5 (Android backup beyond Auto Backup and Save
-to device; end-to-end-only cloud backup), 6 (Android look and feel: back
-at the root, predictive back, scrolling), 7 (orientation and large
-screens), 8 (the Meta glasses default on Android), 9 (analysis after you
-leave the app), 10 (restaurant lookups with photo location), 11
-(shortcuts and a widget) and 12 (Health Connect). Nothing below assumes
-an answer to them.
+**The owner's decisions (2026-11-20):**
+
+5. **Backup:** Android's Auto Backup plus Export Data › Save to Device
+   now; "Back up to a file" (the background job rewrites an export in a
+   file or folder the user picks) after launch. The Google backup takes
+   the app's data only end-to-end encrypted, which needs the phone's
+   screen lock: `disableIfNoEncryptionCapabilities` on Android 12 and
+   later (`res/xml/data_extraction_rules.xml`),
+   `requireFlags="clientSideEncryption"` on Android 9 to 11
+   (`res/xml-v28/backup_rules.xml`). Android 7.0 to 8.1 cannot encrypt
+   end to end, so there neither a backup nor a transfer carries the
+   app's data (`res/xml/backup_rules.xml`). The Android footer under
+   Settings › Your Data says the backup needs a screen lock; the privacy
+   policy dates it from 1.7.1 (§ 6.6).
+6. **Android look and feel:** predictive back (with
+   `android:enableOnBackInvokedCallback="true"`), Material stretch
+   overscroll and Roboto at its own spacing on Android; iOS keeps its
+   slide, bounce and tracking. Back at the root moves the task to the back
+   instead of finishing it (`popSystemNavigator`, in its own PR). Android
+   14 and later finish a task the launcher did not start when Back at its
+   root reaches them, so such a task keeps Flutter's back callback there
+   (`MainActivity`). `singleTask` stays.
+7. **Orientation:** portrait on phones
+   (`android:screenOrientation="portrait"`). Android 16 ignores it at
+   600 dp and wider, where the width-capped layout applies. Tablets stay
+   in the device catalog.
+8. **Meta glasses photos** start Off on Android, which cannot check them
+   for food on the phone; a value the user set wins, and a line under
+   Settings › Photos says why. The privacy policy dates it from 1.7.1
+   (§ 6.6).
+9. **Analysis after you leave the app:** QA on 2026-11-20 (API 35 and
+   36) found that once other apps are opened, Android freezes the app
+   about 17 seconds after it leaves the screen, and an analysis waits
+   until it comes back (a kill in between loses it). A short expedited
+   WorkManager job will keep an analysis running (API 31 and later), in
+   its own PR.
+10. **Restaurant lookups** stay brand-only on Android (no photo location,
+    no places service); the hint no longer says "for now" / 目前.
+11. **Shortcuts and a widget:** after launch, static shortcuts first and
+    a widget later; nothing in 1.7.1.
+12. **Health Connect:** no sync in v1.
 
 ### 6.1 Account and app record
 
@@ -1645,8 +1679,7 @@ checks that they agree; it cannot tell that the date is old).
 
 Do now:
 
-1. Read decisions 1–4 above; they are settled. Decisions 5–12 can wait
-   for the closed test.
+1. Read decisions 1–12 above; they are settled.
 2. Create the personal Play Console account, with 2-Step Verification,
    identity, email and phone checks, the public developer name and contact
    email, and the trader-status declaration (§ 6.1).
