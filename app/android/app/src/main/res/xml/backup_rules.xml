@@ -1,28 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Android 11 and lower (android:fullBackupContent; Android 12+ reads
-     data_extraction_rules.xml instead). Keeps the backup-excluded local
-     store (lib/services/local_store.dart, files/bitewise_local/) and
-     flutter_secure_storage's shared_prefs files (the API keys, encrypted
-     with a Keystore key that never leaves this phone) out of Auto Backup
-     and device-to-device transfer; data_extraction_rules.xml says why.
-
-     A cloud backup only when it is end-to-end encrypted (owner decision 5,
-     2026-11-20). Each <include> takes a whole domain (path ".", so the
-     includes together take what Auto Backup takes with no rules), but
-     only for the transfer its requireFlags names (Android 9 and later):
-     clientSideEncryption, a cloud backup encrypted with the phone's
-     screen lock (PIN, pattern or password); deviceToDeviceTransfer, a
-     transfer straight to a new phone, which stays as it was. A cloud
-     backup from a phone without a screen lock matches no <include> and
-     carries none of the app's files. The excludes hold for both.
-
-     Android 8.1 and lower cannot read requireFlags: there the rules fail
-     to parse and Android skips the app's backup ("adding requirements to
-     the XML prevents backups from working on previous Android versions",
-     developer.android.com/identity/data/autobackup, read 2026-11-20).
-     Those versions cannot encrypt a backup end to end anyway. The
-     excludes stay first, so they are read before the parse stops: a
-     backup that went ahead regardless would still leave them out. -->
+<!-- Android 7.0 to 8.1 (API 24-27, android:fullBackupContent; Android 9 to
+     11 read res/xml-v28/backup_rules.xml, Android 12+
+     data_extraction_rules.xml). Owner decision 5 (2026-11-20): the app's
+     data goes to the cloud only end-to-end encrypted, which Android does
+     from Android 9 on, with the phone's screen lock. These versions
+     cannot encrypt a backup end to end, and they cannot tell a cloud
+     backup from a transfer to a new phone (requireFlags came with Android
+     9), so neither carries any of the app's data here: the one <include>
+     names a file the app never writes. With an <include>, Android backs
+     up only what the includes name, and a restore takes only that. The
+     excludes stay as everywhere else. Every rule has two attributes:
+     these versions refuse a third, and a parse that fails half way would
+     leave the excludes alone in force for a later backup, which then
+     takes everything else. Export Data › Save to Device still keeps a
+     copy. -->
 <full-backup-content>
     <exclude domain="file" path="bitewise_local/"/>
     <exclude domain="sharedpref" path="FlutterSecureStorage.xml"/>
@@ -30,23 +21,5 @@
     <exclude domain="sharedpref" path="FlutterSecureStorageConfiguration.xml"/>
     <exclude domain="sharedpref" path="FlutterSecureStorageConfiguration:FlutterSecureStorage.xml"/>
 
-    <include domain="root" path="." requireFlags="clientSideEncryption"/>
-    <include domain="file" path="." requireFlags="clientSideEncryption"/>
-    <include domain="database" path="." requireFlags="clientSideEncryption"/>
-    <include domain="sharedpref" path="." requireFlags="clientSideEncryption"/>
-    <include domain="external" path="." requireFlags="clientSideEncryption"/>
-    <include domain="device_root" path="." requireFlags="clientSideEncryption"/>
-    <include domain="device_file" path="." requireFlags="clientSideEncryption"/>
-    <include domain="device_database" path="." requireFlags="clientSideEncryption"/>
-    <include domain="device_sharedpref" path="." requireFlags="clientSideEncryption"/>
-
-    <include domain="root" path="." requireFlags="deviceToDeviceTransfer"/>
-    <include domain="file" path="." requireFlags="deviceToDeviceTransfer"/>
-    <include domain="database" path="." requireFlags="deviceToDeviceTransfer"/>
-    <include domain="sharedpref" path="." requireFlags="deviceToDeviceTransfer"/>
-    <include domain="external" path="." requireFlags="deviceToDeviceTransfer"/>
-    <include domain="device_root" path="." requireFlags="deviceToDeviceTransfer"/>
-    <include domain="device_file" path="." requireFlags="deviceToDeviceTransfer"/>
-    <include domain="device_database" path="." requireFlags="deviceToDeviceTransfer"/>
-    <include domain="device_sharedpref" path="." requireFlags="deviceToDeviceTransfer"/>
+    <include domain="file" path="no_backup_before_android_9"/>
 </full-backup-content>

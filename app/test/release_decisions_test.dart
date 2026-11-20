@@ -1222,11 +1222,14 @@ void main() {
       }
 
       final rules = _read('android/app/src/main/res/xml/data_extraction_rules.xml');
-      final legacy = _read('android/app/src/main/res/xml/backup_rules.xml');
+      // Android 9 to 11 read res/xml-v28, Android 8.1 and lower res/xml.
+      final legacy = _read('android/app/src/main/res/xml-v28/backup_rules.xml');
+      final oldest = _read('android/app/src/main/res/xml/backup_rules.xml');
       for (final (name, block) in [
         ('cloud-backup', section(rules, 'cloud-backup')),
         ('device-transfer', section(rules, 'device-transfer')),
         ('full-backup-content', section(legacy, 'full-backup-content')),
+        ('full-backup-content (8.1)', section(oldest, 'full-backup-content')),
       ]) {
         for (final file in files) {
           expect(block, contains('<exclude domain="sharedpref" path="$file"/>'),
@@ -1238,6 +1241,9 @@ void main() {
     // Owner decision 5 (2026-11-20): the policy and Settings › Your Data
     // say Android's cloud backup needs a screen lock; the backup rules are
     // what makes that true (manifest_gate_test checks them in full).
+    // Android 8.1 and lower cannot encrypt a backup end to end or tell it
+    // from a transfer to a new phone, and their rules carry none of the
+    // app's data: the policy and the footer say so too (review of #72).
     test("Android's cloud backup needs a screen lock: the policy and the "
         'footer say so, the backup rules do it', () {
       final policy = _readRepo('docs/PRIVACY.md').replaceAll(RegExp(r'\s+'), ' ');
@@ -1245,21 +1251,51 @@ void main() {
       expect(policy, contains('screen lock (PIN, pattern or password)'));
       expect(policy, contains('只有在端到端加密时'));
       expect(policy, contains('屏幕锁定（PIN 码、图案或密码）'));
-      expect(policy,
-          contains('<!-- gated: release_decisions_test (disableIfNoEncryptionCapabilities and requireFlags in res/xml) -->'));
-      expect(AppLocalizationsEn().backupAndroidFooter, contains('screen lock'));
-      expect(AppLocalizationsZh().backupAndroidFooter, contains('屏幕锁定'));
+      expect(
+          policy,
+          contains('On Android 9 and later, a transfer straight to a new '
+              'phone is not affected. On Android 8.1 and earlier, which '
+              'cannot encrypt a backup end to end, the app\'s data goes '
+              'neither to your Google account nor to a new phone in a '
+              'transfer.'));
+      expect(policy, isNot(contains('A transfer straight to a new phone is '
+          'not affected')), reason: 'not on Android 8.1 and earlier');
+      expect(
+          policy,
+          contains('在 Android 9 及以上版本上，直接转移到新手机不受影响。'
+              'Android 8.1 及更早的版本无法对备份进行端到端加密，在这些版本上，'
+              '应用数据既不会备份到你的 Google 账户，也不会在转移时带到新手机。'));
+      expect(
+          policy,
+          contains('<!-- gated: release_decisions_test '
+              '(disableIfNoEncryptionCapabilities in res/xml, requireFlags in '
+              'res/xml-v28, nothing included for Android 8.1 and earlier) -->'));
+      expect(AppLocalizationsEn().backupAndroidFooter,
+          contains('without a screen lock, or on Android 8.1 and earlier, '
+              'your log is not backed up'));
+      expect(AppLocalizationsZh().backupAndroidFooter,
+          contains('没有设置屏幕锁定时，或在 Android 8.1 及更早的版本上，'
+              '饮食记录不会被备份'));
 
       final rules = _read('android/app/src/main/res/xml/data_extraction_rules.xml');
       expect(rules,
           contains('<cloud-backup disableIfNoEncryptionCapabilities="true">'));
-      final legacy = _read('android/app/src/main/res/xml/backup_rules.xml')
-          .replaceAll(RegExp(r'<!--.*?-->', dotAll: true), '');
+      String uncommented(String xml) =>
+          xml.replaceAll(RegExp(r'<!--.*?-->', dotAll: true), '');
+      final legacy = uncommented(
+          _read('android/app/src/main/res/xml-v28/backup_rules.xml'));
       expect(legacy, contains('requireFlags="clientSideEncryption"'));
       expect(
           RegExp(r'<include\b(?![^>]*requireFlags=)[^>]*>').hasMatch(legacy),
           isFalse,
           reason: 'an include without requireFlags backs up unencrypted');
+      final oldest =
+          uncommented(_read('android/app/src/main/res/xml/backup_rules.xml'));
+      expect(oldest, isNot(contains('requireFlags')),
+          reason: 'Android 8.1 and lower cannot read it');
+      expect(RegExp(r'<include\b[^>]*>').allMatches(oldest).single.group(0),
+          '<include domain="file" path="no_backup_before_android_9"/>',
+          reason: 'one include, of a file the app never writes');
     });
 
     test('the app reminds users to consult a healthcare professional '

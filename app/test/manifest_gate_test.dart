@@ -822,11 +822,15 @@ void main() {
       expect(body, isNot(contains('<include')), reason: scheme);
     }
 
-    final legacy = File('$main/res/xml/backup_rules.xml');
-    expect(legacy.existsSync(), isTrue, reason: legacy.path);
-    final full = section(legacy.readAsStringSync(), 'full-backup-content');
-    expect(exclude.hasMatch(full), isTrue,
-        reason: 'fullBackupContent does not exclude $localStoreDirName/');
+    // Android 9 to 11 read res/xml-v28, Android 8.1 and lower res/xml.
+    for (final dir in ['xml', 'xml-v28']) {
+      final legacy = File('$main/res/$dir/backup_rules.xml');
+      expect(legacy.existsSync(), isTrue, reason: legacy.path);
+      final full = section(legacy.readAsStringSync(), 'full-backup-content');
+      expect(exclude.hasMatch(full), isTrue,
+          reason: '$dir fullBackupContent does not exclude '
+              '$localStoreDirName/');
+    }
   });
 
   // flutter_secure_storage's files hold the API keys encrypted with a key
@@ -856,11 +860,15 @@ void main() {
 
     final extraction =
         File('$main/res/xml/data_extraction_rules.xml').readAsStringSync();
-    final legacy = File('$main/res/xml/backup_rules.xml').readAsStringSync();
+    String legacy(String dir) =>
+        File('$main/res/$dir/backup_rules.xml').readAsStringSync();
     final sections = {
       'cloud-backup': section(extraction, 'cloud-backup'),
       'device-transfer': section(extraction, 'device-transfer'),
-      'full-backup-content': section(legacy, 'full-backup-content'),
+      'full-backup-content (Android 9 to 11)':
+          section(legacy('xml-v28'), 'full-backup-content'),
+      'full-backup-content (Android 8.1 and lower)':
+          section(legacy('xml'), 'full-backup-content'),
     };
     sections.forEach((name, body) {
       for (final file in files) {
@@ -892,17 +900,16 @@ void main() {
   });
 
   // Owner decision 5 (2026-11-20): the log goes to the cloud only end-to-end
-  // encrypted, which Android does with the phone's screen lock; a
-  // transfer to a new phone stays as it was (developer.android.com/
-  // identity/data/autobackup, read 2026-11-20). Android 12+:
-  // disableIfNoEncryptionCapabilities on <cloud-backup> alone. Android 11
-  // and lower: every <include> takes a whole domain under one transfer
-  // flag; one without requireFlags would back up unencrypted, and a
-  // domain left out would silently stop being backed up or transferred.
-  // The excludes come first: Android 8.1 and lower stop parsing at the
-  // first requireFlags, and what they read by then still holds.
-  test('Android backs up to the cloud only end-to-end encrypted; a transfer '
-      'to a new phone is unchanged', () {
+  // encrypted, which Android does from Android 9 with the phone's screen
+  // lock; there a transfer to a new phone stays as it was
+  // (developer.android.com/identity/data/autobackup, read 2026-11-20).
+  // Android 12+: disableIfNoEncryptionCapabilities on <cloud-backup> alone.
+  // Android 9 to 11 (res/xml-v28): every <include> takes a whole domain
+  // under one transfer flag; one without requireFlags would back up
+  // unencrypted, and a domain left out would silently stop being backed up
+  // or transferred. Android 8.1 and lower: the next test.
+  test('Android backs up to the cloud only end-to-end encrypted; from '
+      'Android 9 a transfer to a new phone is unchanged', () {
     final main = '${_appRoot().path}/android/app/src/main';
     final extraction = _uncommented(
         File('$main/res/xml/data_extraction_rules.xml').readAsStringSync());
@@ -935,7 +942,7 @@ void main() {
     };
     const flags = {'clientSideEncryption', 'deviceToDeviceTransfer'};
     final legacy = _uncommented(
-        File('$main/res/xml/backup_rules.xml').readAsStringSync());
+        File('$main/res/xml-v28/backup_rules.xml').readAsStringSync());
     final rules = [
       for (final m in RegExp(r'<(include|exclude)\s([^>]*?)/?>')
           .allMatches(legacy))
@@ -956,16 +963,80 @@ void main() {
         for (final f in flags) (d, f),
     });
     expect(includes, hasLength(domains.length * flags.length));
-    final firstInclude = rules.indexWhere((r) => r.$1 == 'include');
-    final lastExclude = rules.lastIndexWhere((r) => r.$1 == 'exclude');
-    expect(lastExclude, isNonNegative);
-    expect(lastExclude, lessThan(firstInclude),
-        reason: 'the excludes come before the first include');
     for (final (kind, a) in rules) {
       if (kind == 'exclude') {
         expect(a.keys.toSet(), {'domain', 'path'}, reason: '$a');
       }
     }
+  });
+
+  // Android 8.1 and lower (minSdk is 24) cannot encrypt a backup end to end
+  // and have no transfer flags: a cloud backup and a transfer read the same
+  // rules. They refuse any rule with a third attribute (requireFlags), and
+  // a parse that failed half way left the excludes alone in force for a
+  // later backup in the same process, which then took everything else,
+  // unencrypted (review of #72). Their rules (res/xml; Android 9 and later
+  // read res/xml-v28) parse there and include one file the app never
+  // writes: no backup or transfer carries the app's data, and a restore
+  // takes none. Google's page asks for such alternate rules.
+  test("Android 8.1 and lower: rules they can read, which carry none of the "
+      "app's data", () {
+    final res = '${_appRoot().path}/android/app/src/main/res';
+    Map<String, String> attributes(String tag) => {
+          for (final m in RegExp(r'([\w:]+)="([^"]*)"').allMatches(tag))
+            m.group(1)!: m.group(2)!,
+        };
+    final variants = {
+      for (final d in Directory(res).listSync().whereType<Directory>())
+        if (File('${d.path}/backup_rules.xml').existsSync())
+          d.uri.pathSegments.lastWhere((p) => p.isNotEmpty),
+    };
+    expect(variants, {'xml', 'xml-v28'},
+        reason: 'res/xml for Android 8.1 and lower, res/xml-v28 from 9');
+
+    final xml =
+        _uncommented(File('$res/xml/backup_rules.xml').readAsStringSync());
+    expect(xml, isNot(contains('requireFlags')));
+    final tags = [
+      for (final m in RegExp(r'<([\w-]+)\b([^>]*?)/?>').allMatches(xml))
+        (m.group(1)!, attributes(m.group(2)!)),
+    ];
+    expect(tags.first.$1, 'full-backup-content');
+    expect(tags.first.$2, isEmpty);
+    for (final (name, a) in tags.skip(1)) {
+      expect({'include', 'exclude'}, contains(name), reason: name);
+      expect(a.keys.toSet(), {'domain', 'path'},
+          reason: '$name $a: Android 8.1 and lower refuse a third attribute');
+    }
+    final includes = [
+      for (final (name, a) in tags)
+        if (name == 'include') a,
+    ];
+    expect(includes, hasLength(1),
+        reason: 'one include, or Android backs up everything not excluded');
+    final nothing = includes.single;
+    expect(nothing['domain'], 'file');
+    expect(nothing['path'], matches(RegExp(r'^[a-z0-9_]+$')),
+        reason: 'one plain file name, no folder');
+    // A file the app never writes: no Dart or Kotlin source names it.
+    for (final source in [
+      ...Directory('${_appRoot().path}/lib').listSync(recursive: true),
+      ...Directory('${_appRoot().path}/android/app/src/main/kotlin')
+          .listSync(recursive: true),
+    ].whereType<File>()) {
+      expect(source.readAsStringSync(), isNot(contains(nothing['path']!)),
+          reason: source.path);
+    }
+
+    // The same excludes as from Android 9.
+    Set<String> excludes(String rules) => {
+          for (final m in RegExp(r'<exclude\b[^>]*>').allMatches(rules))
+            m.group(0)!,
+        };
+    final v28 =
+        _uncommented(File('$res/xml-v28/backup_rules.xml').readAsStringSync());
+    expect(excludes(xml), hasLength(5));
+    expect(excludes(xml), excludes(v28));
   });
 
   // Owner decisions 6 and 7 (2026-11-20): back reaches the app through

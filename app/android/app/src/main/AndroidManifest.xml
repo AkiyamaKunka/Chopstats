@@ -42,9 +42,13 @@
          the backup-excluded local store (lib/services/local_store.dart),
          and flutter_secure_storage's files (the API keys, which no other
          phone could decrypt): res/xml/data_extraction_rules.xml on Android
-         12+, backup_rules.xml below it. A cloud backup happens only when
-         it is end-to-end encrypted, which needs a screen lock (owner
-         decision 5, 2026-11-20); a transfer to a new phone as before.
+         12+, res/xml-v28/backup_rules.xml on Android 9 to 11. A cloud
+         backup happens only when it is end-to-end encrypted, which needs a
+         screen lock (owner decision 5, 2026-11-20); on Android 9 and later
+         a transfer to a new phone goes as before. Android 8.1 and lower
+         cannot encrypt a backup end to end, nor tell it from a transfer:
+         res/xml/backup_rules.xml gives them none of the app's data for
+         either (an export still keeps a copy).
          hasFragileUserData: on Android 10+ the uninstall dialog offers to
          keep the app's data, since the meal log lives only on the phone. A
          reinstall with the same signer then finds the log. Should the

@@ -3013,7 +3013,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get backupAndroidFooter =>
-      'Android 自带的备份可以把饮食记录保存在你的 Google 账户里，但不包括 API Key 和服务器上传密钥：在新手机上需要重新输入。这份备份会用手机的屏幕锁定（PIN 码、图案或密码）进行端到端加密：没有设置屏幕锁定时，饮食记录不会被备份。换手机时，请用「导出数据」→「保存到设备…」存一个文件，再在新手机上导入。导入会合并：已有的餐不会被改动。';
+      'Android 自带的备份可以把饮食记录保存在你的 Google 账户里，但不包括 API Key 和服务器上传密钥：在新手机上需要重新输入。在 Android 9 及以上版本上，这份备份会用手机的屏幕锁定（PIN 码、图案或密码）进行端到端加密；没有设置屏幕锁定时，或在 Android 8.1 及更早的版本上，饮食记录不会被备份。换手机时，请用「导出数据」→「保存到设备…」存一个文件，再在新手机上导入。导入会合并：已有的餐不会被改动。';
 
   @override
   String get backupStatusOff => '已关闭';

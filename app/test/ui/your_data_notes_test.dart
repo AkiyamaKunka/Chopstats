@@ -61,18 +61,25 @@ void main() {
     });
 
     // Owner decision 5 (2026-11-20): Android's cloud backup only when it
-    // is end-to-end encrypted, which needs a screen lock
-    // (res/xml/data_extraction_rules.xml and backup_rules.xml).
+    // is end-to-end encrypted, which needs a screen lock and Android 9 or
+    // later (res/xml/data_extraction_rules.xml, res/xml-v28 and res/xml
+    // backup_rules.xml). The footer shows on every Android version, and
+    // Android 8.1 and earlier back up none of the log (review of #72).
     test('it says the backup is end-to-end encrypted and needs a screen '
-        'lock, without which the log is not backed up', () {
+        'lock and Android 9, without which the log is not backed up', () {
       final e = en.backupAndroidFooter;
       expect(e, contains('end-to-end encrypted'));
       expect(e, contains('screen lock (PIN, pattern or password)'));
-      expect(e, contains('without a screen lock, your log is not backed up'));
+      expect(e, contains('On Android 9 and later that backup is end-to-end '
+          'encrypted'));
+      expect(e, contains('without a screen lock, or on Android 8.1 and '
+          'earlier, your log is not backed up'));
       final z = zh.backupAndroidFooter;
       expect(z, contains('端到端加密'));
       expect(z, contains('屏幕锁定（PIN 码、图案或密码）'));
-      expect(z, contains('没有设置屏幕锁定时，饮食记录不会被备份'));
+      expect(z, contains('在 Android 9 及以上版本上，这份备份会用手机的屏幕锁定'));
+      expect(z, contains('没有设置屏幕锁定时，或在 Android 8.1 及更早的版本上，'
+          '饮食记录不会被备份'));
     });
 
     testWidgets('shown on Android', (tester) async {
