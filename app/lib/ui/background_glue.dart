@@ -840,7 +840,11 @@ Future<bool> _runAfterLaunch({
   // first launch would, the app owes its one notice (play_channel.dart),
   // and the job cancels itself (backgroundJobWanted is false there).
   if (!photoLibraryInBuild) {
-    await retireWatchCameraRoll(settings, prefs);
+    try {
+      await retireWatchCameraRoll(settings, prefs);
+    } catch (_) {
+      // The app's launch tries again.
+    }
     await recorder.finish(BackgroundStop.watcherOff);
     try {
       await syncBackgroundScan(settings);

@@ -1029,7 +1029,7 @@ void main() {
           r'await dao\.reclaimStaleProcessing\(\);\s*'
           r'(//[^\n]*\n\s*)*'
           r'final prefs = await SharedPreferences\.getInstance\(\);\s*'
-          r'await retireWatchCameraRoll\(settings, prefs\);',
+          r'try \{ await retireWatchCameraRoll\(settings, prefs\); \}',
         ),
       );
       expect(
@@ -1048,6 +1048,31 @@ void main() {
       ]) {
         expect(body.indexOf(later), greaterThan(retire), reason: later);
       }
+      // And whatever the setting, the live watcher and the launch catch-up
+      // never start in that build: both sit behind this one check.
+      expect(
+        body,
+        _wired(
+          r'if \(settings\.watcherEnabled && photoLibraryInBuild\) \{ '
+          r'await photoIntake\.start\(\);',
+        ),
+      );
+      expect(
+        body.indexOf('if (settings.watcherEnabled && photoLibraryInBuild)'),
+        lessThan(body.indexOf('launchCatchUp()')),
+      );
+      // Nor the resume catch-up.
+      expect(
+        _body(
+          _source('lib/ui/app.dart'),
+          '  void didChangeAppLifecycleState(AppLifecycleState state) {',
+          indent: '  ',
+        ),
+        _wired(
+          r'if \(!s\.settings\.watcherEnabled \|\| !photoLibraryInBuild\) '
+          r'return; unawaited\(_resumeCatchUp\(\)\);',
+        ),
+      );
     });
 
     test('di.dart never asks for photo access in the Play build, and wires '
@@ -1116,7 +1141,8 @@ void main() {
         run,
         _wired(
           r'if \(!photoLibraryInBuild\) \{ '
-          r'await retireWatchCameraRoll\(settings, prefs\); '
+          r'try \{ await retireWatchCameraRoll\(settings, prefs\); \} '
+          r'catch \(_\) \{[^}]*\} '
           r'await recorder\.finish\(BackgroundStop\.watcherOff\); '
           r'try \{ await syncBackgroundScan\(settings\); \} catch \(_\) \{'
           r'[^}]*\} return true; \}',

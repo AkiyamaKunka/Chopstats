@@ -2553,6 +2553,23 @@ void main() {
       expect(intake.backfillScans, before);
     });
 
+    // The Google Play build has no Watch Camera Roll (core/app_channel.dart):
+    // no resume catch-up, even with the setting a GitHub install left on.
+    testWidgets('the Play build: no scan on resume, whatever the setting',
+        (tester) async {
+      debugAppChannelOverride = AppChannel.play;
+      addTearDown(() => debugAppChannelOverride = null);
+      final intake = FakeIntake();
+      await tester.pumpWidget(
+          MaterialApp(home: HomeShell(services: services(intake, watcher: true))));
+      final before = intake.backfillScans;
+      tester.binding
+          .handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump();
+      expect(intake.backfillScans, before);
+      expect(intake.started, isFalse);
+    });
+
     testWidgets('paused/inactive states never scan', (tester) async {
       final intake = FakeIntake();
       await tester.pumpWidget(

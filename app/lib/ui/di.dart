@@ -107,7 +107,12 @@ class AppServices {
     // anything below reads it, and the shell owes the user one notice
     // (play_channel.dart). The job sync at the end cancels its job.
     final prefs = await SharedPreferences.getInstance();
-    await retireWatchCameraRoll(settings, prefs);
+    try {
+      await retireWatchCameraRoll(settings, prefs);
+    } catch (_) {
+      // A repair must never block startup; the next launch tries again,
+      // and nothing below starts the watcher in that build anyway.
+    }
     if (Platform.isIOS) {
       // This engine's GPU goes off whenever the app is in the background:
       // no dart:ui decode may start there (platform_decode.dart).
@@ -546,7 +551,8 @@ class AppServices {
         shareConsent.gate(shareIntake.photos(), deliveries: shareIntake));
     mealAssist.start();
     var catchingUp = false;
-    if (settings.watcherEnabled) {
+    // Never in the Play build, whatever the setting (core/app_channel.dart).
+    if (settings.watcherEnabled && photoLibraryInBuild) {
       await photoIntake.start();
       // Launch catch-up over the FULL lookback window: change-notify only
       // fires while the process lives, and EMUI-class OS freezing kills it

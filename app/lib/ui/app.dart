@@ -6,6 +6,7 @@ import 'dart:async' show StreamSubscription, unawaited;
 import 'dart:io' show File, Platform;
 
 import '../core/ai_consent.dart' show aiConsentRoute, aiRoutesInMainlandChina;
+import '../core/app_channel.dart' show photoLibraryInBuild;
 import '../core/setup_link.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
@@ -589,7 +590,9 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     // IndexedStack keeps stale screens alive, so refresh them now.
     _todayKey.currentState?.reload();
     if (_index == 1) _historyKey.currentState?.reload();
-    if (!s.settings.watcherEnabled) return;
+    // Never in the Google Play build, whatever the setting
+    // (core/app_channel.dart): it has no Watch Camera Roll.
+    if (!s.settings.watcherEnabled || !photoLibraryInBuild) return;
     unawaited(_resumeCatchUp());
   }
 
