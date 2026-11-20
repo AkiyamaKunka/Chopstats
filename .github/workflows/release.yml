@@ -168,7 +168,7 @@ jobs:
               floor=$((offset + GITHUB_RUN_NUMBER))
               if [[ "$number" =~ ^[0-9]+$ ]] && (( number < floor )); then
                 if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
-                  echo "::error::tag v$tag carries build number $number, but this is Release run $GITHUB_RUN_NUMBER: earlier runs numbered their builds up to $((floor - 1)) (BUILD_NUMBER_OFFSET $offset + run number), so $number may already be on App Store Connect, on Play or in a GitHub APK. Tag v$name without a +N (this run numbers it $floor), or use $floor or more."
+                  echo "::error::tag v$tag carries build number $number, but this is Release run $GITHUB_RUN_NUMBER: earlier runs numbered their builds up to $((floor - 1)) (BUILD_NUMBER_OFFSET $offset + run number), so $number may already be on App Store Connect, on Play or in a GitHub APK. Tag v$name without a +N instead: CI numbers it BUILD_NUMBER_OFFSET + the new run's number, which no run has used. A +N must clear the floor of the run your new push starts, not this one's: that run is numbered $((GITHUB_RUN_NUMBER + 1)) or later, so use more than $floor, with room to spare if other Release runs may start first."
                   exit 1
                 fi
                 echo "::warning::Run workflow on tag v$tag: build number $number is below $floor, the lowest number no earlier run has used. Fine for re-running this tag's own release; App Store Connect and Play refuse it if an earlier run uploaded $number or more."

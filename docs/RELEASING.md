@@ -1063,9 +1063,12 @@ step. Revisit if the app is ever published with a developer-run service.
   run's number: every earlier run numbered its build below that (Android
   1.7.0 is 200 + run 7), so a lower `N` may already be on App Store
   Connect, on Play or in a GitHub APK, and a GitHub APK with it may not
-  install over one already out. The plan job refuses it and names the
-  lowest `N` it takes. Run workflow on a `+N` tag that already ran (to
-  re-release that tag) gets a later run number, so there it only warns.
+  install over one already out. The plan job refuses it. Push plain
+  `vX.Y.Z` instead; for a `+N`, go above `BUILD_NUMBER_OFFSET` + the
+  refused run's number. The corrected tag is a new push, so it starts a
+  new run with a higher number and a higher floor. Run workflow on a `+N`
+  tag that already ran (to re-release that tag) gets a later run number,
+  so there it only warns.
 
 ---
 
@@ -1854,7 +1857,9 @@ transport.
 
 **"This bundle is invalid. The value for key CFBundleVersion must contain a
 higher value"** — a build number was reused. Tag as `vX.Y.Z+N` with a
-higher N once, or raise `BUILD_NUMBER_OFFSET`; never lower it.
+higher N once (on a tag push it must also be above `BUILD_NUMBER_OFFSET`
++ the latest Release run's number, § 5), or raise `BUILD_NUMBER_OFFSET`;
+never lower it.
 
 **"Xcode 26.2 is not on this runner image"** (warning) — GitHub removed that
 patch release; the build used the default. Set `XCODE_VERSION` in both

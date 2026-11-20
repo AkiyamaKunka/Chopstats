@@ -1392,7 +1392,13 @@ void main() {
           expect(r.code, 1, reason: '+$n at run 10');
           expect(r.log, contains('this is Release run 10'));
           expect(r.log, contains('up to 209'));
-          expect(r.log, contains('use 210 or more'));
+          // The corrected tag is a new push, so a new run with a higher
+          // number and floor: this run's floor (210) is refused there too.
+          expect(r.log, contains('Tag v1.7.0 without a +N instead'));
+          expect(r.log, contains('that run is numbered 11 or later, so use '
+              'more than 210'));
+          expect(r.log, isNot(contains('this run numbers it')));
+          expect(r.log, isNot(contains('210 or more')));
           expect(r.log, isNot(contains('not above BUILD_NUMBER_OFFSET')),
               reason: '$n is above the offset; that message would be false');
         }
@@ -1400,6 +1406,24 @@ void main() {
         final low = await plan('push', 'refs/tags/v1.7.0+200', 10);
         expect(low.code, 1);
         expect(low.log, contains('not above BUILD_NUMBER_OFFSET'));
+      });
+
+      // What the owner does with the refusal: a new push, which is the
+      // next run. The advice must pass there (the old "use 210 or more"
+      // was refused again at run 11, whose floor is 211).
+      test('the refusal\'s advice passes on the next run', () async {
+        final refused = await plan('push', 'refs/tags/v1.7.0+205', 10);
+        final bound = int.parse(
+            RegExp(r'more than (\d+)').firstMatch(refused.log)!.group(1)!);
+        expect(bound, 210);
+        final plus = await plan('push', 'refs/tags/v1.7.0+${bound + 1}', 11);
+        expect(plus.code, 0, reason: plus.log);
+        expect(plus.out, contains('build_number=${bound + 1}\n'));
+        final plain = await plan('push', 'refs/tags/v1.7.0', 11);
+        expect(plain.code, 0, reason: plain.log);
+        expect(plain.out, contains('build_number=211\n'));
+        // The number the old message named is refused at run 11.
+        expect((await plan('push', 'refs/tags/v1.7.0+$bound', 11)).code, 1);
       });
 
       test('at or above it a tag push passes, plain tags as before',
