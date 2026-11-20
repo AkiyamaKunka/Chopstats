@@ -175,8 +175,12 @@ Future<void> _armOnce({
   }
 
   // 2. The cards to arm: the next slot with the day as it stands, and on
-  //    Android the 7 after it with the empty-day text (no meal can be in a
-  //    day that has not started; logging re-arms and rebuilds them).
+  //    Android the 7 after it with the empty-day text — for a day not
+  //    begun yet (no meal can be in it; logging re-arms and rebuilds
+  //    them). A slot before 04:00 armed between midnight and the slot
+  //    describes on its next night the day already begun: built as it
+  //    stands too (review 2026-11-19).
+  final today = DateTime(at.year, at.month, at.day);
   final first = ReportNotifier.nextDailyOccurrence(time, at);
   final slots = [
     for (var k = 0; k < (android ? ReportNotifier.dailySetSize : 1); k++)
@@ -192,7 +196,7 @@ Future<void> _armOnce({
     // The day the card DESCRIBES is the day it fires on, or for a slot
     // before 04:00 the day that just ended (C16/C40).
     final day = summaryDayFor(slot, slotHour: time.hour);
-    final card = k == 0
+    final card = k == 0 || calendarDaysBetween(day, today) >= 0
         ? await summaryForDay(
             dao: dao,
             day: day,

@@ -285,6 +285,42 @@ void main() {
       });
     });
 
+    // Review 2026-11-19 (R10): with a slot before 04:00, an arm between
+    // midnight and the slot armed the next night's card — about the day
+    // already begun — with the empty-day text, and with the watcher off
+    // nothing rebuilt it unless the app was opened.
+    group('a night slot armed between midnight and the slot', () {
+      test('the next night\'s card carries the day already begun',
+          () async {
+        final s = await settingsAt(reportTime: '01:00');
+        dao.seed(_meal('2026-11-15', 900)); // Sunday
+        dao.seed(_meal('2026-11-16', 420)); // Monday, a 00:05 snack
+        await arm(s, DateTime(2026, 11, 16, 0, 20));
+        expect(os.pending[_id]!.when, DateTime(2026, 11, 16, 1, 0));
+        expect(os.pending[_id]!.title, 'Sun: 900 kcal');
+        expect(os.pending[_id + 1]!.when, DateTime(2026, 11, 17, 1, 0));
+        expect(os.pending[_id + 1]!.title, 'Mon: 420 kcal');
+        expect(os.pending[_id + 1]!.body,
+            isNot(startsWith('Nothing logged that day.')));
+        expect(os.pending[_id + 2]!.title, 'Tue: 0 kcal',
+            reason: 'a day not begun yet');
+        os.deliverDue(DateTime(2026, 11, 17, 1, 30)); // app never opened
+        expect(os.delivered.map((c) => c.title),
+            ['Sun: 900 kcal', 'Mon: 420 kcal']);
+      });
+
+      test('at 03:30 too; a day slot\'s nights ahead stay empty', () async {
+        dao.seed(_meal('2026-11-16', 610));
+        await arm(await settingsAt(reportTime: '03:30'),
+            DateTime(2026, 11, 16, 2, 0));
+        expect(os.pending[_id + 1]!.title, 'Mon: 610 kcal');
+        await arm(await settingsAt(reportTime: '04:00'),
+            DateTime(2026, 11, 16, 2, 0));
+        expect(os.pending[_id]!.title, 'Mon: 610 kcal');
+        expect(os.pending[_id + 1]!.title, 'Tue: 0 kcal');
+      });
+    });
+
     // Review 2026-11-19 (R8): Settings' Next summary row read only the
     // first id, and this engine's own note of what it armed.
     group('the next summary Settings shows', () {
