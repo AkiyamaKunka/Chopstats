@@ -663,10 +663,13 @@ void main() {
       // again: Who we are, adults only, https only, and Android's backup
       // leaving the keys out. If that branch merges on a later day, set the
       // date and kPolicyEffectiveDate to the merge date. The Android
-      // look-and-defaults branch (android/feel-and-defaults, 2026-11-20)
-      // changed it again: Android's cloud backup only end-to-end encrypted
-      // (a screen lock), and Meta glasses photos off by default on Android;
-      // if it merges on a later day, the same applies.
+      // look-and-defaults branch (android/feel-and-defaults, #72) changed it
+      // again and merged on 2026-11-20: Android's cloud backup only
+      // end-to-end encrypted (a screen lock), and Meta glasses photos off
+      // by default on Android. The Android lows lane
+      // (android/lows-and-release, #74, 2026-11-20) changed it again:
+      // Connect Claude sends your own server the sign-in code you paste; if
+      // it merges on a later day, set both to that day too.
       expect(
           RegExp(r'^Effective date: (\S+)$', multiLine: true)
               .allMatches(policy)
