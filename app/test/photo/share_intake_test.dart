@@ -1019,6 +1019,110 @@ void main() {
       await sub.cancel();
     });
 
+    // Review 2026-11-19, R1: a Not now covers a share made while its
+    // question was open. Queued behind the start-up batch (which asks
+    // alone), its copies used to wait until that whole batch had been
+    // read; an app stopped meanwhile left them for the next start's sweep,
+    // which sent them unasked once the batch's own question was answered
+    // Allow. They go as the answer is given now.
+    test('Not now deletes a share queued behind the start-up batch at once; '
+        'the next start never sends it', () async {
+      final left = [
+        for (var i = 0; i < 3; i++)
+          copyAt('l$i', 'IMG_left$i.jpg', Duration(hours: 3 - i)),
+      ];
+      final launch = copyAt('n0', 'IMG_new0.jpg', Duration.zero);
+      final source = FakeShareSource()..initial = [launch.path];
+      final intake = android(source, <String>[]);
+      final settings = FakeSettings(apiKey: 'k')..aiConsent = {};
+      final gate = SharedPhotoConsentGate(settings);
+      final declined = <File>[];
+      final notSent = <int>[];
+      List<bool>? onDiskAtAnswer;
+      var asked = 0;
+      gate.attach(() async {
+        asked++;
+        if (asked > 1) {
+          // The start-up batch's own question: Allow.
+          settings.aiConsent = {'gemini'};
+          return true;
+        }
+        // The launch share's question is open while the start-up batch
+        // arrives and the user shares two more photos; then Not now.
+        await until(() => intake.arrivedDelivery >= 2, 'the start-up batch');
+        declined
+          ..add(copyAt('x0', 'IMG_x0.jpg', Duration.zero))
+          ..add(copyAt('x1', 'IMG_x1.jpg', Duration.zero));
+        source.controller.add([for (final f in declined) f.path]);
+        await until(() => intake.arrivedDelivery >= 3, 'the share made then');
+        notSent.add(gate.declineOpenQuestion());
+        onDiskAtAnswer = [for (final f in declined) f.existsSync()];
+        return false;
+      });
+      final passed = <String>[];
+      late StreamSubscription<IntakePhoto> sub;
+      // The pipeline holds the first photo it gets (a long analysis).
+      sub = gate.gate(intake.photos(), deliveries: intake).listen((p) {
+        passed.add(p.fileName);
+        sub.pause();
+      });
+      await until(() => passed.isNotEmpty, 'a start-up photo in the pipeline');
+      expect(asked, 2);
+      expect(intake.asksAlone(2), isTrue);
+      expect(notSent, [3], reason: 'the launch share and the two shared then');
+      expect(onDiskAtAnswer, [false, false],
+          reason: 'deleted as the answer is given, not once the start-up '
+              'batch in front of them has been read');
+
+      // The app is stopped here: nothing more of this run happens. The
+      // next start, 5 minutes on, with the recipient now allowed, logs what
+      // is left of the start-up batch, up to a copy newer than any other.
+      final newest = copyAt('z', 'IMG_z.jpg', const Duration(seconds: -1));
+      final next = <String>[];
+      final sub2 = SharedPhotoConsentGate(settings)
+          .gate(ShareIntake(
+                  source: FakeShareSource(),
+                  library: FakePhotoLibrary(),
+                  readBytes: (path) => File(path).readAsBytes(),
+                  sharedFolder: () async => folder,
+                  clock: () => now.add(const Duration(minutes: 5)))
+              .photos())
+          .listen((p) => next.add(p.fileName));
+      await until(() => next.contains('IMG_z.jpg'), "the next start's sweep");
+      expect(next.where((n) => n.startsWith('IMG_x')), isEmpty,
+          reason: 'photos answered Not now are never sent');
+      expect(newest.existsSync(), isFalse);
+      expect(left.last.existsSync(), isFalse);
+      await sub2.cancel();
+      await sub.cancel();
+    });
+
+    test('a Not now deletes the copies of a share queued behind another '
+        'before it returns, while the reader still waits', () async {
+      // Seconds old: the start-up sweep leaves them to their own shares.
+      final first = [
+        for (var i = 0; i < 3; i++) copyAt('a$i', 'IMG_a$i.jpg', Duration.zero),
+      ];
+      final source = FakeShareSource();
+      final intake = android(source, <String>[]);
+      late StreamSubscription<IntakePhoto> sub;
+      sub = intake.photos().listen((_) => sub.pause());
+      source.controller.add([for (final f in first) f.path]);
+      await until(() => sub.isPaused, 'the first photo handed on');
+      final second = [
+        for (var i = 0; i < 2; i++) copyAt('b$i', 'IMG_b$i.jpg', Duration.zero),
+      ];
+      source.controller.add([for (final f in second) f.path]);
+      await until(() => intake.arrivedDelivery >= 2, 'the second share');
+      intake.declineDeliveries({2});
+      // No wait at all: an app stopped right after the answer keeps none.
+      expect([for (final f in second) f.existsSync()], [false, false]);
+      expect(first.last.existsSync(), isTrue,
+          reason: 'the share not declined still waits its turn');
+      expect(sub.isPaused, isTrue);
+      await sub.cancel();
+    });
+
     test('a copy both left over and in a live share is logged once',
         () async {
       final c = copyAt('u1', 'IMG_x.jpg', const Duration(minutes: 5));
