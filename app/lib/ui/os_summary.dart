@@ -29,8 +29,9 @@
 ///     whichever engine gets there first; so is today's card when the time
 ///     is moved to before now, which the set for the new time would
 ///     replace before it came;
-///   * the first arm after the update posts today's summary if its slot
-///     passed and the old scheme had not posted it.
+///   * the first arm after the update posts the last slot's summary if it
+///     passed within the grace window and the old scheme had not posted
+///     it.
 library;
 
 import 'dart:async';
@@ -344,12 +345,18 @@ _unsaidCard(
   );
 }
 
-/// The first Android arm after the update: if today's slot (or last
-/// night's, within the grace window) passed and the old scheme's watermark
-/// does not have it, its card — the old scheme posted from a Timer or the
-/// background job, and nothing of the new one is armed yet. Only for an
-/// install the old scheme had already posted on: a fresh install says
-/// nothing until its first slot.
+/// The first Android arm after the update: if the last slot passed within
+/// the grace window and the old scheme's watermark does not have it, its
+/// card — the old scheme posted from a Timer or the background job, and
+/// nothing of the new one is armed yet. Only for an install the old scheme
+/// had already posted on: a fresh install says nothing until its first
+/// slot.
+///
+/// The old scheme's watermark is the slot's own date: before the night
+/// rule a 00:30 summary was 'Today', so for a slot before 04:00 it never
+/// equals the day the card describes (review 2026-11-19: a card about the
+/// day before at whatever hour the app first ran, after the old build's
+/// own 00:30 card). It is read, and written, in those terms.
 Future<({DateTime slot, PendingDailyCard? pending, CoachSummary card})?>
 _updateDayCard(
   MealsDao dao,
@@ -367,13 +374,14 @@ _updateDayCard(
   }
   if (posted.isEmpty) return null;
   final slot = lastSlotWithinGrace(time.hour, time.minute, at);
-  if (slot == null) return null;
+  // lastSlotWithinGrace bounds yesterday's slot only.
+  if (slot == null || at.difference(slot) > kSummaryGraceWindow) return null;
+  if (isoDate(slot) == posted) return null;
   final day = summaryDayFor(slot, slotHour: time.hour);
-  if (isoDate(day) == posted) return null;
   final p = await _freshPrefs(SharedPreferences.getInstance);
   if (!await _claim(p, slot)) return null;
   try {
-    await settings.markSummaryPosted(isoDate(day));
+    await settings.markSummaryPosted(isoDate(slot));
   } catch (_) {}
   return (
     slot: slot,

@@ -454,6 +454,51 @@ void main() {
         await arm(s, DateTime(2026, 11, 13, 22, 1), via: os.notifier());
         expect(os.shown, hasLength(1));
       });
+
+      // Review 2026-11-19 (R11): the old scheme stored the slot's own date
+      // (before the night rule a 00:30 summary was 'Today'), which the
+      // night rule's day never equals, and today's slot had no grace
+      // bound: a 00:30 user got a card about Thursday at whatever hour the
+      // app first ran on Friday, after the old build's own 00:30 card.
+      test('a night slot the old scheme posted: nothing, whenever the first '
+          'arm comes', () async {
+        for (final at in [
+          DateTime(2026, 11, 13, 7, 0), // inside the grace window
+          DateTime(2026, 11, 13, 15, 0),
+          DateTime(2026, 11, 13, 23, 50),
+        ]) {
+          os = _FakeOs();
+          notifier = os.notifier();
+          final s = await settingsAt(
+              reportTime: '00:30', postedDate: '2026-11-13'); // Fri 00:30
+          dao.seed(_meal('2026-11-12', 1850));
+          await arm(s, at);
+          expect(os.shown, isEmpty, reason: 'first arm at $at');
+        }
+      });
+
+      test('a night slot the old scheme missed: the day it describes, '
+          'inside the grace window only', () async {
+        dao.seed(_meal('2026-11-12', 1850));
+        // The old scheme last posted Thursday's 00:30 slot.
+        var s = await settingsAt(reportTime: '00:30', postedDate: '2026-11-12');
+        await arm(s, DateTime(2026, 11, 13, 7, 0));
+        expect(os.shown.single.title, 'Thu: 1,850 kcal');
+        expect(await s.freshSummaryPostedDate(), '2026-11-13',
+            reason: 'in the old scheme\'s terms: that slot is posted');
+        os = _FakeOs();
+        notifier = os.notifier();
+        s = await settingsAt(reportTime: '00:30', postedDate: '2026-11-12');
+        await arm(s, DateTime(2026, 11, 13, 15, 0));
+        expect(os.shown, isEmpty, reason: 'fourteen and a half hours late');
+      });
+
+      test('a day slot past the grace window: nothing', () async {
+        final s = await settingsAt(reportTime: '08:00', postedDate: '2026-11-12');
+        await arm(s, DateTime(2026, 11, 13, 16, 1));
+        expect(os.shown, isEmpty);
+        expect(os.pending[_id]!.when, DateTime(2026, 11, 14, 8, 0));
+      });
     });
   });
 }

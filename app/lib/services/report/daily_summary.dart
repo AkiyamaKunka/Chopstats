@@ -87,10 +87,12 @@ DateTime summaryDayFor(DateTime slot, {int? slotHour}) =>
 bool summaryIsAboutYesterday(DateTime day, DateTime at) =>
     calendarDaysBetween(day, at) >= 1;
 
-/// The slot at [hour]:[minute] that most recently passed at [now], if it
-/// passed within [kSummaryGraceWindow]: today's once it has come, else
-/// yesterday's (calendar arithmetic: on the fall-back night a 24 h step
-/// from 23:30 lands on the SAME date). Null when the last one is older.
+/// The slot at [hour]:[minute] that most recently passed at [now]: today's
+/// once it has come, however long ago, else yesterday's if it passed
+/// within [kSummaryGraceWindow] (calendar arithmetic: on the fall-back
+/// night a 24 h step from 23:30 lands on the SAME date). Null when
+/// yesterday's is older. A caller that must honour the window for today's
+/// slot too checks it (os_summary.dart's update day).
 DateTime? lastSlotWithinGrace(int hour, int minute, DateTime now) {
   DateTime slotOn(DateTime day) =>
       DateTime(day.year, day.month, day.day, hour, minute);
