@@ -4,6 +4,7 @@ import android.content.Intent
 import android.os.Build
 import java.io.File
 import java.io.InputStream
+import java.util.Locale
 
 /// MainActivity's decisions, kept free of Android objects so the JVM unit
 /// tests (src/test, `./gradlew :app:testDebugUnitTest`, run by
@@ -105,6 +106,30 @@ internal object IntakeRules {
     /// it names no file, and the plugin hands a file:// URI's path on as it
     /// is, without opening it.
     fun refusedSharePath(refusal: ShareRefusal): String = "$REFUSED_SHARE_PATH/${refusal.token}"
+
+    /// The longest file name a copy may have, in bytes (ext4 and f2fs).
+    const val MAX_NAME_BYTES = 255
+
+    /// The name a shared image is copied under (MainActivity.withSafeShares):
+    /// [name] as its provider shows it, or, when that has no extension
+    /// Android knows ([isKnownExtension], asked about the part after the
+    /// last dot, lower-cased), with the one its image type gives
+    /// ([typeExtension], asked only then). A provider may show a name
+    /// without one (IMG_1731500000000, "Lunch with.Sarah"), and share
+    /// intake takes a copy by its name's type: such a JPEG was refused as a
+    /// kind of file Chopstats can't read. Unchanged when the type gives no
+    /// plain extension, or the name would grow past MAX_NAME_BYTES.
+    fun copyName(name: String, isKnownExtension: (String) -> Boolean, typeExtension: () -> String?): String {
+        val dot = name.lastIndexOf('.')
+        if (dot in 0 until name.length - 1 &&
+            isKnownExtension(name.substring(dot + 1).lowercase(Locale.ROOT))
+        ) return name
+        val ext = typeExtension()?.takeIf { e ->
+            e.isNotEmpty() && e.all { it in 'a'..'z' || it in 'A'..'Z' || it in '0'..'9' }
+        } ?: return name
+        val named = if (name.endsWith('.')) name + ext else "$name.$ext"
+        return if (named.toByteArray(Charsets.UTF_8).size > MAX_NAME_BYTES) name else named
+    }
 
     /// Whether [path] is [dir] or lies inside it once both are resolved
     /// (symbolic links included). True when that cannot be told: callers

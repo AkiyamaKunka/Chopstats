@@ -1477,8 +1477,8 @@ void main() {
           'IntakeRules.ShareRefusal.UNREADABLE) return@forEachIndexed }',
       'if (itemType?.startsWith("image") != true) { refused.add('
           'IntakeRules.typeRefusal(itemType)) return@forEachIndexed }',
-      'val (copy, copied) = copyShare(uri, name) if (copy == null) { '
-          'refused.add( if (copied == Copied.TOO_BIG) '
+      'val (copy, copied) = copyShare(uri, copyName(uri, name, itemType)) '
+          'if (copy == null) { refused.add( if (copied == Copied.TOO_BIG) '
           'IntakeRules.ShareRefusal.TOO_BIG else '
           'IntakeRules.ShareRefusal.UNREADABLE, ) return@forEachIndexed }',
       '} catch (e: Exception) { refused.add('
@@ -1556,6 +1556,43 @@ void main() {
         endsWith('} else if ("content".equals(uri.scheme, ignoreCase = '
             'true)) { return getDataColumn(context, uri, null, null) } '
             'return uri.path }'));
+  });
+
+  // Share intake (Dart) takes a copy by its name's type. A provider can
+  // show an image's name without an extension (IMG_1731500000000, "Lunch
+  // with.Sarah"), and MainActivity copied it under that name, so a JPEG
+  // shared as image/jpeg was refused as a kind of file Chopstats can't
+  // read. Such a name gets the extension its image type gives (the
+  // share's own type for it, else its provider's), from Android's MIME
+  // table, as the plugin's own name for a nameless stream did.
+  test('a shared image whose name has no extension Android knows is copied '
+      'under the one its type gives', () {
+    final code = _kotlinCode(_mainActivity());
+    final copyName = _kotlinFunction(
+        code, 'private fun copyName(uri: Uri, name: String, itemType: String)');
+    expect(
+        copyName,
+        contains('val types = MimeTypeMap.getSingleton() fun extensionOf('
+            'type: String?): String? = type?.lowercase(Locale.ROOT)?.takeIf '
+            '{ it.startsWith("image/") } ?.let { '
+            'types.getExtensionFromMimeType(it) } return '
+            'IntakeRules.copyName(name, { types.hasExtension(it) }) { '
+            'extensionOf(itemType) ?: extensionOf(providerType(uri)) }'));
+    // Only an image's copy: after the type check, before the copy.
+    final safe = _kotlinFunction(code, 'private fun withSafeShares(');
+    expect(
+        safe.indexOf('if (itemType?.startsWith("image") != true)'),
+        lessThan(safe.indexOf('copyShare(uri, copyName(uri, name, itemType))')));
+    expect('copyName('.allMatches(safe), hasLength(1));
+    final rules = _kotlinCode(_intakeRules());
+    expect(rules, contains('const val MAX_NAME_BYTES = 255'));
+    _expectJvmTests([
+      'aNameWithNoExtensionGetsTheOneItsTypeGives',
+      'aNameWithAKnownExtensionIsKeptAndItsTypeNotAskedFor',
+      'aTypeThatGivesNoPlainExtensionLeavesTheNameAsItIs',
+      'aNameThatWouldGrowPastTheLongestFileNameIsKept',
+      'IntakeRules.copyName(',
+    ]);
   });
 
   // A file:// URI into the app's own data is never copied, shared or

@@ -26,6 +26,7 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
 import java.net.URLConnection
+import java.util.Locale
 import java.util.UUID
 
 class MainActivity : FlutterActivity() {
@@ -217,7 +218,9 @@ class MainActivity : FlutterActivity() {
     /// Dart as the path, which share intake then deleted. The plugin now
     /// sees only copies made here, of the items it would report as images:
     /// each in a folder of its own under SHARE_FOLDER, under the sender's
-    /// base name (its date stays readable), at most MAX_SHARE_BYTES. What
+    /// base name (its date stays readable; with the extension its image
+    /// type gives when it has none Android knows, copyName, as share
+    /// intake reads a copy by its name's type), at most MAX_SHARE_BYTES. What
     /// cannot be read is left out, and none of the sender's extras is
     /// passed on; a share with nothing left reaches no plugin. The plugin
     /// reports a file:// URI as it is, without opening it.
@@ -278,7 +281,7 @@ class MainActivity : FlutterActivity() {
                     refused.add(IntakeRules.typeRefusal(itemType))
                     return@forEachIndexed
                 }
-                val (copy, copied) = copyShare(uri, name)
+                val (copy, copied) = copyShare(uri, copyName(uri, name, itemType))
                 if (copy == null) {
                     refused.add(
                         if (copied == Copied.TOO_BIG) IntakeRules.ShareRefusal.TOO_BIG
@@ -371,13 +374,31 @@ class MainActivity : FlutterActivity() {
         return if (name.isEmpty() || name == "." || name == ".." || '\u0000' in name) null else name
     }
 
+    /// The type [uri]'s provider gives it; null when it gives none or
+    /// cannot be asked.
+    private fun providerType(uri: Uri): String? = try {
+        contentResolver.getType(uri)
+    } catch (e: Exception) {
+        null
+    }
+
+    /// The name a shared image of [itemType] at [uri] is copied under:
+    /// [name], or with the extension its image type gives when [name] has
+    /// none Android knows (IntakeRules.copyName). That type is the share's
+    /// own for it, else, for one such as image/*, its provider's.
+    private fun copyName(uri: Uri, name: String, itemType: String): String {
+        val types = MimeTypeMap.getSingleton()
+        fun extensionOf(type: String?): String? =
+            type?.lowercase(Locale.ROOT)?.takeIf { it.startsWith("image/") }
+                ?.let { types.getExtensionFromMimeType(it) }
+        return IntakeRules.copyName(name, { types.hasExtension(it) }) {
+            extensionOf(itemType) ?: extensionOf(providerType(uri))
+        }
+    }
+
     /// The plugin's name for a stream whose provider shows none.
     private fun fallbackShareName(uri: Uri): String {
-        val mime = try {
-            contentResolver.getType(uri)
-        } catch (e: Exception) {
-            null
-        }
+        val mime = providerType(uri)
         val prefix = when {
             mime?.startsWith("image") == true -> "IMG"
             mime?.startsWith("video") == true -> "VID"
