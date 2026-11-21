@@ -329,6 +329,57 @@ void main() {
     expect(families, isNotEmpty);
     expect(families, everyElement('1'));
   });
+
+  // RCREL-V-1 on the iPhone (review of #83, 2026-11-21): the
+  // bitewise://setup link reaches the app through app_links only (its
+  // example Info.plist sets this key). With the key missing, Flutter's own
+  // deep linking is on: a link that arrives while the app runs is offered
+  // to the plugins, none claims it (app_links returns NO by default), and
+  // the engine pushes it to the framework as a route. A bare link became
+  // "/" and pushed a second HomeShell, as on Android. A cold start is
+  // spared today only because receive_sharing_intent claims every scene
+  // connection.
+  test('Info.plist turns Flutter deep linking off, so only app_links sees '
+      'the setup link', () {
+    final plist = File('${_appRoot().path}/ios/Runner/Info.plist')
+        .readAsStringSync();
+    expect(plist, contains('<string>bitewise</string>'));
+    expect(
+        RegExp(r'<key>FlutterDeepLinkingEnabled</key>\s*<false/>')
+            .allMatches(plist),
+        hasLength(1));
+    expect('FlutterDeepLinkingEnabled'.allMatches(plist), hasLength(1),
+        reason: 'set once');
+    final extension = File(
+            '${_appRoot().path}/ios/ShareExtension/Info.plist')
+        .readAsStringSync();
+    expect(extension, isNot(contains('FlutterDeepLinkingEnabled')),
+        reason: 'the share extension runs no Flutter engine');
+
+    // Flutter 3.44, where the SDK carries its sources: the engine reads
+    // this key, treats a missing key as on, and checks it before it sends
+    // a link to the framework.
+    final source = Directory('${_pluginRoot('flutter')}/../../engine/src/'
+        'flutter/shell/platform/darwin/ios/framework/Source');
+    if (!source.existsSync()) {
+      markTestSkipped('this Flutter SDK carries no engine sources');
+      return;
+    }
+    String objc(String name) => File('${source.path}/$name')
+        .readAsStringSync()
+        .replaceAll(RegExp(r'//[^\n]*'), '')
+        .replaceAll(RegExp(r'\s+'), ' ');
+    expect(
+        objc('FlutterSharedApplication.mm'),
+        contains('NSNumber* isDeepLinkingEnabled = [[NSBundle mainBundle] '
+            'objectForInfoDictionaryKey:@"FlutterDeepLinkingEnabled"]; '
+            'return isDeepLinkingEnabled ? [isDeepLinkingEnabled boolValue] '
+            ': YES;'));
+    expect(
+        objc('FlutterSceneLifeCycle.mm'),
+        contains('if (!FlutterSharedApplication.isFlutterDeepLinkingEnabled) '
+            '{ return NO; } [engine sendDeepLinkToFramework:url'));
+  });
   // App Store Connect scans every executable in the IPA for "required
   // reason" APIs and emails ITMS-91053 for each bundle that uses one without
   // a PrivacyInfo.xcprivacy beside it. Both targets do: receive_sharing_intent
