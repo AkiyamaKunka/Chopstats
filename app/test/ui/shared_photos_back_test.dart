@@ -4,13 +4,15 @@
 // (setFrameworkHandlesBack(false)), and with predictive back on
 // (enableOnBackInvokedCallback) Android 14 and later finish the activity
 // unless the home screen started it (the start that created it on Android
-// 14 and 15, the latest start on Android 16). MainActivity keeps Back in
-// Flutter unless the home screen made both, but Android 16 also judges a
-// start the app cannot see: a return from Recents, by the app that shows
-// Recents, which is not the home app with a third-party home app as the
-// default. A photo shared into an activity Android then finishes would die
-// with its engine mid-analysis, and come back only at the next start, sent
-// to the AI a second time, or never when that start was a day later.
+// 14 and the first release of Android 15, the latest start into its task
+// on Android 15 QPR1 and later and Android 16). MainActivity keeps Back in
+// Flutter unless the home screen made both, but Android 15 QPR1 and later
+// also judge a start the app cannot see: a return from Recents, by the app
+// that shows Recents, which is not the home app with a third-party home
+// app as the default. A photo shared into an activity Android then
+// finishes would die with its engine mid-analysis, and come back only at
+// the next start, sent to the AI a second time, or never when that start
+// was a day later.
 //
 // While a shared photo is pending the shell's guard keeps the Back in
 // Flutter, in every task, and a Back at the root calls SystemNavigator.pop,

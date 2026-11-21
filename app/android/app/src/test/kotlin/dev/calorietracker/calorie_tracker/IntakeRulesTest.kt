@@ -43,9 +43,10 @@ class IntakeRulesTest {
 
     // --- Back at the root: Android 14+ moves the task to the back only
     // after starts from the home screen (the start that created the
-    // activity on Android 14 and 15, the latest one on Android 16) and
-    // finishes any other root; unless the home screen made both, Flutter
-    // keeps its back callback (MainActivity.setFrameworkHandlesBack).
+    // activity on Android 14 and the first release of Android 15, the
+    // latest start into its task on Android 15 QPR1 and later and Android
+    // 16) and finishes any other root; unless the home screen made both,
+    // Flutter keeps its back callback (MainActivity.setFrameworkHandlesBack).
 
     private val launcher = setOf("android.intent.category.LAUNCHER")
     private val home = "com.google.android.apps.nexuslauncher"
@@ -148,22 +149,34 @@ class IntakeRulesTest {
         assertEquals(HomeStarts(first = true, latest = true), tapped)
         assertTrue(tapped.systemMovesTaskBack)
         // Then a share, a notification tap, the setup link or Play's Open
-        // button into the running activity, which Android 16 judges.
+        // button into the running activity, which Android 15 QPR1 and later
+        // judge.
         val shared = tapped.after(home = false, covered = false)
         assertEquals(HomeStarts(first = true, latest = false), shared)
         assertFalse(shared.systemMovesTaskBack)
         // The home icon again: both rules move the task back.
         assertTrue(shared.after(home = true, covered = false).systemMovesTaskBack)
         // Created by `am start`, Play's Open button or the installer's,
-        // which Android 14 and 15 judge for good.
+        // which Android 14 and the first Android 15 judge for good.
         val opened = HomeStarts.restore(null, null) { false }
         assertFalse(opened.systemMovesTaskBack)
         assertFalse(opened.after(home = true, covered = false).systemMovesTaskBack)
         // A home start while another activity of the task covered this one
-        // (a picker, the share sheet): Android 16 gave it to that activity,
+        // (a picker, the share sheet): Android gave it to that activity,
         // which the start closed, so here it counts as none.
         assertEquals(HomeStarts(true, false), tapped.after(home = true, covered = true))
         assertFalse(shared.after(home = true, covered = true).systemMovesTaskBack)
+        // The app opened another activity in its task (a picker), or the
+        // window shell started the task in split screen: a latest start
+        // that was not the home screen's, until the next home start.
+        val picked = tapped.afterOtherStart()
+        assertEquals(HomeStarts(first = true, latest = false), picked)
+        assertFalse(picked.systemMovesTaskBack)
+        assertTrue(picked.after(home = true, covered = false).systemMovesTaskBack)
+        // It never makes one, and the first stays.
+        assertEquals(HomeStarts(false, false), opened.afterOtherStart())
+        assertEquals(HomeStarts(false, false), HomeStarts(false, true).afterOtherStart())
+        assertEquals(picked, picked.afterOtherStart())
     }
 
     @Test
@@ -199,76 +212,216 @@ class IntakeRulesTest {
         }
     }
 
-    /// A start into MainActivity: whether its intent is the launcher's, the
-    /// package Android records as its caller, and whether another activity
-    /// of the task covered MainActivity when it came.
-    private data class Start(
+    /// What happens to MainActivity's task, in order.
+    private enum class Kind {
+        /// A start Android delivers to MainActivity: the one that creates
+        /// it, or a later one through onNewIntent. MainActivity is
+        /// singleTask, so a later one closes an activity the app opened
+        /// above it (clear-top).
+        START,
+
+        /// The app opens another activity in its task above MainActivity
+        /// (the photo picker, a permission dialog, the share sheet): a start
+        /// from the app's own process, with no intent for MainActivity,
+        /// which pauses below it.
+        OPEN,
+
+        /// That activity closes (a pick, a cancel): MainActivity resumes.
+        CLOSE,
+
+        /// A return from Recents: a start of the task by the app that shows
+        /// Recents, with no intent.
+        RECENTS,
+
+        /// The window shell starts the task into split screen: a start of
+        /// it from Recents by SystemUI, with no intent; MainActivity comes
+        /// up in multi-window mode (then full screen again).
+        SPLIT,
+    }
+
+    /// One event: for a start, whether its intent is the launcher's, and the
+    /// package Android records as its caller.
+    private data class Event(
         val name: String,
-        val launcherIntent: Boolean,
-        val caller: String,
-        val covered: Boolean = false,
+        val kind: Kind,
+        val launcherIntent: Boolean = false,
+        val caller: String = "",
     )
 
-    private val icon = Start("home icon", true, home)
-    private val adb = Start("am start -a MAIN -c LAUNCHER", true, "com.android.shell")
-    private val play = Start("Play's Open button", true, "com.android.vending")
-    private val installer = Start("the installer's Open button", true, "com.google.android.packageinstaller")
-    private val share = Start("a shared photo", false, "com.google.android.apps.photos")
-    private val setupLink = Start("the setup link", false, "com.google.android.GoogleCamera")
-    private val notification = Start("a notification tap", false, "dev.calorietracker.calorie_tracker")
-    private val iconOverPicker = Start("home icon over the photo picker", true, home, covered = true)
-    private val starts = listOf(icon, adb, play, installer, share, setupLink, notification, iconOverPicker)
+    private val app = "dev.calorietracker.calorie_tracker"
+    private val icon = Event("home icon", Kind.START, true, home)
+    private val adb = Event("am start -a MAIN -c LAUNCHER", Kind.START, true, "com.android.shell")
+    private val play = Event("Play's Open button", Kind.START, true, "com.android.vending")
+    private val installer = Event("the installer's Open button", Kind.START, true, "com.google.android.packageinstaller")
+    private val share = Event("a shared photo", Kind.START, false, "com.google.android.apps.photos")
+    private val setupLink = Event("the setup link", Kind.START, false, "com.google.android.GoogleCamera")
+    private val notification = Event("a notification tap", Kind.START, false, app)
+    private val picker = Event("the photo picker", Kind.OPEN, caller = app)
+    private val close = Event("the picker closes", Kind.CLOSE)
+    private val recents = Event("the Recents card", Kind.RECENTS, caller = home)
+    private val split = Event("split screen from Recents", Kind.SPLIT, caller = "com.android.systemui")
 
-    /// MainActivity's answers after [history], whose first start created it.
-    private fun answers(history: List<Start>): HomeStarts {
-        fun isHome(start: Start) = IntakeRules.homeStart(
+    /// With a third-party home app as the default, Recents is still the
+    /// system launcher's, which is then not the home app: the one start
+    /// MainActivity cannot tell (setFrameworkHandlesBack).
+    private val recentsOfAnotherApp = Event("the Recents card, a third-party home app", Kind.RECENTS, caller = "com.android.launcher3")
+
+    private val events = listOf(
+        icon, adb, play, installer, share, setupLink, notification,
+        picker, close, recents, split, recentsOfAnotherApp,
+    )
+
+    /// Whether [history] can happen: the app opens an activity only from
+    /// MainActivity on top, and only an open one closes.
+    private fun possible(history: List<Event>): Boolean {
+        var covered = false
+        for (event in history.drop(1)) {
+            when (event.kind) {
+                Kind.START -> covered = false
+                Kind.OPEN -> if (covered) return false else covered = true
+                Kind.CLOSE -> if (covered) covered = false else return false
+                Kind.RECENTS, Kind.SPLIT -> Unit
+            }
+        }
+        return true
+    }
+
+    /// [history] with MainActivity back at its root: an activity the app
+    /// left open closes first.
+    private fun atRoot(history: List<Event>): List<Event> {
+        var covered = false
+        for (event in history) {
+            when (event.kind) {
+                Kind.START, Kind.CLOSE -> covered = false
+                Kind.OPEN -> covered = true
+                Kind.RECENTS, Kind.SPLIT -> Unit
+            }
+        }
+        return if (covered) history + close else history
+    }
+
+    /// MainActivity's answers after [history], whose first event is the
+    /// start that created it, as MainActivity notes the events: a start in
+    /// onNewIntent (noteStart), an activity the app opened as MainActivity
+    /// pauses below it (onPause), split screen as it comes up in
+    /// multi-window mode (onResume, onMultiWindowModeChanged). A return
+    /// from Recents tells it nothing.
+    private fun answers(history: List<Event>): HomeStarts {
+        fun isHome(start: Event) = IntakeRules.homeStart(
             start.launcherIntent,
             IntakeRules.callerPackage(IntakeRules.REFERRER_SCHEME, start.caller, false, 0),
             home,
         )
         var answers = HomeStarts.restore(null, null) { isHome(history.first()) }
-        for (start in history.drop(1)) answers = answers.after(isHome(start), start.covered)
+        var covered = false
+        for (event in history.drop(1)) {
+            when (event.kind) {
+                Kind.START -> {
+                    answers = answers.after(isHome(event), covered)
+                    covered = false
+                }
+                Kind.OPEN -> {
+                    covered = true
+                    answers = answers.afterOtherStart()
+                }
+                Kind.CLOSE -> covered = false
+                Kind.RECENTS -> Unit
+                Kind.SPLIT -> answers = answers.afterOtherStart()
+            }
+        }
         return answers
     }
 
-    /// Whether Android [sdk] moves the task to the back on a Back at an idle
-    /// root after [history] (ActivityClientController.shouldMoveTaskToBack):
-    /// the intent that created the activity is the launcher's, and its
-    /// launch source is the home screen's. Android 14 and 15 keep the
-    /// creating start's; Android 16 takes each start's, on the task's top
-    /// activity, so a start that found MainActivity covered leaves its own.
-    private fun androidMovesTaskBack(sdk: Int, history: List<Start>): Boolean {
-        val source = if (sdk >= 36) history.last { !it.covered } else history.first()
-        return history.first().launcherIntent && source.caller == home
+    /// Whether Android moves the task to the back on a Back at an idle root
+    /// after [history] (ActivityClientController.shouldMoveTaskToBack): the
+    /// intent that created the activity is the launcher's, and its launch
+    /// source is the home screen's. [latestRule]: Android 15 QPR1 and later
+    /// and Android 16, where each start into the task
+    /// (ActivityStarter.startActivityInner) and each start of it from
+    /// Recents (ActivityTaskSupervisor.startActivityFromRecents) gives the
+    /// task's top activity the start's own launch source, the app's own
+    /// start of the picker included. Otherwise Android 14 and the first
+    /// release of Android 15, where the activity keeps the creating start's.
+    private fun androidMovesTaskBack(latestRule: Boolean, history: List<Event>): Boolean {
+        val created = history.first()
+        var source = created.caller
+        if (latestRule) {
+            var covered = false
+            for (event in history.drop(1)) {
+                when (event.kind) {
+                    // An open activity takes the start, which closes it.
+                    Kind.START -> if (covered) covered = false else source = event.caller
+                    // MainActivity is the task's top as the picker starts.
+                    Kind.OPEN -> {
+                        source = event.caller
+                        covered = true
+                    }
+                    Kind.CLOSE -> covered = false
+                    Kind.RECENTS, Kind.SPLIT -> if (!covered) source = event.caller
+                }
+            }
+        }
+        return created.launcherIntent && source == home
+    }
+
+    /// The rules Android [sdk] can run (androidMovesTaskBack): Android 15
+    /// (API 35) runs the first-start rule in its first release and the
+    /// latest-start rule from QPR1 on.
+    private fun rulesOf(sdk: Int): List<Boolean> = when {
+        sdk >= 36 -> listOf(true)
+        sdk == 35 -> listOf(false, true)
+        else -> listOf(false)
     }
 
     @Test
     fun backIsLeftToAndroidOnlyWhereAndroid14To16MoveTheTaskBack() {
-        // Every history of up to three starts after the one that created
-        // the activity (a creating start finds nothing above it).
-        var histories = starts.filter { !it.covered }.map { listOf(it) }
+        // Every possible history of up to four events after the start that
+        // created the activity, then a Back at its idle root.
+        var histories = events.filter { it.kind == Kind.START }.map { listOf(it) }
         val all = histories.toMutableList()
-        repeat(3) {
-            histories = histories.flatMap { h -> starts.map { h + it } }
+        repeat(4) {
+            histories = histories.flatMap { h -> events.map { h + it } }.filter { possible(it) }
             all += histories
         }
         var leftToAndroid = 0
-        for (history in all) {
+        for (history in all.map { atRoot(it) }) {
             val answers = answers(history)
             for (sdk in 34..36) {
                 if (IntakeRules.keepsBackCallbackAtRoot(sdk, answers.systemMovesTaskBack)) continue
                 leftToAndroid++
-                assertTrue("Android $sdk would finish after ${history.map { it.name }}", androidMovesTaskBack(sdk, history))
+                for (latestRule in rulesOf(sdk)) {
+                    if (androidMovesTaskBack(latestRule, history)) continue
+                    // Android finishes the activity: only ever after the one
+                    // start the app cannot tell.
+                    assertTrue(
+                        "Android $sdk (latest rule: $latestRule) would finish after ${history.map { it.name }}",
+                        recentsOfAnotherApp in history,
+                    )
+                }
             }
         }
         assertTrue(leftToAndroid > 0)
     }
 
     @Test
+    fun theOneStartLeftUnseenIsAReturnFromRecentsShownByAnotherApp() {
+        // With a third-party home app as the default, a return from Recents
+        // after a home start leaves Back to Android, and Android 15 QPR1 and
+        // later finish the activity; a pending shared photo or an analysis
+        // in flight keeps that Back in Flutter (SharedPhotosBackGuard).
+        val history = listOf(icon, recentsOfAnotherApp)
+        for (sdk in 34..36) {
+            assertFalse(IntakeRules.keepsBackCallbackAtRoot(sdk, answers(history).systemMovesTaskBack))
+        }
+        assertFalse(androidMovesTaskBack(latestRule = true, history))
+        assertTrue(androidMovesTaskBack(latestRule = false, history))
+    }
+
+    @Test
     fun theMeasuredRunsKeepBackWhereAndroidFinished() {
         // RC-171-verify.md's rows: whether Flutter keeps Back at the root
         // (and moves the task to the back itself) on Android 15 and 16.
-        fun keeps(sdk: Int, vararg history: Start) =
+        fun keeps(sdk: Int, vararg history: Event) =
             IntakeRules.keepsBackCallbackAtRoot(sdk, answers(history.toList()).systemMovesTaskBack)
         for (sdk in listOf(35, 36)) {
             // A: started from the home screen. Android moves it back, with
@@ -281,8 +434,8 @@ class IntakeRulesTest {
             // D, E: the home icon after that. Android moves it back.
             assertFalse(keeps(sdk, icon, icon))
             assertFalse(keeps(sdk, icon, adb, icon))
-            // F: created by `am start`, then the home icon, which Android 15
-            // finished.
+            // F: created by `am start`, then the home icon, which the first
+            // Android 15 finished.
             assertTrue(keeps(sdk, adb, icon))
             assertTrue(keeps(sdk, installer, icon))
             // G: one photo shared into it, which Android 16 finished; a
@@ -290,6 +443,33 @@ class IntakeRulesTest {
             assertTrue(keeps(sdk, icon, share))
             assertTrue(keeps(sdk, icon, notification))
             assertTrue(keeps(sdk, icon, setupLink))
+        }
+    }
+
+    @Test
+    fun anActivityTheAppOpensOrSplitScreenKeepsBackUntilTheNextHomeStart() {
+        fun keeps(sdk: Int, vararg history: Event) =
+            IntakeRules.keepsBackCallbackAtRoot(sdk, answers(history.toList()).systemMovesTaskBack)
+        // Review of #82, F1: the photo picker, then a pick or a cancel.
+        // Android 15 QPR1 and later then finish the activity on an idle
+        // root Back.
+        assertFalse(androidMovesTaskBack(latestRule = true, listOf(icon, picker, close)))
+        // F2: split screen from Recents, then full screen again.
+        assertFalse(androidMovesTaskBack(latestRule = true, listOf(icon, split)))
+        for (sdk in 34..36) {
+            assertTrue(keeps(sdk, icon, picker, close))
+            // A start that found the picker open goes to it: still none from
+            // the home screen.
+            assertTrue(keeps(sdk, icon, picker, icon))
+            // The home icon once the picker closed: Android moves it back.
+            assertFalse(keeps(sdk, icon, picker, close, icon))
+            assertTrue(keeps(sdk, icon, split))
+            assertFalse(keeps(sdk, icon, split, icon))
+            // A return from Recents with the default home app tells the app
+            // nothing: Android moves the task back after it, and the app
+            // keeps what it knew, the picker's start included.
+            assertFalse(keeps(sdk, icon, recents))
+            assertTrue(keeps(sdk, icon, picker, close, recents))
         }
     }
 

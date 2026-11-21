@@ -990,7 +990,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     // that Back in Flutter wherever it knows Android 14 and later would
     // finish the activity, and its engine with it, mid-request (Q9); the
     // guard also covers a start it cannot see (a return from Recents on
-    // Android 16).
+    // Android 15 QPR1 and later, with a third-party home app).
     final sharing = s.sharedPhotosPending;
     final analyzing = s.analysisKeepAlive?.inFlight;
     return sharing == null && analyzing == null

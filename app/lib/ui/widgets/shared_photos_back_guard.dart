@@ -27,16 +27,16 @@ import 'package:flutter/widgets.dart';
 /// On Android 14 and later MainActivity keeps Flutter's callback unless the
 /// home screen made both its first start and its latest
 /// (MainActivity.setFrameworkHandlesBack), so after a share, the setup
-/// link, a notification or Play's Open button its Back reaches
-/// popSystemNavigator anyway. Android 16 also judges a start the app cannot
-/// see, a return from Recents, by the app that shows Recents, which is not
-/// the home app with a third-party home app as the default; it then
-/// FINISHES the activity on a Back at an idle root. A photo shared into the
-/// running activity (singleTask), or any analysis started there, would die
-/// with its engine in the middle of the request: a shared photo came back
-/// only at the next start, sent to the AI a second time, or never when that
-/// start was a day later, and a picked photo, a typed meal or a fix was
-/// lost.
+/// link, a notification, a picker, split screen or Play's Open button its
+/// Back reaches popSystemNavigator anyway. Android 15 QPR1 and later also
+/// judge a start the app cannot see, a return from Recents, by the app that
+/// shows Recents, which is not the home app with a third-party home app as
+/// the default; they then FINISH the activity on a Back at an idle root. A
+/// photo shared into the running activity (singleTask), or any analysis
+/// started there, would die with its engine in the middle of the request:
+/// a shared photo came back only at the next start, sent to the AI a second
+/// time, or never when that start was a day later, and a picked photo, a
+/// typed meal or a fix was lost.
 ///
 /// So while either is true the root route does not pop (PopScope with
 /// canPop false): Flutter keeps the Back (setFrameworkHandlesBack(true))

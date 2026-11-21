@@ -1139,15 +1139,17 @@ void main() {
   // root's creating intent is the launcher's, ActivityRecord.isMainIntent,
   // and its launch source is the home app's process) and finish any other
   // root: a task a share created was finished on Back, with the engine
-  // that was still analyzing its photo (review of #72). Android 14 and 15
-  // keep the launch source of the start that created the activity, Android
-  // 16 takes each start's (RC171A-1: one `am start` of the launcher intent,
-  // or one photo shared into a task the home screen started, and the next
-  // idle Back finished it). So unless the home screen made both the first
-  // start and the latest (HomeStarts), MainActivity keeps Flutter's
-  // callback, and Back at its root goes through Flutter's
-  // SystemNavigator.pop to popSystemNavigator, which moves the task to the
-  // back (the test of decision 6.1 below), as on Android 12 and lower.
+  // that was still analyzing its photo (review of #72). Android 14 and the
+  // first release of Android 15 keep the launch source of the start that
+  // created the activity; Android 15 QPR1 and later, and Android 16, give
+  // the task's top activity each start's own (RC171A-1: one `am start` of
+  // the launcher intent, or one photo shared into a task the home screen
+  // started, and the next idle Back finished it). So unless the home
+  // screen made both the first start and the latest (HomeStarts),
+  // MainActivity keeps Flutter's callback, and Back at its root goes
+  // through Flutter's SystemNavigator.pop to popSystemNavigator, which
+  // moves the task to the back (the test of decision 6.1 below), as on
+  // Android 12 and lower.
   // A home start is the launcher's intent from the caller Android recorded
   // for it (getReferrer), when that is the default home app, which the
   // manifest's <queries> lets the app see. The first is decided once per
@@ -1157,7 +1159,10 @@ void main() {
   // gender) hands the new instance whatever intent the last one set (the
   // replay rewrite's, a notification tap's; review of #72). The latest
   // moves with each start onNewIntent delivers, read there before anything
-  // calls setIntent, and the callback follows at once.
+  // calls setIntent, and with the starts that deliver no intent but that
+  // the activity can tell: an activity the app opens in its task (a
+  // picker, a permission dialog), and the window shell's in multi-window
+  // mode. The callback follows at once.
   test('Back at the root stays with Flutter on Android 14 and later unless '
       'the home screen made the first and the latest start', () {
     final code = _kotlinCode(_mainActivity());
@@ -1193,14 +1198,21 @@ void main() {
     // (pinned whole with the share hold below): getReferrer() names its
     // caller only during that call, and reads a referrer extra on the
     // activity's intent first, which a plugin's setIntent there can change.
-    expect(
-        _kotlinFunction(code, 'private fun noteStart('),
-        '{ homeStarts = homeStarts.after(isHomeStart(start), coveredInTask) '
-        'val keep = IntakeRules.keepsBackCallbackAtRoot(Build.VERSION.SDK_INT, '
-        'homeStarts.systemMovesTaskBack) if (keep == backCallbackAtRoot) '
-        'return backCallbackAtRoot = keep applyBackCallback() }');
+    expect(_kotlinFunction(code, 'private fun noteStart('),
+        '{ noteStarts(homeStarts.after(isHomeStart(start), coveredInTask)) }');
     expect(_kotlinFunction(code, 'override fun onNewIntent('),
         startsWith('{ noteStart(intent) '));
+    // Every move of the answers goes through noteStarts, and the callback
+    // follows it at once.
+    expect(
+        _kotlinFunction(code, 'private fun noteStarts('),
+        '{ homeStarts = starts val keep = IntakeRules.keepsBackCallbackAtRoot('
+        'Build.VERSION.SDK_INT, starts.systemMovesTaskBack) if (keep == '
+        'backCallbackAtRoot) return backCallbackAtRoot = keep '
+        'applyBackCallback() }');
+    expect(RegExp(r'\bnoteStarts\(').allMatches(code), hasLength(5),
+        reason: 'declared, then called from noteStart, onPause, onResume '
+            'and onMultiWindowModeChanged only');
     expect(
         code,
         contains('private fun isHomeStart(start: Intent): Boolean = try { val '
@@ -1226,15 +1238,30 @@ void main() {
         'packageManager.resolveActivity(home, '
         'PackageManager.MATCH_DEFAULT_ONLY) } return '
         'found?.activityInfo?.packageName }');
-    // Android 16 gives a start to the task's top activity: one that comes
-    // while another activity of the task (a picker) sits above MainActivity
-    // goes to that one, which the start then closes, and is not counted
-    // (HomeStarts.after). Whether one did is read as MainActivity pauses
-    // and kept until it resumes.
+    // Android 15 QPR1 and later give a start to the task's top activity.
+    // The app's own start of a picker, a permission dialog or the share
+    // sheet finds MainActivity there, so it is a latest start that was not
+    // the home screen's, seen as MainActivity pauses below the new activity
+    // (HomeStarts.afterOtherStart; review of #82, F1). A start that
+    // comes while that activity is still open goes to it, which the start
+    // then closes, and is not counted (HomeStarts.after); whether one is
+    // open is read as MainActivity pauses and kept until it resumes. In
+    // multi-window mode the window shell starts the task from Recents with
+    // no intent (SystemUI's launch source, F2): no start counts as a home
+    // start there, nor after it until the next home start.
     expect(_kotlinFunction(code, 'override fun onPause('),
-        '{ super.onPause() coveredInTask = !isTopOfItsTask() }');
+        '{ super.onPause() coveredInTask = !isTopOfItsTask() if '
+        '(coveredInTask) noteStarts(homeStarts.afterOtherStart()) }');
     expect(_kotlinFunction(code, 'override fun onResume('),
-        '{ super.onResume() coveredInTask = false }');
+        '{ super.onResume() coveredInTask = false if (isInMultiWindowMode) '
+        'noteStarts(homeStarts.afterOtherStart()) }');
+    expect(
+        code,
+        contains('@RequiresApi(Build.VERSION_CODES.O) override fun '
+            'onMultiWindowModeChanged(isInMultiWindowMode: Boolean, newConfig: '
+            'Configuration) { super.onMultiWindowModeChanged('
+            'isInMultiWindowMode, newConfig) if (isInMultiWindowMode) '
+            'noteStarts(homeStarts.afterOtherStart()) }'));
     expect(
         _kotlinFunction(code, 'private fun isTopOfItsTask('),
         endsWith('am.appTasks.asSequence().mapNotNull { it.taskInfo } '
@@ -1300,7 +1327,8 @@ void main() {
         rules,
         contains('internal data class HomeStarts(val first: Boolean, val '
             'latest: Boolean) { fun after(home: Boolean, covered: Boolean): '
-            'HomeStarts = copy(latest = home && !covered) val '
+            'HomeStarts = copy(latest = home && !covered) fun '
+            'afterOtherStart(): HomeStarts = copy(latest = false) val '
             'systemMovesTaskBack: Boolean get() = first && latest companion '
             'object { fun restore(first: Boolean?, latest: Boolean?, created: '
             '() -> Boolean): HomeStarts = if (first != null && latest != null) '
@@ -1312,6 +1340,7 @@ void main() {
       'IntakeRules.homeStart(',
       'HomeStarts.restore(',
       '.after(',
+      '.afterOtherStart(',
       'keepsBackCallbackAtRoot',
       'androidMovesTaskBack',
     ]);
@@ -1514,9 +1543,10 @@ void main() {
   // 13 moves a task whose root is a launcher activity (MainActivity is
   // one) to the back, and Android 14 and later move back an activity the
   // home screen started, and finish it after a start the app cannot see
-  // (a return from Recents on Android 16, with a third-party home app as
-  // the default). While a shared photo is pending the shell's guard keeps
-  // that Back in Flutter in every task (test/ui/shared_photos_back_test.dart).
+  // (a return from Recents on Android 15 QPR1 and later, with a
+  // third-party home app as the default). While a shared photo is pending
+  // the shell's guard keeps that Back in Flutter in every task
+  // (test/ui/shared_photos_back_test.dart).
   // The launch mode stays singleTask (decision 6.4), and nothing else
   // finishes the activity by hand.
   test('SystemNavigator.pop moves the task to the back, never finishes it',

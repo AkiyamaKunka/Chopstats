@@ -267,20 +267,37 @@ internal object IntakeRules {
 
 /// Whether the home screen made MainActivity's first start, the one that
 /// created it, and its latest (IntakeRules.homeStart). On a Back at an
-/// idle root, Android 14 and 15 judge the first: the activity keeps the
-/// launch source it was created with. Android 16 judges the latest: each
-/// start into a task sets the launch source of the task's top activity to
-/// its own (ActivityStarter.startActivityInner), from the home screen or
-/// not.
+/// idle root, Android 14 and the first release of Android 15 judge the
+/// first: the activity keeps the launch source it was created with.
+/// Android 15 QPR1 and later, and Android 16, judge the latest: each start
+/// into a task sets the launch source of the task's top activity to its
+/// own (ActivityStarter.startActivityInner), from the home screen or not,
+/// the app's own starts of other activities in its task included, and so
+/// does a start of the task from Recents (ActivityTaskSupervisor
+/// .startActivityFromRecents), by whoever asks for it: the app that shows
+/// Recents, or the system's window shell (SystemUI). Both rules run on
+/// API 35, so the SDK level never picks one: the answer holds for both.
 internal data class HomeStarts(val first: Boolean, val latest: Boolean) {
-    /// After a start into the running activity: [home] whether it was a
-    /// home start; [covered] whether another activity of the task (a
-    /// picker, the share sheet, a permission dialog) sat above this one
-    /// when it came. Android 16 then sets that activity's launch source,
-    /// the start closes it, and this one keeps its earlier source. The
-    /// first stays. The latest is a home start only when [home] and
-    /// nothing covered the activity; a covered start never makes it one.
+    /// After a start Android delivers to the running activity
+    /// (onNewIntent): [home] whether it was a home start; [covered] whether
+    /// another activity of the task (a picker, the share sheet, a
+    /// permission dialog) sat above this one when it came. Android then
+    /// sets that activity's launch source, the start closes it, and this
+    /// one keeps its earlier source. The first stays. The latest is a home
+    /// start only when [home] and nothing covered the activity; a covered
+    /// start never makes it one.
     fun after(home: Boolean, covered: Boolean): HomeStarts = copy(latest = home && !covered)
+
+    /// After a start into the task that Android does not deliver to this
+    /// activity and that did not come from the home screen: the app
+    /// opening another activity in its task above this one (the photo
+    /// picker, a document picker, a permission dialog, the share sheet, a
+    /// Settings page), which this one is the task's top for when it
+    /// starts, so it takes the app's own launch source; or the window
+    /// shell launching the task into split screen or a desktop window
+    /// (SystemUI's). The first stays; the latest is no home start until
+    /// the next home start Android delivers (after).
+    fun afterOtherStart(): HomeStarts = copy(latest = false)
 
     /// Whether Android 14 and later move the task to the back on a Back at
     /// an idle root (ActivityClientController.shouldMoveTaskToBack): where

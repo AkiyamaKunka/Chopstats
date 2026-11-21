@@ -7,6 +7,7 @@ import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.database.ContentObserver
 import android.net.Uri
 import android.os.Build
@@ -22,6 +23,7 @@ import android.view.View
 import android.webkit.MimeTypeMap
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.RequiresApi
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -61,13 +63,15 @@ class MainActivity : FlutterActivity() {
 
     /// Whether the home screen made this activity's first start, the one
     /// that created it, and its latest (HomeStarts): decided at its first
-    /// create, moved on by each start onNewIntent delivers (noteStart), and
-    /// kept in the saved state (onSaveInstanceState).
+    /// create, moved on by each start onNewIntent delivers (noteStart) and
+    /// by the starts the activity tells otherwise (onPause, onResume,
+    /// onMultiWindowModeChanged), and kept in the saved state
+    /// (onSaveInstanceState).
     private var homeStarts = HomeStarts(first = false, latest = false)
 
     /// Whether Flutter's back callback stays registered at the root route
     /// (setFrameworkHandlesBack), from homeStarts: set in onCreate, and
-    /// again at each start onNewIntent delivers (noteStart).
+    /// again whenever homeStarts moves (noteStarts).
     private var backCallbackAtRoot = false
 
     /// What Flutter last asked for (setFrameworkHandlesBack): whether it
@@ -76,7 +80,8 @@ class MainActivity : FlutterActivity() {
 
     /// Whether another activity of this task (a picker, the share sheet, a
     /// permission dialog) sat above this one when it last paused, until it
-    /// resumes: a start that comes meanwhile is not its own on Android 16
+    /// resumes: the app opened it, a start that was not the home screen's
+    /// (onPause), and a start that comes meanwhile is not this one's
     /// (HomeStarts.after). Kept in the saved state.
     private var coveredInTask = false
 
@@ -101,7 +106,7 @@ class MainActivity : FlutterActivity() {
         // in the same process (theme colours, Bold text, grammatical
         // gender) whatever intent its last instance set, the replay
         // rewrite's or a notification tap's; neither tells of the starts
-        // since, which arrived through onNewIntent (noteStart).
+        // since, which the last instance noted as they came (noteStarts).
         homeStarts = HomeStarts.restore(
             first = savedInstanceState?.savedBoolean(STATE_FIRST_HOME_START),
             latest = savedInstanceState?.savedBoolean(STATE_LATEST_HOME_START),
@@ -148,15 +153,39 @@ class MainActivity : FlutterActivity() {
     /// Whether another activity of the task covers this one
     /// (coveredInTask): one that does is the task's top as this one pauses
     /// for it, while for the home screen or another task this one stays
-    /// its task's top.
+    /// its task's top. The app opened that activity (the photo picker, a
+    /// document picker, a permission dialog, the share sheet, a Settings
+    /// page), and this one was the task's top as it started: Android 15
+    /// QPR1 and later gave this one the start's launch source, the app's
+    /// own, and no intent tells of it. So the latest start is no home
+    /// start from here (HomeStarts.afterOtherStart), even once that
+    /// activity closes. A task that cannot be read counts as covered.
     override fun onPause() {
         super.onPause()
         coveredInTask = !isTopOfItsTask()
+        if (coveredInTask) noteStarts(homeStarts.afterOtherStart())
     }
 
+    /// Nothing covers the activity now (coveredInTask). In multi-window
+    /// mode (split screen, a desktop window) the window shell starts the
+    /// task itself, from Recents and with no intent, and Android 15 QPR1
+    /// and later give this activity SystemUI's launch source; such a start
+    /// brings the activity up in multi-window mode. So there the latest
+    /// start never counts as a home start (onNewIntent delivers one before
+    /// this), nor after it until the next home start
+    /// (HomeStarts.afterOtherStart). The activity can also enter the mode
+    /// while it runs (onMultiWindowModeChanged).
     override fun onResume() {
         super.onResume()
         coveredInTask = false
+        if (isInMultiWindowMode) noteStarts(homeStarts.afterOtherStart())
+    }
+
+    /// The activity entered multi-window mode while it ran (onResume).
+    @RequiresApi(Build.VERSION_CODES.O)
+    override fun onMultiWindowModeChanged(isInMultiWindowMode: Boolean, newConfig: Configuration) {
+        super.onMultiWindowModeChanged(isInMultiWindowMode, newConfig)
+        if (isInMultiWindowMode) noteStarts(homeStarts.afterOtherStart())
     }
 
     /// Flutter keeps its back callback registered only while it has
@@ -165,26 +194,30 @@ class MainActivity : FlutterActivity() {
     /// Back to Android (enableOnBackInvokedCallback, AndroidManifest.xml).
     /// Android 14 and later then move the task to the back only after
     /// starts from the home screen, and finish any other root, its engine
-    /// with it, mid-analysis: Android 14 and 15 judge the start that
-    /// created the activity, Android 16 the latest start into it
-    /// (HomeStarts). Unless the home screen made both, the activity keeps
-    /// the callback (backCallbackAtRoot, IntakeRules.keepsBackCallbackAtRoot),
-    /// so Back at its root goes through Flutter (handlePopRoute,
+    /// with it, mid-analysis: Android 14 and the first release of Android
+    /// 15 judge the start that created the activity, Android 15 QPR1 and
+    /// later and Android 16 the latest start into its task (HomeStarts).
+    /// Unless the home screen made both, the activity keeps the callback
+    /// (backCallbackAtRoot, IntakeRules.keepsBackCallbackAtRoot), so Back
+    /// at its root goes through Flutter (handlePopRoute,
     /// SystemNavigator.pop, popSystemNavigator, which moves the task to the
     /// back) as on Android 12 and lower, and gives up Android's
-    /// back-to-home preview: after a share, the bitewise://setup link, a
-    /// notification, Play's Open button or `am start`, for good when that
-    /// start created the task, until the next start from the home screen
-    /// when it came into the task later. What Flutter asks for is kept
-    /// (flutterHandlesBack), so a start can change the answer while the
-    /// activity runs (noteStart). Android 16 also judges a start the
-    /// activity never sees: a return from Recents, which delivers no
-    /// intent, counts as a start by the app that shows Recents, the home
-    /// app on most phones but not with a third-party home app as the
-    /// default. Android then finishes the activity on a Back at an idle
-    /// root, and a pending shared photo or an analysis in flight keeps that
-    /// Back in Flutter (SharedPhotosBackGuard). FlutterActivity also calls
-    /// this from its onCreate, with the state it saved.
+    /// back-to-home preview: for good when the start that created the task
+    /// was not the home screen's (Play's Open button, `am start`, a share),
+    /// and until the next start from the home screen after a share, the
+    /// bitewise://setup link or a notification into the task, after the
+    /// app opened another activity in it (a picker, a permission dialog,
+    /// the share sheet: onPause), and in and after multi-window mode
+    /// (onResume). What Flutter asks for is kept (flutterHandlesBack), so a
+    /// start can change the answer while the activity runs (noteStarts).
+    /// One start is left that the activity never learns of: a return from
+    /// Recents delivers no intent and counts as a start by the app that
+    /// shows Recents, the home app on most phones but not with a
+    /// third-party home app as the default. Android 15 QPR1 and later then
+    /// finish the activity on a Back at an idle root, and a pending shared
+    /// photo or an analysis in flight keeps that Back in Flutter
+    /// (SharedPhotosBackGuard). FlutterActivity also calls this from its
+    /// onCreate, with the state it saved.
     override fun setFrameworkHandlesBack(frameworkHandlesBack: Boolean) {
         flutterHandlesBack = frameworkHandlesBack
         applyBackCallback()
@@ -212,17 +245,17 @@ class MainActivity : FlutterActivity() {
     /// (HomeStarts). On Android 14 and later the activity keeps the
     /// callback unless the home screen made both its first start and its
     /// latest (setFrameworkHandlesBack above), so after a share, the setup
-    /// link, a notification, Play's Open button or `am start` its Back lands
-    /// here. Android 16 still finishes it on a Back at an idle root after a
-    /// start it cannot see (a return from Recents, with a third-party home
-    /// app as the default). So while a shared photo is pending or an
-    /// analysis the user started is in flight (AnalysisKeepAlive), the
-    /// shell keeps Back at the root in Flutter in every task
-    /// (SharedPhotosBackGuard, app.dart), and its SystemNavigator.pop()
-    /// lands here on every Android version. A photo a finish still cuts off
-    /// (a swipe from Recents, a Back before share intake has the share) is
-    /// offered again at the next start, since its copy is kept until the
-    /// photo is settled (share_intake.dart).
+    /// link, a notification, a picker, split screen, Play's Open button or
+    /// `am start` its Back lands here. Android 15 QPR1 and later still
+    /// finish it on a Back at an idle root after a start it cannot see (a
+    /// return from Recents, with a third-party home app as the default).
+    /// So while a shared photo is pending or an analysis the user started
+    /// is in flight (AnalysisKeepAlive), the shell keeps Back at the root
+    /// in Flutter in every task (SharedPhotosBackGuard, app.dart), and its
+    /// SystemNavigator.pop() lands here on every Android version. A photo a
+    /// finish still cuts off (a swipe from Recents, a Back before share
+    /// intake has the share) is offered again at the next start, since its
+    /// copy is kept until the photo is settled (share_intake.dart).
     override fun popSystemNavigator(): Boolean {
         moveTaskToBack(true)
         return true
@@ -244,8 +277,7 @@ class MainActivity : FlutterActivity() {
     }
 
     /// [start], delivered to the running activity, is its latest start now
-    /// (HomeStarts.after), and Flutter's back callback at the root follows
-    /// (applyBackCallback). Called first in onNewIntent: getReferrer() names
+    /// (HomeStarts.after). Called first in onNewIntent: getReferrer() names
     /// this start's caller only during that call
     /// (Instrumentation.callActivityOnNewIntent sets the activity's
     /// referrer to the new intent's), and only while the activity's intent
@@ -253,11 +285,20 @@ class MainActivity : FlutterActivity() {
     /// on it first, and flutter_local_notifications sets a notification
     /// tap's intent in super.onNewIntent). A start from the home icon
     /// arrives here too: MainActivity is singleTask, so Android hands it the
-    /// launcher's intent (ActivityStarter.complyActivityFlags). A return
-    /// from Recents delivers none.
+    /// launcher's intent (ActivityStarter.complyActivityFlags). The starts
+    /// that deliver no intent are noted where the activity can tell them
+    /// (onPause, onResume, onMultiWindowModeChanged), all but a return from
+    /// Recents (setFrameworkHandlesBack).
     private fun noteStart(start: Intent) {
-        homeStarts = homeStarts.after(isHomeStart(start), coveredInTask)
-        val keep = IntakeRules.keepsBackCallbackAtRoot(Build.VERSION.SDK_INT, homeStarts.systemMovesTaskBack)
+        noteStarts(homeStarts.after(isHomeStart(start), coveredInTask))
+    }
+
+    /// [starts] is what the activity knows of its starts now (homeStarts),
+    /// and Flutter's back callback at the root follows at once
+    /// (applyBackCallback).
+    private fun noteStarts(starts: HomeStarts) {
+        homeStarts = starts
+        val keep = IntakeRules.keepsBackCallbackAtRoot(Build.VERSION.SDK_INT, starts.systemMovesTaskBack)
         if (keep == backCallbackAtRoot) return
         backCallbackAtRoot = keep
         applyBackCallback()
