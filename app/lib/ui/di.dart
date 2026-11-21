@@ -20,6 +20,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../core/app_channel.dart' show photoLibraryInBuild;
 import '../core/contracts.dart';
 import '../data/meals_dao_impl.dart';
+import '../services/analysis_keep_alive.dart';
 import '../services/analyzer/platform_decode.dart' show isEngineBackgrounded;
 import '../services/analyzer/provider_analyzers.dart'
     show MultiProviderAnalyzer, ServerAnalyzer;
@@ -143,7 +144,16 @@ class AppServices {
     // may re-connect Claude while temporarily on Gemini).
     final serverAnalyzer = ServerAnalyzer(settings);
     final appLinks = AppLinks();
-    final executor = createExecutor(dao, analyzer, settings);
+    // Android: an analysis the user started keeps the app running until it
+    // settles, should they leave the app meanwhile (owner decision 9,
+    // analysis_keep_alive.dart): the pipeline's deliberate photos, the
+    // leftover estimate (UiServices) and, here, typed meals and Fix meals
+    // requests. iOS asks for background time per photo instead.
+    final keepAlive = Platform.isAndroid ? AnalysisKeepAlive() : null;
+    final textExecutor = createExecutor(dao, analyzer, settings);
+    final executor = keepAlive == null
+        ? textExecutor
+        : KeptAliveExecutor(textExecutor, keepAlive);
     // iCloud Backup (iPhone; built below, after the screens' services).
     late final BackupCoordinator? cloudBackup;
     // The photo module reads lookbackDays through the live settings object,
@@ -283,6 +293,11 @@ class AppServices {
         // asks for the time to finish its upload and save first, and no
         // automatic photo starts once the app is in the background.
         backgroundTime: Platform.isIOS ? const BackgroundTime() : null,
+        // Android freezes an app the user left for another one about 10 s
+        // later: each deliberate photo (shared, picked, Photo Coverage)
+        // keeps the process running from its queueing to the end of its
+        // turn (owner decision 9).
+        keepAlive: keepAlive,
         backgrounded: Platform.isIOS ? appEngineBackgrounded : null,
         // iCloud Backup: while a restore offer, a restore or the look for
         // one holds the intake, an automatic photo is let go untouched; a
@@ -522,6 +537,9 @@ class AppServices {
       // photo is on its way to a meal (SharedPhotosBackGuard).
       sharedPhotosPending:
           Platform.isAndroid ? shareIntake.photosPending : null,
+      // Android: the leftover estimate is kept alive too, and Back at the
+      // root keeps the app running while any analysis is in flight.
+      analysisKeepAlive: keepAlive,
       photoLibrary: photoLibraryInBuild ? photoLibrary : null,
       startClaudeAuth: serverAnalyzer.startClaudeAuth,
       completeClaudeAuth: serverAnalyzer.completeClaudeAuth,

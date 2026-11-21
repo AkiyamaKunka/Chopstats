@@ -25,6 +25,7 @@ import '../diagnostics.dart';
 import '../l10n.dart';
 import '../restaurant_assist_controls.dart' show RestaurantLookupsDiagnostics;
 import '../theme/tokens.dart' show AppThemeContext;
+import '../widgets/grouped.dart' show scrollEndInset;
 import '../widgets/small_spinner.dart';
 
 /// How many background runs the page lists (20 are kept).
@@ -171,7 +172,8 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
     return Scaffold(
       appBar: AppBar(title: Text(l.diagTitle)),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        // Its last card scrolls clear of a 3-button bar (scrollEndInset).
+        padding: EdgeInsets.fromLTRB(16, 16, 16, scrollEndInset(context, 16)),
         children: [
           Text(
             l.diagIntro,

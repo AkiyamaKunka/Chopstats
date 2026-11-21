@@ -18,6 +18,8 @@ import 'package:calorie_tracker/core/server_transport.dart'
         serverKeyForOtherHost,
         serverKeyHostOf,
         serverKeyShownAt;
+import 'package:calorie_tracker/services/analysis_keep_alive.dart'
+    show AnalysisKeepAlive;
 import 'package:calorie_tracker/services/backup/save_file_channel.dart'
     show SaveFileStatus;
 import 'package:calorie_tracker/services/photo/photo_library.dart';
@@ -547,6 +549,7 @@ UiServices makeServices({
   MealInUseRegistry? mealInUse,
   RestaurantAssistControls? restaurantAssist,
   UsualFoods? usualFoods,
+  AnalysisKeepAlive? analysisKeepAlive,
   Future<SaveFileStatus?> Function()? lateSaveResult,
 }) {
   final s = settings ?? FakeSettings();
@@ -568,6 +571,7 @@ UiServices makeServices({
     mealInUse: mealInUse,
     restaurantAssist: restaurantAssist,
     usualFoods: usualFoods,
+    analysisKeepAlive: analysisKeepAlive,
     lateSaveResult: lateSaveResult,
   );
 }

@@ -1132,9 +1132,26 @@ position. The paste-ready answers live next to the app in
    (`MainActivity`). One start still looks like the launcher's and is
    finished on Android 14 and later when nothing is pending: the launcher
    intent sent from somewhere other than the home screen, such as Play's
-   Open button. While a shared photo is still pending, the app keeps Back
-   at the root itself in every task (`SharedPhotosBackGuard`).
-   `singleTask` stays.
+   Open button. While a shared photo is still pending, or an analysis the
+   user started is in flight (item 9), the app keeps Back at the root
+   itself in every task (`SharedPhotosBackGuard`). `singleTask` stays.
+   The navigation bar: from Android 15 the app draws edge to edge and
+   Flutter no longer sets the bar's colour, so MainActivity sets the tab
+   bar's colour on the window (`colorNavigationBar`). That ends the dark
+   buttons Android forced on a window that started light, which stayed on
+   the dark 3-button bar after a switch to dark on Android 16 (QA A36-1),
+   and with the contrast scrim on, Android draws that colour at 80% behind
+   the 3-button bar only. At 80% a field under the buttons still showed
+   through (QA KAA-1), so with 3-button navigation the app paints the
+   bar's height in the same colour itself, opaque, above its screens and
+   under the scrim (`NavBarBand`): nothing shows under the buttons
+   (A36-2). The gesture bar gets neither and stays transparent, edge to
+   edge. Every screen without the tab bar ends its scroll past the bar
+   (`scrollEndInset`), so its last line or row of photos can always be
+   scrolled clear of it, and while a dialog or the analyzing overlay dims
+   the app, the colour sent and painted is the tab bar's under that dim,
+   since Android draws the scrim above the app, and the band lies above
+   its screens, where no Flutter barrier reaches either.
 7. **Orientation:** portrait on phones
    (`android:screenOrientation="portrait"`). Android 16 ignores it at
    600 dp and wider, where the width-capped layout applies. Tablets stay
@@ -1146,9 +1163,30 @@ position. The paste-ready answers live next to the app in
 9. **Analysis after you leave the app:** QA on 2026-11-20 (API 35 and
    36) found that once other apps are opened, Android freezes the app
    about 17 seconds after it leaves the screen, and an analysis waits
-   until it comes back (a kill in between loses it). A short expedited
-   WorkManager job will keep an analysis running (API 31 and later), in
-   its own PR.
+   until it comes back (a kill in between loses it); it also cuts a
+   background app's network about 8 seconds after Home. Now, while an
+   analysis the user started is on its way (a photo shared, picked or
+   logged from Photo Coverage, a leftover estimate, a typed meal, a Fix
+   meals request), a WorkManager job keeps the process running
+   (`AnalysisKeepAlive.kt`): expedited on Android 12 and later, with no
+   notification (a plain job once the expedited quota is used up), and a
+   plain one-time job on Android 7 to 11, where WorkManager would run
+   expedited work as the foreground service the manifest strips. From
+   Android 9 it needs a network that reaches the internet, validated or
+   not: a phone in mainland China with no VPN fails Android's validation
+   probe on every network and still reaches a China provider, and a
+   validated-only constraint never started the job there. Below Android 9
+   it needs no network. It ends as the last request does, keeps any one
+   request at most 3 minutes from its own start (a photo waiting its turn
+   gets its wait and its own analysis counted apart, and a Photo Coverage
+   batch is one request from its first photo to its last), and adds no
+   permission. The first request after a quiet spell replaces any job
+   WorkManager still holds from a stop or a dead process, which it would
+   re-run only plain and after a 30-second backoff; a job the system stops
+   mid-request is replaced the same way. Automatic Watch Camera Roll
+   photos are not kept: the next scan or the background job offers them
+   again. To confirm on a physical Android 15 or 16 phone with the https
+   own server: that a reply reaches the app after Home and another app.
 10. **Restaurant lookups** stay brand-only on Android (no photo location,
     no places service); the hint no longer says "for now" / 目前.
 11. **Shortcuts and a widget:** after launch, static shortcuts first and
@@ -1693,7 +1731,10 @@ different signatures"; make that definitive after the check.
   debugsymbols` whether the bundle already carries them), and, observed by
   developers but on no Google page, an edge-to-edge "deprecated APIs"
   recommendation caused by Flutter engine calls that only run below
-  API 35.
+  API 35, and by `MainActivity.colorNavigationBar`, which calls
+  `Window.setNavigationBarColor` from API 35 on purpose (§ 6 item 6: it
+  ends Android's forced light navigation bar and tints the 3-button
+  scrim).
 - **Known, not fixed here:** on Android 7 to 11 the launch window behind
   Flutter's first frame is white in light mode (Theme.Light's
   `colorBackground`) before the `#F2F2F7` page; Android 12+ is fixed in

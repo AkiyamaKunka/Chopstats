@@ -55,6 +55,16 @@ internal object IntakeRules {
     fun keepsBackCallbackAtRoot(sdk: Int, launcherTask: Boolean): Boolean =
         sdk >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE && !launcherTask
 
+    /// Whether the app sets the navigation bar's colour itself on Android
+    /// [sdk] (MainActivity.colorNavigationBar): from Android 15 (API 35),
+    /// where the app draws edge to edge and Flutter's engine leaves the
+    /// colour alone. Android then took the window's light background for a
+    /// light bar and forced dark buttons until the app set a colour
+    /// (APPEARANCE_FORCE_LIGHT_NAVIGATION_BARS), and tints the 3-button
+    /// bar's contrast scrim with the colour set. Below that Flutter sets
+    /// the colour as before, an opaque bar.
+    fun colorsNavigationBar(sdk: Int): Boolean = sdk >= Build.VERSION_CODES.VANILLA_ICE_CREAM
+
     /// share_plus's FileProvider authority after the package name (its
     /// AndroidManifest.xml: ${applicationId}.flutter.share_provider).
     const val SHARE_OUT_AUTHORITY_SUFFIX = ".flutter.share_provider"

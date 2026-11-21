@@ -17,6 +17,7 @@ import 'package:url_launcher/url_launcher.dart' as launcher;
 import '../../core/app_channel.dart' show photoLibraryInBuild;
 import '../../core/contracts.dart';
 import '../../core/server_transport.dart' show serverAddressRefused;
+import '../../services/analysis_keep_alive.dart' show AnalysisKeepAlive;
 import '../../services/backup/backup_coordinator.dart';
 
 import '../../services/analyzer/platform_decode.dart';
@@ -113,6 +114,10 @@ class SettingsScreen extends StatefulWidget {
   final Future<PhotoOutcome> Function(IntakePhoto photo)? processPhoto;
   final PhotoLibrary? photoLibrary;
 
+  /// Android (UiServices.analysisKeepAlive): the Coverage screen's bulk
+  /// Log/Retry is kept alive as one request (CoverageScreen.keepAlive).
+  final AnalysisKeepAlive? analysisKeepAlive;
+
   /// Fires when settings change (AppServices.settingsChanges). The app
   /// shell's rebuild keeps this same screen instance, so without listening
   /// the Photos footer showed a pause armed or lifted mid-view only after
@@ -142,6 +147,7 @@ class SettingsScreen extends StatefulWidget {
     this.coverage,
     this.processPhoto,
     this.photoLibrary,
+    this.analysisKeepAlive,
     this.startClaudeAuth,
     this.completeClaudeAuth,
     this.serverLoginState,
@@ -980,6 +986,10 @@ class _SettingsScreenState extends State<SettingsScreen>
                     ensureConsent: (ctx) =>
                         ensureAiConsent(ctx, widget.settings),
                     library: widget.photoLibrary,
+                    // Android: a bulk run holds Back and the keep-alive
+                    // from its first photo to its last, even once the user
+                    // has left the screen.
+                    keepAlive: widget.analysisKeepAlive,
                     logManually: (photo) async {
                       final saved = await Navigator.of(context)
                               .push<bool>(MaterialPageRoute(

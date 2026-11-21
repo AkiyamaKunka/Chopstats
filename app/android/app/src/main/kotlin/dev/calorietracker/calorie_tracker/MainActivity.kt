@@ -67,6 +67,11 @@ class MainActivity : FlutterActivity() {
     /// (setFrameworkHandlesBack). Set in onCreate, from launcherTask.
     private var backCallbackAtRoot = false
 
+    /// This activity's engine's session in the analysis keep-alive
+    /// (AnalysisKeepAlive): set when the engine is configured, dropped
+    /// with the engine (cleanUpFlutterEngine).
+    private var keepAliveSession = 0L
+
     override fun onCreate(savedInstanceState: Bundle?) {
         // Picked-photo copies an earlier activity left (its engine died
         // before Dart read them) have no reader: no pick of this one is
@@ -143,9 +148,9 @@ class MainActivity : FlutterActivity() {
     /// the preview. A launcher-intent start that did not come from the home
     /// screen (Play's Open button, `am start -a MAIN -c LAUNCHER`) looks the
     /// same from here, and Android still finishes it on a Back at an idle
-    /// root; only a pending shared photo keeps that Back in Flutter there
-    /// (SharedPhotosBackGuard). FlutterActivity also calls this from its
-    /// onCreate, with the state it saved.
+    /// root; a pending shared photo or an analysis in flight keeps that Back
+    /// in Flutter there (SharedPhotosBackGuard). FlutterActivity also calls
+    /// this from its onCreate, with the state it saved.
     override fun setFrameworkHandlesBack(frameworkHandlesBack: Boolean) {
         super.setFrameworkHandlesBack(frameworkHandlesBack || backCallbackAtRoot)
     }
@@ -169,6 +174,7 @@ class MainActivity : FlutterActivity() {
     /// finish on a Back at an idle root: the launcher intent sent from
     /// somewhere other than the home screen (Play's Open button,
     /// `am start -a MAIN -c LAUNCHER`). So while a shared photo is pending
+    /// or an analysis the user started is in flight (AnalysisKeepAlive),
     /// the shell keeps Back at the root in Flutter in every task
     /// (SharedPhotosBackGuard, app.dart), and its SystemNavigator.pop()
     /// lands here on every Android version. A photo a finish still cuts off
@@ -388,11 +394,6 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
-        contentResolver.unregisterContentObserver(clockFormatObserver)
-        super.cleanUpFlutterEngine(flutterEngine)
-    }
-
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         contentResolver.registerContentObserver(
@@ -453,6 +454,77 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+        // The analysis keep-alive (owner decision 9, AnalysisKeepAlive.kt):
+        // Dart's AnalysisKeepAlive sends "begin" and "end" with its id for
+        // each analysis the user started, under this engine's session, so
+        // the requests of an engine that dies end with it
+        // (cleanUpFlutterEngine). Its "reset", sent once as it is built,
+        // drops what an earlier run of this engine's Dart left open: a hot
+        // restart keeps the engine (no configure, no cleanup) and starts
+        // the ids over. Nothing is open at a cold start. No permission:
+        // WorkManager is the one the background photo scan already uses.
+        val session = AnalysisKeepAlive.newSession()
+        keepAliveSession = session
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, KEEP_ALIVE_CHANNEL)
+            .setMethodCallHandler { call, result ->
+                val id = (call.argument<Any?>("id") as? Number)?.toLong()
+                when {
+                    call.method == "reset" -> {
+                        AnalysisKeepAlive.drop(applicationContext, session)
+                        result.success(true)
+                    }
+                    id == null -> result.success(false)
+                    call.method == "begin" ->
+                        result.success(AnalysisKeepAlive.begin(applicationContext, session, id))
+                    call.method == "end" ->
+                        result.success(AnalysisKeepAlive.end(applicationContext, session, id))
+                    else -> result.notImplemented()
+                }
+            }
+        // The navigation bar's colour on Android 15 and later, which
+        // Flutter no longer sets there (colorNavigationBar).
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, SYSTEM_BARS_CHANNEL)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "navigationBarColor" ->
+                        result.success(colorNavigationBar((call.argument<Any?>("color") as? Number)?.toLong()))
+                    else -> result.notImplemented()
+                }
+            }
+    }
+
+    /// The engine is going (the activity is destroyed): the 12/24-hour
+    /// observer registered for it stops (clockFormatObserver), and its
+    /// analyses go with it, so they no longer keep the process up. Its Dart
+    /// can never end them now.
+    override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
+        contentResolver.unregisterContentObserver(clockFormatObserver)
+        AnalysisKeepAlive.drop(applicationContext, keepAliveSession)
+        super.cleanUpFlutterEngine(flutterEngine)
+    }
+
+    /// The navigation bar's colour, from the app's theme ([argb]: the tab
+    /// bar's own, lib/ui/app.dart _SystemNavBarStyle), on Android 15 and
+    /// later only (IntakeRules.colorsNavigationBar); true when it was set.
+    /// Below that Flutter sets it itself, as an opaque bar. From Android 15
+    /// the app draws edge to edge and Flutter leaves the colour alone, so
+    /// Android took a light window background (the light launch theme) as
+    /// a light bar and forced dark buttons on it
+    /// (APPEARANCE_FORCE_LIGHT_NAVIGATION_BARS, DecorView.setWindowBackground):
+    /// with 3-button navigation, a switch to dark while the app ran left
+    /// dark buttons on the dark bar on Android 16 (A36-1; MainActivity
+    /// handles uiMode itself, so the window background is never set
+    /// again). A colour the app sets clears that, and Android never forces
+    /// it again for this window: the buttons follow the app's own
+    /// light/dark request (Flutter's systemNavigationBarIconBrightness).
+    /// It also tints the contrast scrim Android draws behind the 3-button
+    /// bar (the colour at 80%; none behind the gesture bar), which the app
+    /// asks for so the buttons never sit on a screen's content (A36-2).
+    @Suppress("DEPRECATION")
+    private fun colorNavigationBar(argb: Long?): Boolean {
+        if (argb == null || !IntakeRules.colorsNavigationBar(Build.VERSION.SDK_INT)) return false
+        window.navigationBarColor = argb.toInt()
+        return true
     }
 
     private fun isBackgroundRestricted(): Boolean {
@@ -847,6 +919,12 @@ class MainActivity : FlutterActivity() {
     private companion object {
         const val CHANNEL = "dev.calorietracker/background"
         const val FILES_CHANNEL = "dev.calorietracker/files"
+
+        /// lib/services/analysis_keep_alive.dart keepAliveChannelName.
+        const val KEEP_ALIVE_CHANNEL = "dev.calorietracker/keepalive"
+
+        /// lib/ui/app.dart systemBarsChannelName.
+        const val SYSTEM_BARS_CHANNEL = "dev.calorietracker/systembars"
         const val PICK_REQUEST = 4207
         const val PHOTO_PICK_REQUEST = 4208
         const val SAVE_REQUEST = 4209

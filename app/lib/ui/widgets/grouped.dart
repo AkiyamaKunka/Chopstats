@@ -542,9 +542,28 @@ class ContentWidthCap extends StatelessWidget {
   }
 }
 
+/// The end padding of a scroll on a screen without the tab bar: [base]
+/// past the system's bottom inset (Android, A36-2). From Android 15 the
+/// app draws edge to edge, under a 3-button navigation bar of 48 dp that
+/// covers whatever sits under it (the app's opaque band, NavBarBand, under
+/// Android's contrast scrim): a scroll that ended [base] above the
+/// screen's bottom left its last line or its last row of photos there
+/// however far it scrolled. With the inset it scrolls clear, and the
+/// viewport itself still reaches the bottom, edge to edge. MediaQuery's
+/// bottom padding is 0 below Android 15 (an opaque bar the app does not
+/// draw under) and while the keyboard is up, so nothing moves there; the
+/// gesture bar's small inset is added the same way. iPhone keeps [base]
+/// alone, as its layouts always had.
+double scrollEndInset(BuildContext context, [double base = AppSpace.s32]) =>
+    base +
+    (Theme.of(context).platform == TargetPlatform.android
+        ? MediaQuery.paddingOf(context).bottom
+        : 0);
+
 /// Scaffold for a grouped subpage (the disclosure targets): grouped
 /// background + iOS-style large-title collapsing header. On a wide window
-/// the page is a centred column ([ContentWidthCap]).
+/// the page is a centred column ([ContentWidthCap]). Its scroll ends past
+/// the system's bottom inset ([scrollEndInset]).
 class GroupedPage extends StatelessWidget {
   const GroupedPage({super.key, required this.title, required this.children});
   final String title;
@@ -568,7 +587,10 @@ class GroupedPage extends StatelessWidget {
             SliverToBoxAdapter(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
-                children: [...children, const SizedBox(height: 32)],
+                children: [
+                  ...children,
+                  SizedBox(height: scrollEndInset(context)),
+                ],
               ),
             ),
           ],

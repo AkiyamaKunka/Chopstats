@@ -263,8 +263,15 @@ class _LeftoverScreenState extends State<LeftoverScreen> {
         }
       }
       final compact = compactOriginalAnalysis(meal.analysis);
-      final reply =
-          await services.analyzer.leftoverIntent(photo.bytes, compact);
+      // Android: the estimate keeps the app running until it answers,
+      // should the user leave meanwhile (owner decision 9).
+      final bytes = photo.bytes;
+      Future<Map<String, dynamic>?> estimate() =>
+          services.analyzer.leftoverIntent(bytes, compact);
+      final keepAlive = services.analysisKeepAlive;
+      final reply = keepAlive == null
+          ? await estimate()
+          : await keepAlive.guard(estimate);
       if (!mounted) return;
       if (reply == null) {
         // leftoverIntent gives no reason, but a call that used up the daily
@@ -583,7 +590,7 @@ class _LeftoverScreenState extends State<LeftoverScreen> {
     // No horizontal padding: GroupedSection already insets 16 (ONE
     // gutter); an extra 16 a side here shrank every cell to 326 px.
     return ListView(
-      padding: const EdgeInsets.only(top: 8, bottom: 24),
+      padding: EdgeInsets.only(top: 8, bottom: scrollEndInset(context, 24)),
       children: [
         GroupedSection(
           header: l.leftoverPickMeal,
@@ -704,7 +711,8 @@ class _LeftoverScreenState extends State<LeftoverScreen> {
               return Center(child: Text(l.addNoPhotos));
             }
             final grid = GridView.builder(
-              padding: const EdgeInsets.all(16),
+              padding: EdgeInsets.fromLTRB(
+                  16, 16, 16, scrollEndInset(context, 16)),
               gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                   crossAxisCount: 3, crossAxisSpacing: 6, mainAxisSpacing: 6),
               itemCount: assets.length,

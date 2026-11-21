@@ -16,6 +16,7 @@ import '../core/contracts.dart';
 import '../core/outcome_kind.dart';
 import '../core/leftover_logic.dart';
 import '../core/restaurant_assist_logic.dart' show dropAssistClaims;
+import '../services/analysis_keep_alive.dart' show AnalysisKeepAlive;
 import '../services/analyzer/platform_decode.dart';
 import '../services/photo/background_time.dart';
 import '../services/photo/capture_dating.dart' show glassesCapturedAt;
@@ -340,6 +341,22 @@ class PhotoPipeline {
   /// suspend this way, tests opt in.
   final BackgroundTime? backgroundTime;
 
+  /// Android, the app's own engine only (di.dart): each DELIBERATE photo
+  /// (shared, picked, logged or retried from Photo Coverage) keeps the
+  /// process running (and online, where its job is expedited) from the
+  /// moment it is queued until its turn has ended (owner decision 9):
+  /// Android freezes an app the user left for another one about 10 s
+  /// later, and its reply then waited in the frozen process until the user
+  /// came back. Queued time counts, with an allowance of its own: the photo
+  /// ahead of it (often an automatic one, which is not kept itself) must
+  /// finish for its turn to come. Its turn is a second request, so the
+  /// photo's own analysis gets the full cap (3 minutes) from its start,
+  /// however long it waited ([_chain]). Automatic photos are not kept: the
+  /// next scan or the background job offers again any they could not
+  /// finish. Null everywhere else (iOS has [backgroundTime], the headless
+  /// run its own time, tests opt in).
+  final AnalysisKeepAlive? keepAlive;
+
   /// iOS, the app's own engine only (di.dart: appEngineBackgrounded):
   /// whether the app is in the background right now. Then an AUTOMATIC
   /// photo is not started at all — released before it is hashed, reserved
@@ -430,10 +447,23 @@ class PhotoPipeline {
   bool get isIdle => _queued == 0 && _running == 0 && _held == null;
 
   /// Chains [photo] onto the global FIFO tail, counted for [isIdle] until
-  /// its turn ends.
+  /// its turn ends. A deliberate photo is kept alive ([keepAlive]) from
+  /// here to the end of its turn, whatever its verdict, as two requests:
+  /// the outer one covers the wait as well (the photo ahead must finish for
+  /// this one's turn to come), the inner one the turn alone. Each request's
+  /// cap counts from its own begin, so the turn gets the full cap however
+  /// long the wait was; one id held across the turn would have spent it on
+  /// the photo ahead. Nested, not one ended and the next begun: the job
+  /// never sees nothing live between them. [_tail] is read here,
+  /// synchronously, either way (guard runs its body before its first
+  /// await), so the FIFO order stays the callers'.
   Future<PhotoOutcome> _chain(IntakePhoto photo) {
     _queued++;
-    final slot = _tail.then((_) => process(photo));
+    final keep = photo.deliberate ? keepAlive : null;
+    final slot = keep == null
+        ? _tail.then((_) => process(photo))
+        : keep.guard(
+            () => _tail.then((_) => keep.guard(() => process(photo))));
     slot.whenComplete(() => _queued--).ignore();
     return slot;
   }
@@ -448,6 +478,7 @@ class PhotoPipeline {
       this.sendGate,
       this.deferUndecodable = false,
       this.backgroundTime,
+      this.keepAlive,
       this.backgrounded,
       this.onOutcome,
       this.previewHold,

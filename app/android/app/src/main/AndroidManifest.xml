@@ -31,10 +31,14 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
     <!-- WorkManager's library manifest brings FOREGROUND_SERVICE and its
          SystemForegroundService (no type) for expedited work on Android 11
-         and lower and for setForeground. The app registers one periodic
-         task (lib/services/photo/background.dart) and never asks for
-         either, so both are stripped from the merged manifest. Expedited
-         or one-off work would need them back (manifest_gate_test). -->
+         and lower and for setForeground. The app never asks for either, so
+         both are stripped from the merged manifest. Its work: one periodic
+         task (lib/services/photo/background.dart), and the analysis
+         keep-alive's one-time job (AnalysisKeepAlive.kt, owner decision 9),
+         expedited only on Android 12 and later, where JobScheduler runs it
+         with no foreground service, and a plain job below that. Expedited
+         work below Android 12, or setForeground, would need them back
+         (manifest_gate_test). -->
     <uses-permission
         android:name="android.permission.FOREGROUND_SERVICE"
         tools:node="remove"/>
@@ -72,8 +76,9 @@
          as on Android 12 and lower. A launcher-intent start that did not
          come from the home screen (Play's Open button) looks the same to
          the app, and Android 14 and later still finish it on such a Back.
-         While a shared photo is pending, the shell keeps Back at the root
-         in Flutter in every task (SharedPhotosBackGuard). -->
+         While a shared photo is pending or an analysis the user started is
+         in flight, the shell keeps Back at the root in Flutter in every
+         task (SharedPhotosBackGuard). -->
     <application
         android:label="@string/app_name"
         android:name="${applicationName}"
