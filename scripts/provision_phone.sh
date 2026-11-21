@@ -72,7 +72,16 @@ fi
 # Android: the first adb device.
 if command -v adb >/dev/null 2>&1 && adb devices | awk 'NR>1 && $2=="device"{f=1} END{exit !f}'; then
   echo "Android: opening the app with the setup link (confirm on the phone)…"
-  adb shell am start -a android.intent.action.VIEW -d "$LINK" "$ANDROID_PKG" >/dev/null
+  # adb joins its arguments into one command line for the phone's shell
+  # without quoting them, so the link goes in single quotes there: unquoted,
+  # the phone's sh cut it at the first '&' and the app got no key. The link
+  # is percent-encoded (urlenc, safe=""), so it holds no single quote.
+  if ! OUT=$(adb shell "am start -a android.intent.action.VIEW -d '$LINK' $ANDROID_PKG" 2>&1) \
+      || printf '%s' "$OUT" | grep -q '^Error'; then
+    printf '%s\n' "$OUT" | sed -E 's/(key=)[^&[:space:]]*/\1…/g' >&2
+    echo "Android: the phone did not open the link." >&2
+    exit 1
+  fi
   echo "Done — tap 使用这台服务器 / Use this server on the phone."
   exit 0
 fi
