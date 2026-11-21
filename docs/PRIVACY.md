@@ -1,6 +1,6 @@
 # Chopstats · 筷拍 — Privacy Policy
 
-Effective date: 2026-11-20
+Effective date: 2026-11-21
 
 [English](#english) · [中文](#中文)
 
@@ -326,7 +326,9 @@ learned and its saved answers, or uninstall the app to delete what it
 stored on the phone. iOS can keep API keys in the Keychain after an app is
 deleted, so to remove them too, first clear each key you entered in
 Settings › AI Provider (and the **Server upload key** under
-*Your own server*). On iPhone, delete the iCloud backup in Settings › Your
+*Your own server*; when that page says a key was *Saved without its server
+address*, its field is empty, so tap **Remove this key** under it
+instead). On iPhone, delete the iCloud backup in Settings › Your
 Data (turning iCloud Backup off offers it) or in the Files app (iCloud
 Drive › Chopstats); uninstalling the app does not delete it. Copies you
 exported or that sit in your own backups,
@@ -491,7 +493,7 @@ date. Questions: see *Who we are* above, or open an issue at
 
 ### 删除数据
 
-在应用内删除餐食（「我常吃的」和你平时的数值都根据餐食算出，会随之改变），用「**清除已记住的地点**」（设置 › 餐厅营养；Android 上是「**清除保存的查询结果**」）删除餐厅查询记住的地点和保存的查询结果，或卸载应用以删除它在手机上保存的数据。iOS 可能会在应用删除后仍把 API Key 留在钥匙串中，所以如果也要删除它们，请先在 设置 › AI 服务 里清除你填写的每一个 Key（以及「你自己的服务器」里的「**服务器上传密钥**」）。在 iPhone 上，可以在 设置 › 你的数据 里删除 iCloud 备份（关闭「iCloud 备份」时也会询问），或在「文件」App 的 iCloud 云盘 › Chopstats 里删除；卸载应用不会删除它。你导出的文件、你自己备份中的副本，以及已经发送给你所选 AI 服务的内容，分别由它们现在所在的位置（你的文件、你的备份或该服务商的政策）决定。
+在应用内删除餐食（「我常吃的」和你平时的数值都根据餐食算出，会随之改变），用「**清除已记住的地点**」（设置 › 餐厅营养；Android 上是「**清除保存的查询结果**」）删除餐厅查询记住的地点和保存的查询结果，或卸载应用以删除它在手机上保存的数据。iOS 可能会在应用删除后仍把 API Key 留在钥匙串中，所以如果也要删除它们，请先在 设置 › AI 服务 里清除你填写的每一个 Key（以及「你自己的服务器」里的「**服务器上传密钥**」；如果那里显示密钥「保存时没有记下服务器地址」，它的输入框是空的，请改点下面的「**删除此密钥**」）。在 iPhone 上，可以在 设置 › 你的数据 里删除 iCloud 备份（关闭「iCloud 备份」时也会询问），或在「文件」App 的 iCloud 云盘 › Chopstats 里删除；卸载应用不会删除它。你导出的文件、你自己备份中的副本，以及已经发送给你所选 AI 服务的内容，分别由它们现在所在的位置（你的文件、你的备份或该服务商的政策）决定。
 
 ### 第三方与你的同意
 

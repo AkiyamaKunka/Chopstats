@@ -5,6 +5,8 @@
 //   2. platformKeyStore() against a model of the real keychain rules the
 //      plugin exposes (accessibility in every query; one item per key
 //      whatever its class; delete matches every class; locked phone).
+import 'dart:convert' show jsonDecode;
+
 import 'package:calorie_tracker/services/settings/app_settings.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -324,24 +326,121 @@ void main() {
     test('iOS: an upgraded iPhone keeps its key and the locked-phone '
         'background run can read it once migrated', () async {
       debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
-      // Saved by an earlier build under the plugin default.
-      keychain.items['server_api_key'] = ('sk-test', 'unlocked');
+      // Saved by an earlier build under the plugin default. (A provider key:
+      // the server upload key is also moved into its item, below.)
+      keychain.items['gemini_api_key'] = ('sk-test', 'unlocked');
 
       // Locked before the app was opened unlocked: the load FAILS (never
       // "no key" — the UI would offer to overwrite it) and the item stays.
       // The background runner survives a failed load (background_glue).
       keychain.locked = true;
       await expectLater(load(), throwsA(isA<PlatformException>()));
-      expect(keychain.items['server_api_key'], ('sk-test', 'unlocked'));
+      expect(keychain.items['gemini_api_key'], ('sk-test', 'unlocked'));
 
       // Foreground, unlocked: read and migrated.
       keychain.locked = false;
-      expect((await load()).serverApiKey, 'sk-test');
-      expect(keychain.items['server_api_key'], ('sk-test', 'first_unlock'));
+      expect((await load()).geminiApiKey, 'sk-test');
+      expect(keychain.items['gemini_api_key'], ('sk-test', 'first_unlock'));
 
       // Locked again: the background run now has the key.
       keychain.locked = true;
-      expect((await load()).serverApiKey, 'sk-test');
+      expect((await load()).geminiApiKey, 'sk-test');
+    });
+
+    // The server upload key an earlier build stored as plain text, under
+    // the plugin default: the app's first unlocked load moves it into the
+    // first_unlock class and then into its item, bound to the address it
+    // was in use with, and leaves the old name holding no key.
+    test('iOS: an upgraded iPhone\'s server upload key is moved into its '
+        'item; the locked background run reads it; a reinstall keeps its '
+        'host', () async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      keychain.items['server_api_key'] = ('key-a', 'unlocked');
+      Future<AppSettings> loadWith(Map<String, Object> prefs,
+          {bool background = false}) async {
+        SharedPreferences.setMockInitialValues(prefs);
+        return AppSettings.load(
+            prefs: await SharedPreferences.getInstance(),
+            keyStore: platformKeyStore(migrate: !background),
+            readOnlyKeys: background);
+      }
+
+      const updated = {
+        'settings.provider': 'server',
+        'settings.server_base_url': 'https://a.example',
+      };
+      keychain.locked = true;
+      await expectLater(loadWith(updated), throwsA(isA<PlatformException>()));
+      expect(keychain.items['server_api_key'], ('key-a', 'unlocked'));
+      // Locked, the background run finds no key yet and moves nothing.
+      final early = await loadWith(updated, background: true);
+      expect(early.serverApiKey, isNull);
+      expect(keychain.items.keys, ['server_api_key']);
+
+      keychain.locked = false;
+      final app = await loadWith(updated);
+      expect((app.serverApiKey, app.serverKeyHost), ('key-a', 'a.example'));
+      final (item, itemClass) = keychain.items['server_api_key_item']!;
+      expect(jsonDecode(item), {'key': 'key-a', 'host': 'a.example'});
+      expect(itemClass, 'first_unlock');
+      expect(keychain.items['server_api_key'], (' ', 'first_unlock'),
+          reason: '1.6.0 reads this name as no key');
+
+      keychain.locked = true;
+      final bg = await loadWith(updated, background: true);
+      expect((bg.serverApiKey, bg.serverKeyHost), ('key-a', 'a.example'));
+      expect(bg.serverKeyFor('a.example'), 'key-a');
+
+      // A reinstall keeps keychain items and drops the preferences.
+      keychain.locked = false;
+      final reinstalled = await loadWith({});
+      expect((reinstalled.serverApiKey, reinstalled.serverKeyHost),
+          ('key-a', 'a.example'));
+    });
+
+    test('iOS: a reinstall of an iPhone that never opened this version: '
+        'the plain key has no known host, kept and never sent', () async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      keychain.items['server_api_key'] = ('key-a', 'unlocked');
+      final s = await load(); // no preferences: the reinstall's first launch
+      expect(s.serverKeyHostUnknown, isTrue);
+      expect(s.serverApiKey, isNull);
+      final (item, _) = keychain.items['server_api_key_item']!;
+      expect(jsonDecode(item),
+          {'key': 'key-a', 'host': null, 'hostUnknown': true});
+      await s.setProvider(AiProvider.server);
+      await s.setServerBaseUrl('https://b.example');
+      expect(s.serverKeyFor('b.example'), isNull);
+      // Use this key, on the tap.
+      await s.bindServerKeyToAddress();
+      expect((s.serverApiKey, s.serverKeyHost), ('key-a', 'b.example'));
+    });
+
+    // Review of PR 78, SEC-3 and UXC-1: the Keychain keeps items after the
+    // app is deleted, and a key with no known host is not in the key field
+    // for a clear to delete. Remove this key does.
+    test('iOS: Remove this key leaves no server upload key in the keychain '
+        'under either name, and a reinstall finds none', () async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      keychain.items['server_api_key'] = ('key-a', 'unlocked');
+      final s = await load(); // a reinstall's first launch
+      expect(s.serverKeyHostUnknown, isTrue);
+      await s.removeServerKeyOfUnknownHost();
+      expect(s.serverKeyHostUnknown, isFalse);
+      expect(keychain.items.containsKey('server_api_key_item'), isFalse);
+      expect(
+          keychain.items.keys.where((k) => k.startsWith('server_api_key_item')),
+          isEmpty,
+          reason: 'no staged copy either');
+      final (old, oldClass) = keychain.items['server_api_key']!;
+      expect(old, ' ', reason: '1.6.0 reads this name as no key');
+      expect(oldClass, 'first_unlock');
+      for (final values in keychain.items.values) {
+        expect(values.$1, isNot(contains('key-a')));
+      }
+      final again = await load(); // another reinstall
+      expect(again.serverKeyHostUnknown, isFalse);
+      expect(again.serverApiKey, isNull);
     });
 
     test('iOS: uses first_unlock, never a this-device class (backups restore)',

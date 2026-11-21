@@ -2429,6 +2429,26 @@ void main() {
       await rearm(s, _ThrowingPrefs());
       expect(armed.first.$3, DateTime(2026, 11, 13, 21, 30));
     });
+
+    // Review of PR 78: finding no upload key, the app engine's load records
+    // the host the address names for one it may not have read (SEC-1). The
+    // re-read has no key store at all and loads as the background engine,
+    // so it never writes that record.
+    test('the re-read writes no preference', () async {
+      SharedPreferences.setMockInitialValues({
+        'settings.provider': 'server',
+        'settings.server_base_url': 'https://a.example',
+        'settings.report_time': '21:30',
+      });
+      final prefs = await SharedPreferences.getInstance();
+      final run = await AppSettings.load(
+          prefs: prefs, keyStore: MemoryKeyStore(), readOnlyKeys: true);
+      final before = {for (final k in prefs.getKeys()) k: prefs.get(k)};
+      final now = await summarySettingsNow(prefs, run);
+      expect(now.serverBaseUrl, 'https://a.example');
+      expect(now.serverApiKey, isNull);
+      expect({for (final k in prefs.getKeys()) k: prefs.get(k)}, before);
+    });
   });
 
   // Review (finding 10): a run cut at Android's 9-minute deadline used to

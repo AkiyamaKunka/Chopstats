@@ -1774,6 +1774,72 @@ void main() {
       expect(seen.single.headers['X-API-Key'], 'key-b');
     });
 
+    // Review of 2026-11-20 (PN-1, UPG-1, UX-2): a key 1.7.0 stored as
+    // plain text, found by an update with no address naming a host (or by
+    // an iPhone reinstall's first launch), has no known server. It is not
+    // the upload key: no path builds a request with it, and each says no
+    // key is set (not "saved for another server address", which may be
+    // false and pointed at a row the page did not show then).
+    test('a key saved without its server address: nothing is sent on any '
+        'path, each says no key is set; Use this key sends it to that '
+        'address alone', () async {
+      SharedPreferences.setMockInitialValues({
+        'settings.provider': 'server',
+        'settings.server_backend': 'claude',
+        'settings.server_base_url': '',
+        'settings.ai_consent_routes': <String>['server:claude'],
+      });
+      final keys = MemoryKeyStore()..data['server_api_key'] = 'upload-key';
+      final s = await AppSettings.load(
+          prefs: await SharedPreferences.getInstance(), keyStore: keys);
+      await s.setServerBaseUrl('https://b.example');
+      expect(s.serverKeyHostUnknown, isTrue);
+      final seen = <http.BaseRequest>[];
+      final client = MockClient((req) async {
+        seen.add(req);
+        return http.Response(
+            jsonEncode({'ok': true, 'url': 'https://claude.ai/oauth/x'}), 200);
+      });
+      final a =
+          ServerAnalyzer(s, normalizer: (b) async => b, client: client);
+      // What the app's analyzer says (MultiProviderAnalyzer).
+      final photo =
+          await MultiProviderAnalyzer(s, client: client).analyzePhoto(jpeg());
+      expect(photo.retryable, isTrue, reason: 'kept');
+      expect(classifyAnalysisError(photo.error), AnalysisErrorKind.noServerKey);
+      expect(isServerKeyOtherHostMessage(photo.error), isFalse);
+      final o = PhotoOutcome(PhotoOutcomeKind.failed, photo.error!,
+          retryable: true,
+          errorKind: classifyAnalysisError(photo.error),
+          detail: photo.error);
+      final zh = AppLocalizationsZh(), en = AppLocalizationsEn();
+      expect(outcomeBody(en, o), en.errNoServerKey);
+      expect(outcomeBody(zh, o, deliberate: true), zh.errNoServerKey);
+      // Every server path, called straight.
+      expect((await a.analyzePhoto(jpeg())).error, isNotNull);
+      expect(
+          isServerKeyOtherHostMessage(
+              (await a.textIntentOutcome('lunch 500 kcal')).error),
+          isFalse);
+      expect(await a.leftoverIntent(jpeg(), '{}'), isNull);
+      expect(await a.validateKey(s.serverApiKey ?? ''),
+          'Enter your server upload key.');
+      expect(await a.serverLoginState(), isNull);
+      expect(await a.serverFeatures(), isNull);
+      expect((await a.startClaudeAuth()).url, isNull);
+      await expectLater(
+          a.client.post(Uri.parse('https://b.example/api/new_endpoint'),
+              headers: {'X-API-Key': 'upload-key'}),
+          throwsA(isA<http.ClientException>()),
+          reason: 'refused at the client too');
+      expect(seen, isEmpty, reason: 'the key went nowhere');
+
+      await s.bindServerKeyToAddress();
+      expect(await a.serverFeatures(), isNotNull);
+      expect(seen.single.url.host, 'b.example');
+      expect(seen.single.headers['X-API-Key'], 'upload-key');
+    });
+
     test('the same server at a new address: the saved key, bound to it, '
         'goes there', () async {
       final s = await serverSettings(url: 'https://a.example', allowed: true);

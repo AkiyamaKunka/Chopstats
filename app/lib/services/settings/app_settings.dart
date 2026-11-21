@@ -342,7 +342,13 @@ class AppSettings extends ChangeNotifier {
   static const String _kAnthropicKey = 'anthropic_api_key';
   // The own server's upload key and the host it is bound to, as one value
   // ([_serverKeyItem]).
-  static const String _kServerKey = 'server_api_key';
+  static const String _kServerKeyItem = 'server_api_key_item';
+  // Where 1.7.0 and earlier (iPhone 1.6.0 too) kept the upload key, as
+  // plain text, and the only name they read. Read to move the key into
+  // [_kServerKeyItem], then left blank ([_retireLegacyServerKey]): an older
+  // version installed over this one finds no key there and asks for one,
+  // instead of sending the item's text as the key.
+  static const String _kLegacyServerKey = 'server_api_key';
   static const String _kQwenKey = 'qwen_api_key';
   static const String _kDoubaoKey = 'doubao_api_key';
   static const String _kGlmKey = 'glm_api_key';
@@ -392,12 +398,21 @@ class AppSettings extends ChangeNotifier {
   static const String _kOpenaiModel = 'settings.openai_model';
   static const String _kAnthropicModel = 'settings.anthropic_model';
   static const String _kServerBaseUrl = 'settings.server_base_url';
-  // Only for an upload key stored as plain text, before its host was
-  // stored with it ([_loadServerKey]): the host it is bound to, and that
-  // it is bound to a host this install no longer knows. Gone with the
-  // plain value.
+  // Only while a key an earlier version stored under [_kLegacyServerKey]
+  // is being moved into the item ([_loadServerKey]): the host it is bound
+  // to, or that its host is not known. Written before the item, so a move
+  // whose item write fails keeps the binding it found; gone once the old
+  // name is retired. Builds before this one wrote them too.
   static const String _kServerKeyHost = 'settings.server_key_host';
   static const String _kServerKeyHostLost = 'settings.server_key_host_lost';
+  // The host the saved address named ('' for none) at the app engine's
+  // first load that found no upload key, the old name reading as nothing
+  // ([_noteServerKeyUnread]). On Android that is also a read that failed,
+  // a key 1.7.0 stored perhaps still there for a later read: this is the
+  // host it was in use with. Gone once the old name is retired by a write
+  // ([_removeServerKeyRecords]), or read blank.
+  static const String _kServerKeyHostUnread =
+      'settings.server_key_host_unread';
   static const String _kServerBackend = 'settings.server_backend';
   static const String _kQwenModel = 'settings.qwen_model';
   static const String _kDoubaoModel = 'settings.doubao_model';
@@ -459,9 +474,17 @@ class AppSettings extends ChangeNotifier {
   String? _openrouterApiKey;
   String _serverBaseUrl = '';
   String? _serverKeyHost;
-  // The upload key is bound to a host this install no longer knows
-  // ([_loadServerKey]): never shown, sent or bound to an address.
-  bool _serverKeyHostLost = false;
+  // An upload key kept whose server is not known ([_loadServerKey]): never
+  // shown, sent or bound to an address until the user uses it for one
+  // ([bindServerKeyToAddress]), enters another key or removes it
+  // ([removeServerKeyOfUnknownHost]). [_serverApiKey] is null while it is
+  // kept, so no request can carry it.
+  String? _serverKeyOfUnknownHost;
+  // What [_kLegacyServerKey] holds as this engine last read or wrote it,
+  // trimmed: null when the read found nothing (or failed: Android forgives
+  // a broken read as no key), '' once retired, else a key an earlier
+  // version stored.
+  String? _legacyServerKeyText;
   String _serverBackend = 'claude';
   AiProvider _provider = AiProvider.gemini;
   String _openaiModel = defaultOpenaiModel;
@@ -494,8 +517,14 @@ class AppSettings extends ChangeNotifier {
   String? _analysisBlockedKind;
   bool _mealLogged = false;
 
+  /// [readOnlyKeys]: this engine only reads the key store (the background
+  /// engine), so the app engine is the one engine that moves an upload key
+  /// an earlier version stored ([_loadServerKey]), and the two can never
+  /// race on that move.
   static Future<AppSettings> load(
-      {SharedPreferences? prefs, SecureKeyStore? keyStore}) async {
+      {SharedPreferences? prefs,
+      SecureKeyStore? keyStore,
+      bool readOnlyKeys = false}) async {
     final p = prefs ?? await SharedPreferences.getInstance();
     final k = keyStore ?? platformKeyStore();
     final s = AppSettings._(p, k);
@@ -511,7 +540,10 @@ class AppSettings extends ChangeNotifier {
     s._openaiApiKey = (oaKey == null || oaKey.isEmpty) ? null : oaKey;
     final anKey = (await k.read(_kAnthropicKey))?.trim();
     s._anthropicApiKey = (anKey == null || anKey.isEmpty) ? null : anKey;
-    final svKey = (await k.read(_kServerKey))?.trim();
+    // The old name before the item: the app engine writes the item before
+    // it retires the old name, so a reader never misses both.
+    final svLegacy = (await k.read(_kLegacyServerKey))?.trim();
+    final svItem = (await k.read(_kServerKeyItem))?.trim();
     final qwKey = (await k.read(_kQwenKey))?.trim();
     s._qwenApiKey = (qwKey == null || qwKey.isEmpty) ? null : qwKey;
     final dbKey = (await k.read(_kDoubaoKey))?.trim();
@@ -525,7 +557,11 @@ class AppSettings extends ChangeNotifier {
     final orKey = (await k.read(_kOpenrouterKey))?.trim();
     s._openrouterApiKey = (orKey == null || orKey.isEmpty) ? null : orKey;
     s._serverBaseUrl = (p.getString(_kServerBaseUrl) ?? '').trim();
-    await s._loadServerKey(svKey, firstLaunch: firstLaunch);
+    await s._loadServerKey(
+        legacy: svLegacy,
+        item: svItem,
+        firstLaunch: firstLaunch,
+        readOnly: readOnlyKeys);
     final backend = (p.getString(_kServerBackend) ?? '').trim();
     s._serverBackend =
         serverBackends.contains(backend) ? backend : 'claude';
@@ -741,17 +777,32 @@ class AppSettings extends ChangeNotifier {
 
   /// The upload key for the user's own server (same X-API-Key the phone
   /// watcher uses). Secure storage — never shared_preferences — in one
-  /// item with the host it is bound to ([_storeServerKey]).
+  /// item with the host it is bound to ([_storeServerKey]). Null while the
+  /// only key kept is one whose server is not known
+  /// ([serverKeyHostUnknown]): no request is ever built with that one.
   String? get serverApiKey => _serverApiKey;
 
   /// The host the upload key was saved for (lowercased), or null: no key;
   /// a key saved before any address, or at one naming no host (it binds to
-  /// the next address saved); or a key whose host this install no longer
-  /// knows, which is never shown, sent or bound to an address
-  /// ([_loadServerKey]). Every request to the server goes through
+  /// the next address saved); or only a key whose server is not known
+  /// ([serverKeyHostUnknown]). Every request to the server goes through
   /// HttpsOnlyServerClient, which sends the key to this host only, so a
   /// key saved for one server never goes to an address typed for another.
   String? get serverKeyHost => _serverApiKey == null ? null : _serverKeyHost;
+
+  /// Whether an upload key is kept whose server is not known
+  /// ([_loadServerKey]): one an earlier version stored as plain text, found
+  /// by an update with no server address saved and no record of its server
+  /// (the address was cleared, or the key typed before any), or read only
+  /// after the address moved from the one recorded when it could not be
+  /// read, or one an iPhone reinstall kept without the preferences that
+  /// said which server it was for. It is not the upload key ([serverApiKey]
+  /// is null): never in the key field, never sent, never bound to an
+  /// address saved, until the user uses it for the address
+  /// ([bindServerKeyToAddress], Settings › Your own server › "Use this key
+  /// for …"), enters another key, or removes it
+  /// ([removeServerKeyOfUnknownHost], "Remove this key").
+  bool get serverKeyHostUnknown => _serverKeyOfUnknownHost != null;
 
   /// Whether the own server is the provider and its upload key was saved
   /// for another host than its address: nothing is sent with it until the
@@ -781,13 +832,12 @@ class AppSettings extends ChangeNotifier {
   /// address: the saved key while it is bound to the address's host, or to
   /// none yet (serverKeyShownAt); null, an empty field, while it is bound
   /// to another host, or to one while the address names none ('' or
-  /// 'https://'), and at every address while its host is lost
-  /// ([_loadServerKey]). The field shows this and nothing else, and what it
-  /// holds is saved with [setServerKeyFromField]: the text of a key saved
-  /// for one host is never in it to be edited into another's (review of
-  /// PR 74).
+  /// 'https://'), and at every address for a key whose server is not known
+  /// ([serverKeyHostUnknown]). The field shows this and nothing else, and
+  /// what it holds is saved with [setServerKeyFromField]: the text of a key
+  /// saved for one host is never in it to be edited into another's (review
+  /// of PR 74).
   String? get serverKeyForAddress => _serverApiKey != null &&
-          !_serverKeyHostLost &&
           serverKeyShownAt(_serverKeyHost, _serverBaseUrl)
       ? _serverApiKey
       : null;
@@ -810,10 +860,10 @@ class AppSettings extends ChangeNotifier {
   /// of another host's key unless the user typed or pasted it there:
   /// - a key is saved and bound here, even the saved key itself (pasted at
   ///   the same server's new address, as Use this key makes it, or over a
-  ///   key whose host is lost);
+  ///   key whose server is not known, which it replaces);
   /// - empty deletes the key when the field showed it; when the field
-  ///   showed nothing (the key is another host's, or its host is lost),
-  ///   nothing changes.
+  ///   showed nothing (the key is another host's, or its server is not
+  ///   known), nothing changes.
   Future<bool> setServerKeyFromField(String value,
       {required String filledAt}) async {
     final host = serverKeyHostOf(_serverBaseUrl);
@@ -821,9 +871,7 @@ class AppSettings extends ChangeNotifier {
     final v = value.trim();
     if (v.isEmpty) {
       if (serverKeyForAddress != null) await _saveServerKey(null, null);
-    } else if (v != _serverApiKey ||
-        host != _serverKeyHost ||
-        _serverKeyHostLost) {
+    } else if (v != _serverApiKey || host != _serverKeyHost) {
       await _saveServerKey(v, host);
     } else {
       // The same key saved again (Done after an edit back to it): a
@@ -854,12 +902,14 @@ class AppSettings extends ChangeNotifier {
 
   /// Saves the upload key and the host it is bound to, both assigned
   /// before anything is awaited (no request sees the one without the
-  /// other), and stored as one value ([_storeServerKey]).
+  /// other), and stored as one value ([_storeServerKey]). A key kept whose
+  /// server is not known goes in the same step: [key] replaces it, or is
+  /// it, used for an address ([bindServerKeyToAddress]).
   Future<void> _saveServerKey(String? key, String? host) async {
     final keyChanged = key != _serverApiKey;
     _serverApiKey = key;
     _serverKeyHost = key == null ? null : host;
-    _serverKeyHostLost = false;
+    _serverKeyOfUnknownHost = null;
     await _storeServerKey(key, _serverKeyHost);
     // As _setProviderKey: a changed key on the ACTIVE provider does not
     // inherit the previous key's quota pause.
@@ -885,28 +935,69 @@ class AppSettings extends ChangeNotifier {
   ///   the key later, so a key stored in between (a setup link confirmed,
   ///   the first keystroke of a new server's key) was paired with the
   ///   previous host, and the previous server was sent it.
-  /// The records a key stored as plain text kept in the preferences
-  /// ([_loadServerKey]) go after the item: cut short in between, the item
-  /// wins.
+  ///
+  /// A value an earlier version left under the old name goes too
+  /// ([_retireLegacyServerKey]), before the item unless it is this key's
+  /// own text (a move of it cut short): this version never leaves another
+  /// key there next to its item, so the next load can take any other key
+  /// it finds there for one an older version stored after this item. The
+  /// records a move kept in the preferences ([_loadServerKey]) go last: cut
+  /// short before, the item wins.
   Future<void> _storeServerKey(String? key, String? host) async {
+    final legacy = _legacyServerKeyText;
+    final ownText = key != null &&
+        legacy != null &&
+        legacy.isNotEmpty &&
+        _legacyKeyText(legacy) == key;
+    if (!ownText && legacy != '') await _retireLegacyServerKey();
     if (key == null) {
-      await _keys.delete(_kServerKey);
+      await _keys.delete(_kServerKeyItem);
     } else {
-      await _keys.write(_kServerKey, _serverKeyItem(key, host));
+      await _keys.write(_kServerKeyItem, _serverKeyItem(key, host));
     }
-    for (final record in const [_kServerKeyHost, _kServerKeyHostLost]) {
+    if (ownText) await _retireLegacyServerKey();
+    await _removeServerKeyRecords();
+  }
+
+  /// Leaves the old name blank: one space, which 1.7.0, iPhone 1.6.0 and
+  /// every earlier version trim and read as no key (and this one too), and
+  /// never an empty value, which not every keychain call is sure to store.
+  /// A write, not a delete: a value whose read failed this run is
+  /// overwritten too (AndroidSecureKeyStore skips the delete of one), where
+  /// left in place it could be read at a later load as a key an older
+  /// version stored after the item.
+  Future<void> _retireLegacyServerKey() async {
+    await _keys.write(_kLegacyServerKey, ' ');
+    _legacyServerKeyText = '';
+  }
+
+  static const List<String> _serverKeyRecords = [
+    _kServerKeyHost,
+    _kServerKeyHostLost,
+    _kServerKeyHostUnread,
+  ];
+
+  Future<void> _removeServerKeyRecords() async {
+    for (final record in _serverKeyRecords) {
       if (_prefs.containsKey(record)) await _prefs.remove(record);
     }
   }
 
   /// The upload key's secure item: `{"key": …, "host": …}`, the host null
-  /// while the key is bound to none yet.
-  static String _serverKeyItem(String key, String? host) =>
-      jsonEncode({'key': key, 'host': host});
+  /// while the key is bound to none yet, and `"hostUnknown": true` added
+  /// for a key kept whose server is not known ([serverKeyHostUnknown]).
+  static String _serverKeyItem(String key, String? host,
+          {bool hostUnknown = false}) =>
+      jsonEncode({
+        'key': key,
+        'host': host,
+        if (hostUnknown) 'hostUnknown': true,
+      });
 
-  /// [stored] as [_serverKeyItem] writes it, or null for any other value:
-  /// a key stored as plain text, before its host was stored with it.
-  static ({String key, String? host})? _readServerKeyItem(String stored) {
+  /// [stored] as [_serverKeyItem] writes it, or null for any other value.
+  /// Under the old name, any other value is a key stored as plain text.
+  static ({String key, String? host, bool hostUnknown})? _readServerKeyItem(
+      String stored) {
     if (!stored.startsWith('{')) return null;
     final Object? item;
     try {
@@ -917,89 +1008,279 @@ class AppSettings extends ChangeNotifier {
     if (item is! Map ||
         item['key'] is! String ||
         !item.containsKey('host') ||
-        (item['host'] != null && item['host'] is! String)) {
+        (item['host'] != null && item['host'] is! String) ||
+        (item['hostUnknown'] != null && item['hostUnknown'] is! bool)) {
       return null;
     }
     final host = ((item['host'] as String?) ?? '').trim().toLowerCase();
     return (
       key: (item['key'] as String).trim(),
       host: host.isEmpty ? null : host,
+      hostUnknown: item['hostUnknown'] == true,
     );
   }
 
-  /// The upload key and its host as [load] finds them. The secure item
-  /// holds both ([_storeServerKey]), so they are read as one value: the
-  /// background engine's key and host belong together whenever its
-  /// preferences were read, and the client sends that key to its own host
-  /// alone, whatever address those preferences hold.
+  /// The key a value under the old name holds: the plain text, or the key
+  /// of the item builds before this one stored there.
+  static String _legacyKeyText(String legacy) =>
+      _readServerKeyItem(legacy)?.key ?? legacy;
+
+  /// The upload key and its host as [load] finds them. The item holds both
+  /// ([_storeServerKey]), so they are read as one value: the background
+  /// engine's key and host belong together whenever its preferences were
+  /// read, and the client sends that key to its own host alone, whatever
+  /// address those preferences hold.
   ///
-  /// A key stored as plain text (1.7.0 and earlier, and builds that kept
-  /// its host in the preferences) takes the first of:
-  /// - its host lost, when that was recorded (below);
-  /// - the host recorded for it in the preferences;
-  /// - the host of the address saved with it, recorded now (an update in
-  ///   place: the address it was in use with);
-  /// - on an install's first launch ([firstLaunch]), its host lost
-  ///   ([_serverKeyHostLost]), recorded now: the keychain kept the key
-  ///   through a reinstall that dropped the preferences, its address with
-  ///   them. Bound to none, it was in the key field at any address to be
-  ///   edited into the next server's key, and bound to the first address
-  ///   saved (recheck of PR 74). Lost, it is never shown, sent or bound to
-  ///   an address, until a key is entered or a setup link confirmed; a key
-  ///   stored with its host keeps that host through a reinstall;
-  /// - otherwise none yet (a key typed before any address).
-  /// A key stored bound to none yet that a first launch finds was left by
-  /// such a reinstall too: its host is as lost. The records go when the key
-  /// is next stored.
-  Future<void> _loadServerKey(String? stored,
-      {required bool firstLaunch}) async {
-    if (stored == null || stored.isEmpty) return;
-    final item = _readServerKeyItem(stored);
-    final key = item == null ? stored : item.key;
-    if (key.isEmpty) return;
-    _serverApiKey = key;
-    final host = item?.host;
-    if (host != null) {
-      _serverKeyHost = host;
+  /// [legacy] is what the old name holds: nothing, '' (retired), or a key
+  /// an earlier version stored there, as plain text (1.7.0, iPhone 1.6.0)
+  /// or, from builds before this one, as the item. Next to an item, its
+  /// own text is a move cut short (or the same key pasted into an older
+  /// version): the item counts. In the app engine, another key next to an
+  /// item was stored by an older version installed over this one, after
+  /// the item (this version never leaves another key there,
+  /// [_storeServerKey], and blanks a value it could not read next to its
+  /// item, below): it is the newer key, and any record (older still) does
+  /// not count for it. The background engine ([readOnly]) takes the item
+  /// whenever there is one: its two reads can straddle the app engine's
+  /// save of a new key (the old name blanked, then the new item written),
+  /// so another key it finds under the old name may be the one the new
+  /// item replaced, and taken as newer it was bound to the address in the
+  /// run's preferences (review of PR 78, SEC-2). The item's key goes to the
+  /// item's host alone; the app engine's next load takes a key an older
+  /// version stored.
+  ///
+  /// A key under the old name is bound to the first of:
+  /// - the host stored with it (an item of a build before this one);
+  /// - no known host, when a move recorded that ([_kServerKeyHostLost]);
+  /// - the host a move recorded for it ([_kServerKeyHost]);
+  /// - for a plain key the app engine could not read at its first load
+  ///   with no key ([_kServerKeyHostUnread]): the host the address named
+  ///   then, while the saved address still names it; no known host once
+  ///   the address names another or none, since that key may be the one
+  ///   1.7.0 used at the address recorded, or one an older version
+  ///   installed over this one stored since at the address saved now
+  ///   (review of PR 78, SEC-1);
+  /// - the host of the address saved with it (an update in place: the
+  ///   address it was in use with);
+  /// - for a plain key, no known host: no record, and no saved address
+  ///   naming a host (cleared, never entered, or dropped with the
+  ///   preferences by an iPhone reinstall that kept the keychain), so
+  ///   nothing says which server it was for. Read as bound to none yet, it
+  ///   showed in the key field at any address and went to the first one
+  ///   saved, so a different server got the old one's key (review of
+  ///   2026-11-20: PN-1, UPG-1);
+  /// - for an item bound to none yet (a key typed before any address): no
+  ///   known host on an install's first launch ([firstLaunch]: a reinstall
+  ///   kept it without its address), else none yet.
+  /// An item bound to none yet that a first launch finds, or that a record
+  /// says has no known host, has none either.
+  ///
+  /// A key with no known host is kept apart ([serverKeyHostUnknown]): not
+  /// the upload key, so never in the key field, in a request or bound to an
+  /// address saved, until the user uses it for one, enters another key or
+  /// removes it ([removeServerKeyOfUnknownHost]).
+  ///
+  /// The app engine stores what it finds as the item at once, and retires
+  /// the old name ([_moveServerKey]); the background engine only reads, so
+  /// the move has a single mover, and a reader between its two writes
+  /// finds the same key bound the same way (the item is written before the
+  /// old name is retired, and [load] reads the old name first).
+  Future<void> _loadServerKey(
+      {required String? legacy,
+      required String? item,
+      required bool firstLaunch,
+      required bool readOnly}) async {
+    _legacyServerKeyText = legacy;
+    var stored = item == null || item.isEmpty ? null : _readServerKeyItem(item);
+    if (stored != null && stored.key.isEmpty) stored = null;
+    final old = legacy == null || legacy.isEmpty ? null : legacy;
+    final oldItem = old == null ? null : _readServerKeyItem(old);
+    final oldKey = old == null ? '' : (oldItem?.key ?? old);
+    final hostLostRecorded = _prefs.getBool(_kServerKeyHostLost) ?? false;
+
+    if (oldKey.isEmpty ||
+        (readOnly && stored != null) ||
+        (stored != null && stored.key == oldKey)) {
+      // The item counts; under the old name, nothing or its own text (in
+      // the background engine, whatever it holds).
+      if (stored == null) {
+        if (!readOnly) {
+          await _noteServerKeyUnread(legacy, firstLaunch: firstLaunch);
+        }
+        return;
+      }
+      final lost = stored.host == null &&
+          !stored.hostUnknown &&
+          (firstLaunch || hostLostRecorded);
+      final found = lost
+          ? (key: stored.key, host: null, hostUnknown: true)
+          : stored;
+      _bindLoadedServerKey(found);
+      if (readOnly) return;
+      if (lost) {
+        await _moveServerKey(found, retire: legacy != '');
+      } else if (legacy != '') {
+        // A move cut short after the item was written: finish it. Or the
+        // old name read as nothing, which on Android is also a read that
+        // failed (AndroidSecureKeyStore): blanked too, so a value this load
+        // could not read never comes back at a later one as a newer key,
+        // bound to an address saved since. The item holds this key.
+        try {
+          await _retireLegacyServerKey();
+          await _removeServerKeyRecords();
+        } catch (e) {
+          debugPrint('Settings: the old server upload key name was not '
+              'cleared yet (${e.runtimeType})');
+        }
+      }
       return;
     }
-    if (_prefs.getBool(_kServerKeyHostLost) ?? false) {
-      _serverKeyHostLost = true;
-      return;
-    }
-    if (item == null) {
+
+    // A key under the old name, with no item holding it.
+    final newer = stored != null;
+    final String? host;
+    if (oldItem?.host != null) {
+      host = oldItem!.host;
+    } else if (oldItem != null || (!newer && hostLostRecorded)) {
+      host = null;
+    } else if (newer) {
+      host = serverKeyHostOf(_serverBaseUrl);
+    } else {
       final recorded =
           (_prefs.getString(_kServerKeyHost) ?? '').trim().toLowerCase();
-      if (recorded.isNotEmpty) {
-        _serverKeyHost = recorded;
-        return;
-      }
-      final saved = serverKeyHostOf(_serverBaseUrl);
-      if (saved != null) {
-        _serverKeyHost = saved;
-        await _prefs.setString(_kServerKeyHost, saved);
-        return;
-      }
+      host = recorded.isNotEmpty ? recorded : _plainServerKeyHost();
     }
-    if (firstLaunch) {
-      _serverKeyHostLost = true;
-      await _prefs.setBool(_kServerKeyHostLost, true);
+    final found = (
+      key: oldKey,
+      host: host,
+      hostUnknown: host == null &&
+          (oldItem == null || firstLaunch || (!newer && hostLostRecorded)),
+    );
+    _bindLoadedServerKey(found);
+    if (!readOnly) await _moveServerKey(found, retire: true);
+  }
+
+  /// The host of a plain key under the old name that no move recorded a
+  /// host for: the saved address's, the address it was in use with. Unless
+  /// the app engine could not read it at its first load with no key, and
+  /// the address names another host now (or none): the key may then be
+  /// the one 1.7.0 used at the address recorded, or one an older version
+  /// installed over this one stored since at the address saved now, and
+  /// nothing says which. No known host then ([_kServerKeyHostUnread]).
+  String? _plainServerKeyHost() {
+    final saved = serverKeyHostOf(_serverBaseUrl);
+    final unread = _prefs.getString(_kServerKeyHostUnread);
+    if (unread == null) return saved;
+    return saved != null && saved == unread.trim().toLowerCase() ? saved : null;
+  }
+
+  /// The app engine's load found no upload key under either name.
+  ///
+  /// The old name read as nothing: on Android that is also a read that
+  /// failed (AndroidSecureKeyStore forgives one as no key), with a key
+  /// 1.7.0 stored perhaps still there, readable at a later load. The host
+  /// it was in use with is the one the saved address names now: recorded
+  /// at once ([_kServerKeyHostUnread]), once, so an address saved before
+  /// that later read never binds it; a later load in either engine binds
+  /// it to that host only while the address still names it
+  /// ([_plainServerKeyHost]; review of PR 78, SEC-1). Not on an install's
+  /// first launch: no address is saved yet, and [load] writes no
+  /// preference then (settleNotificationAskAtLaunch takes any as an
+  /// earlier install's).
+  ///
+  /// The old name blank: this version retired it, so no key a record could
+  /// be about is there; any record left is removed.
+  Future<void> _noteServerKeyUnread(String? legacy,
+      {required bool firstLaunch}) async {
+    try {
+      if (legacy == '') {
+        await _removeServerKeyRecords();
+        return;
+      }
+      if (legacy != null || firstLaunch) return;
+      if (_serverKeyRecords.any(_prefs.containsKey)) return;
+      await _prefs.setString(
+          _kServerKeyHostUnread, serverKeyHostOf(_serverBaseUrl) ?? '');
+    } catch (e) {
+      debugPrint('Settings: the server address for an upload key not read '
+          'was not recorded (${e.runtimeType})');
     }
   }
 
-  /// Settings › Your own server › "Use this key for …": the saved key
-  /// is this address's too (the same server at a new IP, domain or port).
-  /// Only ever on the user's tap, and never for a key whose host is lost:
-  /// nothing says which server it was saved for.
+  void _bindLoadedServerKey(
+      ({String key, String? host, bool hostUnknown}) found) {
+    if (found.hostUnknown) {
+      _serverKeyOfUnknownHost = found.key;
+    } else {
+      _serverApiKey = found.key;
+      _serverKeyHost = found.host;
+    }
+  }
+
+  /// The app engine's move of what [_loadServerKey] found into the item,
+  /// once: a record of its host (or that none is known) first, then the
+  /// item, then the old name retired ([retire]), then the record removed,
+  /// each of the last three only after the one before it succeeded. So a
+  /// write that fails leaves the key where it was with the binding found
+  /// recorded (the next load takes the record, never an address saved
+  /// since), and the next load moves it again. The record backs the item
+  /// up: a record that cannot be written stops nothing. The load goes on
+  /// either way, the key bound in memory as found.
+  Future<void> _moveServerKey(
+      ({String key, String? host, bool hostUnknown}) found,
+      {required bool retire}) async {
+    try {
+      if (found.hostUnknown) {
+        await _prefs.setBool(_kServerKeyHostLost, true);
+      } else if (found.host != null) {
+        await _prefs.setString(_kServerKeyHost, found.host!);
+      }
+    } catch (e) {
+      // The item below is the binding; the record only backs it up.
+      debugPrint('Settings: the server upload key\'s host was not recorded '
+          '(${e.runtimeType})');
+    }
+    try {
+      await _keys.write(
+          _kServerKeyItem,
+          _serverKeyItem(found.key, found.host,
+              hostUnknown: found.hostUnknown));
+      if (retire) await _retireLegacyServerKey();
+      await _removeServerKeyRecords();
+    } catch (e) {
+      debugPrint('Settings: the server upload key was not moved yet '
+          '(${e.runtimeType}); it stays where it was');
+    }
+  }
+
+  /// Settings › Your own server › "Use this key for …", only ever on the
+  /// user's tap: the saved key is this address's too (the same server at a
+  /// new IP, domain or port), or a key kept whose server is not known
+  /// ([serverKeyHostUnknown]) is this address's, which only the user can
+  /// say.
   Future<void> bindServerKeyToAddress() async {
     final host = serverKeyHostOf(_serverBaseUrl);
-    if (_serverApiKey == null ||
-        _serverKeyHostLost ||
-        host == null ||
-        host == _serverKeyHost) {
+    if (host == null) return;
+    final kept = _serverKeyOfUnknownHost;
+    if (kept != null) {
+      await _saveServerKey(kept, host);
       return;
     }
+    if (_serverApiKey == null || host == _serverKeyHost) return;
     await _saveServerKey(_serverApiKey, host);
+  }
+
+  /// Settings › Your own server › "Remove this key", only ever on the
+  /// user's tap: deletes a key kept whose server is not known
+  /// ([serverKeyHostUnknown]) from the phone. Its field is empty, so
+  /// clearing the field could not remove it, and the iPhone Keychain keeps
+  /// it after the app is deleted (review of PR 78, SEC-3, UXC-1). As a
+  /// cleared key goes ([_storeServerKey]): the item deleted, the old name
+  /// left blank, the records removed. Nothing else changes: the upload key,
+  /// when there is one instead, is never touched.
+  Future<void> removeServerKeyOfUnknownHost() async {
+    if (_serverKeyOfUnknownHost == null) return;
+    await _saveServerKey(null, null);
   }
 
   /// A confirmed setup link: the own server on [backend] at [baseUrl]
@@ -1023,7 +1304,7 @@ class AppSettings extends ChangeNotifier {
     _serverBaseUrl = url;
     _serverApiKey = k.isEmpty ? null : k;
     _serverKeyHost = host;
-    _serverKeyHostLost = false;
+    _serverKeyOfUnknownHost = null; // replaced, in storage too
     await _storeServerKey(_serverApiKey, host);
     await _prefs.setString(_kServerBaseUrl, url);
     await _prefs.setString(_kServerBackend, b);
@@ -1044,18 +1325,18 @@ class AppSettings extends ChangeNotifier {
 
   /// The upload key stays bound to the host it was saved for
   /// ([serverKeyHost]); only a key saved before any address binds to the
-  /// first one saved, in the same step as the address, and a key whose
-  /// host is lost binds to none. The key is stored with its host before
+  /// first one saved, in the same step as the address. A key kept whose
+  /// server is not known ([serverKeyHostUnknown]) binds to none: only the
+  /// user's Use this key does that. The key is stored with its host before
   /// the address: cut short in between, the next load finds it bound to
   /// this host under the previous address (one naming no host), never an
   /// address with the key bound to none.
   Future<void> setServerBaseUrl(String value) async {
     final v = _trimServerUrl(value);
     _serverBaseUrl = v;
-    final bind =
-        _serverApiKey != null && _serverKeyHost == null && !_serverKeyHostLost
-            ? serverKeyHostOf(v)
-            : null;
+    final bind = _serverApiKey != null && _serverKeyHost == null
+        ? serverKeyHostOf(v)
+        : null;
     if (bind != null) {
       _serverKeyHost = bind;
       await _storeServerKey(_serverApiKey, bind);

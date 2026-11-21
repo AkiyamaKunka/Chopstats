@@ -22,11 +22,14 @@
 /// address it was entered at, alone (SettingsStore.setServerKeyFromField):
 /// the previous server's key is never in the field to be edited in place,
 /// and an edit of a field filled at another host than the saved address's
-/// is refused. A key whose host is lost (one an iPhone reinstall kept
-/// without the preferences that said which server it was for) leaves the
-/// field empty at every address and names no host. A change from elsewhere
-/// while the page is open (a setup link confirmed over it) refills both
-/// fields.
+/// is refused. A key kept whose server is not known (one an earlier
+/// version saved without its server address, SettingsStore
+/// .serverKeyHostUnknown) leaves the field empty at every address and says
+/// so under it; at an address naming a host, the same one tap makes it that
+/// address's key, and only that tap, another key or the Remove this key row
+/// under it (SettingsStore.removeServerKeyOfUnknownHost: the field cannot
+/// clear a key it does not show) ends it. A change from elsewhere while the
+/// page is open (a setup link confirmed over it) refills both fields.
 library;
 
 import 'dart:async';
@@ -538,6 +541,9 @@ class _SubscriptionProviderPageState
     final scheme = Theme.of(context).colorScheme;
     final settings = widget.settings;
     final keySavedFor = _keySavedForOtherHost;
+    // A key saved without its server address: not the upload key, never in
+    // the field; the row below makes it the address's, on the tap alone.
+    final keyHostUnknown = settings.serverKeyHostUnknown;
     final addressHost = serverKeyHostOf(settings.serverBaseUrl);
     return GroupedPage(
       title: context.l10n.subPageTitle,
@@ -613,16 +619,20 @@ class _SubscriptionProviderPageState
                   context,
                   labelText: context.l10n.serverUploadKeyLabel,
                 ).copyWith(
-                    // Saved for another server: nothing is sent with it to
-                    // the address above until it is that server's.
-                    errorText: keySavedFor == null
-                        ? null
-                        : context.l10n.serverKeyOtherHostField(keySavedFor),
+                    // Saved for another server, or without its server
+                    // address: nothing is sent with it to the address above
+                    // until it is that server's.
+                    errorText: keySavedFor != null
+                        ? context.l10n.serverKeyOtherHostField(keySavedFor)
+                        : keyHostUnknown
+                            ? context.l10n.serverKeyUnknownHostField
+                            : null,
                     errorMaxLines: 3,
                     errorBorder: InputBorder.none,
                     focusedErrorBorder: InputBorder.none),
               )),
-              if (keySavedFor != null && addressHost != null)
+              if ((keySavedFor != null || keyHostUnknown) &&
+                  addressHost != null)
                 GroupedRow(
                   key: const Key('serverKeyUseHereRow'),
                   icon: Icons.key_outlined,
@@ -632,6 +642,22 @@ class _SubscriptionProviderPageState
                   onTap: () async {
                     await settings.bindServerKeyToAddress();
                     // The key is this address's now: back in the field.
+                    if (mounted) setState(_syncKeyField);
+                  },
+                ),
+              // The one way to delete a key kept without its server
+              // address: its field is empty, so clearing it cannot, and an
+              // iPhone keeps it in the Keychain after the app is deleted.
+              if (keyHostUnknown)
+                GroupedRow(
+                  key: const Key('serverKeyRemoveKeptRow'),
+                  icon: Icons.delete_outline,
+                  iconColor: scheme.error,
+                  title: context.l10n.serverKeyRemoveKept,
+                  destructive: true,
+                  showChevron: false,
+                  onTap: () async {
+                    await settings.removeServerKeyOfUnknownHost();
                     if (mounted) setState(_syncKeyField);
                   },
                 ),

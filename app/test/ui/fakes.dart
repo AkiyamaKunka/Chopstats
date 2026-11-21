@@ -259,6 +259,16 @@ class FakeSettings with ChangeNotifier implements SettingsStore {
   String? get serverKeyHost => (keysByProvider['server'] ?? '').trim().isEmpty
       ? null
       : keySavedFor ?? serverKeyHostOf(serverBaseUrl);
+
+  /// A key kept whose server is not known (AppSettings
+  /// .serverKeyHostUnknown). Not the upload key: leave the server's entry in
+  /// [keysByProvider] empty with it. [bindServerKeyToAddress] at an address
+  /// naming a host makes it the key; a key entered or a setup link replaces
+  /// it; [removeServerKeyOfUnknownHost] removes it.
+  String? keyOfUnknownHost;
+  @override
+  bool get serverKeyHostUnknown => keyOfUnknownHost != null;
+
   @override
   String get serverKeyForAddress {
     final key = (keysByProvider['server'] ?? '').trim();
@@ -293,6 +303,7 @@ class FakeSettings with ChangeNotifier implements SettingsStore {
     if (v.isNotEmpty || serverKeyForAddress.isNotEmpty) {
       keysByProvider['server'] = v;
       keySavedFor = null; // bound here, or to the first address saved
+      keyOfUnknownHost = null; // replaced
       notifyListeners();
     }
     return true;
@@ -305,7 +316,24 @@ class FakeSettings with ChangeNotifier implements SettingsStore {
   @override
   Future<void> bindServerKeyToAddress() async {
     bindServerKeyCalls++;
+    final kept = keyOfUnknownHost;
+    if (kept != null && serverKeyHostOf(serverBaseUrl) != null) {
+      keysByProvider['server'] = kept;
+      keyOfUnknownHost = null;
+    }
     keySavedFor = null;
+    notifyListeners();
+  }
+
+  int removeKeptKeyCalls = 0;
+
+  /// As AppSettings.removeServerKeyOfUnknownHost: the key kept whose
+  /// server is not known goes; the upload key stays.
+  @override
+  Future<void> removeServerKeyOfUnknownHost() async {
+    removeKeptKeyCalls++;
+    if (keyOfUnknownHost == null) return;
+    keyOfUnknownHost = null;
     notifyListeners();
   }
 
@@ -323,6 +351,7 @@ class FakeSettings with ChangeNotifier implements SettingsStore {
     this.serverBaseUrl = serverBaseUrl;
     keysByProvider['server'] = apiKey;
     keySavedFor = null;
+    keyOfUnknownHost = null;
     notifyListeners(); // once, as AppSettings.applyServerSetup
   }
 
@@ -429,6 +458,7 @@ class FakeSettings with ChangeNotifier implements SettingsStore {
       // saved for; an unchanged one keeps its host.
       if (this.provider == 'server' && apiKey.trim() != this.apiKey.trim()) {
         keySavedFor = null;
+        keyOfUnknownHost = null;
       }
       this.apiKey = apiKey;
     }

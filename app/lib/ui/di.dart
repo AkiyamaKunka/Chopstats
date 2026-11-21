@@ -745,6 +745,8 @@ class _AppSettingsStore implements SettingsStore {
   @override
   String? get serverKeyHost => _s.serverKeyHost;
   @override
+  bool get serverKeyHostUnknown => _s.serverKeyHostUnknown;
+  @override
   String get serverKeyForAddress => _s.serverKeyForAddress ?? '';
   @override
   String? serverKeyFor(String host) => _s.serverKeyFor(host);
@@ -756,6 +758,9 @@ class _AppSettingsStore implements SettingsStore {
   Listenable get changes => _s;
   @override
   Future<void> bindServerKeyToAddress() => _s.bindServerKeyToAddress();
+  @override
+  Future<void> removeServerKeyOfUnknownHost() =>
+      _s.removeServerKeyOfUnknownHost();
   @override
   Future<void> applyServerSetup({
     required String serverBackend,

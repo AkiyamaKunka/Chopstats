@@ -943,6 +943,30 @@ void main() {
     String launch() => _body(glue(), 'Future<bool> runHeadlessBackfill({');
     String after() => _body(glue(), 'Future<bool> _runAfterLaunch({');
 
+    // Review of PR 78, UXC-2: only the app engine moves keys (between
+    // keychain classes, and an upload key an earlier version stored into
+    // its item), and the ordering that lets the two engines load at once
+    // holds with one mover alone. The tests pass these flags themselves,
+    // so dropping them here kept the whole suite green.
+    test('the run loads its settings with key stores that only read', () {
+      expect(
+        after(),
+        _wired(
+          r'AppSettings\.load\( keyStore: platformKeyStore\(migrate: false\), '
+          r'readOnlyKeys: true\)',
+        ),
+      );
+      expect(glue(), isNot(contains('platformKeyStore()')));
+      expect(
+        _body(glue(), 'Future<AppSettings> summarySettingsNow('),
+        _wired(
+          r'AppSettings\.load\( prefs: prefs, keyStore: const _NoKeys\(\), '
+          r'readOnlyKeys: true\)',
+        ),
+      );
+      expect('readOnlyKeys: false'.allMatches(glue()), isEmpty);
+    });
+
     test('the intake passes over what the run deferred too often, and the '
         'run notes what it defers', () {
       expect(
