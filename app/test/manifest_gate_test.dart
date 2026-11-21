@@ -1183,6 +1183,93 @@ void main() {
         isNot(contains('requestedOrientation')));
   });
 
+  // RCREL-V-1 (2026-11-21): the bitewise://setup link reaches the app
+  // through app_links only. Flutter's own deep linking, on unless the
+  // activity's meta-data turns it off, pushed each link that arrived while
+  // the app was open as a named route: a bare link became "/", which opened
+  // a second HomeShell that brought back the first setup link of the run
+  // and, when it closed, detached the sharing-consent asker.
+  test('Android: Flutter deep linking is off, so only app_links sees the '
+      'setup link', () {
+    final manifest = _uncommented(_manifest());
+    // MainActivity by name, up to its </activity>; meta-data inside an
+    // intent filter is not the activity's, so the filters are cut out.
+    final activity = RegExp(
+            r'<activity\b[^>]*android:name="\.MainActivity"[^>]*>.*?</activity>',
+            dotAll: true)
+        .firstMatch(manifest)
+        ?.group(0);
+    expect(activity, isNotNull, reason: 'MainActivity missing');
+    expect(activity, contains('android:scheme="bitewise"'));
+    final ownMetaData = activity!.replaceAll(
+        RegExp(r'<intent-filter\b.*?</intent-filter>', dotAll: true), '');
+    final flags = RegExp(r'<meta-data\b[^>]*>')
+        .allMatches(ownMetaData)
+        .map((m) => m.group(0)!.replaceAll(RegExp(r'\s+'), ' '))
+        .where((m) => m.contains('flutter_deeplinking_enabled'))
+        .toList();
+    expect(flags, hasLength(1));
+    expect(flags.single, contains('android:value="false"'));
+    expect('flutter_deeplinking_enabled'.allMatches(manifest), hasLength(1),
+        reason: 'set once, on MainActivity');
+
+    // Nothing turns it back on: not the debug, profile or Play manifests,
+    // and not the app's Kotlin (FlutterActivity.shouldHandleDeeplinking).
+    final src = '${_appRoot().path}/android/app/src';
+    for (final variant in ['debug', 'profile', 'playChannel']) {
+      final xml = _uncommented(
+          File('$src/$variant/AndroidManifest.xml').readAsStringSync());
+      expect(xml, isNot(contains('flutter_deeplinking_enabled')),
+          reason: variant);
+    }
+    for (final file in _appKotlin().entries) {
+      expect(_kotlinCode(file.value),
+          isNot(contains('shouldHandleDeeplinking')),
+          reason: file.key);
+    }
+
+    // Flutter 3.44, where the SDK carries its sources: the meta-data key is
+    // this one, deep linking is on when it is missing, and both ways a link
+    // becomes a route (the cold-start route and the push on onNewIntent) go
+    // through the activity's check of it.
+    final engine = Directory('${_pluginRoot('flutter')}/../../engine/src/'
+        'flutter/shell/platform/android/io/flutter/embedding/android');
+    if (!engine.existsSync()) {
+      markTestSkipped('this Flutter SDK carries no engine sources');
+      return;
+    }
+    String java(String name) => File('${engine.path}/$name')
+        .readAsStringSync()
+        .replaceAll(RegExp(r'//[^\n]*'), '')
+        .replaceAll(RegExp(r'\s+'), ' ');
+    final configs = java('FlutterActivityLaunchConfigs.java');
+    expect(
+        configs,
+        contains('HANDLE_DEEPLINKING_META_DATA_KEY = '
+            '"flutter_deeplinking_enabled";'));
+    expect(
+        configs,
+        contains('if (metaData != null && metaData.containsKey('
+            'HANDLE_DEEPLINKING_META_DATA_KEY)) { return '
+            'metaData.getBoolean(HANDLE_DEEPLINKING_META_DATA_KEY); } else '
+            '{ return true; }'));
+    expect(
+        java('FlutterActivity.java'),
+        contains('public boolean shouldHandleDeeplinking() { try { Bundle '
+            'metaData = getMetaData(); return deepLinkEnabled(metaData);'));
+    final delegate = java('FlutterActivityAndFragmentDelegate.java');
+    expect(
+        delegate,
+        contains('private String maybeGetInitialRouteFromIntent(Intent '
+            'intent) { if (host.shouldHandleDeeplinking()) {'));
+    expect(
+        delegate,
+        contains('String initialRoute = maybeGetInitialRouteFromIntent(intent); '
+            'if (initialRoute != null && !initialRoute.isEmpty()) { '
+            'flutterEngine.getNavigationChannel().pushRouteInformation('
+            'initialRoute);'));
+  });
+
   // With enableOnBackInvokedCallback, Flutter unregisters its back
   // callback at an idle root route and leaves Back there to Android.
   // Android 14 and later move the task to the back only when the home
