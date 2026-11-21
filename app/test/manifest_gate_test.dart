@@ -134,6 +134,30 @@ void main() {
     expect(families, isNotEmpty);
     expect(families, everyElement('1'));
   });
+
+  // IOS-DL-1 (from main's #84, 2026-11-21): the bitewise://setup link
+  // reaches the app through app_links only (its example Info.plist sets this
+  // key). With the key missing, Flutter's own deep linking is on: a link that
+  // arrives while the app runs is offered to the plugins, none claims it, and
+  // the engine pushes it to the framework as a route. A bare link became "/"
+  // and pushed a second HomeShell; on the simulator a photo shared after that
+  // got no consent question and was lost.
+  test('Info.plist turns Flutter deep linking off, so only app_links sees '
+      'the setup link', () {
+    final plist = File('${_appRoot().path}/ios/Runner/Info.plist')
+        .readAsStringSync();
+    expect(plist, contains('<string>bitewise</string>'));
+    expect(
+        RegExp(r'<key>FlutterDeepLinkingEnabled</key>\s*<false/>')
+            .allMatches(plist),
+        hasLength(1));
+    expect('FlutterDeepLinkingEnabled'.allMatches(plist), hasLength(1),
+        reason: 'set once');
+    final extension = File('${_appRoot().path}/ios/ShareExtension/Info.plist')
+        .readAsStringSync();
+    expect(extension, isNot(contains('FlutterDeepLinkingEnabled')),
+        reason: 'the share extension runs no Flutter engine');
+  });
   // App Store Connect scans every executable in the IPA for "required
   // reason" APIs and emails ITMS-91053 for each bundle that uses one without
   // a PrivacyInfo.xcprivacy beside it. Both targets do: receive_sharing_intent
