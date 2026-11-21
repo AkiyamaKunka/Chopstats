@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 
 import '../l10n.dart';
 import '../theme/tokens.dart';
+import 'nav_bar_dimming.dart';
 
 /// A centred empty state: icon, title, optional message and action.
 ///
@@ -180,8 +181,10 @@ class LoadingState extends StatelessWidget {
 
 /// The scrim + capsule shown over a screen while a photo is analysed.
 /// The label is a live region: a slow round trip is otherwise silent to a
-/// screen reader until the outcome dialog.
-class AnalyzingOverlay extends StatelessWidget {
+/// screen reader until the outcome dialog. While it is up, Android 15's
+/// 3-button bar dims with it (NavBarDimming): the bar's scrim is drawn
+/// above the app, out of this scrim's reach.
+class AnalyzingOverlay extends StatefulWidget {
   const AnalyzingOverlay({
     super.key,
     required this.label,
@@ -198,9 +201,33 @@ class AnalyzingOverlay extends StatelessWidget {
   final Key? spinnerKey;
 
   @override
+  State<AnalyzingOverlay> createState() => _AnalyzingOverlayState();
+}
+
+class _AnalyzingOverlayState extends State<AnalyzingOverlay> {
+  /// Lets go of the shell's bar dimming; null without the shell (an
+  /// iPhone, a test).
+  VoidCallback? _release;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _release ??= NavBarDimming.maybeOf(context)?.hold();
+  }
+
+  @override
+  void dispose() {
+    _release?.call();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colors = AppColors.of(context);
+    final labelKey = widget.labelKey;
+    final spinnerKey = widget.spinnerKey;
+    final label = widget.label;
     return ColoredBox(
       color: colors.scrim,
       child: Center(

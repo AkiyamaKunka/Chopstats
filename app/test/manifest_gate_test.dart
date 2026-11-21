@@ -2114,6 +2114,9 @@ void main() {
   // (AnalysisKeepAlive.kt). Dart drives it over this engine's own channel;
   // an engine that dies takes its requests with it, or the job would keep
   // the process up for the full cap after they were gone.
+  // A Dart run that starts over in the same engine (a hot restart: no
+  // configure, no cleanup, ids from 1 again) sends "reset" first, and the
+  // session drops what the last run left open (review DL-3).
   test('the analysis keep-alive: each engine drives it over its own channel, '
       'and its requests end with the engine', () {
     final code = _kotlinCode(_mainActivity());
@@ -2126,11 +2129,22 @@ void main() {
             'flutterEngine.dartExecutor.binaryMessenger, KEEP_ALIVE_CHANNEL) '
             '.setMethodCallHandler { call, result -> val id = '
             '(call.argument<Any?>("id") as? Number)?.toLong() when { '
+            'call.method == "reset" -> { AnalysisKeepAlive.drop('
+            'applicationContext, session) result.success(true) } '
             'id == null -> result.success(false) call.method == "begin" -> '
             'result.success(AnalysisKeepAlive.begin(applicationContext, '
             'session, id)) call.method == "end" -> result.success('
             'AnalysisKeepAlive.end(applicationContext, session, id)) '
             'else -> result.notImplemented() } }'));
+    // Dart's side: the reset is the first call each instance makes.
+    final dart =
+        File('${_appRoot().path}/lib/services/analysis_keep_alive.dart')
+            .readAsStringSync()
+            .replaceAll(RegExp(r'\s+'), ' ');
+    expect(
+        dart,
+        contains('AnalysisKeepAlive( [this._channel = const '
+            "MethodChannel(keepAliveChannelName)]) { _send('reset'); }"));
     expect(_kotlinFunction(code, 'override fun cleanUpFlutterEngine('),
         '{ AnalysisKeepAlive.drop(applicationContext, keepAliveSession) '
         'super.cleanUpFlutterEngine(flutterEngine) }');
@@ -2153,34 +2167,62 @@ void main() {
     }
   });
 
-  // The job itself: one time, a network (JobScheduler then lets its
-  // process use one), expedited from Android 12 only, where JobScheduler
-  // runs it with no foreground service and no notification, and out of
-  // quota as a plain job. Below Android 12 WorkManager would run expedited
-  // work as its stripped foreground service and ask the worker for
-  // foreground info it does not give: a plain job there. It is cancelled
-  // as soon as nothing is live, and its worker only waits and succeeds,
-  // for 2 minutes 45 seconds at most: never retried, never a foreground
+  // The job itself: one time, expedited from Android 12 only, where
+  // JobScheduler runs it with no foreground service and no notification,
+  // and out of quota as a plain job. Below Android 12 WorkManager would run
+  // expedited work as its stripped foreground service and ask the worker
+  // for foreground info it does not give: a plain job there. From Android 9
+  // it needs a network, any that reaches the internet, validated or not
+  // (review BG-1): JobInfo's NETWORK_TYPE_ANY without
+  // NET_CAPABILITY_VALIDATED, so a network that fails Android's probe (a
+  // phone in mainland China with no VPN) still starts it, and an expedited
+  // job keeps its network bypass, which needs a network constraint. Below
+  // Android 9 none (a plain job, no bypass to keep). The first request of
+  // a burst replaces any job WorkManager still has, a backed-off re-run
+  // that would never be expedited (review BG-2); a system stop mid-run is
+  // renewed with a fresh job while a request is live. It is cancelled as
+  // soon as nothing is live, and its worker only waits and succeeds, for
+  // 2 minutes 45 seconds at most: never retried, never a foreground
   // service.
-  test('the keep-alive job: one time, needs a network, expedited only on '
-      'Android 12 and later; its worker only waits', () {
+  test('the keep-alive job: one time, any network from Android 9, expedited '
+      'only on Android 12 and later, fresh for each burst; its worker only '
+      'waits', () {
     final kotlin = _appKotlin();
     final glue = _kotlinCode(kotlin['AnalysisKeepAlive.kt']!);
     expect(
         _kotlinFunction(glue, 'private fun request('),
-        '{ val builder = OneTimeWorkRequest.Builder('
-        'AnalysisKeepAliveWorker::class.java) .setConstraints( '
-        'Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED)'
-        '.build(), ) if (KeepAliveRules.expedited(Build.VERSION.SDK_INT)) { '
+        '{ val constraints = if (KeepAliveRules.usesNetworkRequest('
+        'Build.VERSION.SDK_INT)) { Constraints.Builder()'
+        '.setRequiredNetworkRequest( NetworkRequest.Builder() '
+        '.addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) '
+        '.removeCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN) '
+        '.removeCapability(NetworkCapabilities.NET_CAPABILITY_NOT_RESTRICTED) '
+        '.build(), NetworkType.CONNECTED, ).build() } else { '
+        'Constraints.NONE } val builder = OneTimeWorkRequest.Builder('
+        'AnalysisKeepAliveWorker::class.java) .setConstraints(constraints) '
+        'if (KeepAliveRules.expedited(Build.VERSION.SDK_INT)) { '
         'builder.setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST) '
         '} return builder.build() }');
-    final begin = _kotlinFunction(glue, 'fun begin(');
-    expect(begin,
-        contains('val added = ledger.begin(session, id, SystemClock.elapsedRealtime())'));
+    expect(glue, isNot(contains('NET_CAPABILITY_VALIDATED')));
+    expect(glue, isNot(contains('setRequiredNetworkType(')),
+        reason: 'CONNECTED alone asks for a validated network');
     expect(
-        begin,
-        contains('WorkManager.getInstance(context) .enqueueUniqueWork('
-            'KeepAliveRules.WORK_NAME, ExistingWorkPolicy.KEEP, request())'));
+        _kotlinFunction(glue, 'fun begin('),
+        '{ val now = SystemClock.elapsedRealtime() val replace = '
+        'KeepAliveRules.replacesJob(liveBefore = ledger.live(now)) '
+        'val added = ledger.begin(session, id, now) enqueue(context, '
+        'if (replace) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP) '
+        'return added }');
+    expect(
+        _kotlinFunction(glue, 'private fun enqueue('),
+        '{ try { WorkManager.getInstance(context) .enqueueUniqueWork('
+        'KeepAliveRules.WORK_NAME, policy, request()) } catch (e: Exception) '
+        '{ } }');
+    expect(
+        _kotlinFunction(glue, 'fun renewAfterStop('),
+        '{ if (!KeepAliveRules.renewsAfterStop(stopReason)) return if '
+        '(!ledger.live(SystemClock.elapsedRealtime())) return '
+        'enqueue(context, ExistingWorkPolicy.REPLACE) }');
     expect(_kotlinFunction(glue, 'fun end('),
         '{ val removed = ledger.end(session, id) if (removed) '
         'settle(context) return removed }');
@@ -2195,8 +2237,11 @@ void main() {
         glue,
         contains('class AnalysisKeepAliveWorker(context: Context, params: '
             'WorkerParameters) : CoroutineWorker(context, params) { override '
-            'suspend fun doWork(): Result { '
-            'AnalysisKeepAlive.runJob(applicationContext) '
+            'suspend fun doWork(): Result { try { '
+            'AnalysisKeepAlive.runJob(applicationContext) } catch (e: '
+            'CancellationException) { if (Build.VERSION.SDK_INT >= '
+            'Build.VERSION_CODES.S) { AnalysisKeepAlive.renewAfterStop('
+            'applicationContext, stopReason) } throw e } '
             'return Result.success() } }'));
     // Android counts an expedited job of 3 minutes or more as timed out
     // however it ends, and more than 10 timeouts a day restrict the app
@@ -2205,26 +2250,42 @@ void main() {
     expect(
         _kotlinFunction(glue, 'suspend fun runJob('),
         '{ val stillLive = ledger.awaitIdleOrCap(KeepAliveRules.JOB_CAP_MS) '
-        '{ SystemClock.elapsedRealtime() } if (!stillLive) return try { '
-        'WorkManager.getInstance(context).enqueueUniqueWork( '
-        'KeepAliveRules.WORK_NAME, ExistingWorkPolicy.APPEND_OR_REPLACE, '
-        'request(), ) } catch (e: Exception) { } }');
+        '{ SystemClock.elapsedRealtime() } if (!stillLive) return '
+        'enqueue(context, ExistingWorkPolicy.APPEND_OR_REPLACE) }');
 
     final rules = _kotlinCode(kotlin['KeepAliveRules.kt']!);
     expect(rules, contains('const val CAP_MS = 3L * 60 * 1000'));
     expect(rules, contains('const val JOB_CAP_MS = 165L * 1000'));
     expect(rules,
         contains('fun expedited(sdk: Int): Boolean = sdk >= Build.VERSION_CODES.S'));
+    expect(
+        rules,
+        contains('fun usesNetworkRequest(sdk: Int): Boolean = '
+            'sdk >= Build.VERSION_CODES.P'));
+    expect(rules,
+        contains('fun replacesJob(liveBefore: Boolean): Boolean = !liveBefore'));
+    expect(
+        rules,
+        contains('fun renewsAfterStop(stopReason: Int): Boolean = when '
+            '(stopReason) { WorkInfo.STOP_REASON_PREEMPT, '
+            'WorkInfo.STOP_REASON_DEVICE_STATE, '
+            'WorkInfo.STOP_REASON_CONSTRAINT_CONNECTIVITY, '
+            'WorkInfo.STOP_REASON_QUOTA, WorkInfo.STOP_REASON_APP_STANDBY, '
+            'WorkInfo.STOP_REASON_SYSTEM_PROCESSING -> true else -> false }'));
     expect(rules, isNot(contains('import android.content')),
         reason: 'the rules stay free of Android objects, for the JVM tests');
     _expectJvmTests([
       'KeepAliveRules.expedited(',
+      'KeepAliveRules.usesNetworkRequest(',
+      'KeepAliveRules.replacesJob(',
+      'KeepAliveRules.renewsAfterStop(',
       'KeepAliveRules.CAP_MS',
       'KeepAliveRules.JOB_CAP_MS',
       'ledger.drop(',
       'ledger.awaitIdle(',
       'awaitIdleOrCap(',
       'aStrayEndChangesNothing',
+      'aDartThatStartsOverDropsWhatItsLastRunLeft',
     ], suite: 'KeepAliveRulesTest');
 
     // One expedited request in the app, the one above; no foreground

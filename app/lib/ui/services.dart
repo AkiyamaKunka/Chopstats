@@ -261,7 +261,9 @@ class UiServices {
   /// Android: keeps the app running while an analysis the user started is
   /// in flight (owner decision 9): the pipeline keeps its
   /// deliberate photos, [executor] its typed meals and Fix meals requests,
-  /// and the leftover flow its estimate. Its [AnalysisKeepAlive.inFlight]
+  /// the leftover flow its estimate, and Photo Coverage its bulk run, as
+  /// one request from its first photo to its last (SettingsScreen hands it
+  /// on). Its [AnalysisKeepAlive.inFlight]
   /// also holds the shell's Back at the root, as [sharedPhotosPending]
   /// does (SharedPhotosBackGuard). Null on iPhone and in most tests.
   final AnalysisKeepAlive? analysisKeepAlive;

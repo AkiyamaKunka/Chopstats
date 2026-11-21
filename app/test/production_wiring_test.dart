@@ -1245,8 +1245,9 @@ void main() {
     test('the shell says it once: at launch, on a return to the app, and '
         'once the shell is back on top', () {
       final app = _source('lib/ui/app.dart');
+      final shell = app.substring(app.indexOf('class _HomeShellState'));
       expect(
-        _body(app, '  void initState() {', indent: '  '),
+        _body(shell, '  void initState() {', indent: '  '),
         contains('_tellWatchRetiredWhenIdle();'),
       );
       expect(

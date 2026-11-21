@@ -16,6 +16,7 @@ import '../services.dart' show SettingsStore;
 import '../large_text.dart';
 import '../theme/tokens.dart';
 import '../widgets/discard_guard.dart';
+import '../widgets/grouped.dart' show scrollEndInset;
 import '../widgets/reply_note.dart';
 import '../widgets/small_spinner.dart';
 
@@ -160,11 +161,13 @@ class _FixMealScreenState extends State<FixMealScreen> {
         body: SingleChildScrollView(
           // More room on top at large text: the field's floating label rises
           // about 20 pt above it at AX5, past the 16-pt padding.
+          // Its send button scrolls clear of a 3-button bar at large text
+          // (scrollEndInset; none while the keyboard is up).
           padding: EdgeInsets.fromLTRB(
               AppSpace.gutter,
               isLargeText(context) ? AppSpace.s24 : AppSpace.gutter,
               AppSpace.gutter,
-              AppSpace.gutter),
+              scrollEndInset(context, AppSpace.gutter)),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [

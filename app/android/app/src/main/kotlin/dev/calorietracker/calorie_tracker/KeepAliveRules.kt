@@ -1,6 +1,7 @@
 package dev.calorietracker.calorie_tracker
 
 import android.os.Build
+import androidx.work.WorkInfo
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
@@ -9,8 +10,9 @@ import kotlinx.coroutines.withTimeoutOrNull
 /// 2026-11-20; AnalysisKeepAlive.kt wires them to WorkManager), kept free
 /// of Android objects as IntakeRules is, so the JVM tests
 /// (KeepAliveRulesTest, `./gradlew :app:testDebugUnitTest`) run them for
-/// real. manifest_gate_test pins the wiring. (Build's version codes are
-/// compile-time constants: no Android class is loaded.)
+/// real. manifest_gate_test pins the wiring. (Build's version codes and
+/// WorkInfo's stop reasons are compile-time constants: no Android class is
+/// loaded.)
 internal object KeepAliveRules {
     /// How long one analysis may keep the process up, from its begin:
     /// 3 minutes. A direct provider's call gives up after 90 s a try
@@ -42,6 +44,62 @@ internal object KeepAliveRules {
     /// the worker's foreground info, which the keep-alive worker does not
     /// give: there the job is a plain one-time job.
     fun expedited(sdk: Int): Boolean = sdk >= Build.VERSION_CODES.S
+
+    /// Whether the job asks for its network as a NetworkRequest on Android
+    /// [sdk] (AnalysisKeepAlive.request): from Android 9 (API 28), where
+    /// WorkManager hands one to JobScheduler (JobInfo.setRequiredNetwork)
+    /// and tracks it in-process itself. The request is JobInfo's
+    /// NETWORK_TYPE_ANY without NET_CAPABILITY_VALIDATED: a network can
+    /// carry the app's requests and still fail Android's validation probe
+    /// (a phone in mainland China with no VPN, whose probes go to Google;
+    /// a network that blocks the probe hosts; partial connectivity), and
+    /// NetworkType.CONNECTED, which asks for a validated one, never let the
+    /// job start there, or stopped it as the network lost its validation.
+    /// The constraint itself stays: JobScheduler gives an expedited job its
+    /// network bypass (BIND_BYPASS_POWER_NETWORK_RESTRICTIONS) only with
+    /// one. Below Android 9 the job is plain, with no bypass to keep, and
+    /// CONNECTED would wait for a validated network as well (JobScheduler
+    /// and WorkManager's tracker, API 26 and 27): no network constraint
+    /// there, so the job runs on any network or none.
+    fun usesNetworkRequest(sdk: Int): Boolean = sdk >= Build.VERSION_CODES.P
+
+    /// Whether a request that begins replaces the keep-alive job
+    /// (ExistingWorkPolicy.REPLACE) instead of keeping the one WorkManager
+    /// has (KEEP): when nothing was live before it ([liveBefore] false),
+    /// the first request of a burst, and so the first one in any process.
+    /// A job left from before then serves nothing: one finishing as its
+    /// requests ended, or one WorkManager runs again after the system
+    /// stopped it or its process died mid-run (a swipe from Recents). Such
+    /// a re-run waits out a backoff (30 s, then longer) and is never
+    /// expedited (runAttemptCount above 0), and KEEP adopted it: the new
+    /// request had no expedited job, and no running one for up to 30 s.
+    /// REPLACE puts a fresh, expedited job in its place. A request that
+    /// joins a live one keeps the job that runs for it.
+    fun replacesJob(liveBefore: Boolean): Boolean = !liveBefore
+
+    /// Whether a keep-alive job the system stopped mid-run with
+    /// [stopReason] (WorkInfo.STOP_REASON_*, Android 12 and later) is
+    /// renewed while a request is still live (AnalysisKeepAlive
+    /// .renewAfterStop): WorkManager runs a stopped job again only after a
+    /// backoff, and never expedited, so the request was held by nothing in
+    /// between. A fresh job (REPLACE) is expedited again with no backoff.
+    /// Renewed after the stops a fresh job can outlast: preempted, the
+    /// device's state, the network gone for a moment (the fresh job waits
+    /// for it), out of quota (the fresh job then runs as a plain one), the
+    /// standby bucket, the system's own processing. Never after the app's
+    /// own cancel (its requests ended, or a newer burst replaced the job),
+    /// a user's stop, a background restriction the user set, or a timeout,
+    /// which a second job would repeat (more than 10 in a day restrict the
+    /// app); nor for a reason this list does not know.
+    fun renewsAfterStop(stopReason: Int): Boolean = when (stopReason) {
+        WorkInfo.STOP_REASON_PREEMPT,
+        WorkInfo.STOP_REASON_DEVICE_STATE,
+        WorkInfo.STOP_REASON_CONSTRAINT_CONNECTIVITY,
+        WorkInfo.STOP_REASON_QUOTA,
+        WorkInfo.STOP_REASON_APP_STANDBY,
+        WorkInfo.STOP_REASON_SYSTEM_PROCESSING -> true
+        else -> false
+    }
 }
 
 /// The analyses in flight in this process: each by its engine's session
@@ -49,7 +107,9 @@ internal object KeepAliveRules {
 /// Dart gave it (never reused within that engine), with the time it
 /// began. In memory only: a new process starts with none, so a keep-alive
 /// job that outlived its process (WorkManager re-runs one its process
-/// died in) finds nothing to wait for and ends at once. Thread-safe: the
+/// died in, after a backoff) finds nothing to wait for and ends at once,
+/// and the first request that process begins replaces it with a fresh job
+/// instead of adopting it (KeepAliveRules.replacesJob). Thread-safe: the
 /// method channel calls on the main thread, the worker reads on its own.
 internal class KeepAliveLedger(private val capMs: Long = KeepAliveRules.CAP_MS) {
     private val begun = HashMap<Pair<Long, Long>, Long>()

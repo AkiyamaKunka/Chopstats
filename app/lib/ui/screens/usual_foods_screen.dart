@@ -308,7 +308,7 @@ class _UsualFoodsScreenState extends State<UsualFoodsScreen> {
     final list = _list;
     if (_failed || list == null) {
       return ListView(
-        padding: const EdgeInsets.only(bottom: AppSpace.s32),
+        padding: EdgeInsets.only(bottom: scrollEndInset(context)),
         children: [
           InlineError(
             key: const Key('usualListFailed'),
@@ -341,7 +341,7 @@ class _UsualFoodsScreenState extends State<UsualFoodsScreen> {
     if (around.isEmpty && more.isEmpty) {
       final allHidden = _hiddenCount > 0;
       return ListView(
-        padding: const EdgeInsets.only(bottom: AppSpace.s32),
+        padding: EdgeInsets.only(bottom: scrollEndInset(context)),
         children: [
           EmptyState(
             key: Key(allHidden ? 'usualAllHidden' : 'usualEmpty'),
@@ -379,7 +379,7 @@ class _UsualFoodsScreenState extends State<UsualFoodsScreen> {
           ],
         );
     return ListView(
-      padding: const EdgeInsets.only(bottom: AppSpace.s32),
+      padding: EdgeInsets.only(bottom: scrollEndInset(context)),
       children: [
         if (around.isNotEmpty) rows(around),
         if (more.isNotEmpty) rows(more),

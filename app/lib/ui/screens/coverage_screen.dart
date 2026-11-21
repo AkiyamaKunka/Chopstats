@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/contracts.dart';
 import '../../core/outcome_kind.dart';
+import '../../services/analysis_keep_alive.dart' show AnalysisKeepAlive;
 import '../../services/photo/coverage.dart';
 import '../../services/photo/photo_library.dart';
 import '../outcome_text.dart';
@@ -35,6 +36,7 @@ class CoverageScreen extends StatefulWidget {
     required this.ensureConsent,
     this.library,
     this.logManually,
+    this.keepAlive,
   });
 
   final CoverageAuditor auditor;
@@ -64,6 +66,18 @@ class CoverageScreen extends StatefulWidget {
   /// Open the manual editor for a photo the model refused or failed on for
   /// good. Null hides the action (tests / no editor context).
   final Future<bool> Function(IntakePhoto photo)? logManually;
+
+  /// Android (UiServices.analysisKeepAlive): a bulk Log/Retry is ONE
+  /// analysis from its first photo to its last (owner decision 9). Each
+  /// photo is kept alive by the pipeline for its own turn, but between two
+  /// of them, while the next original is read, nothing else is in flight:
+  /// the shell handed root Back back to Android (a task Play's Open button
+  /// started was then finished, and the rest of the batch with it) and
+  /// the keep-alive job was cancelled mid-batch. The run holds one request
+  /// for the whole batch, so neither happens until the last photo is done;
+  /// each photo's own request still gets its full cap. Null on iPhone and
+  /// in tests that are about something else.
+  final AnalysisKeepAlive? keepAlive;
 
   @override
   State<CoverageScreen> createState() => _CoverageScreenState();
@@ -188,61 +202,75 @@ class _CoverageScreenState extends State<CoverageScreen> {
     // that stop names its own reason instead of sending the user to a key
     // that is fine.
     PhotoOutcome? stopOutcome;
-    for (final item in items) {
-      // Re-checked EVERY iteration, not once up front: photo 1's daily-quota
-      // 429 arms the pause latch mid-batch, and every photo pushed after
-      // that is reserved (reclaiming its skipped/failed tombstone), makes
-      // zero model calls, then released — and releasing a just-reclaimed row
-      // DELETES it. Stopping here is what keeps rows 2..N in the ledger.
-      if (!widget.canAnalyze()) {
-        stopped = true;
-        break;
-      }
-      final photo = await widget.auditor.loadForProcessing(item);
-      attempted++;
-      if (photo == null) {
-        failures++;
-      } else {
-        final outcome = await widget.processPhoto(photo);
-        if (outcome.kind == PhotoOutcomeKind.failed) {
+    Future<void> run() async {
+      for (final item in items) {
+        // Re-checked EVERY iteration, not once up front: photo 1's
+        // daily-quota 429 arms the pause latch mid-batch, and every photo
+        // pushed after that is reserved (reclaiming its skipped/failed
+        // tombstone), makes zero model calls, then released — and releasing
+        // a just-reclaimed row DELETES it. Stopping here is what keeps rows
+        // 2..N in the ledger.
+        if (!widget.canAnalyze()) {
+          stopped = true;
+          break;
+        }
+        final photo = await widget.auditor.loadForProcessing(item);
+        attempted++;
+        if (photo == null) {
           failures++;
-          // A retryable failure (rate limit, network, quota, missing key)
-          // means the NEXT photo cannot succeed either — and its reservation
-          // was released, not burned, so this photo's tombstone is already
-          // gone. Cap the damage at one row. A rejected key is permanent
-          // for a deliberate photo, yet refuses photos 2..N just the same:
-          // stop there too rather than upload every one of them for the
-          // same verdict.
-          if (outcome.retryable ||
-              outcome.errorKind == AnalysisErrorKind.rejectedKey) {
-            stopOutcome = outcome;
-            stopped = true;
-            if (mounted) setState(() => _progressDone = attempted);
-            break;
+        } else {
+          final outcome = await widget.processPhoto(photo);
+          if (outcome.kind == PhotoOutcomeKind.failed) {
+            failures++;
+            // A retryable failure (rate limit, network, quota, missing key)
+            // means the NEXT photo cannot succeed either — and its
+            // reservation was released, not burned, so this photo's
+            // tombstone is already gone. Cap the damage at one row. A
+            // rejected key is permanent for a deliberate photo, yet refuses
+            // photos 2..N just the same: stop there too rather than upload
+            // every one of them for the same verdict.
+            if (outcome.retryable ||
+                outcome.errorKind == AnalysisErrorKind.rejectedKey) {
+              stopOutcome = outcome;
+              stopped = true;
+              if (mounted) setState(() => _progressDone = attempted);
+              break;
+            }
           }
         }
+        // Keep going even if the user left: the confirmation promised the
+        // work continues, and abandoning photos 4..21 mid-run would leave
+        // their ledger rows churned for nothing. Only the UI updates need a
+        // mounted screen. (Photos already enqueued are the pipeline's
+        // business anyway.)
+        if (!mounted) continue;
+        setState(() {
+          _actedOn++;
+          _progressDone = _actedOn;
+        });
       }
-      // Keep going even if the user left: the confirmation promised the work
-      // continues, and abandoning photos 4..21 mid-run would leave their
-      // ledger rows churned for nothing. Only the UI updates need a mounted
-      // screen. (Photos already enqueued are the pipeline's business anyway.)
-      if (!mounted) continue;
-      setState(() {
-        _actedOn++;
-        _progressDone = _actedOn;
-      });
+    }
+
+    // Android: the whole batch is one request kept alive, Back held at the
+    // root included, even once the user has left this screen ([keepAlive]).
+    final keepAlive = widget.keepAlive;
+    if (keepAlive == null) {
+      await run();
+    } else {
+      await keepAlive.guard(run);
     }
     if (!mounted) return;
     final remaining = items.length - attempted;
+    final stop = stopOutcome;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(stopOutcome != null
+        content: Text(stop != null
             // Stopped on the LAST photo: nothing remains, so no "the
             // remaining 0 photos … run this again later" (U13).
             ? remaining == 0
                 ? l.covStoppedLast(label, attempted, items.length,
-                    outcomeBody(l, stopOutcome))
+                    outcomeBody(l, stop))
                 : l.covStoppedBecause(label, attempted, items.length,
-                    outcomeBody(l, stopOutcome), remaining)
+                    outcomeBody(l, stop), remaining)
             : stopped
                 ? l.covStopped(label, attempted, items.length, remaining)
                 : failures == 0
@@ -372,7 +400,7 @@ class _CoverageScreenState extends State<CoverageScreen> {
       backgroundColor: pageColor(context),
       appBar: AppBar(title: Text(context.l10n.covTitle)),
       body: ListView(
-        padding: const EdgeInsets.only(bottom: AppSpace.s32),
+        padding: EdgeInsets.only(bottom: scrollEndInset(context)),
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(kGroupInset + AppSpace.rowH,

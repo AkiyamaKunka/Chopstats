@@ -15,11 +15,18 @@
 // bar showed its form under the buttons at rest (A36-2). The colour now
 // also goes to MainActivity, which sets it on the window from Android 15
 // (ending the forced buttons, and tinting the scrim), and the scrim is on:
-// Android draws it behind the 3-button bar only.
-import 'package:calorie_tracker/core/contracts.dart';
+// Android draws it behind the 3-button bar only. Every screen without the
+// tab bar ends its scroll past that bar: scroll_end_inset_test.dart.
+//
+// The scrim is a view Android draws above the app, which no Flutter barrier
+// can dim (review NAV-2): every dialog and the overlay that dims Add photo
+// while a photo is analyzed left a bright strip under the buttons. While
+// one is up, the colour handed to MainActivity is the tab bar's under the
+// barrier's scrim; once it is gone, the tab bar's own again. Bottom sheets
+// cover the bar's area themselves and change nothing.
 import 'package:calorie_tracker/ui/app.dart';
-import 'package:calorie_tracker/ui/screens/meal_editor_screen.dart';
 import 'package:calorie_tracker/ui/theme/tokens.dart' show AppColors;
+import 'package:calorie_tracker/ui/widgets/states.dart' show AnalyzingOverlay;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -36,6 +43,12 @@ Finder _navBarRegion() => find.byWidgetPredicate((w) =>
 
 Color _chrome(Brightness theme) =>
     (theme == Brightness.dark ? AppColors.dark : AppColors.light).chrome;
+
+/// The tab bar's colour under a dialog's barrier (the theme's scrim).
+Color _dimmed(Brightness theme) {
+  final c = theme == Brightness.dark ? AppColors.dark : AppColors.light;
+  return Color.alphaBlend(c.scrim, c.chrome);
+}
 
 /// What the app told Android about its bars, in order: each overlay style
 /// Flutter sent (`style:` and its buttons' brightness) and each colour
@@ -233,53 +246,138 @@ void main() {
     messenger.setMockMethodCallHandler(_systemBars, null);
   });
 
-  // A36-2's other half: at the end of its scroll a screen with no tab bar
-  // brings its last controls above a 3-button bar (48 dp on a 1080x2400
-  // phone at 2.625), so nothing stays out of reach under the buttons.
-  testWidgets('Android, 3-button bar: Edit meal scrolls Save and its last '
-      'item above the bar', (tester) async {
-    tester.view.physicalSize = const Size(1080, 2400);
-    tester.view.devicePixelRatio = 2.625;
-    tester.view.padding = const FakeViewPadding(bottom: 126);
-    tester.view.viewPadding = const FakeViewPadding(bottom: 126);
-    addTearDown(tester.view.reset);
-    final dao = FakeDao()
-      ..seed(Meal(
-        id: 1,
-        date: '2026-11-20',
-        time: '12:30 PM',
-        timestamp: '2026-11-20T12:30:00.000',
-        source: 'app_photo',
-        imageHash: 'h1',
-        analysis: {
-          'is_food': true,
-          'meal_description': 'Rice bowl',
-          'total_calories': 650,
-          'total_protein_g': 30,
-          'total_carbs_g': 90,
-          'total_fat_g': 15,
-          'food_items': [
-            for (var i = 0; i < 6; i++)
-              {
-                'name': 'Item $i',
-                'estimated_calories': 100,
-                'protein_g': 5,
-                'carbs_g': 15,
-                'fat_g': 2.5,
-              },
-          ],
-        },
-      ));
-    await tester.pumpWidget(MaterialApp(
-        home: MealEditorScreen(dao: dao, meal: dao.meals.first)));
+  for (final theme in Brightness.values) {
+    testWidgets('Android, $theme: a dialog dims the bar with its barrier, and '
+        'once it is closed the bar has its own colour again', (tester) async {
+      final bars = _Bars()..listen(tester);
+      addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
+      tester.platformDispatcher.platformBrightnessTestValue = theme;
+      await tester.pumpWidget(
+          CalorieTrackerApp(services: makeServices(settings: FakeSettings())));
+      await tester.pumpAndSettle();
+      expect(bars.colors, [_Bars.color(_chrome(theme))]);
+      final shell = tester.element(find.byType(HomeShell));
+
+      // An alert (showDialog: the consent and confirmation dialogs).
+      final closed = showDialog<void>(
+          context: shell,
+          builder: (_) => const AlertDialog(content: Text('Sure?')));
+      await tester.pumpAndSettle();
+      expect(bars.colors.last, _Bars.color(_dimmed(theme)),
+          reason: 'the strip under the buttons dims with the app');
+      Navigator.of(tester.element(find.text('Sure?'))).pop();
+      await tester.pumpAndSettle();
+      await closed;
+      expect(bars.colors.last, _Bars.color(_chrome(theme)));
+
+      // A date picker (Edit meal's day) is a dialog route too.
+      final picked = showDatePicker(
+          context: shell,
+          initialDate: DateTime(2026, 11, 20),
+          firstDate: DateTime(2026),
+          lastDate: DateTime(2027));
+      await tester.pumpAndSettle();
+      expect(bars.colors.last, _Bars.color(_dimmed(theme)));
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(await picked, isNull);
+      expect(bars.colors.last, _Bars.color(_chrome(theme)));
+      expect(bars.colors, [
+        for (var i = 0; i < 2; i++) ...[
+          _Bars.color(_chrome(theme)),
+          _Bars.color(_dimmed(theme)),
+        ],
+        _Bars.color(_chrome(theme)),
+      ], reason: 'each change sent once');
+    });
+  }
+
+  testWidgets('Android: two dialogs, one over the other: dimmed until the '
+      'last one closes', (tester) async {
+    final bars = _Bars()..listen(tester);
+    addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
+    tester.platformDispatcher.platformBrightnessTestValue = Brightness.light;
+    await tester.pumpWidget(
+        CalorieTrackerApp(services: makeServices(settings: FakeSettings())));
     await tester.pumpAndSettle();
-    await tester.drag(find.byType(ListView).first, const Offset(0, -20000));
+    final shell = tester.element(find.byType(HomeShell));
+    final first = showDialog<void>(
+        context: shell, builder: (_) => const AlertDialog(content: Text('A')));
     await tester.pumpAndSettle();
-    const height = 2400 / 2.625;
-    const barTop = height - 126 / 2.625;
-    for (final key in ['saveMealButton', 'addItemRow']) {
-      final rect = tester.getRect(find.byKey(Key(key)));
-      expect(rect.bottom, lessThanOrEqualTo(barTop), reason: key);
-    }
+    final second = showDialog<void>(
+        context: shell, builder: (_) => const AlertDialog(content: Text('B')));
+    await tester.pumpAndSettle();
+    Navigator.of(tester.element(find.text('B'))).pop();
+    await tester.pumpAndSettle();
+    await second;
+    expect(bars.colors.last, _Bars.color(_dimmed(Brightness.light)),
+        reason: 'the first dialog is still up');
+    Navigator.of(tester.element(find.text('A'))).pop();
+    await tester.pumpAndSettle();
+    await first;
+    expect(bars.colors, [
+      _Bars.color(_chrome(Brightness.light)),
+      _Bars.color(_dimmed(Brightness.light)),
+      _Bars.color(_chrome(Brightness.light)),
+    ]);
+  });
+
+  testWidgets('Android: a bottom sheet leaves the bar alone (it covers the '
+      "bar's area itself)", (tester) async {
+    final bars = _Bars()..listen(tester);
+    addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
+    tester.platformDispatcher.platformBrightnessTestValue = Brightness.light;
+    await tester.pumpWidget(
+        CalorieTrackerApp(services: makeServices(settings: FakeSettings())));
+    await tester.pumpAndSettle();
+    final closed = showModalBottomSheet<void>(
+        context: tester.element(find.byType(HomeShell)),
+        builder: (_) => const SizedBox(height: 200, child: Text('Sheet')));
+    await tester.pumpAndSettle();
+    expect(find.text('Sheet'), findsOneWidget);
+    Navigator.of(tester.element(find.text('Sheet'))).pop();
+    await tester.pumpAndSettle();
+    await closed;
+    expect(bars.colors, [_Bars.color(_chrome(Brightness.light))]);
+  });
+
+  testWidgets('Android: the analyzing overlay dims the bar while it is up',
+      (tester) async {
+    final bars = _Bars()..listen(tester);
+    addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
+    tester.platformDispatcher.platformBrightnessTestValue = Brightness.dark;
+    await tester.pumpWidget(
+        CalorieTrackerApp(services: makeServices(settings: FakeSettings())));
+    await tester.pumpAndSettle();
+    final analyzing = ValueNotifier<bool>(false);
+    Navigator.of(tester.element(find.byType(HomeShell))).push(
+        MaterialPageRoute<void>(
+            builder: (_) => Scaffold(
+                  appBar: AppBar(title: const Text('Add photo')),
+                  body: ValueListenableBuilder<bool>(
+                    valueListenable: analyzing,
+                    builder: (_, on, _) => Stack(children: [
+                      const Center(child: Text('Grid')),
+                      if (on)
+                        const Positioned.fill(
+                            child: AnalyzingOverlay(label: 'Analyzing…')),
+                    ]),
+                  ),
+                )));
+    await tester.pumpAndSettle();
+    expect(bars.colors, [_Bars.color(_chrome(Brightness.dark))],
+        reason: 'a pushed screen is no barrier');
+    analyzing.value = true;
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(bars.colors.last, _Bars.color(_dimmed(Brightness.dark)));
+    analyzing.value = false;
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(bars.colors, [
+      _Bars.color(_chrome(Brightness.dark)),
+      _Bars.color(_dimmed(Brightness.dark)),
+      _Bars.color(_chrome(Brightness.dark)),
+    ]);
   });
 }

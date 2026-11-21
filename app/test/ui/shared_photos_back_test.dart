@@ -25,14 +25,18 @@
 // its engine.
 import 'dart:async' show Completer;
 
+import 'package:calorie_tracker/core/contracts.dart';
 import 'package:calorie_tracker/services/analysis_keep_alive.dart';
+import 'package:calorie_tracker/services/photo/coverage.dart';
 import 'package:calorie_tracker/ui/app.dart';
+import 'package:calorie_tracker/ui/photo_pipeline.dart';
 import 'package:calorie_tracker/ui/services.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../photo/watcher_test.dart' show FakeAsset, FakePhotoLibrary, bytesOf;
 import '../support/back_gesture.dart' show predictiveBack;
 import 'fakes.dart';
 
@@ -228,6 +232,121 @@ void main() {
     expect(platform.handlesBack.last, isFalse);
   });
 
+  // Review DL-2: Photo Coverage's Log all keeps going after the user leaves
+  // the screen, one photo after another, and each photo is kept alive by
+  // the pipeline for its own turn only. Between two of them, while the next
+  // original was read, nothing was in flight: the shell handed root Back
+  // back to Android, which finished a task Play's Open button had started
+  // (and the rest of the batch with it), and the native job was cancelled
+  // mid-batch. The run is now one request from its first photo to its last.
+  testWidgets('Android: a Photo Coverage bulk run holds Back at the root '
+      'from the user leaving the screen until its last photo is done, '
+      'between two photos too', (tester) async {
+    tester.view.physicalSize = const Size(800, 3000);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    final platform = _Platform()..listen(tester);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    final keepAlive = AnalysisKeepAlive();
+    final dao = FakeDao();
+    final library = _HeldReadLibrary()
+      ..assets = [
+        FakeAsset('a1', 'IMG_1.jpg', DateTime(2026, 7, 26, 8), bytesOf(1)),
+        FakeAsset('a2', 'IMG_2.jpg', DateTime(2026, 7, 26, 9), bytesOf(2)),
+      ];
+    final analyses = [Completer<void>(), Completer<void>()];
+    var analyzed = 0;
+    final settings = FakeSettings();
+    final services = UiServices(
+      dao: dao,
+      analyzer: FakeAnalyzer(),
+      executor: FakeExecutor(),
+      settings: settings,
+      settingsChanges: settings,
+      picker: FakePicker(),
+      photoIntake: FakeIntake(),
+      requestPhotoPermission: () async => true,
+      coverage: CoverageAuditor(
+          library: library,
+          dao: dao,
+          hasher: (b) async => 'h${b.first}',
+          clock: () => DateTime(2026, 7, 26, 12)),
+      photoLibrary: library,
+      // As the pipeline does for a deliberate photo: kept alive for its
+      // own turn, and no longer.
+      processPhoto: (photo) => keepAlive.guard(() async {
+        await analyses[analyzed++].future;
+        dao.ledger['h${photo.bytes.first}'] = IngestionStatus.saved;
+        return const PhotoOutcome(PhotoOutcomeKind.saved, 'ok');
+      }),
+      analysisKeepAlive: keepAlive,
+    );
+    await tester.pumpWidget(CalorieTrackerApp(services: services));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Settings').last);
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const Key('coverageCheckTile')));
+    await tester.tap(find.byKey(const Key('coverageCheckTile')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('runCoverageCheck')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('logAllMissing')));
+    await tester.pumpAndSettle();
+    // The second photo's original is read only once the first is done:
+    // that read is held, the gap between the two photos.
+    library.heldId = 'a2';
+    await tester.tap(find.byKey(const Key('confirmBulkAction')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(analyzed, 1, reason: 'the first photo is on its way');
+
+    // The user leaves the screen: back on the shell, at its root.
+    await tester.binding.handlePopRoute();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.byKey(const Key('runCoverageCheck')), findsNothing);
+    expect(find.byType(HomeShell), findsOneWidget);
+    final left = platform.handlesBack.length;
+    expect(platform.handlesBack.last, isTrue);
+
+    // The first photo is done; the second one's original is being read.
+    analyses[0].complete();
+    for (var i = 0; i < 5; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    expect(library.holding, isTrue, reason: 'between the two photos');
+    expect(keepAlive.inFlight.value, isTrue,
+        reason: 'the batch is still one request in flight');
+    expect(platform.handlesBack.sublist(left), everyElement(isTrue));
+    expect(platform.handlesBack.last, isTrue);
+    // A Back now moves the app to the back: the engine, and the batch,
+    // live on.
+    final popsBefore = platform.pops;
+    expect(await tester.binding.handlePopRoute(), isTrue);
+    await tester.pump();
+    expect(platform.pops, popsBefore + 1);
+
+    library.release.complete();
+    for (var i = 0; i < 5; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    expect(analyzed, 2, reason: 'the second photo is on its way');
+    expect(platform.handlesBack.sublist(left), everyElement(isTrue));
+
+    // The last photo is done: Back at the root is the platform's again.
+    analyses[1].complete();
+    await tester.pumpAndSettle();
+    expect(dao.ledger['h1'], IngestionStatus.saved);
+    expect(dao.ledger['h2'], IngestionStatus.saved);
+    expect(keepAlive.inFlight.value, isFalse);
+    expect(keepAlive.openCount, 0);
+    expect(platform.handlesBack.last, isFalse);
+    expect(
+        platform.handlesBack.sublist(left, platform.handlesBack.length - 1),
+        everyElement(isTrue),
+        reason: 'held from leaving the screen until the last photo ended');
+  });
+
   testWidgets('no shared photo pending ever (the default): the shell has no '
       'guard, and nothing changes', (tester) async {
     final platform = _Platform()..listen(tester);
@@ -257,4 +376,24 @@ void main() {
         findsNothing);
     debugDefaultTargetPlatformOverride = null;
   });
+}
+
+/// A photo library whose next original read of [heldId] waits for
+/// [release] ([holding] meanwhile): the gap between two photos of a bulk
+/// run, where the next one's bytes are read.
+class _HeldReadLibrary extends FakePhotoLibrary {
+  String? heldId;
+  final Completer<void> release = Completer<void>();
+  bool holding = false;
+
+  @override
+  Future<Uint8List?> originBytesByAssetId(String assetId) async {
+    if (assetId == heldId) {
+      heldId = null;
+      holding = true;
+      await release.future;
+      holding = false;
+    }
+    return super.originBytesByAssetId(assetId);
+  }
 }

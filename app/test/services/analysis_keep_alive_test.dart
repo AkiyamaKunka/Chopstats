@@ -17,18 +17,29 @@ import 'package:flutter_test/flutter_test.dart';
 
 import '../ui/fakes.dart';
 
-/// MainActivity's side of the channel, as the tests see it: every call in
-/// order, and the requests it holds open.
+/// MainActivity's side of the channel, as the tests see it: every begin
+/// and end in order ([calls]), every call with the resets ([log]), and the
+/// requests it holds open for the engine's session.
 class _Native {
   final List<String> calls = [];
+  final List<String> log = [];
   final Set<int> open = {};
 
   /// When set, every call fails (MainActivity missing a handler, say).
   bool fail = false;
 
   Future<Object?> handle(MethodCall call) async {
+    if (call.method == 'reset') {
+      // AnalysisKeepAlive.drop: every request of this session goes.
+      expect(call.arguments, isNull);
+      log.add('reset');
+      if (fail) throw PlatformException(code: 'unavailable');
+      open.clear();
+      return true;
+    }
     final id = (call.arguments as Map)['id'] as int;
     calls.add('${call.method}:$id');
+    log.add('${call.method}:$id');
     if (fail) throw PlatformException(code: 'unavailable');
     switch (call.method) {
       case 'begin':
@@ -91,6 +102,31 @@ void main() {
       expect(native.open, isEmpty);
       expect(keep.inFlight.value, isFalse);
       expect(keep.openCount, 0);
+    });
+
+    // A hot restart keeps the engine, and MainActivity's session with it
+    // (no configure, no cleanup), while the ids start over at 1 (review
+    // DL-3): the last run's request 1, never ended, kept the job up for its
+    // full cap with nothing in flight, and this run's request 1 landed on
+    // it, a repeated begin with the stale begin's time.
+    test('built, it first drops what an earlier run of the engine left open, '
+        'before any request of its own', () async {
+      native.open.addAll({1, 2}); // the last run's, never ended
+      final keep = AnalysisKeepAlive();
+      final held = Completer<void>();
+      final run = keep.guard(() => held.future);
+      await _settle();
+      expect(native.log, ['reset', 'begin:1']);
+      expect(native.open, {1}, reason: 'only this run\'s own request 1');
+      held.complete();
+      await run;
+      await _settle();
+      expect(native.open, isEmpty);
+      expect(native.log, ['reset', 'begin:1', 'end:1']);
+      // One reset per instance, never again.
+      await keep.guard(() async {});
+      await _settle();
+      expect(native.log.where((c) => c == 'reset'), hasLength(1));
     });
 
     test('a body that fails still ends, and its error comes through',
@@ -224,8 +260,8 @@ void main() {
             hasher: (b) async => 'h${b.first}',
             thumbnailer: (_) async => null);
 
-    test('a picked photo is kept alive from its queueing to its verdict',
-        () async {
+    test('a picked photo is kept alive from its queueing to its verdict: '
+        'its wait and, inside it, its turn', () async {
       final keep = AnalysisKeepAlive();
       final openDuringAnalysis = <Set<int>>[];
       final analyzer = FakeAnalyzer()
@@ -241,9 +277,9 @@ void main() {
       expect(outcome.kind, PhotoOutcomeKind.saved);
       expect(dao.meals, hasLength(1));
       expect(openDuringAnalysis, [
-        {1},
+        {1, 2},
       ]);
-      expect(native.calls, ['begin:1', 'end:1']);
+      expect(native.calls, ['begin:1', 'begin:2', 'end:2', 'end:1']);
       expect(keep.inFlight.value, isFalse);
     });
 
@@ -273,7 +309,7 @@ void main() {
       final outcome = await p.enqueue(_photo(1));
       await _settle();
       expect(outcome.reason, notAllowedReason);
-      expect(native.calls, ['begin:1', 'end:1']);
+      expect(native.calls, ['begin:1', 'begin:2', 'end:2', 'end:1']);
       expect(native.open, isEmpty);
     });
 
@@ -297,7 +333,7 @@ void main() {
         final outcome = await p.enqueue(_photo(1));
         await _settle();
         expect(outcome.kind, isNot(PhotoOutcomeKind.saved));
-        expect(native.calls, ['begin:1', 'end:1']);
+        expect(native.calls, ['begin:1', 'begin:2', 'end:2', 'end:1']);
         expect(keep.inFlight.value, isFalse);
       });
     }
@@ -312,19 +348,31 @@ void main() {
       await _settle();
       expect(outcome.kind, PhotoOutcomeKind.failed);
       expect(outcome.errorKind, isNot(AnalysisErrorKind.none));
-      expect(native.calls, ['begin:1', 'end:1']);
+      expect(native.calls, ['begin:1', 'begin:2', 'end:2', 'end:1']);
     });
 
-    test('a picked photo queued behind an automatic one is kept alive while '
-        'it waits: the photo ahead must finish for its turn to come',
+    // Review DL-1: each request's cap (3 minutes) counts from its begin. A
+    // photo kept alive by one id from its queueing on spent its cap on the
+    // photo ahead (often an automatic one, never kept itself): queued 5 s
+    // in behind a 150 s photo, its own 60 s request lost the job at 185 s,
+    // mid-request, and the process froze. Its turn is now a request of its
+    // own, begun as the turn starts, inside the wait's.
+    test('a picked photo queued behind an automatic one: its wait is kept '
+        'alive at once, and its turn gets a request of its own as it starts',
         () async {
       final keep = AnalysisKeepAlive();
       final ahead = Completer<void>();
+      final openDuringItsTurn = <Set<int>>[];
       var analyses = 0;
       final analyzer = FakeAnalyzer()
         ..nextPhotoOutcome = _food
         ..onAnalyze = () async {
-          if (analyses++ == 0) await ahead.future;
+          if (analyses++ == 0) {
+            await ahead.future;
+          } else {
+            await _settle();
+            openDuringItsTurn.add({...native.open});
+          }
         };
       final p = pipeline(analyzer: analyzer, keepAlive: keep);
       final automatic = p.enqueue(_photo(1, deliberate: false));
@@ -332,11 +380,49 @@ void main() {
       final picked = p.enqueue(_photo(2));
       await _settle();
       expect(native.open, {1}, reason: 'begun at once, while it waits');
+      expect(native.calls, ['begin:1'],
+          reason: 'its turn has not started: the photo ahead is analyzed');
       ahead.complete();
       await automatic;
       expect((await picked).kind, PhotoOutcomeKind.saved);
       await _settle();
-      expect(native.calls, ['begin:1', 'end:1']);
+      expect(openDuringItsTurn, [
+        {1, 2},
+      ], reason: 'its own request from the start of its turn');
+      expect(native.calls, ['begin:1', 'begin:2', 'end:2', 'end:1']);
+      expect(native.open, isEmpty);
+      expect(keep.inFlight.value, isFalse);
+    });
+
+    test('photos queued behind one another: each waits under its own id and '
+        'is analyzed under another, FIFO, all ended', () async {
+      final keep = AnalysisKeepAlive();
+      final first = Completer<void>();
+      var analyses = 0;
+      final analyzer = FakeAnalyzer()
+        ..nextPhotoOutcome = _food
+        ..onAnalyze = () async {
+          if (analyses++ == 0) await first.future;
+        };
+      final dao = FakeDao();
+      final p = pipeline(analyzer: analyzer, dao: dao, keepAlive: keep);
+      final a = p.enqueue(_photo(1));
+      final b = p.enqueue(_photo(2));
+      await _settle();
+      // A: waited (1) and in its turn (3); B: waiting (2).
+      expect(native.calls, ['begin:1', 'begin:2', 'begin:3']);
+      expect(native.open, {1, 2, 3});
+      first.complete();
+      expect((await a).kind, PhotoOutcomeKind.saved);
+      expect((await b).kind, PhotoOutcomeKind.saved);
+      await _settle();
+      expect(native.calls, [
+        'begin:1', 'begin:2', 'begin:3', //
+        'end:3', 'end:1', // A's turn, then its wait
+        'begin:4', 'end:4', 'end:2', // B's turn, then its wait
+      ]);
+      expect(native.open, isEmpty);
+      expect(dao.meals, hasLength(2));
     });
 
     test('a share: each photo kept alive for its own turn, none left open',
@@ -355,12 +441,16 @@ void main() {
             'IMG_S$n.jpg',
             deliberate: true, onSettled: () => settled.add(n)));
       }
-      await _until(() => settled.length == 3 && native.calls.length == 6);
+      await _until(() => settled.length == 3 && native.calls.length == 12);
       await shares.close();
       await _settle();
       expect(dao.meals, hasLength(3));
-      expect(native.calls,
-          ['begin:1', 'end:1', 'begin:2', 'end:2', 'begin:3', 'end:3']);
+      // Each photo: its wait, and inside it its turn.
+      expect(native.calls, [
+        'begin:1', 'begin:2', 'end:2', 'end:1', //
+        'begin:3', 'begin:4', 'end:4', 'end:3', //
+        'begin:5', 'begin:6', 'end:6', 'end:5',
+      ]);
       expect(native.open, isEmpty);
       expect(keep.inFlight.value, isFalse);
     });

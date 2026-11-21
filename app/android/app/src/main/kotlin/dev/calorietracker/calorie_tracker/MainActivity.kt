@@ -419,14 +419,21 @@ class MainActivity : FlutterActivity() {
         // Dart's AnalysisKeepAlive sends "begin" and "end" with its id for
         // each analysis the user started, under this engine's session, so
         // the requests of an engine that dies end with it
-        // (cleanUpFlutterEngine). No permission: WorkManager is the one the
-        // background photo scan already uses.
+        // (cleanUpFlutterEngine). Its "reset", sent once as it is built,
+        // drops what an earlier run of this engine's Dart left open: a hot
+        // restart keeps the engine (no configure, no cleanup) and starts
+        // the ids over. Nothing is open at a cold start. No permission:
+        // WorkManager is the one the background photo scan already uses.
         val session = AnalysisKeepAlive.newSession()
         keepAliveSession = session
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, KEEP_ALIVE_CHANNEL)
             .setMethodCallHandler { call, result ->
                 val id = (call.argument<Any?>("id") as? Number)?.toLong()
                 when {
+                    call.method == "reset" -> {
+                        AnalysisKeepAlive.drop(applicationContext, session)
+                        result.success(true)
+                    }
                     id == null -> result.success(false)
                     call.method == "begin" ->
                         result.success(AnalysisKeepAlive.begin(applicationContext, session, id))

@@ -1,6 +1,8 @@
 package dev.calorietracker.calorie_tracker
 
 import android.content.Context
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.os.Build
 import android.os.SystemClock
 import androidx.work.Constraints
@@ -12,6 +14,7 @@ import androidx.work.OutOfQuotaPolicy
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import java.util.concurrent.atomic.AtomicLong
+import kotlinx.coroutines.CancellationException
 
 /// Keeps the process running, and its network usable, while an analysis
 /// the user started is on its way to the AI or their own server (owner
@@ -28,18 +31,23 @@ import java.util.concurrent.atomic.AtomicLong
 /// "begin" and "end" for each request over MainActivity's keep-alive
 /// channel. While one is live (KeepAliveLedger: begun, not ended, younger
 /// than KeepAliveRules.CAP_MS) a WorkManager one-time job runs: expedited
-/// on Android 12 and later, plain below (KeepAliveRules.expedited), with a
-/// network constraint and no notification. A running job keeps the process
-/// out of the cached state, so it is not frozen, and an expedited job
-/// keeps its network. Its worker only waits: it returns once nothing is
-/// live, and the job is cancelled as the last request ends, so it never
-/// keeps the process up after that. One job runs 2 minutes 45 seconds at
-/// most (KeepAliveRules.JOB_CAP_MS, below the 3 minutes past which Android
+/// on Android 12 and later, plain below (KeepAliveRules.expedited), with no
+/// notification, and from Android 9 a constraint for any network that
+/// reaches the internet, validated or not (KeepAliveRules
+/// .usesNetworkRequest). A running job keeps the process out of the cached
+/// state, so it is not frozen, and an expedited job keeps its network. Its
+/// worker only waits: it returns once nothing is live, and the job is
+/// cancelled as the last request ends, so it never keeps the process up
+/// after that. One job runs 2 minutes 45 seconds at most
+/// (KeepAliveRules.JOB_CAP_MS, below the 3 minutes past which Android
 /// counts an expedited job as timed out); a request still live then gets a
 /// follow-up job. An engine that dies takes its requests with it (drop,
-/// from MainActivity.cleanUpFlutterEngine). Nothing is persisted: a job
-/// WorkManager re-runs in a new process finds nothing live there and ends
-/// at once.
+/// from MainActivity.cleanUpFlutterEngine), and an engine's Dart starting
+/// over (a hot restart) drops the ones its last run left (reset). Nothing
+/// is persisted, but WorkManager keeps the job's own record: a job it runs
+/// again in a new process, after a backoff, finds nothing live there and
+/// ends at once, and the first request a process begins replaces any such
+/// job with a fresh one (KeepAliveRules.replacesJob) instead of adopting it.
 internal object AnalysisKeepAlive {
     private val ledger = KeepAliveLedger()
     private val sessions = AtomicLong()
@@ -48,18 +56,18 @@ internal object AnalysisKeepAlive {
     /// requests are told apart from another engine's by it.
     fun newSession(): Long = sessions.incrementAndGet()
 
-    /// Request [id] of [session] began: recorded, and the job enqueued
-    /// unless one is pending or running already (ExistingWorkPolicy.KEEP).
+    /// Request [id] of [session] began: recorded, and the job enqueued.
+    /// The first live request replaces whatever job WorkManager has
+    /// (ExistingWorkPolicy.REPLACE: a backed-off re-run, or one finishing);
+    /// one that joins a live request keeps the job that runs for it (KEEP).
     /// A WorkManager that cannot be reached leaves the request as it was
     /// before, without the job.
     fun begin(context: Context, session: Long, id: Long): Boolean {
-        val added = ledger.begin(session, id, SystemClock.elapsedRealtime())
-        try {
-            WorkManager.getInstance(context)
-                .enqueueUniqueWork(KeepAliveRules.WORK_NAME, ExistingWorkPolicy.KEEP, request())
-        } catch (e: Exception) {
-            // No job: the analysis runs on, as every analysis did before.
-        }
+        val now = SystemClock.elapsedRealtime()
+        // Asked before the request is recorded: was one live already?
+        val replace = KeepAliveRules.replacesJob(liveBefore = ledger.live(now))
+        val added = ledger.begin(session, id, now)
+        enqueue(context, if (replace) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP)
         return added
     }
 
@@ -71,7 +79,9 @@ internal object AnalysisKeepAlive {
         return removed
     }
 
-    /// [session]'s engine is gone, and every request it had with it.
+    /// [session]'s engine is gone, and every request it had with it; or
+    /// its Dart started over (MainActivity's "reset"), and can no longer
+    /// end the requests its last run began.
     fun drop(context: Context, session: Long) {
         if (ledger.drop(session) > 0) settle(context)
     }
@@ -98,25 +108,56 @@ internal object AnalysisKeepAlive {
             SystemClock.elapsedRealtime()
         }
         if (!stillLive) return
+        enqueue(context, ExistingWorkPolicy.APPEND_OR_REPLACE)
+    }
+
+    /// The system stopped a running job with [stopReason] (Android 12 and
+    /// later): while a request is still live, and the stop is one a fresh
+    /// job can outlast (KeepAliveRules.renewsAfterStop), a fresh job
+    /// replaces it now, expedited again, instead of WorkManager's re-run of
+    /// the stopped one: plain, and only after a backoff.
+    fun renewAfterStop(context: Context, stopReason: Int) {
+        if (!KeepAliveRules.renewsAfterStop(stopReason)) return
+        if (!ledger.live(SystemClock.elapsedRealtime())) return
+        enqueue(context, ExistingWorkPolicy.REPLACE)
+    }
+
+    private fun enqueue(context: Context, policy: ExistingWorkPolicy) {
         try {
-            WorkManager.getInstance(context).enqueueUniqueWork(
-                KeepAliveRules.WORK_NAME,
-                ExistingWorkPolicy.APPEND_OR_REPLACE,
-                request(),
-            )
+            WorkManager.getInstance(context)
+                .enqueueUniqueWork(KeepAliveRules.WORK_NAME, policy, request())
         } catch (e: Exception) {
-            // No follow-up: the request goes on as it did before.
+            // No job: the analysis runs on, as every analysis did before.
         }
     }
 
-    /// The keep-alive job: one time, needs a network (a request without
-    /// one fails on its own; with one, JobScheduler lets the job's process
-    /// use it), expedited where that needs no foreground service.
+    /// The keep-alive job: one time, expedited where that needs no
+    /// foreground service. From Android 9 it needs a network, any that
+    /// reaches the internet, validated or not (KeepAliveRules
+    /// .usesNetworkRequest): JobInfo's NETWORK_TYPE_ANY without
+    /// NET_CAPABILITY_VALIDATED. An unvalidated network can still carry
+    /// the request (a phone in mainland China with no VPN fails Android's
+    /// probe on every network), and a validated-only constraint kept the
+    /// job from starting there, or stopped it partway as the network lost
+    /// its validation; with a constraint, JobScheduler lets an expedited
+    /// job's process use the network. Below Android 9 the job is plain and
+    /// needs no network: there a constraint waited for a validated one, and
+    /// gave the job nothing.
     private fun request(): OneTimeWorkRequest {
+        val constraints = if (KeepAliveRules.usesNetworkRequest(Build.VERSION.SDK_INT)) {
+            Constraints.Builder().setRequiredNetworkRequest(
+                NetworkRequest.Builder()
+                    .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                    .removeCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
+                    .removeCapability(NetworkCapabilities.NET_CAPABILITY_NOT_RESTRICTED)
+                    .build(),
+                NetworkType.CONNECTED,
+            ).build()
+        } else {
+            Constraints.NONE
+        }
         val builder = OneTimeWorkRequest.Builder(AnalysisKeepAliveWorker::class.java)
-            .setConstraints(
-                Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build(),
-            )
+            .setConstraints(constraints)
         if (KeepAliveRules.expedited(Build.VERSION.SDK_INT)) {
             builder.setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
         }
@@ -126,14 +167,26 @@ internal object AnalysisKeepAlive {
 
 /// The keep-alive job's worker (AnalysisKeepAlive): it waits while an
 /// analysis is live in this process (2 minutes 45 seconds at most, then a
-/// follow-up job if one still is), then succeeds, never retried. No
-/// foreground info: it is expedited only on Android 12 and later, where
-/// WorkManager never asks for it. R8 keeps it (proguard-rules.pro:
-/// WorkManager builds workers by their class name).
+/// follow-up job if one still is), then succeeds, never retried. Stopped
+/// by the system mid-wait (Android 12 and later), it hands the stop to
+/// AnalysisKeepAlive.renewAfterStop, which may put a fresh job in its
+/// place. No foreground info: it is expedited only on Android 12 and
+/// later, where WorkManager never asks for it. R8 keeps it
+/// (proguard-rules.pro: WorkManager builds workers by their class name).
 class AnalysisKeepAliveWorker(context: Context, params: WorkerParameters) :
     CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
-        AnalysisKeepAlive.runJob(applicationContext)
+        try {
+            AnalysisKeepAlive.runJob(applicationContext)
+        } catch (e: CancellationException) {
+            // Stopped: by the app (nothing live, or a newer burst replaced
+            // the job), or by the system, whose stop reason is known from
+            // Android 12, where the job is expedited.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                AnalysisKeepAlive.renewAfterStop(applicationContext, stopReason)
+            }
+            throw e
+        }
         return Result.success()
     }
 }

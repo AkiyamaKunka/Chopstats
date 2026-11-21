@@ -1125,7 +1125,12 @@ position. The paste-ready answers live next to the app in
    the dark 3-button bar after a switch to dark on Android 16 (QA A36-1),
    and with the contrast scrim on, Android draws that colour at 80% behind
    the 3-button bar only, so no screen's fields sit under its buttons at
-   rest (A36-2); the gesture bar stays transparent.
+   rest (A36-2); the gesture bar stays transparent. Every screen without
+   the tab bar ends its scroll past the bar (`scrollEndInset`), so its last
+   line or row of photos can always be scrolled clear of the scrim, and
+   while a dialog or the analyzing overlay dims the app, the colour sent is
+   the tab bar's under that dim, since Android draws the scrim above the
+   app where no Flutter barrier reaches it.
 7. **Orientation:** portrait on phones
    (`android:screenOrientation="portrait"`). Android 16 ignores it at
    600 dp and wider, where the width-capped layout applies. Tablets stay
@@ -1145,12 +1150,22 @@ position. The paste-ready answers live next to the app in
    (`AnalysisKeepAlive.kt`): expedited on Android 12 and later, with no
    notification (a plain job once the expedited quota is used up), and a
    plain one-time job on Android 7 to 11, where WorkManager would run
-   expedited work as the foreground service the manifest strips. It needs
-   a network, ends as the last request does, keeps any one request at most
-   3 minutes, and adds no permission. Automatic Watch Camera Roll photos
-   are not kept: the next scan or the background job offers them again.
-   To confirm on a physical Android 15 or 16 phone with the https own
-   server: that a reply reaches the app after Home and another app.
+   expedited work as the foreground service the manifest strips. From
+   Android 9 it needs a network that reaches the internet, validated or
+   not: a phone in mainland China with no VPN fails Android's validation
+   probe on every network and still reaches a China provider, and a
+   validated-only constraint never started the job there. Below Android 9
+   it needs no network. It ends as the last request does, keeps any one
+   request at most 3 minutes from its own start (a photo waiting its turn
+   gets its wait and its own analysis counted apart, and a Photo Coverage
+   batch is one request from its first photo to its last), and adds no
+   permission. The first request after a quiet spell replaces any job
+   WorkManager still holds from a stop or a dead process, which it would
+   re-run only plain and after a 30-second backoff; a job the system stops
+   mid-request is replaced the same way. Automatic Watch Camera Roll
+   photos are not kept: the next scan or the background job offers them
+   again. To confirm on a physical Android 15 or 16 phone with the https
+   own server: that a reply reaches the app after Home and another app.
 10. **Restaurant lookups** stay brand-only on Android (no photo location,
     no places service); the hint no longer says "for now" / 目前.
 11. **Shortcuts and a widget:** after launch, static shortcuts first and

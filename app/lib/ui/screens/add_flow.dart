@@ -766,7 +766,10 @@ class _AddPhotoScreenState extends State<AddPhotoScreen> {
                 ),
               ];
               final grid = GridView.builder(
-                padding: const EdgeInsets.all(8),
+                // The last row scrolls clear of a 3-button bar
+                // (scrollEndInset).
+                padding:
+                    EdgeInsets.fromLTRB(8, 8, 8, scrollEndInset(context, 8)),
                 gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                     crossAxisCount: 3, crossAxisSpacing: 4, mainAxisSpacing: 4),
                 itemCount: assets.length,
@@ -968,7 +971,7 @@ class _AddTextScreenState extends State<AddTextScreen> {
       // and smaller by the review probes).
       body: SingleChildScrollView(
         padding: EdgeInsets.fromLTRB(AppSpace.gutter, _topInset(context),
-            AppSpace.gutter, AppSpace.gutter),
+            AppSpace.gutter, scrollEndInset(context, AppSpace.gutter)),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [

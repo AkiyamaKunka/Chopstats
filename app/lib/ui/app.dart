@@ -41,6 +41,7 @@ import 'screens/today_screen.dart';
 import 'refresh_signal.dart';
 import 'services.dart';
 import 'widgets/grouped.dart' show ContentWidthCap;
+import 'widgets/nav_bar_dimming.dart';
 import 'widgets/restaurant_consent_sheet.dart';
 import 'widgets/shared_photos_back_guard.dart';
 
@@ -108,12 +109,23 @@ Future<void> sendNavigationBarColor(Color color,
 ///   stays transparent, edge to edge): a screen with no tab bar no longer
 ///   shows its fields under the buttons at rest (A36-2), and the tab bar's
 ///   own colour runs on under them.
+/// - That scrim is a view Android draws above the app, which no Flutter
+///   barrier can dim: while a dialog or the analyzing overlay dims the app
+///   ([dimming], NavBarDimming), the colour sent is the tab bar's under
+///   the barrier's scrim, and the tab bar's own again once it is gone, so
+///   no bright strip stays under the buttons (NAV-2). Bottom sheets cover
+///   the bar's area themselves and change nothing.
 /// Sent after the frame, behind Flutter's own style, so the buttons'
 /// light/dark is set before Android stops forcing it. iPhone has no such
 /// bar: nothing is set there.
 class _SystemNavBarStyle extends StatefulWidget {
-  const _SystemNavBarStyle({required this.child});
+  const _SystemNavBarStyle({required this.child, this.dimming});
   final Widget child;
+
+  /// The app shell's barriers (its navigator's dialogs, the analyzing
+  /// overlay), handed to the routes below through NavBarDimmingScope.
+  /// Null on the startup-error screen, which has neither.
+  final NavBarDimming? dimming;
 
   @override
   State<_SystemNavBarStyle> createState() => _SystemNavBarStyleState();
@@ -123,19 +135,63 @@ class _SystemNavBarStyleState extends State<_SystemNavBarStyle> {
   /// The colour last handed to MainActivity: each change is sent once.
   Color? _sent;
 
+  /// The last build's tab-bar and barrier colours (null until an Android
+  /// build): a barrier that comes or goes changes neither, and is sent
+  /// from them without a rebuild.
+  Color? _chrome;
+  Color? _scrim;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.dimming?.addListener(_sendWanted);
+  }
+
+  @override
+  void didUpdateWidget(covariant _SystemNavBarStyle oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.dimming != widget.dimming) {
+      oldWidget.dimming?.removeListener(_sendWanted);
+      widget.dimming?.addListener(_sendWanted);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.dimming?.removeListener(_sendWanted);
+    super.dispose();
+  }
+
+  /// Hands MainActivity the colour wanted now, once per change: the tab
+  /// bar's, or under a barrier the tab bar's dimmed by the barrier's scrim.
+  /// Never a rebuild: a barrier may come while a frame is being built.
+  void _sendWanted() {
+    final chrome = _chrome;
+    final scrim = _scrim;
+    if (chrome == null || scrim == null) return;
+    final wanted = widget.dimming?.dimmed ?? false
+        ? Color.alphaBlend(scrim, chrome)
+        : chrome;
+    if (wanted == _sent) return;
+    _sent = wanted;
+    // Flutter sends the style below in a microtask queued while this
+    // frame is composited; this one is queued after it.
+    WidgetsBinding.instance.addPostFrameCallback((_) => scheduleMicrotask(
+        () => unawaited(sendNavigationBarColor(wanted))));
+    WidgetsBinding.instance.ensureVisualUpdate();
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     if (theme.platform != TargetPlatform.android) return widget.child;
     final dark = theme.brightness == Brightness.dark;
-    final chrome = context.colors.chrome;
-    if (chrome != _sent) {
-      _sent = chrome;
-      // Flutter sends the style below in a microtask queued while this
-      // frame is composited; this one is queued after it.
-      WidgetsBinding.instance.addPostFrameCallback((_) => scheduleMicrotask(
-          () => unawaited(sendNavigationBarColor(chrome))));
-    }
+    final colors = context.colors;
+    final chrome = colors.chrome;
+    _chrome = chrome;
+    _scrim = colors.scrim;
+    _sendWanted();
+    final dimming = widget.dimming;
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle(
         systemNavigationBarColor: chrome,
@@ -144,18 +200,40 @@ class _SystemNavBarStyleState extends State<_SystemNavBarStyle> {
             dark ? Brightness.light : Brightness.dark,
         systemNavigationBarContrastEnforced: true,
       ),
-      child: widget.child,
+      child: dimming == null
+          ? widget.child
+          : NavBarDimmingScope(dimming: dimming, child: widget.child),
     );
   }
 }
 
-class CalorieTrackerApp extends StatelessWidget {
+class CalorieTrackerApp extends StatefulWidget {
   final UiServices services;
   final GlobalKey<ScaffoldMessengerState>? messengerKey;
   const CalorieTrackerApp({super.key, required this.services, this.messengerKey});
 
   @override
+  State<CalorieTrackerApp> createState() => _CalorieTrackerAppState();
+}
+
+class _CalorieTrackerAppState extends State<CalorieTrackerApp> {
+  /// Android 15 and later: the dialogs open on the app's navigator and the
+  /// analyzing overlays up, which dim the 3-button bar's scrim with them
+  /// (_SystemNavBarStyle, NAV-2). One per app, kept across rebuilds: the
+  /// navigator keeps its observer, and with it the dialogs it has seen.
+  final NavBarDimming _dimming = NavBarDimming();
+  late final NavBarDimmingObserver _dialogs = NavBarDimmingObserver(_dimming);
+
+  @override
+  void dispose() {
+    _dimming.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final services = widget.services;
+    final messengerKey = widget.messengerKey;
     // Design (run 7, theme/app_theme.dart): Apple's system neutrals for
     // every surface, the terracotta accent (#A64B2A light / #F2A07B dark),
     // iOS type sizes on the system fonts, depth from the page/cell tone
@@ -193,8 +271,9 @@ class CalorieTrackerApp extends StatelessWidget {
             GlobalCupertinoLocalizations.delegate,
           ],
           supportedLocales: const [Locale('en'), Locale('zh')],
-          builder: (context, child) =>
-              _SystemNavBarStyle(child: child ?? const SizedBox.shrink()),
+          navigatorObservers: [_dialogs],
+          builder: (context, child) => _SystemNavBarStyle(
+              dimming: _dimming, child: child ?? const SizedBox.shrink()),
           home: shell,
         );
     }
@@ -761,6 +840,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
               coverage: s.coverage,
               processPhoto: s.processPhoto,
               photoLibrary: s.photoLibrary,
+              analysisKeepAlive: s.analysisKeepAlive,
               startClaudeAuth: s.startClaudeAuth,
               completeClaudeAuth: s.completeClaudeAuth,
               serverLoginState: s.serverLoginState,

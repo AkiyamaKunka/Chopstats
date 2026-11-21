@@ -1,6 +1,7 @@
 package dev.calorietracker.calorie_tracker
 
 import android.os.Build
+import androidx.work.WorkInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
@@ -24,6 +25,82 @@ class KeepAliveRulesTest {
         assertFalse(KeepAliveRules.expedited(30))
         assertTrue(KeepAliveRules.expedited(31))
         assertTrue(KeepAliveRules.expedited(36))
+    }
+
+    // --- The job's network: any that reaches the internet, validated or
+    // not, from Android 9 (BG-1); none below.
+
+    @Test
+    fun aNetworkRequestFromAndroid9() {
+        assertEquals(28, Build.VERSION_CODES.P)
+        assertFalse(KeepAliveRules.usesNetworkRequest(24))
+        assertFalse(KeepAliveRules.usesNetworkRequest(27))
+        assertTrue(KeepAliveRules.usesNetworkRequest(28))
+        assertTrue(KeepAliveRules.usesNetworkRequest(31))
+        assertTrue(KeepAliveRules.usesNetworkRequest(36))
+        // Wherever the job is expedited it keeps a network constraint, so
+        // JobScheduler still lets it bypass the background network block.
+        for (sdk in 24..36) {
+            if (KeepAliveRules.expedited(sdk)) {
+                assertTrue("API $sdk", KeepAliveRules.usesNetworkRequest(sdk))
+            }
+        }
+    }
+
+    // --- Which job a request that begins gets (BG-2).
+
+    @Test
+    fun theFirstLiveRequestReplacesTheJobAndALaterOneKeepsIt() {
+        val ledger = KeepAliveLedger(capMs = 1_000)
+        // Nothing live: a job WorkManager still has (a backed-off re-run
+        // after a stop or a process death) is replaced by a fresh one.
+        assertTrue(KeepAliveRules.replacesJob(liveBefore = ledger.live(0)))
+        ledger.begin(1, 1, 0)
+        // A second request joins the live one: the job running for it stays.
+        assertFalse(KeepAliveRules.replacesJob(liveBefore = ledger.live(10)))
+        ledger.begin(1, 2, 10)
+        ledger.end(1, 1)
+        assertFalse(KeepAliveRules.replacesJob(liveBefore = ledger.live(20)))
+        ledger.end(1, 2)
+        assertTrue("the next burst starts afresh",
+            KeepAliveRules.replacesJob(liveBefore = ledger.live(30)))
+        // A request open past its cap keeps nothing alive: replaced too.
+        ledger.begin(1, 3, 100)
+        assertTrue(KeepAliveRules.replacesJob(liveBefore = ledger.live(1_100)))
+        // A new process has an empty ledger: its first request replaces
+        // whatever job the last one left.
+        assertTrue(KeepAliveRules.replacesJob(liveBefore = KeepAliveLedger().live(0)))
+    }
+
+    @Test
+    fun aJobTheSystemStoppedIsRenewedOnlyForStopsAFreshJobOutlasts() {
+        for (reason in listOf(
+            WorkInfo.STOP_REASON_PREEMPT,
+            WorkInfo.STOP_REASON_DEVICE_STATE,
+            WorkInfo.STOP_REASON_CONSTRAINT_CONNECTIVITY,
+            WorkInfo.STOP_REASON_QUOTA,
+            WorkInfo.STOP_REASON_APP_STANDBY,
+            WorkInfo.STOP_REASON_SYSTEM_PROCESSING,
+        )) {
+            assertTrue("renewed after $reason", KeepAliveRules.renewsAfterStop(reason))
+        }
+        for (reason in listOf(
+            // The app's own cancel: its requests ended, or a newer burst
+            // replaced the job. Renewing it would undo that.
+            WorkInfo.STOP_REASON_CANCELLED_BY_APP,
+            // A second job would time out again (10 a day restrict the app).
+            WorkInfo.STOP_REASON_TIMEOUT,
+            WorkInfo.STOP_REASON_USER,
+            WorkInfo.STOP_REASON_BACKGROUND_RESTRICTION,
+            WorkInfo.STOP_REASON_NOT_STOPPED,
+            WorkInfo.STOP_REASON_UNKNOWN,
+            WorkInfo.STOP_REASON_FOREGROUND_SERVICE_TIMEOUT,
+            WorkInfo.STOP_REASON_CONSTRAINT_CHARGING,
+            WorkInfo.STOP_REASON_ESTIMATED_APP_LAUNCH_TIME_CHANGED,
+            9_999,
+        )) {
+            assertFalse("not renewed after $reason", KeepAliveRules.renewsAfterStop(reason))
+        }
     }
 
     @Test
@@ -106,6 +183,25 @@ class KeepAliveRulesTest {
         assertFalse("its Dart can no longer end them", ledger.end(1, 2))
         assertEquals(1, ledger.drop(2))
         assertFalse(ledger.live(0))
+    }
+
+    @Test
+    fun aDartThatStartsOverDropsWhatItsLastRunLeft() {
+        // A hot restart keeps the engine and its session but starts Dart's
+        // ids over at 1. Without the drop (MainActivity's "reset") the old
+        // request 1 stayed open, live for its full cap with nothing in
+        // flight, and the new request 1 was a repeated begin: no time of
+        // its own, then its end removed the old one.
+        val ledger = KeepAliveLedger(capMs = 1_000)
+        ledger.begin(1, 1, 0)
+        assertFalse(ledger.begin(1, 1, 900))
+        assertEquals("the stale begin's time", 100L, ledger.msLeft(900))
+        assertEquals(1, ledger.drop(1))
+        assertFalse(ledger.live(900))
+        assertTrue(ledger.begin(1, 1, 900))
+        assertEquals("its own cap, from its own begin", 1_000L, ledger.msLeft(900))
+        // At a cold start nothing is open: the drop changes nothing.
+        assertEquals(0, KeepAliveLedger().drop(1))
     }
 
     // --- The cap: each request keeps the process up for 3 minutes at most.

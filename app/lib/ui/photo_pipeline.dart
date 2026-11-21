@@ -347,11 +347,14 @@ class PhotoPipeline {
   /// moment it is queued until its turn has ended (owner decision 9):
   /// Android freezes an app the user left for another one about 10 s
   /// later, and its reply then waited in the frozen process until the user
-  /// came back. Queued time counts: the photo ahead of it must finish for
-  /// its turn to come. Automatic photos are not kept: the next scan or the
-  /// background job offers again any they could not finish. Null
-  /// everywhere else (iOS has [backgroundTime], the headless run its own
-  /// time, tests opt in).
+  /// came back. Queued time counts, with an allowance of its own: the photo
+  /// ahead of it (often an automatic one, which is not kept itself) must
+  /// finish for its turn to come. Its turn is a second request, so the
+  /// photo's own analysis gets the full cap (3 minutes) from its start,
+  /// however long it waited ([_chain]). Automatic photos are not kept: the
+  /// next scan or the background job offers again any they could not
+  /// finish. Null everywhere else (iOS has [backgroundTime], the headless
+  /// run its own time, tests opt in).
   final AnalysisKeepAlive? keepAlive;
 
   /// iOS, the app's own engine only (di.dart: appEngineBackgrounded):
@@ -445,12 +448,22 @@ class PhotoPipeline {
 
   /// Chains [photo] onto the global FIFO tail, counted for [isIdle] until
   /// its turn ends. A deliberate photo is kept alive ([keepAlive]) from
-  /// here to the end of its turn, whatever its verdict.
+  /// here to the end of its turn, whatever its verdict, as two requests:
+  /// the outer one covers the wait as well (the photo ahead must finish for
+  /// this one's turn to come), the inner one the turn alone. Each request's
+  /// cap counts from its own begin, so the turn gets the full cap however
+  /// long the wait was; one id held across the turn would have spent it on
+  /// the photo ahead. Nested, not one ended and the next begun: the job
+  /// never sees nothing live between them. [_tail] is read here,
+  /// synchronously, either way (guard runs its body before its first
+  /// await), so the FIFO order stays the callers'.
   Future<PhotoOutcome> _chain(IntakePhoto photo) {
     _queued++;
-    Future<PhotoOutcome> turn() => _tail.then((_) => process(photo));
     final keep = photo.deliberate ? keepAlive : null;
-    final slot = keep == null ? turn() : keep.guard(turn);
+    final slot = keep == null
+        ? _tail.then((_) => process(photo))
+        : keep.guard(
+            () => _tail.then((_) => keep.guard(() => process(photo))));
     slot.whenComplete(() => _queued--).ignore();
     return slot;
   }

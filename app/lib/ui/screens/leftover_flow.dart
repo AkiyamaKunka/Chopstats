@@ -585,7 +585,7 @@ class _LeftoverScreenState extends State<LeftoverScreen> {
     // No horizontal padding: GroupedSection already insets 16 (ONE
     // gutter); an extra 16 a side here shrank every cell to 326 px.
     return ListView(
-      padding: const EdgeInsets.only(top: 8, bottom: 24),
+      padding: EdgeInsets.only(top: 8, bottom: scrollEndInset(context, 24)),
       children: [
         GroupedSection(
           header: l.leftoverPickMeal,
@@ -706,7 +706,8 @@ class _LeftoverScreenState extends State<LeftoverScreen> {
               return Center(child: Text(l.addNoPhotos));
             }
             final grid = GridView.builder(
-              padding: const EdgeInsets.all(16),
+              padding: EdgeInsets.fromLTRB(
+                  16, 16, 16, scrollEndInset(context, 16)),
               gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                   crossAxisCount: 3, crossAxisSpacing: 6, mainAxisSpacing: 6),
               itemCount: assets.length,

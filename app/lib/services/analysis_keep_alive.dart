@@ -14,17 +14,21 @@
 /// (android/.../AnalysisKeepAlive.kt: expedited on Android 12 and later,
 /// plain below, no notification), which keeps the process from being
 /// cached and frozen and, expedited, its network usable. The job ends as
-/// the last request does, and a request keeps it for 3 minutes at most
-/// (KeepAliveRules.CAP_MS).
+/// the last request does, and each request keeps it for 3 minutes at most
+/// from its own begin (KeepAliveRules.CAP_MS): a photo waiting its turn
+/// counts its wait as one request and its turn as another, so the turn
+/// gets the full 3 minutes from its start (PhotoPipeline._chain).
 ///
 /// Rules: ONE begin per request, always ended (in `finally`), whatever the
 /// request comes to (a meal saved, a failure, a refusal, the user backing
-/// out); each begin carries an id this engine never reuses, so a repeated
+/// out); each begin carries an id this Dart run never reuses, so a repeated
 /// or stray end changes nothing native. The requests of an engine that dies
 /// (Back finished the activity, a swipe from Recents) end with it:
-/// MainActivity drops its session in cleanUpFlutterEngine. Nothing is kept
-/// across processes. Built for the app's own engine on Android only
-/// (di.dart): iOS asks for background time per photo instead
+/// MainActivity drops its session in cleanUpFlutterEngine. A Dart run that
+/// starts over in the same engine (a hot restart: no cleanup, ids from 1
+/// again) drops what the last run left with its first call, "reset".
+/// Nothing is kept across processes. Built for the app's own engine on
+/// Android only (di.dart): iOS asks for background time per photo instead
 /// (background_time.dart), and the background engine has its job's own
 /// time.
 library;
@@ -40,8 +44,18 @@ import '../core/contracts.dart';
 const String keepAliveChannelName = 'dev.calorietracker/keepalive';
 
 class AnalysisKeepAlive {
+  /// Built once per Dart run of the app's engine (di.dart). Its first call
+  /// is "reset": MainActivity drops every request still open under this
+  /// engine's session. A hot restart keeps the engine, and with it the
+  /// session (configureFlutterEngine is not run again, cleanUpFlutterEngine
+  /// is not called), while the ids here start over at 1: what the last run
+  /// began would keep the job up for its full cap with nothing in flight,
+  /// and this run's first begin would land on its stale entry. At a cold
+  /// start nothing is open, and the reset changes nothing.
   AnalysisKeepAlive(
-      [this._channel = const MethodChannel(keepAliveChannelName)]);
+      [this._channel = const MethodChannel(keepAliveChannelName)]) {
+    _send('reset');
+  }
 
   final MethodChannel _channel;
 
@@ -88,10 +102,10 @@ class AnalysisKeepAlive {
 
   /// Fire and forget: the channel keeps the calls in order, and a missing
   /// or failing native side (an old build, a test) only loses the job.
-  void _send(String method, int id) {
+  void _send(String method, [int? id]) {
     try {
       unawaited(_channel
-          .invokeMethod<Object?>(method, {'id': id})
+          .invokeMethod<Object?>(method, id == null ? null : {'id': id})
           .then<void>((_) {}, onError: (Object _) {}));
     } catch (_) {}
   }
