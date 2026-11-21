@@ -913,12 +913,12 @@ void main() {
     });
 
     // android-v1.7.0 (b207) carries the name 1.7.0, and the policy dates
-    // two Android changes from 1.7.1, so main became 1.7.1 on 2026-11-20
-    // (docs/RELEASING.md § 6.6). Whatever version the policy names last
-    // must be the next build's: while pubspec is behind it, § 6.6 names
-    // the version to bump to and § 6.8 keeps the step before the lane play
-    // run (review of #72; RD-1). release.yml's plan step refuses such an
-    // Android run (the R15 group runs it).
+    // two Android changes from 1.7.1, so main is 1.7.1 since PR #77
+    // (decided on 2026-11-20, docs/RELEASING.md § 6.6). Whatever version
+    // the policy names last must be the next build's: while pubspec is
+    // behind it, § 6.6 names the version to bump to and § 6.8 keeps the
+    // step before the lane play run (review of #72; RD-1). release.yml's
+    // plan step refuses such an Android run (the R15 group runs it).
     test('pubspec is not behind the newest version the policy names', () {
       final v = _policyVersions(policy);
       expect(v.en, contains('1.7.1'));
@@ -1263,8 +1263,9 @@ void main() {
 
     // Decision 4 (2026-11-13): an Android-only version ships with a
     // hand-made GitHub Release under an android-v* tag (android-v1.7.0 on
-    // 2026-11-20, android-v1.7.1 next; the iPhone's next tag is v1.7.1).
-    // That tag must start no run: the only push trigger is tags v*.
+    // 2026-11-19, android-v1.7.1 next; the iPhone's next tag from main is
+    // v1.7.1). That tag must start no run: the only push trigger is tags
+    // v*.
     test('only v* tags start a run, so android-v* tags start none', () {
       final on = RegExp(r'^on:\n((?:[ \t]+.*\n|\n)*)', multiLine: true)
           .firstMatch(workflow)!
@@ -1388,7 +1389,7 @@ void main() {
       expect(s6, contains('Name the release `$version (2xx)`'));
       expect(s6, contains('GitHub APK as `android-v$version` by hand'));
       expect(s6, contains('`android-v1.7.0` (build 207) is already out'));
-      expect(s6, contains("the iPhone's next tag is `v$version`"));
+      expect(s6, contains("the iPhone's next tag from `main` is `v$version`"));
       expect(releasing,
           contains('git tag v$version && git push origin v$version'));
       expect(s6, isNot(contains('The next Android build is 1.7.1.')),
@@ -1401,6 +1402,103 @@ void main() {
           'replaced the same way')));
       expect(s6, contains("the analysis keep-alive's one-time job still runs"));
       expect(s6, isNot(contains('no WorkManager job is registered')));
+    });
+
+    // Review of #77 (RV-2, DT-1): release/1.6.1 holds a finished, untagged
+    // 1.6.1 cut from v1.6.0, so "the iPhone goes from 1.6.0 to 1.7.1" and
+    // "the first iPhone tag since 1.6.0, v1.7.1" held only for tags from
+    // main. What RELEASING says about the next iPhone version is main's,
+    // and § 6.6 says what a v1.6.1 tag on that branch does.
+    test("the iPhone's next version is main's, and a 1.6.x hotfix is "
+        'tagged on its own branch', () {
+      final version = _pubspecVersion(_read('pubspec.yaml'));
+      final flat = releasing.replaceAll(RegExp(r'\s+'), ' ');
+      for (final unscoped in [
+        "the iPhone's next tag is",
+        'the iPhone goes from 1.6.0 to',
+        'Before the first iPhone tag since 1.6.0',
+        'so no build may be named below',
+        'means that next App Store version',
+      ]) {
+        expect(flat, isNot(contains(unscoped)), reason: unscoped);
+      }
+      expect(s6, contains("`main`'s next iPhone version is $version"));
+      expect(
+          s6,
+          contains('so no build of `main` may be named below the newest '
+              'version it names'));
+      expect(
+          flat,
+          contains('Before the first tag from `main` since 1.6.0, '
+              '`v$version`'));
+      expect(
+          flat,
+          contains('means the first App Store version built from `main` '
+              'after 1.6.0, now $version, not a 1.6.x hotfix'));
+      // § 6.3 names the hotfix branch; § 6.6 says what its tag does.
+      expect(
+          s6,
+          contains('The 1.6.x hotfixes branch from tag `v1.6.0` (today '
+              '`release/1.6.1`, § 6.6)'));
+      expect(s6, contains('**A 1.6.x hotfix**'));
+      final hotfix = s6.substring(s6.indexOf('**A 1.6.x hotfix**'));
+      for (final fact in [
+        'A `v1.6.1` tag needs no § 11, since that branch has no iCloud '
+            'entitlement',
+        "runs that branch's own `release.yml`: both lanes on a tag push, "
+            '`BUILD_NUMBER_OFFSET` 100, and none of the checks added since '
+            '1.6.0',
+        'So its build is numbered 100 + its run number',
+        "That is below `android-v1.7.0`'s 207, so Android refuses it on a "
+            'phone with 1.7.0',
+        "Keep that branch's own `release.yml`",
+      ]) {
+        expect(hotfix, contains(fact), reason: fact);
+      }
+    });
+
+    // Review of #77 (DT-2): android-v1.7.0 went out on 2026-11-19 in the
+    // repo's local time (run 7 at 22:09 CST, published 23:31 CST), not
+    // 2026-11-20 (UTC), and main's pubspec is 1.7.1 from the merge of PR
+    // #77 on, not from the day it was decided.
+    test('android-v1.7.0 is dated 2026-11-19, and the bump by its PR', () {
+      final flat = releasing.replaceAll(RegExp(r'\s+'), ' ');
+      final dated = [
+        for (final sentence in flat.split(RegExp(r'(?<=[.;])\s+')))
+          if (sentence.contains('android-v1.7.0'))
+            for (final d in RegExp(r'\d{4}-\d\d-\d\d').allMatches(sentence))
+              (date: d.group(0)!, sentence: sentence),
+      ];
+      expect(dated, hasLength(greaterThanOrEqualTo(3)));
+      for (final (:date, :sentence) in dated) {
+        expect(date, '2026-11-19', reason: sentence);
+      }
+      expect(flat, isNot(contains('So on 2026-11-20 `version:`')));
+      expect(flat, isNot(contains('both were 1.7.1 on 2026-11-20')));
+      expect(
+          flat,
+          contains('`kAppVersion` (`lib/services/backup/backup_files.dart`) '
+              '`1.7.1` since PR #77, decided on 2026-11-20'));
+      expect(flat, contains('(both are 1.7.1 since PR #77)'));
+    });
+
+    // Review of #77 (RV-1): two maintainer notes outside RELEASING waited
+    // for "1.7.0" to ship on the App Store, which the iPhone skips.
+    test('the slide and screenshot notes wait for 1.7.1, not 1.7.0', () {
+      String flatRepo(String path) =>
+          _readRepo(path).replaceAll(RegExp(r'\s+'), ' ');
+      final slides = flatRepo('docs/readme/src/README.md');
+      expect(slides, isNot(contains('When 1.7.0 ships')));
+      expect(
+          slides,
+          contains('When the first App Store version built from `main` '
+              'after 1.6.0 ships (1.7.1: the iPhone skips 1.7.0'));
+      final shots = flatRepo('app/ios/store/marketing-src/README.md');
+      expect(shots, isNot(contains('(1.7.0, the native iOS design)')));
+      expect(
+          shots,
+          contains('(1.7.1, the native iOS design; the iPhone skips '
+              '1.7.0)'));
     });
 
     test('every Google page it cites carries its read date', () {
@@ -1964,6 +2062,73 @@ void main() {
             contains("::error::could not read the repository's tags "
                 '(git ls-remote)'));
         expect(r.out, isEmpty);
+      });
+
+      // Review of #77 (RV-3, DT-3): RELEASING § 5 said two tags pushed
+      // together could each pass. A run reads the tags after the push that
+      // started it, so tags pushed in one push see each other, and a tag
+      // pushed after a run has read them starts a later run, which reads
+      // the earlier run's tag.
+      test('two tags that would collide never both pass', () async {
+        /// The plan of a push of tag [name] at Release run [run], with
+        /// [seen] the repository's tags then, and pubspec at its version.
+        Future<({int code, String log, String out})> push(
+            String name, int run, List<String> seen) async {
+          final version = name.substring(1).split('+').first;
+          final r = await plan('push', 'refs/tags/$name', run,
+              pubspec: '$version+9', tags: seen);
+          return (code: r.code, log: r.log, out: r.out);
+        }
+
+        // One push, two +N tags: each run sees both, the lower is refused.
+        const pair = ['v1.7.0+215', 'v1.7.1+216'];
+        final lower = await push('v1.7.0+215', 9, pair);
+        expect(lower.code, 1, reason: lower.log);
+        expect(lower.log, contains('but tag v1.7.1+216 numbered its build 216'));
+        final higher = await push('v1.7.1+216', 10, pair);
+        expect(higher.code, 0, reason: higher.log);
+        expect(higher.out, contains('build_number=216\n'));
+        // Equal: both are refused, whichever run starts first.
+        const equal = ['v1.7.0+215', 'v1.7.1+215'];
+        for (final (name, run) in [('v1.7.0+215', 9), ('v1.7.1+215', 10)]) {
+          final r = await push(name, run, equal);
+          expect(r.code, 1, reason: '$name: ${r.log}');
+          expect(r.out, isNot(contains('build_number=')));
+        }
+
+        // Pushed after run 9 had read the tags: run 10's floor is above
+        // run 9's own number, and run 10 counts run 9's +N.
+        final plain = await push('v1.7.0', 9, ['v1.7.0']);
+        expect(plain.out, contains('build_number=209\n'));
+        final same = await push('v1.7.1+209', 10, ['v1.7.0', 'v1.7.1+209']);
+        expect(same.code, 1, reason: same.log);
+        final after = await push('v1.7.1+210', 10, ['v1.7.0', 'v1.7.1+210']);
+        expect(after.code, 0, reason: after.log);
+        expect(after.out, contains('build_number=210\n'));
+        final plus = await push('v1.7.0+215', 9, ['v1.7.0+215']);
+        expect(plus.out, contains('build_number=215\n'));
+        for (final name in ['v1.7.1', 'v1.7.1+215']) {
+          final r = await push(name, 10, ['v1.7.0+215', name]);
+          expect(r.code, 1, reason: '$name: ${r.log}');
+          expect(r.log, contains('but tag v1.7.0+215 numbered its build 215'));
+        }
+        final above =
+            await push('v1.7.1+216', 10, ['v1.7.0+215', 'v1.7.1+216']);
+        expect(above.code, 0, reason: above.log);
+
+        // What RELEASING § 5 and the plan step's comment say about it.
+        final releasing =
+            _readRepo('docs/RELEASING.md').replaceAll(RegExp(r'\s+'), ' ');
+        expect(releasing,
+            isNot(contains('two tags pushed together can each pass')));
+        expect(releasing,
+            contains('So two tags that would collide never both pass.'));
+        expect(releasing,
+            contains('the checkout fetches no tag but the one being built'));
+        expect(workflow, isNot(contains('one pushed while this step runs')));
+        expect(workflow, isNot(contains('The checkout fetches no tags')));
+        expect(workflow,
+            contains('two tags that would collide never both pass'));
       });
 
       // RD-1: Run workflow › lane play built 1.7.0 while the policy dated

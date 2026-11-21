@@ -150,11 +150,17 @@ jobs:
           # The highest build number another vX.Y.Z+N tag carries: a +N can
           # be above BUILD_NUMBER_OFFSET + its run number, and a later run's
           # own number, or another tag's +N, would then land on it or below
-          # it. The checkout fetches no tags, so the repository's are read
-          # here (over the checkout's credentials), and a failed read stops
-          # the run. The tag being built does not count (Run workflow
-          # re-releasing it). Not seen (docs/RELEASING.md § 5): a tag deleted
-          # after its build went out, and one pushed while this step runs.
+          # it. The checkout fetches no other tags (on a tag push, only the
+          # one being built), so the repository's are read here (over the
+          # checkout's credentials), and a failed read stops the run. The
+          # tag being built does not count (Run workflow re-releasing it).
+          # Tags pushed in one push see each other here. A tag pushed after
+          # this read is not checked by this run, but its own run comes
+          # later, so its floor is above this run's and it counts this
+          # run's +N: two tags that would collide never both pass. Not seen
+          # (docs/RELEASING.md § 5): a tag deleted after its build went out.
+          # A tag on a branch cut before this check (release/1.6.1) runs
+          # that branch's own release.yml, without it.
           this_tag=
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then this_tag=${GITHUB_REF#refs/tags/}; fi
           if ! tag_refs=$(git ls-remote --tags --refs origin); then
@@ -479,11 +485,12 @@ jobs:
           fi
           echo "team_id=$runner_team" >> "$GITHUB_OUTPUT"
 
-      # iCloud Backup (1.7.0): once Runner.entitlements names the iCloud
-      # container, the Runner App Store profile must allow it with iCloud
-      # Documents, or the archive fails late or ships without the container.
-      # Checked here, before anything is built, with the step that says how
-      # to fix it (docs/RELEASING.md § iCloud container).
+      # iCloud Backup (iPhone 1.7.1; the iPhone skips 1.7.0): once
+      # Runner.entitlements names the iCloud container, the Runner App
+      # Store profile must allow it with iCloud Documents, or the archive
+      # fails late or ships without the container. Checked here, before
+      # anything is built, with the step that says how to fix it
+      # (docs/RELEASING.md § iCloud container).
       - name: Check the Runner profile allows the iCloud container
         if: steps.secrets.outputs.ready == 'true'
         working-directory: app
@@ -580,9 +587,9 @@ jobs:
         run: |
           set -euo pipefail
           app=build/ios/archive/Runner.xcarchive/Products/Applications/Runner.app
-          # iCloud Backup (1.7.0): the signed Runner carries the container
-          # exactly when Runner.entitlements names it; the ShareExtension
-          # never carries iCloud.
+          # iCloud Backup (iPhone 1.7.1): the signed Runner carries the
+          # container exactly when Runner.entitlements names it; the
+          # ShareExtension never carries iCloud.
           want_container=$(/usr/libexec/PlistBuddy -c "Print :com.apple.developer.icloud-container-identifiers:0" ios/Runner/Runner.entitlements 2>/dev/null || true)
           for bundle in "$app" "$app/PlugIns/ShareExtension.appex"; do
             label=$(basename "$bundle")

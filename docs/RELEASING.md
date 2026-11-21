@@ -1082,18 +1082,28 @@ step. Revisit if the app is ever published with a developer-run service.
   tag at run 15 is numbered 215 too, and `v1.7.2+213` at run 12 clears
   that run's floor (212) but sits below a build already out. So the plan
   job also reads the repository's tags (`git ls-remote`; the checkout
-  fetches none, and a failed read stops the run) and takes the highest `N`
-  of the other `vX.Y.Z+N` tags. A tag's `+N` must be above it, and so must
-  a run numbered `BUILD_NUMBER_OFFSET` + its run number (a plain tag, or
-  Run workflow on a branch, lane `play` included): in the example, runs 10
-  to 15 are refused until `BUILD_NUMBER_OFFSET` in `release.yml` is raised
-  so that it plus the next run's number is above 215 (never lower it). So
-  take a `+N` only a little above the floor. What the check cannot see: a
+  fetches no tag but the one being built, and a failed read stops the
+  run) and takes the highest `N` of the other `vX.Y.Z+N` tags. A tag's
+  `+N` must be above it, and so must a run numbered
+  `BUILD_NUMBER_OFFSET` + its run number (a plain tag, or Run workflow on
+  a branch, lane `play` included): in the example, runs 10 to 15 are
+  refused until `BUILD_NUMBER_OFFSET` in `release.yml` is raised so that
+  it plus the next run's number is above 215 (never lower it). So take a
+  `+N` only a little above the floor.
+  Tags pushed close together are covered. Tags pushed in one push see
+  each other, so of two `+N` tags the lower one is refused, and both when
+  they are equal. A tag pushed after a run has read the tags is not
+  checked by that run, but its own run comes later and checks it against
+  the earlier one: its floor (`BUILD_NUMBER_OFFSET` + its run number) is
+  above the earlier run's, and it counts the earlier run's `+N`. So two
+  tags that would collide never both pass. What the check cannot see: a
   `+N` tag deleted after its build went out (raise the offset above its
-  number before deleting it), and a tag pushed while the plan step runs
-  (two tags pushed together can each pass); and it counts a `+N` tag whose
-  run built nothing (its plan refused it for another reason) until that
-  tag is deleted.
+  number before deleting it), and a tag on a branch cut before the check,
+  such as `release/1.6.1` (from `v1.6.0`), which runs that branch's own
+  `release.yml`: `BUILD_NUMBER_OFFSET` 100 and none of these checks
+  (§ 6.6, *A 1.6.x hotfix*). And it counts a `+N` tag whose run built
+  nothing (its plan refused it for another reason) until that tag is
+  deleted.
 
 ---
 
@@ -1126,11 +1136,12 @@ wording, not the position. The paste-ready answers live next to the app in
 4. **Android 1.7.0 ships Android-only:** Run workflow › lane `play`, the
    bundle uploaded to Play by hand, and a GitHub Release made by hand
    under the tag `android-v1.7.0` (§ 6.6), so `v1.7.0` stays free for the
-   iPhone 1.7.0. Done on 2026-11-20 for GitHub (`android-v1.7.0`, build
+   iPhone 1.7.0. Done on 2026-11-19 for GitHub (`android-v1.7.0`, build
    207); no bundle reached Play. Android 1.7.1 goes out the same way.
    The iPhone 1.7.0 never shipped (1.6.0 is live), and pubspec is 1.7.1
-   now, so the iPhone's next tag is `v1.7.1`: `v1.7.0` stays unused
-   (§ 6.6).
+   since PR #77, so the iPhone's next tag from `main` is `v1.7.1`:
+   `v1.7.0` stays unused (§ 6.6). A 1.6.x hotfix is tagged on its own
+   branch instead (§ 6.6, *A 1.6.x hotfix*).
 
 **The owner's decisions (2026-11-20):**
 
@@ -1399,9 +1410,9 @@ the environment `release`, which today has no protection rules, so
 1. Repository › Settings › Environments › `release`: *Required reviewers*
    = you; *Deployment branches and tags* = selected: `main`, `release/*`,
    `hotfix/*` and tags `v*`. The 1.6.x hotfixes branch from tag `v1.6.0`
-   (today `release/1.6.1`); add whatever prefix a hotfix branch uses
-   before running the workflow from it. A run from any other branch then
-   stops before it can read a secret.
+   (today `release/1.6.1`, § 6.6); add whatever prefix a hotfix branch
+   uses before running the workflow from it. A run from any other branch
+   then stops before it can read a secret.
 2. Add `ANDROID_UPLOAD_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD` and
    `ANDROID_KEY_PASSWORD` (and later `PLAY_SERVICE_ACCOUNT_JSON`) as
    **environment** secrets with the same names (an environment secret
@@ -1673,7 +1684,7 @@ read 2026-11-13):
 **An Android-only version (decision 4).** release.yml runs both lanes on
 any `v*` tag, and the iOS lane stops until the iCloud container exists
 (§ 11.1). So Android goes first without a `v*` tag. Android 1.7.0 went
-out this way on 2026-11-20 (`android-v1.7.0`, build 207, GitHub only).
+out this way on 2026-11-19 (`android-v1.7.0`, build 207, GitHub only).
 The next one is 1.7.1, pubspec's version, which the steps name:
 
 1. Actions › Release › Run workflow › `main` › lane **`play`**. The plan
@@ -1706,34 +1717,53 @@ The next one is 1.7.1, pubspec's version, which the steps name:
 
 Later, when the iPhone version is ready, tag `main` as usual with
 pubspec's version, `v1.7.1` (but read the next paragraph first): the
-iPhone 1.7.0 never shipped (1.6.0 is live), so the iPhone goes from 1.6.0
-to 1.7.1, and `v1.7.0` stays unused. That run also builds Android again,
-with a higher build number: it puts that APK on the `v1.7.1` release and,
-with `PLAY_SERVICE_ACCOUNT_JSON` set, sends the bundle to the internal
-track. Both are harmless (an upgrade for anyone who installs them).
+iPhone 1.7.0 never shipped (1.6.0 is live), so `main`'s next iPhone
+version is 1.7.1 (a 1.6.x hotfix is tagged on its own branch, below),
+and `v1.7.0` stays unused. That run also builds Android again, with a
+higher build number: it puts that APK on the `v1.7.1` release and, with
+`PLAY_SERVICE_ACCOUNT_JSON` set, sends the bundle to the internal track.
+Both are harmless (an upgrade for anyone who installs them).
 
 **Pubspec and the versions the policy names.** The privacy policy dates
 changes by version ("From version X.Y.Z"), and every build opens it from
-`main`, so no build may be named below the newest version it names: a
-build named 1.7.0 that does what the policy dates from 1.7.1 would not do
-what the policy says 1.7.0 does. `android-v1.7.0` (b207) went out as
-1.7.0, and the policy dates two Android changes from 1.7.1: Meta glasses
-photos off until turned on, and the Google backup only end-to-end
-encrypted (owner decisions 8 and 5). So on 2026-11-20 `version:` in
-`app/pubspec.yaml` became `1.7.1+10` and `kAppVersion`
-(`lib/services/backup/backup_files.dart`) `1.7.1`, decided by Claude on
-the owner's delegation. The tag must match pubspec, so this also made the
-next iPhone release from `main` 1.7.1, not the 1.7.0 decision 4 kept free
-for it. The rule stays for later versions: when the policy dates a change
-from a version above pubspec's, set `version:` in `app/pubspec.yaml` and
-`kAppVersion` (`lib/services/backup/backup_files.dart`) to that version
-or later before the next build of `main` that includes Android, by lane
-`play` or by any `v*` tag, and ask the owner first, since the tag names
-the next iPhone release too. release.yml's plan step refuses an Android
-run while pubspec is below the newest *From version* in
-`docs/PRIVACY.md` (§ 6.8, step 8). While pubspec is behind,
-`release_decisions_test` wants this paragraph to name the version to bump
-to and § 6.8 to keep step 8.
+`main`, so no build of `main` may be named below the newest version it
+names: a build named 1.7.0 that does what the policy dates from 1.7.1
+would not do what the policy says 1.7.0 does. `android-v1.7.0` (b207)
+went out as 1.7.0, and the policy dates two Android changes from 1.7.1:
+Meta glasses photos off until turned on, and the Google backup only
+end-to-end encrypted (owner decisions 8 and 5). So `version:` in
+`app/pubspec.yaml` is `1.7.1+10` and `kAppVersion`
+(`lib/services/backup/backup_files.dart`) `1.7.1` since PR #77, decided
+on 2026-11-20 by Claude on the owner's delegation. The tag must match
+pubspec, so this also made the next iPhone release from `main` 1.7.1,
+not the 1.7.0 decision 4 kept free for it. The rule stays for later
+versions: when the policy dates a change from a version above pubspec's,
+set `version:` in `app/pubspec.yaml` and `kAppVersion`
+(`lib/services/backup/backup_files.dart`) to that version or later
+before the next build of `main` that includes Android, by lane `play` or
+by any `v*` tag, and ask the owner first, since the tag names `main`'s
+next iPhone release too. release.yml's plan step refuses an Android run
+while pubspec is below the newest *From version* in `docs/PRIVACY.md`
+(§ 6.8, step 8). While pubspec is behind, `release_decisions_test` wants
+this paragraph to name the version to bump to and § 6.8 to keep step 8.
+
+**A 1.6.x hotfix** for the iPhone is tagged on its own branch from
+`v1.6.0`, not on `main`: today `release/1.6.1` (version 1.6.1+9, not
+tagged). A `v1.6.1` tag needs no § 11, since that branch has no iCloud
+entitlement, and it runs that branch's own `release.yml`: both lanes on
+a tag push, `BUILD_NUMBER_OFFSET` 100, and none of the checks added
+since 1.6.0 (the run floor and the `+N` tag check of § 5, the policy
+check above). So its build is numbered 100 + its run number (108 or
+more: run 7 built `android-v1.7.0`), inside § 11.2's 107–199: on a phone
+that installs it, later device test builds go above it. It also puts an
+Android 1.6.1 APK with that number on a new GitHub Release, `v1.6.1`.
+That is below `android-v1.7.0`'s 207, so Android refuses it on a phone
+with 1.7.0: say so in that release's notes, and leave the README's
+Android section on the 1.7.x release. Keep that branch's own
+`release.yml`: `main`'s would stop its Android job (the branch has no
+`kRequireHttpsServer`), and its offset 200 would number the APK above
+207, so Android would install 1.6.1 (database schema 3) over 1.7.0
+(schema 4).
 
 **Developer verification and the GitHub APK.** Because the package
 shipped as GitHub APKs before it existed on Play, Play Console may ask,
@@ -1843,8 +1873,8 @@ the screenshots:
 
 7. Upload the screenshots (at least 4 per language).
 8. Before the run: `version:` in `app/pubspec.yaml` must not be below the
-   newest *From version X.Y.Z* in `docs/PRIVACY.md` (both were 1.7.1 on
-   2026-11-20). If it is, bump it and `kAppVersion` first, with the
+   newest *From version X.Y.Z* in `docs/PRIVACY.md` (both are 1.7.1
+   since PR #77). If it is, bump it and `kAppVersion` first, with the
    owner's OK (§ 6.6); release.yml's plan step refuses the Android lane
    until then.
 9. Run workflow › `main` › lane `play`; check the plan summary's build
@@ -1862,7 +1892,7 @@ the screenshots:
     China, roll out, share the opt-in link, and start the 14-day log.
 13. Publish the same run's GitHub APK as `android-v1.7.1` by hand, then
     update the README's Android section (§ 6.6, steps 3 to 5).
-    `android-v1.7.0` (build 207) is already out, since 2026-11-20.
+    `android-v1.7.0` (build 207) is already out, since 2026-11-19.
 
 Optional, only after the first manual rollout:
 
@@ -1942,11 +1972,13 @@ the README, not this page.
 
 ## 8. Running a release (cheat sheet)
 
-(Before the first iPhone tag since 1.6.0, `v1.7.1` (the iPhone skips
-1.7.0, § 6.6): § 11, the iCloud container, or the iOS lane stops at
-"Check the Runner profile allows the iCloud container". Once that version
-is in the App Store: § 12, the support page, whose "1.7.0" means it. An
-Android-only version goes first without a `v*` tag: § 6.6.)
+(Before the first tag from `main` since 1.6.0, `v1.7.1` (the iPhone
+skips 1.7.0, § 6.6): § 11, the iCloud container, or the iOS lane stops
+at "Check the Runner profile allows the iCloud container". Once that
+version is in the App Store: § 12, the support page, whose "1.7.0" means
+it. A 1.6.x hotfix is tagged on its own branch and needs neither: § 6.6,
+*A 1.6.x hotfix*. An Android-only version goes first without a `v*` tag:
+§ 6.6.)
 
 ```bash
 # 1. in the shipping PR: app/pubspec.yaml  version: 1.7.1+10   (the +N is for hand builds only;
@@ -2263,14 +2295,15 @@ phone, with Part B and § 11.1 done:
 `docs/SUPPORT.md` is the support URL of both store listings, so, like the
 README, it describes the version in the App Store (1.6.0 today). What only
 `main` has is written here instead and goes onto the page in a PR once
-1.7.0 is in the App Store. (The iPhone skips 1.7.0 and goes from 1.6.0 to
-1.7.1, § 6.6: "1.7.0" in this section and in the test named below means
-that next App Store version.) The labels are the app's on `main`:
-`app/test/ui/copy_consistency_test.dart` checks them against `app_en.arb`,
-and checks that `SUPPORT.md` does not name them yet; drop that check
-("names no 1.7.0 control …") in the same PR. If 1.7.0 ships without Part B
-(§ 11), leave out the iCloud Backup text (steps 1, 3 and 4) and keep
-step 2.
+1.7.0 is in the App Store. (The iPhone skips 1.7.0, § 6.6: "1.7.0" in
+this section and in the test named below means the first App Store
+version built from `main` after 1.6.0, now 1.7.1, not a 1.6.x hotfix
+such as 1.6.1, which has none of this.) The labels are the app's on
+`main`: `app/test/ui/copy_consistency_test.dart` checks them against
+`app_en.arb`, and checks that `SUPPORT.md` does not name them yet; drop
+that check ("names no 1.7.0 control …") in the same PR. If 1.7.0 ships
+without Part B (§ 11), leave out the iCloud Backup text (steps 1, 3
+and 4) and keep step 2.
 
 1. **Intro**: "your meal log stays on your phone" becomes "your meal log
    stays on your phone (and, with iCloud Backup, in your own iCloud
