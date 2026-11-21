@@ -19,13 +19,16 @@
 # VERSION AND BUILD NUMBER
 #   build name   = x.y.z from the tag, which MUST equal `version:` in app/pubspec.yaml
 #                  (the run stops otherwise); on workflow_dispatch it is pubspec's x.y.z.
+#                  When the Android lane runs, it must not be below the newest
+#                  "From version X.Y.Z" in docs/PRIVACY.md (docs/RELEASING.md § 6.6).
 #   build number = the tag's +N when the tag carries one, otherwise
 #                  BUILD_NUMBER_OFFSET + github.run_number. App Store Connect and Google
 #                  Play both refuse a number they have already seen; run_number only ever
-#                  grows, and the offset keeps CI above the hand-built era (pubspec +7)
-#                  and above the 107-199 the owner's iCloud device test builds use
-#                  (raised from 100 to 200 for 1.7.0, docs/RELEASING.md § iCloud container).
-#                  Never lower the offset.
+#                  grows, and the offset keeps CI above the hand-built era (pubspec's
+#                  small +N) and above the 107-199 the owner's iCloud device test builds
+#                  use (raised from 100 to 200 for 1.7.0, docs/RELEASING.md § iCloud
+#                  container). Never lower the offset. A new number must also be above
+#                  every other vX.Y.Z+N tag's N (docs/RELEASING.md § 5).
 #
 # SECRETS  (repo Settings -> Secrets and variables -> Actions -> Secrets, or inside the
 # `release` environment, which GitHub creates on the first run; add a required reviewer
@@ -144,6 +147,29 @@ jobs:
           pubspec_version=$(sed -n 's/^version:[[:space:]]*//p' app/pubspec.yaml | tr -d '[:space:]')
           pub_name=${pubspec_version%%+*}
           offset=$BUILD_NUMBER_OFFSET
+          # The highest build number another vX.Y.Z+N tag carries: a +N can
+          # be above BUILD_NUMBER_OFFSET + its run number, and a later run's
+          # own number, or another tag's +N, would then land on it or below
+          # it. The checkout fetches no tags, so the repository's are read
+          # here (over the checkout's credentials), and a failed read stops
+          # the run. The tag being built does not count (Run workflow
+          # re-releasing it). Not seen (docs/RELEASING.md § 5): a tag deleted
+          # after its build went out, and one pushed while this step runs.
+          this_tag=
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then this_tag=${GITHUB_REF#refs/tags/}; fi
+          if ! tag_refs=$(git ls-remote --tags --refs origin); then
+            echo "::error::could not read the repository's tags (git ls-remote), which the build number is checked against. Run the workflow again."
+            exit 1
+          fi
+          plus_max=0; plus_tag=
+          while IFS=$'\t' read -r oid ref; do
+            t=${ref#refs/tags/}
+            if [[ "$t" != "$this_tag" && "$t" =~ ^v[0-9]+\.[0-9]+\.[0-9]+\+([0-9]+)$ ]] \
+                && (( 10#${BASH_REMATCH[1]} > plus_max )); then
+              plus_max=$((10#${BASH_REMATCH[1]})); plus_tag=$t
+            fi
+          done <<< "$tag_refs"
+          run_floor=$((offset + GITHUB_RUN_NUMBER))
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             is_tag=true
             tag=${GITHUB_REF#refs/tags/v}
@@ -158,10 +184,12 @@ jobs:
                 echo "::error::tag v$tag carries build number $number, which is not above BUILD_NUMBER_OFFSET ($offset). Tag v$name without a +N (CI numbers the build), or use a number above every build already uploaded."
                 exit 1
               fi
-              # Every earlier run numbered its build BUILD_NUMBER_OFFSET +
-              # its run number, so offset + this run's number is the lowest
-              # number no CI build has used (android-v1.7.0 is 200 + run 7).
-              # Below it, App Store Connect or Play may refuse the upload as
+              # Every earlier run without a +N numbered its build
+              # BUILD_NUMBER_OFFSET + its run number, so offset + this run's
+              # number is the lowest number none of them used
+              # (android-v1.7.0 is 200 + run 7), and another tag's +N above
+              # that raises the floor past it (tags read above). Below the
+              # floor, App Store Connect or Play may refuse the upload as
               # used or lower, and the GitHub APK may not install over one
               # already out (a downgrade). A tag push is held to it. "Run
               # workflow" on a +N tag gets a later run number, so it is let
@@ -169,17 +197,26 @@ jobs:
               # a tag the plan refused (or that never released) has none,
               # and is refused here too, before anything is built or sent.
               # An API error refuses as well.
-              floor=$((offset + GITHUB_RUN_NUMBER))
+              floor=$run_floor
+              if (( plus_max >= floor )); then floor=$((plus_max + 1)); fi
               if [[ "$number" =~ ^[0-9]+$ ]] && (( number < floor )); then
+                if [[ "$GITHUB_EVENT_NAME" == "push" ]] && (( floor > run_floor )); then
+                  echo "::error::tag v$tag carries build number $number, but tag $plus_tag numbered its build $plus_max: a tag's +N can be above BUILD_NUMBER_OFFSET + its run number, so $number may already be on App Store Connect, on Play or in a GitHub APK, or sit below a build already out. Use a +N above $plus_max. A plain v$name tag is numbered BUILD_NUMBER_OFFSET ($offset) + its run's number and is refused too while that is not above $plus_max (docs/RELEASING.md § 5)."
+                  exit 1
+                fi
                 if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
-                  echo "::error::tag v$tag carries build number $number, but this is Release run $GITHUB_RUN_NUMBER: earlier runs numbered their builds up to $((floor - 1)) (BUILD_NUMBER_OFFSET $offset + run number), so $number may already be on App Store Connect, on Play or in a GitHub APK. Tag v$name without a +N instead: CI numbers it BUILD_NUMBER_OFFSET + the new run's number, which no run has used. A +N must clear the floor of the run your new push starts, not this one's: that run is numbered $((GITHUB_RUN_NUMBER + 1)) or later, so use more than $floor, with room to spare if other Release runs may start first."
+                  echo "::error::tag v$tag carries build number $number, but this is Release run $GITHUB_RUN_NUMBER: earlier runs numbered their builds up to $((floor - 1)) (BUILD_NUMBER_OFFSET $offset + run number), so $number may already be on App Store Connect, on Play or in a GitHub APK. Tag v$name without a +N instead: CI numbers it BUILD_NUMBER_OFFSET + the new run's number, which no run has used. A +N must clear the floor of the run your new push starts, not this one's: that run is numbered $((GITHUB_RUN_NUMBER + 1)) or later, so use more than $floor, with a little room if other Release runs may start first. Not far above it: every later run is then refused until BUILD_NUMBER_OFFSET + its run number passes that +N (docs/RELEASING.md § 5)."
                   exit 1
                 fi
                 if ! gh release view "v$tag" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-                  echo "::error::Run workflow on tag v$tag: build number $number is below $floor, and v$tag has no GitHub Release (its push was refused, or it never released). Its APK may not install over one already out (Android refuses a lower versionCode), and App Store Connect or Play may already have $number. Tag v$name without a +N instead, or use a +N above $floor, with room to spare if other Release runs may start first. To finish a run of v$tag that failed after its plan passed, use Re-run failed jobs on that run."
+                  if (( floor > run_floor )); then
+                    echo "::error::Run workflow on tag v$tag: build number $number is not above $plus_max, which tag $plus_tag carries, and v$tag has no GitHub Release (its push was refused, or it never released). Its APK may not install over one already out (Android refuses a lower versionCode), and App Store Connect or Play may already have $number. Push a tag with a +N above $plus_max instead (docs/RELEASING.md § 5). To finish a run of v$tag that failed after its plan passed, use Re-run failed jobs on that run."
+                    exit 1
+                  fi
+                  echo "::error::Run workflow on tag v$tag: build number $number is below $floor, and v$tag has no GitHub Release (its push was refused, or it never released). Its APK may not install over one already out (Android refuses a lower versionCode), and App Store Connect or Play may already have $number. Tag v$name without a +N instead, or use a +N above $floor, with a little room if other Release runs may start first (not far above: every later run is then refused until BUILD_NUMBER_OFFSET + its run number passes that +N, docs/RELEASING.md § 5). To finish a run of v$tag that failed after its plan passed, use Re-run failed jobs on that run."
                   exit 1
                 fi
-                echo "::warning::Run workflow on tag v$tag: re-releasing build $number (below $floor, the lowest number no earlier run has used). The GitHub Release's APK is replaced by a rebuild of the same number; App Store Connect and Play refuse $number if they already have it or a higher one."
+                echo "::warning::Run workflow on tag v$tag: re-releasing build $number (below $floor, the lowest number no earlier run or other +N tag has used). The GitHub Release's APK is replaced by a rebuild of the same number; App Store Connect and Play refuse $number if they already have it or a higher one."
               fi
             else
               number=$((offset + GITHUB_RUN_NUMBER)); source="BUILD_NUMBER_OFFSET + run_number"
@@ -201,6 +238,14 @@ jobs:
             number=$((offset + GITHUB_RUN_NUMBER)); source="BUILD_NUMBER_OFFSET + run_number"
             internal_only=${INTERNAL_ONLY_INPUT:-true}
           fi
+          # A run numbered BUILD_NUMBER_OFFSET + its run number (a plain tag,
+          # or Run workflow on a branch) must clear every other +N tag too:
+          # run numbers grow by one, so a +N far above the offset holds the
+          # following runs off until they pass it.
+          if [[ "$source" != "the tag" ]] && (( number <= plus_max )); then
+            echo "::error::this is Release run $GITHUB_RUN_NUMBER, so its build number is $number (BUILD_NUMBER_OFFSET $offset + run number), but tag $plus_tag numbered its build $plus_max, so $number may already be on App Store Connect, on Play or in a GitHub APK, or sit below a build already out. Raise BUILD_NUMBER_OFFSET in release.yml so that it plus the next run's number is above $plus_max (never lower it), or push a tag with a +N above $plus_max (docs/RELEASING.md § 5)."
+            exit 1
+          fi
           [[ "$name" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::build name '$name' is not x.y.z"; exit 1; }
           [[ "$number" =~ ^[0-9]+$ ]] || { echo "::error::build number '$number' is not an integer"; exit 1; }
           case "$LANE" in
@@ -209,6 +254,28 @@ jobs:
             play)       run_ios=false; run_android=true ;;
             *) echo "::error::unknown lane '$LANE'"; exit 1 ;;
           esac
+          # The privacy policy dates changes by version ("From version
+          # X.Y.Z"), and every build opens it from main: an Android build
+          # named below the newest of them would not do what the policy says
+          # that version does (docs/RELEASING.md § 6.6). Whitespace is
+          # squeezed first, so a sentence wrapped inside "From version" still
+          # counts; versions compare with sort -V (1.10.0 is above 1.9.0).
+          if [[ "$run_android" == true ]]; then
+            if [[ ! -f docs/PRIVACY.md ]]; then
+              echo "::error::docs/PRIVACY.md is missing, and an Android build's version is checked against the versions it names (docs/RELEASING.md § 6.6)."
+              exit 1
+            fi
+            policy_newest=$(tr -s '[:space:]' ' ' < docs/PRIVACY.md \
+              | { grep -oE 'From version [0-9]+\.[0-9]+\.[0-9]+' || true; } \
+              | sed 's/^From version //' | sort -V | tail -n 1)
+            if [[ -n "$policy_newest" && "$pub_name" != "$policy_newest" ]]; then
+              lower=$(printf '%s\n%s\n' "$pub_name" "$policy_newest" | sort -V | sed -n 1p)
+              if [[ "$lower" == "$pub_name" ]]; then
+                echo "::error::app/pubspec.yaml says $pub_name, but docs/PRIVACY.md says 'From version $policy_newest', and this run builds Android: a build named $pub_name would not do what the policy says $pub_name does. Set version: in app/pubspec.yaml and kAppVersion in app/lib/services/backup/backup_files.dart to $policy_newest or later first (docs/RELEASING.md § 6.6), then run again."
+                exit 1
+              fi
+            fi
+          fi
           {
             echo "build_name=$name"
             echo "build_number=$number"
