@@ -143,6 +143,22 @@ class IntakeRulesTest {
         }
     }
 
+    // --- The app's own language on Android 13 and later
+    // (MainActivity.setAppLanguage): one of the app's languages
+    // (res/xml/locales_config.xml) or none, nothing else.
+
+    @Test
+    fun theAppSetsOnlyItsOwnLanguagesOrNone() {
+        assertEquals(setOf("en", "zh"), IntakeRules.APP_LANGUAGES)
+        assertEquals("en", IntakeRules.appLanguageTags("en"))
+        assertEquals("zh", IntakeRules.appLanguageTags("zh"))
+        // None: the app follows the system's language again.
+        assertEquals("", IntakeRules.appLanguageTags(""))
+        for (tags in listOf(null, "fr", "EN", " en", "en,zh", "zh-Hant", "zh-CN", "und", "system")) {
+            assertNull(tags, IntakeRules.appLanguageTags(tags))
+        }
+    }
+
     // --- A share that comes before share intake listens waits for it
     // (ShareHold): the plugin tells only a listener, and Android delivers
     // the share a stopped app was started again for before Dart runs.

@@ -246,6 +246,34 @@ void main() {
         ),
       );
     });
+
+    // Android 13 and later's per-app language and the app's Language row
+    // are one setting (app_language_sync_test covers what it decides):
+    // agreed at every launch, on Android only, before the first frame. It
+    // writes preferences, so after the notification ask's settling, which
+    // must see those an earlier version left; and before the services that
+    // start at launch. The background engine never runs it.
+    test('Android agrees the app language with Android at launch', () {
+      final body = init();
+      const start =
+          'if (Platform.isAndroid) await AppLanguageSync.startForApp(settings);';
+      expect(start.allMatches(body), hasLength(1));
+      expect('AppLanguageSync'.allMatches(body), hasLength(1));
+      expect(body.indexOf(start),
+          greaterThan(body.indexOf('await settleNotificationAskAtLaunch();')));
+      expect(body.indexOf(start),
+          greaterThan(body.indexOf('retireWatchCameraRoll(')));
+      for (final later in [
+        'if (Platform.isIOS) {',
+        'final analyzer =',
+        'await syncBackgroundScan(settings);',
+      ]) {
+        expect(body.indexOf(later), greaterThan(body.indexOf(start)),
+            reason: later);
+      }
+      expect(_source('lib/ui/background_glue.dart'),
+          isNot(contains('AppLanguageSync')));
+    });
   });
 
   // R6b: the restaurant assist lives in the app engine, reads the real

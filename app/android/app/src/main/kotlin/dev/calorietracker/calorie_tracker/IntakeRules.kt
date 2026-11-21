@@ -65,6 +65,16 @@ internal object IntakeRules {
     /// the colour as before, an opaque bar.
     fun colorsNavigationBar(sdk: Int): Boolean = sdk >= Build.VERSION_CODES.VANILLA_ICE_CREAM
 
+    /// The app's languages, as Android 13 and later list them for it
+    /// (res/xml/locales_config.xml): lib/l10n/app_en.arb and app_zh.arb.
+    val APP_LANGUAGES = setOf("en", "zh")
+
+    /// What MainActivity sets as the app's own language on Android 13 and
+    /// later (setAppLanguage) for [tags] from Dart (app_language_sync.dart):
+    /// one of [APP_LANGUAGES], or "" for none, which hands the app back to
+    /// the system's language. Null for anything else, which is never set.
+    fun appLanguageTags(tags: String?): String? = tags?.takeIf { it.isEmpty() || it in APP_LANGUAGES }
+
     /// share_plus's FileProvider authority after the package name (its
     /// AndroidManifest.xml: ${applicationId}.flutter.share_provider).
     const val SHARE_OUT_AUTHORITY_SUFFIX = ".flutter.share_provider"

@@ -3,6 +3,7 @@ package dev.calorietracker.calorie_tracker
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.ActivityManager
+import android.app.LocaleManager
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
@@ -11,6 +12,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
+import android.os.LocaleList
 import android.os.Looper
 import android.os.ext.SdkExtensions
 import android.provider.DocumentsContract
@@ -491,6 +493,20 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+        // The app's own language on Android 13 and later (Settings › Apps ›
+        // Chopstats › Language, which lists the languages in
+        // res/xml/locales_config.xml), kept in step with the app's Language
+        // row by lib/services/settings/app_language_sync.dart: "get" answers
+        // it (appLanguage), "set" sets it (setAppLanguage). No permission:
+        // an app sets its own.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, APP_LANGUAGE_CHANNEL)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "get" -> result.success(appLanguage())
+                    "set" -> result.success(setAppLanguage(call.argument<Any?>("tags") as? String))
+                    else -> result.notImplemented()
+                }
+            }
     }
 
     /// The engine is going (the activity is destroyed): the 12/24-hour
@@ -525,6 +541,37 @@ class MainActivity : FlutterActivity() {
         if (argb == null || !IntakeRules.colorsNavigationBar(Build.VERSION.SDK_INT)) return false
         window.navigationBarColor = argb.toInt()
         return true
+    }
+
+    /// The language Android keeps for the app itself (LocaleManager, Android
+    /// 13 and later) as language tags, the preferred first ("zh-Hans-CN"):
+    /// "" when there is none and the app follows the system's. Null below
+    /// Android 13, which has no such setting, or when it cannot be read.
+    private fun appLanguage(): String? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return null
+        return try {
+            getSystemService(LocaleManager::class.java)?.applicationLocales?.toLanguageTags()
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /// Sets the app's own language to [tags] on Android 13 and later: one of
+    /// the app's languages, or none for "" (IntakeRules.appLanguageTags);
+    /// true when it was set. Android hands the change to this activity as a
+    /// configuration change it takes itself (configChanges locale and
+    /// layoutDirection, AndroidManifest.xml), so it is not recreated for it:
+    /// FlutterView sends Dart the new locales, and nothing on screen is lost.
+    private fun setAppLanguage(tags: String?): Boolean {
+        val language = IntakeRules.appLanguageTags(tags) ?: return false
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return false
+        return try {
+            val manager = getSystemService(LocaleManager::class.java) ?: return false
+            manager.applicationLocales = LocaleList.forLanguageTags(language)
+            true
+        } catch (e: Exception) {
+            false
+        }
     }
 
     private fun isBackgroundRestricted(): Boolean {
@@ -925,6 +972,9 @@ class MainActivity : FlutterActivity() {
 
         /// lib/ui/app.dart systemBarsChannelName.
         const val SYSTEM_BARS_CHANNEL = "dev.calorietracker/systembars"
+
+        /// lib/services/settings/app_language_sync.dart appLanguageChannelName.
+        const val APP_LANGUAGE_CHANNEL = "dev.calorietracker/applanguage"
         const val PICK_REQUEST = 4207
         const val PHOTO_PICK_REQUEST = 4208
         const val SAVE_REQUEST = 4209
