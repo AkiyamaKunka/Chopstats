@@ -3534,4 +3534,54 @@ class AppLocalizationsZh extends AppLocalizations {
   @override
   String get diagFixServerKeyOtherHost =>
       '在设置 ›「AI 服务」›「你自己的服务器」里粘贴这台服务器的上传密钥，或把已保存的密钥用于它。';
+
+  @override
+  String shareSkippedPhotoType(int count, String type) {
+    return '有 $count 个分享的文件被跳过：筷拍暂时无法读取 $type 格式的照片。';
+  }
+
+  @override
+  String shareSkippedVideo(int count) {
+    return '有 $count 个分享的文件被跳过：筷拍只记录照片，不记录视频。';
+  }
+
+  @override
+  String shareSkippedFileType(int count) {
+    return '有 $count 个分享的文件被跳过：筷拍无法读取这类文件。';
+  }
+
+  @override
+  String shareSkippedTooBig(int count) {
+    return '有 $count 个分享的文件超过 25 MB，已跳过。';
+  }
+
+  @override
+  String shareSkippedUnreadable(int count) {
+    return '有 $count 个分享的文件无法读取，已跳过。';
+  }
+
+  @override
+  String shareSkippedSomeTooBig(int count, int some) {
+    return '有 $count 个分享的文件被跳过，其中 $some 个超过 25 MB。';
+  }
+
+  @override
+  String shareSkippedSomeUnreadable(int count, int some) {
+    return '有 $count 个分享的文件被跳过，其中 $some 个无法读取。';
+  }
+
+  @override
+  String shareSkippedSomePhotoType(int count, int some, String type) {
+    return '有 $count 个分享的文件被跳过，其中 $some 个是筷拍暂时无法读取的 $type 格式照片。';
+  }
+
+  @override
+  String shareSkippedSomeVideo(int count, int some) {
+    return '有 $count 个分享的文件被跳过，其中 $some 个是视频：筷拍只记录照片，不记录视频。';
+  }
+
+  @override
+  String shareSkippedSomeFileType(int count, int some) {
+    return '有 $count 个分享的文件被跳过，其中 $some 个是筷拍无法读取的文件类型。';
+  }
 }

@@ -30,11 +30,16 @@ class FakeShareSource implements SharedMediaSource {
   List<String> initial = [];
 
   @override
-  Stream<List<String>> imagePathBatches() => controller.stream;
+  Stream<SharedBatch> batches() => controller.stream.map(SharedBatch.new);
 
   @override
-  Future<List<String>> initialImagePaths() async => initial;
+  Future<SharedBatch> initialBatch() async => SharedBatch(initial);
 }
+
+/// [items] without share intake's notes on refused files
+/// (IntakePhoto.refusedNote): the photos alone.
+List<IntakePhoto> photosIn(Iterable<IntakePhoto> items) =>
+    [for (final p in items) if (p.refused == null) p];
 
 void main() {
   final now = DateTime(2026, 7, 17, 12, 0, 0);
@@ -98,7 +103,12 @@ void main() {
       source.controller.add(['/shared/notes.txt', '/shared/IMG_big.jpg']);
       await pumpEventQueue();
 
-      expect(emitted, isEmpty);
+      expect(photosIn(emitted), isEmpty);
+      // No photo: only the share's note on its two files. A .txt is a kind
+      // of file, not a photo type.
+      expect(emitted.single.refused!.reasons,
+          [ShareRefusal.fileType, ShareRefusal.tooBig]);
+      expect(emitted.single.refused!.photoTypes, isEmpty);
       expect(cleaned,
           containsAll(['/shared/notes.txt', '/shared/IMG_big.jpg']));
       await sub.cancel();
@@ -138,7 +148,15 @@ void main() {
         '/shared/ok.HEIC',
       ]);
       await pumpEventQueue();
-      expect(emitted.map((p) => p.fileName), ['ok.HEIC']);
+      expect(photosIn(emitted).map((p) => p.fileName), ['ok.HEIC']);
+      // Then the share's note, after its photo.
+      expect(emitted.last.refused!.reasons, [
+        ShareRefusal.fileType,
+        ShareRefusal.tooBig,
+        ShareRefusal.unreadable,
+      ]);
+      expect(emitted.last.refused!.photoTypes, isEmpty,
+          reason: 'TXT is no photo type');
       await sub.cancel();
     });
   });
@@ -222,7 +240,8 @@ void main() {
       final emitted = <IntakePhoto>[];
       final sub = intake.photos().listen(emitted.add);
       await pumpEventQueue();
-      expect(emitted, isEmpty);
+      expect(photosIn(emitted), isEmpty);
+      expect(emitted.single.refused!.reasons, [ShareRefusal.unreadable]);
       expect(read, isEmpty);
       expect(cleaned, isEmpty);
       await sub.cancel();
@@ -349,16 +368,20 @@ void main() {
     // (IMG_<ts>.webp). The engine codec and the image package decode both;
     // iOS ImageIO decodes WebP on iOS 14+ (the app's floor is 15). AVIF
     // stays out: its decoding is unverified on either platform.
-    test('accepts jpg/jpeg/png/heic/heif/tiff/webp/gif, rejects the rest',
-        () {
+    // .jpe and .jfif are JPEG files, .tif a TIFF: the same content as a
+    // .jpg and a .tiff.
+    test('accepts jpg/jpeg/jpe/jfif/png/heic/heif/tiff/tif/webp/gif, rejects '
+        'the rest', () {
       for (final name in [
         'a.jpg', 'a.JPEG', 'a.png', 'a.heic', 'a.HEIF', 'a.tiff', //
-        'a.webp', 'IMG_1731500000000.WEBP', 'a.gif', 'a.GIF',
+        'a.webp', 'IMG_1731500000000.WEBP', 'a.gif', 'a.GIF', //
+        'a.jpe', 'a.JFIF', 'a.tif', 'scan.TIF',
       ]) {
         expect(hasSupportedPhotoExtension(name), isTrue, reason: name);
       }
       for (final name in [
-        'a.avif', 'a.mp4', 'a.txt', 'noext', 'a.', 'a.webp.txt', 'a.gifv'
+        'a.avif', 'a.mp4', 'a.txt', 'noext', 'a.', 'a.webp.txt', 'a.gifv', //
+        'a.tiff.bak', 'a.jfif_large',
       ]) {
         expect(hasSupportedPhotoExtension(name), isFalse, reason: name);
       }
@@ -379,9 +402,13 @@ void main() {
         '/shared/scan.avif',
       ]);
       await pumpEventQueue();
-      expect(emitted.map((p) => p.fileName),
+      expect(photosIn(emitted).map((p) => p.fileName),
           ['IMG_1731500000000.webp', 'lunch.gif']);
-      expect(emitted.every((p) => p.deliberate), isTrue);
+      expect(photosIn(emitted).every((p) => p.deliberate), isTrue);
+      // The AVIF is said, by its type, after the share's photos.
+      expect(emitted, hasLength(3));
+      expect(emitted.last.refused!.reasons, [ShareRefusal.photoType]);
+      expect(emitted.last.refused!.photoTypes, ['AVIF']);
       expect(cleaned, [
         '/shared/IMG_1731500000000.webp',
         '/shared/lunch.gif',
@@ -595,7 +622,13 @@ void main() {
           sharedFolder: () async => '/shared',
           clock: () => now);
       final emitted = <String>[];
+      final notes = <RefusedShareFiles>[];
       final sub = intake.photos().listen((p) {
+        final refused = p.refused;
+        if (refused != null) {
+          notes.add(refused);
+          return;
+        }
         emitted.add(p.fileName);
         p.onSettled!();
       });
@@ -606,6 +639,9 @@ void main() {
       await pumpEventQueue();
       expect(emitted,
           [fileBaseName(paths[0]), fileBaseName(paths[2]), 'later_0.jpg']);
+      expect(notes.single.reasons, [ShareRefusal.unreadable],
+          reason: 'the first share says its unreadable copy; the later one '
+              'has nothing to say');
       expect(cleaned, unorderedEquals([...paths, ...later]),
           reason: 'the unreadable one at once, the others once settled');
       await sub.cancel();
@@ -984,7 +1020,12 @@ void main() {
       final sub = android(source).photos().listen(got.add);
       source.controller.add(paths);
       await pumpEventQueue();
-      expect(got, isEmpty);
+      expect(photosIn(got), isEmpty);
+      expect(got.single.refused!.reasons, [
+        ShareRefusal.fileType,
+        ShareRefusal.tooBig,
+        ShareRefusal.unreadable,
+      ]);
       expect(cleaned, paths);
       await sub.cancel();
     });
