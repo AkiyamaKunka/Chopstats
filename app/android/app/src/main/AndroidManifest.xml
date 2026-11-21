@@ -123,9 +123,9 @@
                  (RCREL-V-1, 2026-11-21): a link with a query failed to find a
                  route and logged an error, and a bare bitewise://setup became
                  "/", which opened a second main screen. That screen brought
-                 back the last setup sheet, and when it closed it took the
-                 sharing-consent question with it, so shared photos waited
-                 until the next start. -->
+                 back the first setup link of the run, and when it closed it
+                 took the sharing-consent question with it, so shared photos
+                 waited until the next start. -->
             <meta-data
               android:name="flutter_deeplinking_enabled"
               android:value="false"
