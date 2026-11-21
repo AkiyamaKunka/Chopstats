@@ -1,7 +1,7 @@
 # Google Play Data safety: the answers for Chopstats
 
 Paste-ready answers for **Play Console › Monitor and improve › Policy and
-programs › App content › Data safety**, written 2026-11-13 for the first Google Play release (1.7.0).
+programs › App content › Data safety**, written 2026-11-13 for the first Google Play release (planned then as 1.7.0; it is 1.7.1, `docs/RELEASING.md` § 6.3).
 The console moves things around: match the meaning of each question, not
 its position. `docs/RELEASING.md` § 6.5 says where this fits; the App
 Store's own label is a different form with different definitions
@@ -19,7 +19,7 @@ Store's own label is a different form with different definitions
    then: `app/lib/core/server_transport.dart` must say
    `kRequireHttpsServer = true` at the commit the bundle was built from.
    release.yml's Android job stops before building otherwise, and
-   `docs/RELEASING.md` § 6.8 step 8 has you check it.
+   `docs/RELEASING.md` § 6.8 step 9 has you check it.
    <!-- gated: release_decisions_test and release.yml's Android job check kRequireHttpsServer = true -->
 3. Google requires the form for closed testing, open testing and
    production; an app that is only on internal testing is exempt. Fill it
