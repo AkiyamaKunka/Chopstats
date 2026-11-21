@@ -3954,10 +3954,12 @@ class AppLocalizationsEn extends AppLocalizations {
     String _temp0 = intl.Intl.pluralLogic(
       count,
       locale: localeName,
-      other: '$count shared files were skipped',
-      one: 'One shared file was skipped',
+      other:
+          '$count shared files were skipped: Chopstats can\'t read those kinds of files.',
+      one:
+          'One shared file was skipped: Chopstats can\'t read that kind of file.',
     );
-    return '$_temp0: Chopstats can\'t read that kind of file.';
+    return '$_temp0';
   }
 
   @override
@@ -4000,6 +4002,39 @@ class AppLocalizationsEn extends AppLocalizations {
       locale: localeName,
       other: '$some of them because they could not be read',
       one: 'one of them because it could not be read',
+    );
+    return '$count shared files were skipped, $_temp0.';
+  }
+
+  @override
+  String shareSkippedSomePhotoType(int count, int some, String type) {
+    String _temp0 = intl.Intl.pluralLogic(
+      some,
+      locale: localeName,
+      other: '$some of them because Chopstats can\'t read $type photos yet',
+      one: 'one of them because Chopstats can\'t read $type photos yet',
+    );
+    return '$count shared files were skipped, $_temp0.';
+  }
+
+  @override
+  String shareSkippedSomeVideo(int count, int some) {
+    String _temp0 = intl.Intl.pluralLogic(
+      some,
+      locale: localeName,
+      other: '$some of them videos',
+      one: 'one of them a video',
+    );
+    return '$count shared files were skipped, $_temp0: Chopstats logs photos, not videos.';
+  }
+
+  @override
+  String shareSkippedSomeFileType(int count, int some) {
+    String _temp0 = intl.Intl.pluralLogic(
+      some,
+      locale: localeName,
+      other: '$some of them because Chopstats can\'t read those kinds of files',
+      one: 'one of them because Chopstats can\'t read that kind of file',
     );
     return '$count shared files were skipped, $_temp0.';
   }

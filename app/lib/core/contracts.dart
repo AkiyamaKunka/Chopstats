@@ -714,13 +714,16 @@ class IntakePhoto {
 /// type first, whose line says what Chopstats can't read.
 enum ShareRefusal {
   /// An image of a type share intake does not take (AVIF, DNG, …): its
-  /// name gives the type ([RefusedShareFiles.photoTypes]).
+  /// name's extension is one of the formats the line names
+  /// (share_intake.dart refusedPhotoExtensions), which gives the type
+  /// ([RefusedShareFiles.photoTypes]).
   photoType,
 
   /// A video.
   video,
 
-  /// Any other kind of file (a PDF), or an image whose name gives no type.
+  /// Any other kind of file (a PDF), or one whose name gives no image
+  /// format share intake knows (no extension, or another one).
   fileType,
 
   /// Over 25 MB (maxPhotoBytes).
@@ -790,7 +793,10 @@ abstract interface class ShareDeliveries {
   /// How many photos [delivery] holds as far as is known now: all its
   /// copies, less those already found unreadable. A copy not read yet
   /// counts, even when it will turn out unusable (an unsupported type,
-  /// over 25 MB, a read that fails), so this can be high, never low.
+  /// over 25 MB, a read that fails), so this can be high, never low. 0:
+  /// it has no photo left to send (every file refused), and another
+  /// share's Not now leaves it out, so its line on those files still
+  /// comes.
   int photoCountOf(int delivery);
 
   /// Every copy of [deliveries] not read yet is deleted unread (at once,

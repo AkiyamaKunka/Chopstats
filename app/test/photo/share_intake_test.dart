@@ -104,9 +104,11 @@ void main() {
       await pumpEventQueue();
 
       expect(photosIn(emitted), isEmpty);
-      // No photo: only the share's note on its two files.
+      // No photo: only the share's note on its two files. A .txt is a kind
+      // of file, not a photo type.
       expect(emitted.single.refused!.reasons,
-          [ShareRefusal.photoType, ShareRefusal.tooBig]);
+          [ShareRefusal.fileType, ShareRefusal.tooBig]);
+      expect(emitted.single.refused!.photoTypes, isEmpty);
       expect(cleaned,
           containsAll(['/shared/notes.txt', '/shared/IMG_big.jpg']));
       await sub.cancel();
@@ -149,11 +151,12 @@ void main() {
       expect(photosIn(emitted).map((p) => p.fileName), ['ok.HEIC']);
       // Then the share's note, after its photo.
       expect(emitted.last.refused!.reasons, [
-        ShareRefusal.photoType,
+        ShareRefusal.fileType,
         ShareRefusal.tooBig,
         ShareRefusal.unreadable,
       ]);
-      expect(emitted.last.refused!.photoTypes, ['TXT']);
+      expect(emitted.last.refused!.photoTypes, isEmpty,
+          reason: 'TXT is no photo type');
       await sub.cancel();
     });
   });
@@ -365,16 +368,20 @@ void main() {
     // (IMG_<ts>.webp). The engine codec and the image package decode both;
     // iOS ImageIO decodes WebP on iOS 14+ (the app's floor is 15). AVIF
     // stays out: its decoding is unverified on either platform.
-    test('accepts jpg/jpeg/png/heic/heif/tiff/webp/gif, rejects the rest',
-        () {
+    // .jpe and .jfif are JPEG files, .tif a TIFF: the same content as a
+    // .jpg and a .tiff.
+    test('accepts jpg/jpeg/jpe/jfif/png/heic/heif/tiff/tif/webp/gif, rejects '
+        'the rest', () {
       for (final name in [
         'a.jpg', 'a.JPEG', 'a.png', 'a.heic', 'a.HEIF', 'a.tiff', //
-        'a.webp', 'IMG_1731500000000.WEBP', 'a.gif', 'a.GIF',
+        'a.webp', 'IMG_1731500000000.WEBP', 'a.gif', 'a.GIF', //
+        'a.jpe', 'a.JFIF', 'a.tif', 'scan.TIF',
       ]) {
         expect(hasSupportedPhotoExtension(name), isTrue, reason: name);
       }
       for (final name in [
-        'a.avif', 'a.mp4', 'a.txt', 'noext', 'a.', 'a.webp.txt', 'a.gifv'
+        'a.avif', 'a.mp4', 'a.txt', 'noext', 'a.', 'a.webp.txt', 'a.gifv', //
+        'a.tiff.bak', 'a.jfif_large',
       ]) {
         expect(hasSupportedPhotoExtension(name), isFalse, reason: name);
       }
@@ -1015,7 +1022,7 @@ void main() {
       await pumpEventQueue();
       expect(photosIn(got), isEmpty);
       expect(got.single.refused!.reasons, [
-        ShareRefusal.photoType,
+        ShareRefusal.fileType,
         ShareRefusal.tooBig,
         ShareRefusal.unreadable,
       ]);

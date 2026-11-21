@@ -3569,4 +3569,19 @@ class AppLocalizationsZh extends AppLocalizations {
   String shareSkippedSomeUnreadable(int count, int some) {
     return '有 $count 个分享的文件被跳过，其中 $some 个无法读取。';
   }
+
+  @override
+  String shareSkippedSomePhotoType(int count, int some, String type) {
+    return '有 $count 个分享的文件被跳过，其中 $some 个是筷拍暂时无法读取的 $type 格式照片。';
+  }
+
+  @override
+  String shareSkippedSomeVideo(int count, int some) {
+    return '有 $count 个分享的文件被跳过，其中 $some 个是视频：筷拍只记录照片，不记录视频。';
+  }
+
+  @override
+  String shareSkippedSomeFileType(int count, int some) {
+    return '有 $count 个分享的文件被跳过，其中 $some 个是筷拍无法读取的文件类型。';
+  }
 }

@@ -188,30 +188,37 @@ String outcomeSnackbar(AppLocalizations l, PhotoOutcome o) {
 const int refusedTypesNamed = 3;
 
 /// The one line for a share's files that gave no photo (2026-11-21): how
-/// many, and the reason most of them share ([RefusedShareFiles.mainReason]).
-/// "2 shared files were skipped: Chopstats can't read AVIF photos yet." /
-/// "One shared file was skipped because it is over 25 MB." A type names
-/// what Chopstats can't read, which holds whatever the others were; a size
-/// or read reason that covers only some of the files says how many it
-/// covers ("3 shared files were skipped, 2 of them because they are over
-/// 25 MB."). Never a file's name or path: a photo type is the extension
-/// its name gives (sharedPhotoTypeOf), up to [refusedTypesNamed] of them.
+/// many, and the reason that covers the most files
+/// ([RefusedShareFiles.mainReason]). "2 shared files were skipped:
+/// Chopstats can't read AVIF photos yet." / "One shared file was skipped
+/// because it is over 25 MB." A reason that covers only some of the files
+/// says how many it covers, whichever it is ("3 shared files were skipped,
+/// 2 of them because they are over 25 MB." / "5 shared files were
+/// skipped, 2 of them because Chopstats can't read AVIF/DNG photos yet."),
+/// so a big photo is never called a video. Never a file's name or path: a
+/// photo type is the extension its name gives, when that is an image
+/// format Chopstats does not read (sharedPhotoTypeOf), up to
+/// [refusedTypesNamed] of them.
 String refusedFilesLine(AppLocalizations l, RefusedShareFiles r) {
   final n = r.count;
   final main = r.mainReason;
   final some = r.countOf(main);
+  final all = some >= n;
   final types = r.typesNamed.take(refusedTypesNamed).join('/');
   return switch (main) {
-    ShareRefusal.photoType when types.isNotEmpty =>
-      l.shareSkippedPhotoType(n, types),
-    ShareRefusal.photoType || ShareRefusal.fileType =>
-      l.shareSkippedFileType(n),
-    ShareRefusal.video => l.shareSkippedVideo(n),
+    ShareRefusal.photoType when types.isNotEmpty => all
+        ? l.shareSkippedPhotoType(n, types)
+        : l.shareSkippedSomePhotoType(n, some, types),
+    ShareRefusal.photoType || ShareRefusal.fileType => all
+        ? l.shareSkippedFileType(n)
+        : l.shareSkippedSomeFileType(n, some),
+    ShareRefusal.video =>
+      all ? l.shareSkippedVideo(n) : l.shareSkippedSomeVideo(n, some),
     ShareRefusal.tooBig =>
-      some < n ? l.shareSkippedSomeTooBig(n, some) : l.shareSkippedTooBig(n),
-    ShareRefusal.unreadable => some < n
-        ? l.shareSkippedSomeUnreadable(n, some)
-        : l.shareSkippedUnreadable(n),
+      all ? l.shareSkippedTooBig(n) : l.shareSkippedSomeTooBig(n, some),
+    ShareRefusal.unreadable => all
+        ? l.shareSkippedUnreadable(n)
+        : l.shareSkippedSomeUnreadable(n, some),
   };
 }
 

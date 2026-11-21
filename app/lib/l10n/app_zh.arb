@@ -1087,5 +1087,8 @@
   "shareSkippedTooBig": "有 {count} 个分享的文件超过 25 MB，已跳过。",
   "shareSkippedUnreadable": "有 {count} 个分享的文件无法读取，已跳过。",
   "shareSkippedSomeTooBig": "有 {count} 个分享的文件被跳过，其中 {some} 个超过 25 MB。",
-  "shareSkippedSomeUnreadable": "有 {count} 个分享的文件被跳过，其中 {some} 个无法读取。"
+  "shareSkippedSomeUnreadable": "有 {count} 个分享的文件被跳过，其中 {some} 个无法读取。",
+  "shareSkippedSomePhotoType": "有 {count} 个分享的文件被跳过，其中 {some} 个是筷拍暂时无法读取的 {type} 格式照片。",
+  "shareSkippedSomeVideo": "有 {count} 个分享的文件被跳过，其中 {some} 个是视频：筷拍只记录照片，不记录视频。",
+  "shareSkippedSomeFileType": "有 {count} 个分享的文件被跳过，其中 {some} 个是筷拍无法读取的文件类型。"
 }

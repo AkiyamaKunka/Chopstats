@@ -335,7 +335,7 @@ When merging #22 after this PR:
 - **Never hand-merge the generated `app_localizations*.dart`.** Take
   either side, then run `flutter gen-l10n` in `app/`.
 - `app/test/ui/usual_copy_test.dart` pins the number of keys in each ARB
-  file: 809 on `main` since #22 merged, 970 on the iCloud Backup branch
+  file: 809 on `main` since #22 merged, 973 on the iCloud Backup branch
   merged with #33, the review-171 fixes, the Android photos, privacy,
   background and ui lanes, the Play channel, the Android
   look-and-defaults branch, the Android lows lane, the legacy upload
@@ -357,7 +357,7 @@ When merging #22 after this PR:
   saved for another server address 7, the legacy upload key lane's
   `serverKeyUnknownHostField` and `serverKeyRemoveKept` 2 (a key saved
   without its server address, and the row that removes it), the
-  refused-share lane's seven `shareSkipped*` lines 7 (a share's files
+  refused-share lane's ten `shareSkipped*` lines 10 (a share's files
   that gave no photo: how many, and why), none shared;
   review r171 deleted
   `bodyEmptyHintImperial`, the same text as `bodyEmptyHint`). If either

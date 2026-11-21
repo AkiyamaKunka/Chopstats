@@ -30,17 +30,22 @@ import 'photo_library.dart';
 /// MainActivity names a nameless image stream (`IMG_<ts>.webp`, from its MIME
 /// type); they were dropped without a word. Every decoder in the upload
 /// chain reads both (the engine codec, iOS ImageIO, the `image` package),
-/// and a GIF is sent as its first frame. Not AVIF: its decoding is
-/// unverified. Content is ultimately validated by decodability downstream
-/// (the analyzer's decode), not by extension — this set only filters
-/// obvious non-photos out of the share sheet.
+/// and a GIF is sent as its first frame. Also the other names of a JPEG
+/// (.jpe, .jfif) and a TIFF (.tif): the same content as .jpg and .tiff,
+/// which the line for a refused file called types Chopstats can't read.
+/// Not AVIF: its decoding is unverified. Content is ultimately validated
+/// by decodability downstream (the analyzer's decode), not by extension —
+/// this set only filters obvious non-photos out of the share sheet.
 const Set<String> supportedPhotoExtensions = {
   '.jpg',
   '.jpeg',
+  '.jpe',
+  '.jfif',
   '.png',
   '.heic',
   '.heif',
   '.tiff',
+  '.tif',
   '.webp',
   '.gif',
 };
@@ -56,17 +61,53 @@ String fileBaseName(String path) {
   return sep < 0 ? path : path.substring(sep + 1);
 }
 
+/// The image formats share intake does not read that the line for a
+/// refused file names by type ([sharedPhotoTypeOf]): AVIF and JPEG XL
+/// (decoding unverified), JPEG 2000, DNG and the cameras' other RAW files
+/// (Canon, Nikon, Sony, Fujifilm, Olympus, Panasonic, Pentax, Samsung,
+/// Hasselblad, Epson, Sigma, Leica), BMP, SVG, icons and Photoshop files.
+/// None is in [supportedPhotoExtensions].
+const Set<String> refusedPhotoExtensions = {
+  '.avif',
+  '.jxl',
+  '.jp2',
+  '.dng',
+  '.cr2',
+  '.cr3',
+  '.crw',
+  '.nef',
+  '.nrw',
+  '.arw',
+  '.srf',
+  '.sr2',
+  '.raf',
+  '.orf',
+  '.rw2',
+  '.pef',
+  '.srw',
+  '.3fr',
+  '.erf',
+  '.x3f',
+  '.rwl',
+  '.bmp',
+  '.svg',
+  '.ico',
+  '.psd',
+};
+
 /// The type a refused file's [name] gives, for the line that says it was
-/// skipped: 'AVIF' for 'IMG_1.avif'. Its extension, upper-cased, when that
-/// is a short run of letters and digits with a letter in it; null for
-/// anything else (no extension, '.0001', a long or odd one), so a sender's
-/// odd name never reaches the line.
+/// skipped: 'AVIF' for 'IMG_1.avif'. Only an extension in
+/// [refusedPhotoExtensions], upper-cased; null for any other name (no
+/// extension, or one that is no image format: 'notes.txt', 'clip.mp4',
+/// 'Dinner with J.Smith'), which the line calls a kind of file Chopstats
+/// can't read. So no part of a sender's name reaches the line as a type,
+/// and no other file is called a photo.
 String? sharedPhotoTypeOf(String name) {
   final dot = name.lastIndexOf('.');
   if (dot < 0) return null;
-  final ext = name.substring(dot + 1);
-  return RegExp(r'^(?=.*[A-Za-z])[A-Za-z0-9]{1,5}$').hasMatch(ext)
-      ? ext.toUpperCase()
+  final ext = name.substring(dot).toLowerCase();
+  return refusedPhotoExtensions.contains(ext)
+      ? ext.substring(1).toUpperCase()
       : null;
 }
 
@@ -440,7 +481,10 @@ class ShareIntake implements ShareDeliveries {
   /// at, one note ([IntakePhoto.refusedNote]) follows its photos: how many
   /// gave none, and why. None for a share answered Not now, or once the
   /// stream is cancelled. A share whose every file was refused is still a
-  /// delivery, with no photo to ask about.
+  /// delivery, with no photo to ask about: its [photoCountOf] is 0 once
+  /// each of its copies is read and refused (at once for a share
+  /// MainActivity refused whole), so another share's Not now does not
+  /// cover it, and its note still comes.
   ///
   /// iOS reads each copy the moment it arrives, as before: the share
   /// extension writes `<appGroup>/<file name>` and replaces a file of the

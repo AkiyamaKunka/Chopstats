@@ -41,6 +41,25 @@ class _Source implements SharedMediaSource {
   Future<SharedBatch> initialBatch() async => initial;
 }
 
+/// The share intake's side of a Not now, scripted: each delivery's photos
+/// as far as is known (ShareDeliveries.photoCountOf).
+class _Deliveries implements ShareDeliveries {
+  final photos = <int, int>{};
+  final declined = <int>{};
+
+  @override
+  int get arrivedDelivery => photos.length;
+
+  @override
+  int photoCountOf(int delivery) => photos[delivery] ?? 0;
+
+  @override
+  void declineDeliveries(Set<int> deliveries) => declined.addAll(deliveries);
+
+  @override
+  bool asksAlone(int delivery) => false;
+}
+
 final AppLocalizations en = AppLocalizationsEn();
 final AppLocalizations zh = AppLocalizationsZh();
 
@@ -144,23 +163,63 @@ void main() {
       expect(batch.refused, [_big]);
     });
 
-    test('the type a refused file\'s name gives', () {
+    test('the type a refused file\'s name gives: only an image format share '
+        'intake does not read', () {
       expect(sharedPhotoTypeOf('IMG_1.avif'), 'AVIF');
       expect(sharedPhotoTypeOf('PXL_20261121.RAW-01.dng'), 'DNG');
-      expect(sharedPhotoTypeOf('scan.Tif'), 'TIF');
+      expect(sharedPhotoTypeOf('scan.Bmp'), 'BMP');
       expect(sharedPhotoTypeOf('_MG_0001.CR2'), 'CR2');
       expect(sharedPhotoTypeOf('B0001.3fr'), '3FR');
+      for (final ext in refusedPhotoExtensions) {
+        expect(hasSupportedPhotoExtension('a$ext'), isFalse, reason: ext);
+        expect(sharedPhotoTypeOf('a$ext'), ext.substring(1).toUpperCase());
+      }
       for (final name in [
         'IMG_1731500000000', // no extension
         'a.',
         'clip.0001', // digits only
-        'a.extension', // too long to be a type
+        'a.extension',
         'a.b-c',
         'a.jp g',
         'a.ü',
+        // Parts of a sender's name, never a type.
+        'Lunch with.Sarah',
+        'Dinner.Mom',
+        'Dinner with J.Smith',
+        'Pho at St.Elmo',
+        'IMG_1234.copy',
+        'lunch.final',
+        'IMG_1234.jpg.bak',
+        // Files that are no photo: a kind of file, not a photo type.
+        'notes.txt',
+        'clip.mp4',
+        'menu.pdf',
+        // Read as photos, never refused for their type.
+        'scan.tif',
+        'photo.jfif',
+        'photo.jpe',
       ]) {
         expect(sharedPhotoTypeOf(name), isNull, reason: name);
       }
+    });
+
+    test('a .tif, .jfif or .jpe is read as the TIFF or JPEG it is', () async {
+      for (final name in ['scan.tif', 'scan.TIF', 'photo.jfif', 'photo.JPE']) {
+        expect(hasSupportedPhotoExtension(name), isTrue, reason: name);
+      }
+      final source = _Source();
+      files['/shared/scan.tif'] = Uint8List.fromList([1]);
+      files['/shared/photo.jfif'] = Uint8List.fromList([2]);
+      files['/shared/photo.jpe'] = Uint8List.fromList([3]);
+      final got = <IntakePhoto>[];
+      final sub = intakeOf(source).photos().listen(got.add);
+      source.controller.add(const SharedBatch(
+          ['/shared/scan.tif', '/shared/photo.jfif', '/shared/photo.jpe']));
+      await pumpEventQueue();
+      expect(got.map((p) => p.fileName),
+          ['scan.tif', 'photo.jfif', 'photo.jpe'],
+          reason: 'three photos, and no note');
+      await sub.cancel();
     });
   });
 
@@ -401,6 +460,44 @@ void main() {
       await sub.cancel();
       await input.close();
     });
+
+    test('a Not now leaves out a share made while it was open that has no '
+        'photo left to send: its note still passes', () async {
+      final gate = SharedPhotoConsentGate(FakeSettings()..aiConsent = {});
+      final deliveries = _Deliveries()..photos[1] = 1;
+      final answer = Completer<bool>();
+      final notSent = <int>[];
+      gate.attach(() async {
+        final yes = await answer.future;
+        if (!yes) notSent.add(gate.declineOpenQuestion());
+        return yes;
+      });
+      final input = StreamController<IntakePhoto>();
+      final passed = <String>[];
+      final sub = gate.gate(input.stream, deliveries: deliveries).listen((p) =>
+          passed.add(p.refused == null ? p.assetId : 'note${p.shareDelivery}'));
+      input.add(photo('a', 1));
+      await pumpEventQueue();
+      // Made while it is asked: a share refused whole (Android, before any
+      // copy), one whose only copy was read and refused (iOS reads each at
+      // once), and one with a photo.
+      deliveries.photos
+        ..[2] = 0
+        ..[3] = 0
+        ..[4] = 1;
+      input
+        ..add(note(2))
+        ..add(note(3))
+        ..add(photo('d', 4))
+        ..add(note(4));
+      answer.complete(false);
+      await pumpEventQueue();
+      expect(notSent, [2], reason: 'a and d');
+      expect(deliveries.declined, {1, 4});
+      expect(passed, ['note2', 'note3']);
+      await sub.cancel();
+      await input.close();
+    });
   });
 
   group('the pipeline', () {
@@ -478,17 +575,20 @@ void main() {
           '3 shared files were skipped because they are over 25 MB.');
       expect(line(en, _files([_video])),
           'One shared file was skipped: Chopstats logs photos, not videos.');
-      expect(line(en, _files([_file, _file])),
-          "2 shared files were skipped: Chopstats can't read that kind of "
+      expect(line(en, _files([_file])),
+          "One shared file was skipped: Chopstats can't read that kind of "
           'file.');
+      expect(line(en, _files([_file, _file])),
+          "2 shared files were skipped: Chopstats can't read those kinds of "
+          'files.');
       expect(line(en, _files([_gone])),
           'One shared file was skipped because it could not be read.');
       expect(line(en, _files([_gone, _gone])),
           '2 shared files were skipped because they could not be read.');
     });
 
-    test('a size or read reason that covers only some says how many; a type '
-        'says what Chopstats can\'t read, whatever the rest were', () {
+    test('a reason that covers only some of the files says how many it '
+        'covers, whichever reason it is', () {
       expect(line(en, _files([_big, _type, _big], ['AVIF'])),
           '3 shared files were skipped, 2 of them because they are over '
           '25 MB.');
@@ -498,8 +598,8 @@ void main() {
           '3 shared files were skipped, 2 of them because they could not be '
           'read.');
       expect(line(en, _files([_type, _type, _big], ['AVIF', 'DNG'])),
-          "3 shared files were skipped: Chopstats can't read AVIF/DNG photos "
-          'yet.');
+          '3 shared files were skipped, 2 of them because Chopstats can\'t '
+          'read AVIF/DNG photos yet.');
       expect(
           line(
               en,
@@ -508,8 +608,31 @@ void main() {
           "5 shared files were skipped: Chopstats can't read AVIF/DNG/CR2 "
           'photos yet.',
           reason: 'at most three types named');
+      // A tie: the earlier reason (a video) is said with how many it
+      // covers, so the big photo is not called a video.
+      expect(line(en, _files([_video, _big])),
+          '2 shared files were skipped, one of them a video: Chopstats logs '
+          'photos, not videos.');
       expect(line(en, _files([_video, _gone])),
-          '2 shared files were skipped: Chopstats logs photos, not videos.');
+          '2 shared files were skipped, one of them a video: Chopstats logs '
+          'photos, not videos.');
+      expect(line(en, _files([_video, _video, _big])),
+          '3 shared files were skipped, 2 of them videos: Chopstats logs '
+          'photos, not videos.');
+      // One type among five reasons.
+      expect(line(en, _files([_type, _video, _file, _big, _gone], ['DNG'])),
+          '5 shared files were skipped, one of them because Chopstats can\'t '
+          'read DNG photos yet.');
+      expect(line(en, _files([_file, _file, _gone])),
+          '3 shared files were skipped, 2 of them because Chopstats can\'t '
+          'read those kinds of files.');
+      expect(line(en, _files([_file, _big])),
+          '2 shared files were skipped, one of them because Chopstats can\'t '
+          'read that kind of file.');
+      // Over 25 MB covers the most: said with its count, as before.
+      expect(line(en, _files([_big, _big, _video, _file])),
+          '4 shared files were skipped, 2 of them because they are over '
+          '25 MB.');
     });
 
     test('in Chinese', () {
@@ -518,34 +641,72 @@ void main() {
       expect(line(zh, _files([_big])), '有 1 个分享的文件超过 25 MB，已跳过。');
       expect(line(zh, _files([_video])), '有 1 个分享的文件被跳过：筷拍只记录照片，不记录视频。');
       expect(line(zh, _files([_file])), '有 1 个分享的文件被跳过：筷拍无法读取这类文件。');
+      expect(line(zh, _files([_file, _file])), '有 2 个分享的文件被跳过：筷拍无法读取这类文件。');
       expect(line(zh, _files([_gone, _gone])), '有 2 个分享的文件无法读取，已跳过。');
       expect(line(zh, _files([_big, _big, _type], ['DNG'])),
           '有 3 个分享的文件被跳过，其中 2 个超过 25 MB。');
       expect(line(zh, _files([_gone, _gone, _file])),
           '有 3 个分享的文件被跳过，其中 2 个无法读取。');
+      expect(line(zh, _files([_type, _type, _big], ['AVIF', 'DNG'])),
+          '有 3 个分享的文件被跳过，其中 2 个是筷拍暂时无法读取的 AVIF/DNG 格式照片。');
+      expect(line(zh, _files([_video, _big])),
+          '有 2 个分享的文件被跳过，其中 1 个是视频：筷拍只记录照片，不记录视频。');
+      expect(line(zh, _files([_file, _file, _gone])),
+          '有 3 个分享的文件被跳过，其中 2 个是筷拍无法读取的文件类型。');
     });
 
     test('never a file\'s name or path, only the type its name gives',
         () async {
       final source = _Source();
-      files['/shared/Trip to Mom/IMG_20261121_secret.avif'] =
-          Uint8List.fromList([1]);
+      const folder = '/shared/Trip to Mom';
+      files['$folder/IMG_20261121_secret.avif'] = Uint8List.fromList([1]);
+      for (final name in [
+        'Lunch with.Sarah',
+        'Dinner.Mom',
+        'Dinner with J.Smith',
+        'IMG_1234.copy',
+      ]) {
+        files['$folder/$name'] = Uint8List.fromList([2]);
+      }
       final got = <IntakePhoto>[];
       final sub = intakeOf(source).photos().listen(got.add);
+      // A share with an AVIF, then one whose names have a dot in them but
+      // give no type.
       source.controller.add(const SharedBatch([
-        '/shared/Trip to Mom/IMG_20261121_secret.avif',
-        '/shared/Trip to Mom/menu.longextension',
+        '$folder/IMG_20261121_secret.avif',
+        '$folder/menu.longextension',
+      ]));
+      source.controller.add(const SharedBatch([
+        '$folder/Lunch with.Sarah',
+        '$folder/Dinner.Mom',
+        '$folder/Dinner with J.Smith',
+        '$folder/IMG_1234.copy',
       ]));
       await pumpEventQueue();
+      expect(got, hasLength(2));
       for (final l in [en, zh]) {
-        final said = line(l, got.single.refused!);
-        expect(said, isNot(contains('Trip')));
-        expect(said, isNot(contains('secret')));
-        expect(said, isNot(contains('IMG_')));
-        expect(said, isNot(contains('/')));
-        expect(said, isNot(contains('longext')));
-        expect(said, contains('AVIF'));
+        final said = [for (final note in got) line(l, note.refused!)];
+        for (final part in [
+          'trip',
+          'secret',
+          'img_',
+          '/',
+          'longext',
+          'sarah',
+          'mom',
+          'smith',
+          'copy',
+        ]) {
+          expect(said.join('\n').toLowerCase(), isNot(contains(part)),
+              reason: part);
+        }
+        expect(said.first, contains('AVIF'));
+        expect(said.last, isNot(contains('photos yet')),
+            reason: 'no type named for them');
       }
+      expect(line(en, got.last.refused!),
+          "4 shared files were skipped: Chopstats can't read those kinds of "
+          'files.');
       await sub.cancel();
     });
   });
@@ -562,7 +723,10 @@ void main() {
     late PhotoPipeline pipeline;
     late _Source source;
 
-    Future<void> start({SharedBatch? launch, AppLocalizations? l}) async {
+    Future<void> start(
+        {SharedBatch? launch,
+        AppLocalizations? l,
+        bool android = true}) async {
       settings = FakeSettings()..aiConsent = {};
       gate = SharedPhotoConsentGate(settings);
       lines = [];
@@ -583,8 +747,24 @@ void main() {
           thumbnailer: (_) async => null);
       source = _Source();
       if (launch != null) source.initial = launch;
-      final intake = intakeOf(source, android: true);
+      final intake = intakeOf(source, android: android);
       pipeline.bindStream(gate.gate(intake.photos(), deliveries: intake));
+    }
+
+    /// The question stays open until [answer] completes; Not now words its
+    /// line as the app shell does (askSharedPhotoConsent), counted into
+    /// [notSent].
+    void askUntil(Completer<bool> answer, List<int> notSent) {
+      gate.attach(() async {
+        asked++;
+        final yes = await answer.future;
+        if (yes) {
+          settings.aiConsent = {...allAiConsentRoutes};
+        } else {
+          notSent.add(gate.declineOpenQuestion());
+        }
+        return yes;
+      });
     }
 
     tearDown(() => pipeline.dispose());
@@ -610,12 +790,14 @@ void main() {
         () async {
       answers = [];
       await start(
-          launch: const SharedBatch([], refused: [_video, _big]));
+          launch: const SharedBatch([], refused: [_video, _video, _big]));
       await pumpEventQueue(times: 100);
       expect(asked, 0);
       expect(analyses, 0);
-      expect(lines,
-          ['2 shared files were skipped: Chopstats logs photos, not videos.']);
+      expect(lines, [
+        '3 shared files were skipped, 2 of them videos: Chopstats logs '
+            'photos, not videos.'
+      ]);
     });
 
     test('a launch share with a photo and a file over 25 MB, in Chinese',
@@ -657,6 +839,76 @@ void main() {
           refused: [_video]));
       await pumpEventQueue(times: 100);
       expect(asked, 1);
+      expect(analyses, 0);
+      expect(lines, isEmpty);
+    });
+
+    // Another share's Not now covers the shares made while its question
+    // is open, but not one with nothing to send: that one was never asked
+    // about, and its line is the only word it gets.
+    test('Android: a share refused whole while another share\'s question is '
+        'open still gets its line after that share\'s Not now', () async {
+      answers = [];
+      await start();
+      final answer = Completer<bool>();
+      final notSent = <int>[];
+      askUntil(answer, notSent);
+      files['/shared/1/IMG_1.jpg'] = Uint8List.fromList([1, 1]);
+      source.controller.add(const SharedBatch(['/shared/1/IMG_1.jpg']));
+      await pumpEventQueue(times: 100);
+      expect(asked, 1, reason: 'the question is open');
+      source.controller.add(const SharedBatch([], refused: [_big]));
+      await pumpEventQueue(times: 100);
+      expect(lines, isEmpty, reason: 'it waits behind the open question');
+      answer.complete(false);
+      await pumpEventQueue(times: 100);
+      expect(notSent, [1], reason: 'the photo asked about, nothing else');
+      expect(asked, 1);
+      expect(analyses, 0, reason: 'nothing sent');
+      expect(lines, ['One shared file was skipped because it is over 25 MB.']);
+    });
+
+    test('iOS: a share of one AVIF while another share\'s question is open '
+        '(read at once, so nothing left to send) still gets its line', () async {
+      answers = [];
+      await start(android: false);
+      final answer = Completer<bool>();
+      final notSent = <int>[];
+      askUntil(answer, notSent);
+      files['/shared/IMG_1.jpg'] = Uint8List.fromList([1, 1]);
+      source.controller.add(const SharedBatch(['/shared/IMG_1.jpg']));
+      await pumpEventQueue(times: 100);
+      expect(asked, 1, reason: 'the question is open');
+      files['/shared/IMG_2.avif'] = Uint8List.fromList([2, 2]);
+      source.controller.add(const SharedBatch(['/shared/IMG_2.avif']));
+      await pumpEventQueue(times: 100);
+      answer.complete(false);
+      await pumpEventQueue(times: 100);
+      expect(notSent, [1]);
+      expect(analyses, 0);
+      expect(lines, [
+        "One shared file was skipped: Chopstats can't read AVIF photos yet."
+      ]);
+    });
+
+    test('a share with a photo made while the question is open is still '
+        'covered by its Not now, refused files and all', () async {
+      answers = [];
+      await start();
+      final answer = Completer<bool>();
+      final notSent = <int>[];
+      askUntil(answer, notSent);
+      files['/shared/1/IMG_1.jpg'] = Uint8List.fromList([1, 1]);
+      files['/shared/2/IMG_2.jpg'] = Uint8List.fromList([2, 2]);
+      source.controller.add(const SharedBatch(['/shared/1/IMG_1.jpg']));
+      await pumpEventQueue(times: 100);
+      source.controller
+          .add(const SharedBatch(['/shared/2/IMG_2.jpg'], refused: [_video]));
+      await pumpEventQueue(times: 100);
+      answer.complete(false);
+      await pumpEventQueue(times: 100);
+      expect(notSent, [2]);
+      expect(asked, 1, reason: 'the second share was answered too');
       expect(analyses, 0);
       expect(lines, isEmpty);
     });
