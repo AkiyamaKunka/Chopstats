@@ -3926,4 +3926,81 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get diagFixServerKeyOtherHost =>
       'In Settings › AI Provider › Your own server, paste this server\'s upload key, or use the saved key for it.';
+
+  @override
+  String shareSkippedPhotoType(int count, String type) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count shared files were skipped',
+      one: 'One shared file was skipped',
+    );
+    return '$_temp0: Chopstats can\'t read $type photos yet.';
+  }
+
+  @override
+  String shareSkippedVideo(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count shared files were skipped',
+      one: 'One shared file was skipped',
+    );
+    return '$_temp0: Chopstats logs photos, not videos.';
+  }
+
+  @override
+  String shareSkippedFileType(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count shared files were skipped',
+      one: 'One shared file was skipped',
+    );
+    return '$_temp0: Chopstats can\'t read that kind of file.';
+  }
+
+  @override
+  String shareSkippedTooBig(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count shared files were skipped because they are over 25 MB.',
+      one: 'One shared file was skipped because it is over 25 MB.',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String shareSkippedUnreadable(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count shared files were skipped because they could not be read.',
+      one: 'One shared file was skipped because it could not be read.',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String shareSkippedSomeTooBig(int count, int some) {
+    String _temp0 = intl.Intl.pluralLogic(
+      some,
+      locale: localeName,
+      other: '$some of them because they are over 25 MB',
+      one: 'one of them because it is over 25 MB',
+    );
+    return '$count shared files were skipped, $_temp0.';
+  }
+
+  @override
+  String shareSkippedSomeUnreadable(int count, int some) {
+    String _temp0 = intl.Intl.pluralLogic(
+      some,
+      locale: localeName,
+      other: '$some of them because they could not be read',
+      one: 'one of them because it could not be read',
+    );
+    return '$count shared files were skipped, $_temp0.';
+  }
 }

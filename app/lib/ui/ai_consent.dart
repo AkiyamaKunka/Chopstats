@@ -306,6 +306,11 @@ Future<bool> askAiConsentUpdate(
 /// no dialog could be shown (the shell is going away). Null is no answer,
 /// like a dialog that failed: nothing is declined, and the photo waits for
 /// the next shell to ask.
+///
+/// A share's note on its files that gave no photo
+/// (IntakePhoto.refusedNote) is no photo: it is never asked about, and a
+/// share whose every file was refused asks nothing. It passes in its
+/// place, after the share's photos, or goes with the share's Not now.
 class SharedPhotoConsentGate {
   SharedPhotoConsentGate(this._settings);
 
@@ -408,6 +413,14 @@ class SharedPhotoConsentGate {
   Future<IntakePhoto?> _admit(IntakePhoto photo) async {
     final delivery = photo.shareDelivery;
     if (delivery != null && delivery > _latestSeen) _latestSeen = delivery;
+    // A share's files that gave no photo (IntakePhoto.refusedNote): nothing
+    // to ask about or send, so no question, even when none of the share's
+    // files gave a photo. Passed on to be said, after the share's photos,
+    // unless the share was answered Not now: that line says nothing was
+    // sent.
+    if (photo.refused != null) {
+      return delivery != null && _declined.contains(delivery) ? null : photo;
+    }
     IntakePhoto passed() {
       if (delivery != null) _admitted[delivery] = (_admitted[delivery] ?? 0) + 1;
       return photo;

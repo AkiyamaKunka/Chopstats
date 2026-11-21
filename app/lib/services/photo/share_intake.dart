@@ -1,9 +1,11 @@
 /// Deliberate intake: share-sheet stream + in-app "recent photos" picker
 /// source (spec §6, §2.3 caller policy).
 ///
-/// Everything emitted here carries `deliberate=true`: a human re-sending a
+/// Every photo emitted here carries `deliberate=true`: a human re-sending a
 /// photo may reclaim failed/skipped/deleted ledger rows (the "deliberate
-/// re-send" rule, spec §2.3).
+/// re-send" rule, spec §2.3). The share stream also carries, after a
+/// share's photos, one note on its files that gave no photo
+/// ([IntakePhoto.refusedNote]), which is no photo at all.
 library;
 
 import 'dart:async';
@@ -54,31 +56,101 @@ String fileBaseName(String path) {
   return sep < 0 ? path : path.substring(sep + 1);
 }
 
+/// The type a refused file's [name] gives, for the line that says it was
+/// skipped: 'AVIF' for 'IMG_1.avif'. Its extension, upper-cased, when that
+/// is a short run of letters and digits with a letter in it; null for
+/// anything else (no extension, '.0001', a long or odd one), so a sender's
+/// odd name never reaches the line.
+String? sharedPhotoTypeOf(String name) {
+  final dot = name.lastIndexOf('.');
+  if (dot < 0) return null;
+  final ext = name.substring(dot + 1);
+  return RegExp(r'^(?=.*[A-Za-z])[A-Za-z0-9]{1,5}$').hasMatch(ext)
+      ? ext.toUpperCase()
+      : null;
+}
+
+/// One share as the platform hands it over: its image files' [paths], and
+/// the files refused before any copy was made ([refused]: on Android,
+/// MainActivity's, see [androidRefusedShareType]).
+class SharedBatch {
+  const SharedBatch(this.paths, {this.refused = const []});
+
+  final List<String> paths;
+  final List<ShareRefusal> refused;
+}
+
 /// receive_sharing_intent seam so tests can fake the platform stream.
 abstract class SharedMediaSource {
-  /// Batches of shared image file paths while the app is alive.
-  Stream<List<String>> imagePathBatches();
+  /// The shares made while the app is alive, one batch each.
+  Stream<SharedBatch> batches();
 
   /// The cold-start share that launched the app (consumed once).
-  Future<List<String>> initialImagePaths();
+  Future<SharedBatch> initialBatch();
+}
+
+/// Android: the type MainActivity gives each shared item it refused
+/// before any copy (MainActivity.kt withSafeShares,
+/// IntakeRules.REFUSED_SHARE_TYPE). Such an item reaches the plugin as a
+/// file:// URI that names no file, [androidRefusedSharePath] and the
+/// reason, which the plugin hands on as the item's path without opening
+/// it; it is no image, so nothing reads it. It lets the share's refusals
+/// travel in the share's own event, the launch share's and a held one's
+/// included, and a share whose every item was refused still arrives.
+const String androidRefusedShareType = 'application/x-chopstats-refused';
+
+/// The folder part of a refused item's path (IntakeRules.REFUSED_SHARE_PATH):
+/// `/chopstats-refused/<reason>`, a path no file has.
+const String androidRefusedSharePath = '/chopstats-refused';
+
+/// The reasons MainActivity gives a refused item, the last part of its
+/// path (IntakeRules.ShareRefusal's tokens).
+const Map<String, ShareRefusal> androidRefusalTokens = {
+  'video': ShareRefusal.video,
+  'file_type': ShareRefusal.fileType,
+  'too_big': ShareRefusal.tooBig,
+  'unreadable': ShareRefusal.unreadable,
+};
+
+/// The plugin's [files] for one share as a [SharedBatch]: the images'
+/// paths, and a refusal for each item that is no image. MainActivity's
+/// refused items say why ([androidRefusedShareType]; an unknown reason
+/// reads as unreadable); a video or another file the plugin reports as it
+/// is counts by its kind. Text and links are no file: left out.
+SharedBatch sharedBatchOf(List<SharedMediaFile> files) {
+  final paths = <String>[];
+  final refused = <ShareRefusal>[];
+  for (final f in files) {
+    if (f.mimeType == androidRefusedShareType) {
+      refused.add(
+          androidRefusalTokens[fileBaseName(f.path)] ?? ShareRefusal.unreadable);
+      continue;
+    }
+    switch (f.type) {
+      case SharedMediaType.image:
+        paths.add(f.path);
+      case SharedMediaType.video:
+        refused.add(ShareRefusal.video);
+      case SharedMediaType.file:
+        refused.add(ShareRefusal.fileType);
+      case SharedMediaType.text || SharedMediaType.url:
+        break;
+    }
+  }
+  return SharedBatch(paths, refused: refused);
 }
 
 class ReceiveSharingIntentSource implements SharedMediaSource {
-  List<String> _imagePaths(List<SharedMediaFile> files) => files
-      .where((f) => f.type == SharedMediaType.image)
-      .map((f) => f.path)
-      .toList();
+  @override
+  Stream<SharedBatch> batches() =>
+      ReceiveSharingIntent.instance.getMediaStream().map(sharedBatchOf);
 
   @override
-  Stream<List<String>> imagePathBatches() =>
-      ReceiveSharingIntent.instance.getMediaStream().map(_imagePaths);
-
-  @override
-  Future<List<String>> initialImagePaths() async {
+  Future<SharedBatch> initialBatch() async {
     final files = await ReceiveSharingIntent.instance.getInitialMedia();
     // Consume the launch intent so a hot restart does not re-log the share.
     ReceiveSharingIntent.instance.reset();
-    return _imagePaths(files);
+    return sharedBatchOf(files);
   }
 }
 
@@ -360,6 +432,16 @@ class ShareIntake implements ShareDeliveries {
   /// type, empty, over 25 MB, unreadable) still goes at once, and on a
   /// cancel the copies read but not handed on go with those not read.
   ///
+  /// REFUSED FILES (2026-11-21): a share's files that give no photo were
+  /// dropped without a word: an AVIF or DNG, a file over 25 MB, an empty
+  /// or unreadable one here, and on Android a video, a PDF, a file over
+  /// 25 MB or a stream MainActivity could not read before any copy
+  /// ([SharedBatch.refused]). Once every file of a share has been looked
+  /// at, one note ([IntakePhoto.refusedNote]) follows its photos: how many
+  /// gave none, and why. None for a share answered Not now, or once the
+  /// stream is cancelled. A share whose every file was refused is still a
+  /// delivery, with no photo to ask about.
+  ///
   /// iOS reads each copy the moment it arrives, as before: the share
   /// extension writes `<appGroup>/<file name>` and replaces a file of the
   /// same name (FullSizeRender.jpg for every edited photo, TempImage.png
@@ -368,7 +450,7 @@ class ShareIntake implements ShareDeliveries {
   /// 2026-11-13). iOS shares one image at a time: one original per share.
   Stream<IntakePhoto> photos() {
     late final StreamController<IntakePhoto> controller;
-    StreamSubscription<List<String>>? liveSub;
+    StreamSubscription<SharedBatch>? liveSub;
     Timer? recheck;
     var cancelled = false;
     Completer<void>? resumed;
@@ -380,9 +462,19 @@ class ShareIntake implements ShareDeliveries {
       r?.complete();
     }
 
-    Future<void> emitPaths(List<String> paths, int delivery) async {
-      void unreadable() => _deliveryUnreadable[delivery] =
-          (_deliveryUnreadable[delivery] ?? 0) + 1;
+    Future<void> emitPaths(List<String> paths, int delivery,
+        {List<ShareRefusal> refusedBefore = const []}) async {
+      // The share's files that gave no photo: those refused before any
+      // copy (MainActivity), then the copies refused here.
+      final refused = [...refusedBefore];
+      final photoTypes = <String>[];
+      void gaveNoPhoto(ShareRefusal why, {String? type}) {
+        _deliveryUnreadable[delivery] =
+            (_deliveryUnreadable[delivery] ?? 0) + 1;
+        refused.add(why);
+        if (type != null) photoTypes.add(type);
+      }
+
       bool declined() => _declined.contains(delivery);
       for (final path in paths) {
         // A declined delivery is never waited on.
@@ -402,20 +494,22 @@ class ShareIntake implements ShareDeliveries {
           await _discard(path);
           continue;
         }
-        final IntakePhoto? photo;
+        final _Read read;
         // Pending while it is read, too: in hand once it gives a photo.
         _reading++;
         try {
-          photo = await _fromPath(path, delivery);
+          read = await _fromPath(path, delivery);
         } catch (_) {
-          unreadable();
+          gaveNoPhoto(ShareRefusal.unreadable);
           continue; // one bad copy (already deleted) never stops the rest
         } finally {
           _reading--;
           _notePending();
         }
+        final photo = read.photo;
         if (photo == null) {
-          unreadable();
+          gaveNoPhoto(read.refusal ?? ShareRefusal.unreadable,
+              type: read.type);
         } else if (!cancelled && !controller.isClosed && !declined()) {
           controller.add(photo);
         } else {
@@ -424,39 +518,57 @@ class ShareIntake implements ShareDeliveries {
           photo.onSettled?.call();
         }
       }
+      // Every file of the share is looked at: those that gave no photo
+      // are said in one line, after its photos (the consent gate and the
+      // pipeline keep the order). Not for a share answered Not now, whose
+      // own line says nothing was sent, nor once the stream is gone.
+      if (refused.isNotEmpty &&
+          !cancelled &&
+          !controller.isClosed &&
+          !declined()) {
+        controller.add(IntakePhoto.refusedNote(
+            RefusedShareFiles(refused, photoTypes: photoTypes),
+            shareDelivery: delivery));
+      }
     }
 
     // One reader, batch after batch: a failure cannot break the chain, or
     // every later share would wait behind it for good. The delivery is
     // numbered here, as its batch event arrives (an empty one is none).
-    void enqueue(List<String> batch, {bool leftOver = false}) {
+    void enqueue(SharedBatch batch, {bool leftOver = false}) {
       // Android's copies each have a path of their own: one already given
       // to a delivery (the start-up sweep and a late live event) is not
       // given again. iOS reuses names for new copies: never deduplicated.
       final paths = _copiesWait
-          ? [for (final p in batch) if (_delivered.add(_normalized(p))) p]
-          : batch;
-      if (paths.isEmpty) return;
+          ? [
+              for (final p in batch.paths)
+                if (_delivered.add(_normalized(p))) p
+            ]
+          : batch.paths;
+      // A share whose every file was refused before any copy is still a
+      // delivery: its line says so, with no question asked.
+      if (paths.isEmpty && batch.refused.isEmpty) return;
       final delivery = ++_deliveries;
       if (leftOver) _startupBatches.add(delivery);
       _deliverySize[delivery] = paths.length;
-      if (_copiesWait) _untaken[delivery] = [...paths];
+      if (_copiesWait && paths.isNotEmpty) _untaken[delivery] = [...paths];
       _notePending();
       reading = reading
-          .then((_) => emitPaths(paths, delivery))
+          .then((_) =>
+              emitPaths(paths, delivery, refusedBefore: batch.refused))
           .catchError((Object _) {});
     }
 
     _wakeReader = wake;
     controller = StreamController<IntakePhoto>(
       onListen: () async {
-        final initial = await _source.initialImagePaths();
+        final initial = await _source.initialBatch();
         if (cancelled) return;
         enqueue(initial);
         // Listened for at once, not after the launch share is read: the
         // plugin drops a share that arrives while nobody listens, and the
         // launch share may now wait on the pipeline for minutes.
-        liveSub = _source.imagePathBatches().listen(enqueue,
+        liveSub = _source.batches().listen(enqueue,
             onError: controller.addError,
             onDone: () => reading = reading.then((_) => controller.close()));
         // Only now has the plugin a listener to tell: MainActivity hands
@@ -468,8 +580,10 @@ class ShareIntake implements ShareDeliveries {
           // Nobody to tell: their copies wait for the sweep (below).
         }
         if (_copiesWait) {
-          final (left, young) = await _leftOver(initial);
-          if (!cancelled && left.isNotEmpty) enqueue(left, leftOver: true);
+          final (left, young) = await _leftOver(initial.paths);
+          if (!cancelled && left.isNotEmpty) {
+            enqueue(SharedBatch(left), leftOver: true);
+          }
           // The copies too young for it: once each is old enough that its
           // share's event has come if it ever will, those still on disk
           // and given to no delivery are taken ([strandedRecheck]).
@@ -484,7 +598,7 @@ class ShareIntake implements ShareDeliveries {
                 }
               }
               if (cancelled || controller.isClosed) return;
-              enqueue(waiting, leftOver: true);
+              enqueue(SharedBatch(waiting), leftOver: true);
             });
           }
         }
@@ -622,20 +736,33 @@ class ShareIntake implements ShareDeliveries {
     }
   }
 
-  Future<IntakePhoto?> _fromPath(String path, int delivery) async {
+  /// The photo the copy at [path] gives, or why it gives none.
+  Future<_Read> _fromPath(String path, int delivery) async {
     // Android (review 171, C5): the plugin used to hand over a path of the
     // sender's making (its file name, climbing out of the cache with
     // '..'; or a share's text when it had no stream), which was read when
     // it looked like a photo and deleted either way: the meal database,
     // the settings. Only MainActivity's copies are touched now.
-    if (!await _isShareCopy(path)) return null;
+    if (!await _isShareCopy(path)) {
+      return const _Read.refused(ShareRefusal.unreadable);
+    }
     var kept = false;
     try {
       final name = fileBaseName(path);
-      if (!hasSupportedPhotoExtension(name)) return null; // §6.1
+      if (!hasSupportedPhotoExtension(name)) {
+        // §6.1. Said by the type its name gives, when it gives one.
+        final type = sharedPhotoTypeOf(name);
+        return type == null
+            ? const _Read.refused(ShareRefusal.fileType)
+            : _Read.refused(ShareRefusal.photoType, type: type);
+      }
       final bytes = await _readBytes(path);
-      if (bytes == null || bytes.isEmpty) return null;
-      if (bytes.length > maxPhotoBytes) return null; // §8: 25 MB cap
+      if (bytes == null || bytes.isEmpty) {
+        return const _Read.refused(ShareRefusal.unreadable);
+      }
+      if (bytes.length > maxPhotoBytes) {
+        return const _Read.refused(ShareRefusal.tooBig); // §8: 25 MB cap
+      }
       // A shared file has no library asset date; filename timestamp or bust
       // (§6.3 fallback = intake-time dating, expressed as capturedAt null).
       final capturedAt = deriveCapturedAt(
@@ -649,7 +776,7 @@ class ShareIntake implements ShareDeliveries {
           shareDelivery: delivery,
           onSettled: _copiesWait ? _settler(delivery, path) : null);
       kept = _copiesWait;
-      return photo;
+      return _Read.photo(photo);
     } finally {
       // The plugin's container copy goes once it has served its purpose:
       // at once when it gives no photo (rejected or unreadable) and on
@@ -699,4 +826,18 @@ class ShareIntake implements ShareDeliveries {
     }
     return out;
   }
+}
+
+/// What one shared copy gave ([ShareIntake]): its photo, or why none.
+class _Read {
+  const _Read.photo(IntakePhoto this.photo)
+      : refusal = null,
+        type = null;
+  const _Read.refused(ShareRefusal this.refusal, {this.type}) : photo = null;
+
+  final IntakePhoto? photo;
+  final ShareRefusal? refusal;
+
+  /// [ShareRefusal.photoType]: the type the copy's name gives.
+  final String? type;
 }

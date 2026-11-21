@@ -76,6 +76,36 @@ internal object IntakeRules {
         "content".equals(scheme, ignoreCase = true) &&
             "$packageName$SHARE_OUT_AUTHORITY_SUFFIX".equals(authority, ignoreCase = true)
 
+    /// Why a shared item gave no copy (MainActivity.withSafeShares). Share
+    /// intake (Dart) reads it from the refused item's path, whose last
+    /// part is the token (share_intake.dart androidRefusalTokens), and
+    /// says how many items were skipped and why.
+    enum class ShareRefusal(val token: String) {
+        VIDEO("video"),
+        FILE_TYPE("file_type"),
+        TOO_BIG("too_big"),
+        UNREADABLE("unreadable"),
+    }
+
+    /// The type a refused item goes to the plugin with
+    /// (share_intake.dart androidRefusedShareType). It is no image, so
+    /// share intake reads nothing at its path.
+    const val REFUSED_SHARE_TYPE = "application/x-chopstats-refused"
+
+    /// Where a refused item's path starts (share_intake.dart
+    /// androidRefusedSharePath): a folder no file is in.
+    const val REFUSED_SHARE_PATH = "/chopstats-refused"
+
+    /// The refusal for a shared item of [itemType] that is no image: a
+    /// video, or any other kind of file (a PDF, or no type at all).
+    fun typeRefusal(itemType: String?): ShareRefusal =
+        if (itemType?.startsWith("video") == true) ShareRefusal.VIDEO else ShareRefusal.FILE_TYPE
+
+    /// The path a refused item reaches the plugin with: a file:// URI of
+    /// it names no file, and the plugin hands a file:// URI's path on as it
+    /// is, without opening it.
+    fun refusedSharePath(refusal: ShareRefusal): String = "$REFUSED_SHARE_PATH/${refusal.token}"
+
     /// Whether [path] is [dir] or lies inside it once both are resolved
     /// (symbolic links included). True when that cannot be told: callers
     /// use it to refuse, so an unknown fails closed.

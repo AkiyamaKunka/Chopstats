@@ -586,7 +586,9 @@ class AppServices {
     );
     pipeline.bind(photoIntake); // automated watch (deliberate=false)
     // Share sheet (deliberate), each photo held until its AI recipient is
-    // allowed.
+    // allowed. A share's files that give no photo (another type, over
+    // 25 MB, unreadable) are said in one line after its photos, through
+    // the same announce (share_intake.dart), and never asked about.
     pipeline.bindStream(
         shareConsent.gate(shareIntake.photos(), deliveries: shareIntake));
     mealAssist.start();

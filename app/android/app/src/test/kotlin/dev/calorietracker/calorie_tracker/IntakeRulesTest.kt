@@ -184,6 +184,41 @@ class IntakeRulesTest {
         assertFalse(IntakeRules.isOwnShareOut("content", "content", pkg))
     }
 
+    // --- A shared item that gives no copy goes on as a refused item, so
+    // share intake can say it was skipped and why.
+
+    @Test
+    fun aVideoIsRefusedAsAVideoAndAnyOtherTypeAsAFileType() {
+        assertEquals(IntakeRules.ShareRefusal.VIDEO, IntakeRules.typeRefusal("video/mp4"))
+        assertEquals(IntakeRules.ShareRefusal.VIDEO, IntakeRules.typeRefusal("video/*"))
+        for (type in listOf("application/pdf", "text/plain", "*/*", "audio/mpeg", "", null)) {
+            assertEquals(type, IntakeRules.ShareRefusal.FILE_TYPE, IntakeRules.typeRefusal(type))
+        }
+    }
+
+    @Test
+    fun aRefusedItemsPathNamesNoFileAndEndsInItsReason() {
+        assertEquals("/chopstats-refused/video", IntakeRules.refusedSharePath(IntakeRules.ShareRefusal.VIDEO))
+        assertEquals("/chopstats-refused/file_type", IntakeRules.refusedSharePath(IntakeRules.ShareRefusal.FILE_TYPE))
+        assertEquals("/chopstats-refused/too_big", IntakeRules.refusedSharePath(IntakeRules.ShareRefusal.TOO_BIG))
+        assertEquals("/chopstats-refused/unreadable", IntakeRules.refusedSharePath(IntakeRules.ShareRefusal.UNREADABLE))
+        val paths = IntakeRules.ShareRefusal.values().map { IntakeRules.refusedSharePath(it) }
+        assertEquals("one path per reason", paths.size, paths.toSet().size)
+        for (path in paths) {
+            // A folder at the root no app can write in: never a copy, and
+            // never in the share folder (MainActivity.SHARE_FOLDER).
+            assertTrue(path, path.startsWith(IntakeRules.REFUSED_SHARE_PATH + "/"))
+            assertFalse(path, File(path).exists())
+            assertFalse(path, path.contains("shared_photos"))
+        }
+        // No image type: the plugin reports such an item as a file, and
+        // share intake reads nothing at its path.
+        assertEquals("application/x-chopstats-refused", IntakeRules.REFUSED_SHARE_TYPE)
+        assertFalse(IntakeRules.REFUSED_SHARE_TYPE.startsWith("image"))
+        assertFalse(IntakeRules.REFUSED_SHARE_TYPE.startsWith("video"))
+        assertFalse(IntakeRules.REFUSED_SHARE_TYPE.startsWith("text"))
+    }
+
     // --- Only a regular file in the cache is ever saved out.
 
     private fun layout(): Triple<File, File, File> {
