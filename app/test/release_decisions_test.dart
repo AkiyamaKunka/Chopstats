@@ -1428,6 +1428,57 @@ void main() {
       expect(s6, isNot(contains('no WorkManager job is registered')));
     });
 
+    // § 6.8 met itself in the merge of main into #77 (2026-11-21): #76
+    // rewrote step 7 (where the screenshots are) while #77 put the version
+    // step after it and renumbered the rest. The steps run 1, 2, 3 … and
+    // the step numbers cited elsewhere still name the steps they mean.
+    test('§ 6.8: the shots, the version step and the lane play run in a '
+        'row, and the step numbers cited elsewhere match', () {
+      final at = releasing.indexOf('### 6.8 Owner checklist, in order');
+      final numbers = <int>[];
+      final steps = <int, String>{};
+      int? n;
+      for (final line in releasing
+          .substring(at, releasing.indexOf('### 6.9 ', at))
+          .split('\n')) {
+        final m = RegExp(r'^(\d+)\. (.*)$').firstMatch(line);
+        if (m != null) {
+          n = int.parse(m.group(1)!);
+          numbers.add(n);
+          steps[n] = m.group(2)!;
+        } else if (n != null && line.startsWith('   ')) {
+          steps[n] = '${steps[n]} ${line.trim()}';
+        } else {
+          n = null;
+        }
+      }
+      expect(numbers, [for (var i = 1; i <= numbers.length; i++) i]);
+      int stepWith(String text) {
+        final hits = [
+          for (final e in steps.entries)
+            if (e.value.replaceAll(RegExp(r'\s+'), ' ').contains(text)) e.key,
+        ];
+        expect(hits, hasLength(1), reason: text);
+        return hits.single;
+      }
+
+      final shots =
+          stepWith('from `app/android/store/screenshots/en-US/` and `zh-CN/`');
+      final version = stepWith(_kVersionStep);
+      final run = stepWith('Run workflow › `main` › lane `play`');
+      expect([version, run], [shots + 1, shots + 2]);
+      final https = stepWith('says `kRequireHttpsServer = true` at the run');
+      expect(steps[stepWith('"encrypted in transit: Yes"')],
+          contains('step $https checks it'));
+      final flat = releasing.replaceAll(RegExp(r'\s+'), ' ');
+      expect(flat, contains('(§ 6.8, step $version)'));
+      expect(flat, contains('§ 6.8 to keep step $version.'));
+      expect(
+          _read('android/store/data_safety.md')
+              .replaceAll(RegExp(r'\s+'), ' '),
+          contains('`docs/RELEASING.md` § 6.8 step $https has you check it'));
+    });
+
     test('every Google page it cites carries its read date', () {
       final urls = RegExp(r'<(https://(?:support\.google\.com|developer\.'
               r'android\.com)[^>]*)>')
