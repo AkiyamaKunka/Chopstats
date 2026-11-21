@@ -6,7 +6,7 @@ emulator, from the release build of the Play variant:
 
     cd app && flutter build apk --release --dart-define=CHOPSTATS_CHANNEL=play && cd ..
     python3 scripts/play_screenshots.py avd       # create + boot the AVD
-    python3 scripts/play_screenshots.py shots     # en-US 01-07, zh-CN the same but 06
+    python3 scripts/play_screenshots.py shots     # en-US 01-07, zh-CN without 06
     python3 scripts/play_screenshots.py stop      # stop the emulator (the AVD stays)
 
     python3 scripts/play_screenshots.py demo-file en-US --out demo.json   # the import file only
@@ -820,6 +820,10 @@ def shot_history(device: Device, lang: str, out: Path) -> None:
 
 
 def shot_body(device: Device, lang: str, out: Path) -> None:
+    """Body unscrolled: scrolled part way, its large title is cut, and
+    collapsed (182 px or more), its weight card meets the bar or goes under
+    it. In en-US the top pixel row of the History header's i-dot shows
+    above the tab bar (SHOTS)."""
     tab(device, lang, "body")
     scroll_to_top(device)
     device.screencap(out)

@@ -130,7 +130,7 @@ kind of thumbnail (160 px, JPEG quality 70) made from:
 | 2 | `02_meal_editor.png` | Today's dinner, a photo meal, open in the editor | The totals, then the food items with the portion the AI assumed and their editable numbers |
 | 3 | `03_log_sheet.png` | The Log sheet over Today | From recent photos, My usual foods, Leftovers, Describe a meal, Enter manually, Fix or delete a meal |
 | 4 | `04_history.png` | History, its large title collapsed | The 30-day chart with its average, and six days' totals |
-| 5 | `05_body.png` | Body | The weight trend and the measurements |
+| 5 | `05_body.png` | Body, unscrolled | The weight trend and the measurements |
 | 6 | `06_ai_provider.png` | Settings › AI Provider › API Key, **en-US only** | The provider list and the top of the empty key field (scrolled further, the field's footer names the provider's key page) |
 | 7 | `07_dark_today.png` | Today in dark mode | As shot 1 |
 
@@ -147,7 +147,11 @@ Never in a shot: Watch Camera Roll, Photo Coverage, Meta glasses rows,
 anything that names the GitHub APK, a real key or address, a provider's
 logo, VPN or mainland-China notes (需要 VPN, 中国直连, 中国大陆请选择…),
 or accuracy or user-count claims. Nothing cut in half by the tab bar
-either: a line shows whole or not at all.
+either: a line shows whole or not at all. One speck stays: on en-US 05
+the top pixel row of the dot on the i of the History header under the
+measurements (6 px wide, y=1709) shows above the tab bar. Body stays
+unscrolled: scrolled part way, its large title is cut, and collapsed
+(182 px or more), its weight card meets the bar or goes under it.
 
 After capture, the owner uploads them under **Grow users › Store presence
 › Main store listing** (and the zh-CN translation) with the graphics from
