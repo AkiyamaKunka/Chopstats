@@ -3534,4 +3534,7 @@ class AppLocalizationsZh extends AppLocalizations {
   @override
   String get diagFixServerKeyOtherHost =>
       '在设置 ›「AI 服务」›「你自己的服务器」里粘贴这台服务器的上传密钥，或把已保存的密钥用于它。';
+
+  @override
+  String get mealViewAction => '查看';
 }

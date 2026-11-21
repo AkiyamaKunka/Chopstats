@@ -68,7 +68,7 @@ void main() {
                   sent.add(r);
                   return http.Response('{}', 200);
                 }))),
-        showMealCard: (_, _) async {},
+        showMealCard: (_, _, {payload}) async {},
         photoOffered: () => offered++,
         recorder: recorder,
       );

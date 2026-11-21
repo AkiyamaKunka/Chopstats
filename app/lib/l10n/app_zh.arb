@@ -1080,5 +1080,6 @@
   "serverKeyRemoveKept": "删除此密钥",
   "autoScanServerKeyOtherHost": "自动记录没有运行：你的服务器上传密钥是为另一个服务器地址保存的，筷拍只会把它发送到那里。请到「AI 服务」›「你自己的服务器」修改。",
   "diagServerKeyOtherHost": "上传密钥是为另一个服务器地址保存的，所以不会发送给这台服务器。",
-  "diagFixServerKeyOtherHost": "在设置 ›「AI 服务」›「你自己的服务器」里粘贴这台服务器的上传密钥，或把已保存的密钥用于它。"
+  "diagFixServerKeyOtherHost": "在设置 ›「AI 服务」›「你自己的服务器」里粘贴这台服务器的上传密钥，或把已保存的密钥用于它。",
+  "mealViewAction": "查看"
 }
