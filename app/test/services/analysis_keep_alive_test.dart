@@ -7,13 +7,23 @@
 library;
 
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:calorie_tracker/core/contracts.dart';
 import 'package:calorie_tracker/core/outcome_kind.dart';
+import 'package:calorie_tracker/l10n/app_localizations_en.dart';
 import 'package:calorie_tracker/services/analysis_keep_alive.dart';
+import 'package:calorie_tracker/services/analyzer/provider_analyzers.dart'
+    show ServerAnalyzer;
+import 'package:calorie_tracker/services/nl/executor.dart'
+    show DefaultNlExecutor;
+import 'package:calorie_tracker/services/settings/app_settings.dart';
 import 'package:calorie_tracker/ui/photo_pipeline.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../ui/fakes.dart';
 
@@ -464,6 +474,156 @@ void main() {
       expect(native.calls, isEmpty);
     });
   });
+
+  // The own server's upload key goes only to the host it was saved for
+  // (review of PR 74): ServerAnalyzer refuses a key saved for another
+  // address before it decodes or sends, and HttpsOnlyServerClient checks
+  // every send again, for a request that read its key before the server
+  // changed. Either refusal comes back as the request's answer, like any
+  // other failure, so the keep-alive request around it ends with it: a
+  // refused stale key leaves no job keeping the process up for its cap.
+  group('an upload key saved for another server address', () {
+    late List<http.BaseRequest> seen;
+    setUp(() => seen = []);
+
+    /// The own server on the Claude plan, allowed, its upload key saved at
+    /// https://a.example; with [movedTo], the address then moved there, so
+    /// the key is a.example's alone.
+    Future<AppSettings> ownServer({String? movedTo}) async {
+      SharedPreferences.setMockInitialValues({});
+      final s = await AppSettings.load(
+          prefs: await SharedPreferences.getInstance(),
+          keyStore: _MemoryKeyStore());
+      await s.setProvider(AiProvider.server);
+      await s.setServerBaseUrl('https://a.example');
+      await s.setServerApiKey('upload-key');
+      await s.setAiConsent('server:claude', granted: true);
+      if (movedTo != null) await s.setServerBaseUrl(movedTo);
+      return s;
+    }
+
+    /// The real analyzer behind its HttpsOnlyServerClient; a request that
+    /// got through would be answered with a meal.
+    ServerAnalyzer server(AppSettings s,
+            {Future<Uint8List?> Function(Uint8List)? normalizer}) =>
+        ServerAnalyzer(s,
+            normalizer: normalizer ?? (b) async => b,
+            sleep: (_) async {},
+            client: MockClient((req) async {
+              seen.add(req);
+              return http.Response(
+                  jsonEncode({
+                    'is_food': true,
+                    'meal_description': 'Ramen',
+                    'total_calories': 600,
+                  }),
+                  200);
+            }));
+
+    final jpeg = Uint8List.fromList([1, 2, 3, 4]);
+
+    test('a picked photo: refused before anything is sent; its wait and its '
+        'turn both end', () async {
+      final keep = AnalysisKeepAlive();
+      final s = await ownServer(movedTo: 'https://b.example');
+      final p = PhotoPipeline(
+          dao: FakeDao(),
+          analyzer: server(s),
+          keepAlive: keep,
+          hasher: (b) async => 'h${b.first}',
+          thumbnailer: (_) async => null);
+      final outcome = await p.enqueue(_photo(1));
+      await _settle();
+      expect(outcome.kind, PhotoOutcomeKind.failed);
+      expect(outcome.errorKind, AnalysisErrorKind.noServerKey);
+      expect(outcome.retryable, isTrue, reason: "kept for this server's key");
+      expect(seen, isEmpty);
+      expect(native.calls, ['begin:1', 'begin:2', 'end:2', 'end:1']);
+      expect(native.open, isEmpty);
+      expect(keep.inFlight.value, isFalse);
+    });
+
+    test('a typed meal and a Fix meals request: each refused, nothing sent, '
+        'each ended', () async {
+      final keep = AnalysisKeepAlive();
+      final s = await ownServer(movedTo: 'https://b.example');
+      final l = AppLocalizationsEn();
+      final executor = KeptAliveExecutor(
+          DefaultNlExecutor(FakeDao(), server(s), s, l10n: l), keep);
+      expect((await executor.describeMeal('a bowl of rice')).error,
+          '❌ ${l.errServerKeyOtherHost}');
+      expect((await executor.handleText('the rice was 200 g')).single.text,
+          '❌ ${l.errServerKeyOtherHost}');
+      await _settle();
+      expect(seen, isEmpty);
+      expect(native.calls, ['begin:1', 'end:1', 'begin:2', 'end:2']);
+      expect(native.open, isEmpty);
+    });
+
+    test('a leftover estimate: refused before its decode; its request ends',
+        () async {
+      final keep = AnalysisKeepAlive();
+      final s = await ownServer(movedTo: 'https://b.example');
+      var decodes = 0;
+      final analyzer = server(s, normalizer: (b) async {
+        decodes++;
+        return b;
+      });
+      expect(await keep.guard(() => analyzer.leftoverIntent(jpeg, '{}')),
+          isNull);
+      await _settle();
+      expect(decodes, 0);
+      expect(seen, isEmpty);
+      expect(native.calls, ['begin:1', 'end:1']);
+      expect(native.open, isEmpty);
+    });
+
+    // The race the client's own check is for: the estimate read its key,
+    // then a setup link put another server and its key in place while the
+    // photo decoded, so the analyzer's check was already behind it. Its
+    // request, built with the previous key for the new host, is refused at
+    // the send, and the estimate answers null as for any failed call.
+    test('a leftover estimate whose server changed while its photo decoded: '
+        'the client refuses the previous key, and its request still ends',
+        () async {
+      final keep = AnalysisKeepAlive();
+      final s = await ownServer();
+      var decodes = 0;
+      final analyzer = server(s, normalizer: (b) async {
+        if (decodes++ == 0) {
+          await s.applyServerSetup(
+              backend: 'claude', baseUrl: 'https://b.example', key: 'key-b');
+        }
+        return b;
+      });
+      expect(await keep.guard(() => analyzer.leftoverIntent(jpeg, '{}')),
+          isNull);
+      await _settle();
+      expect(decodes, 1, reason: "past the analyzer's own check");
+      expect(seen, isEmpty, reason: "a.example's key went nowhere");
+      expect(native.calls, ['begin:1', 'end:1']);
+      expect(native.open, isEmpty);
+      expect(keep.inFlight.value, isFalse);
+
+      // The next estimate reads b.example's own key, and goes there.
+      await keep.guard(() => analyzer.leftoverIntent(jpeg, '{}'));
+      await _settle();
+      expect(seen.single.url.host, 'b.example');
+      expect(seen.single.headers['X-API-Key'], 'key-b');
+      expect(native.calls, ['begin:1', 'end:1', 'begin:2', 'end:2']);
+      expect(native.open, isEmpty);
+    });
+  });
+}
+
+class _MemoryKeyStore implements SecureKeyStore {
+  final Map<String, String> data = {};
+  @override
+  Future<String?> read(String key) async => data[key];
+  @override
+  Future<void> write(String key, String value) async => data[key] = value;
+  @override
+  Future<void> delete(String key) async => data.remove(key);
 }
 
 Future<void> _until(bool Function() done) async {

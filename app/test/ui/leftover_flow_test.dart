@@ -929,7 +929,8 @@ void main() {
       keepAlive = AnalysisKeepAlive();
     });
 
-    Future<void> start(WidgetTester tester, _HeldAnalyzer estimator) async {
+    Future<void> start(WidgetTester tester, _HeldAnalyzer estimator,
+        {FakeSettings? settings}) async {
       final messenger = tester.binding.defaultBinaryMessenger;
       messenger.setMockMethodCallHandler(channel, (call) async {
         native.add('${call.method}:${(call.arguments as Map)['id']}');
@@ -942,6 +943,7 @@ void main() {
               dao: dao,
               analyzer: estimator,
               picker: picker,
+              settings: settings,
               analysisKeepAlive: keepAlive));
       await tester.tap(find.byKey(const Key('leftoverMeal-1')));
       await tester.pumpAndSettle();
@@ -997,6 +999,28 @@ void main() {
       await tester.pumpAndSettle();
       expect(native, ['begin:1', 'end:1']);
       expect(keepAlive.openCount, 0);
+    });
+
+    // The own server's upload key goes only to the host it was saved for
+    // (review of PR 74). A key saved for another address is said before
+    // the consent question and the photo read, so no estimate starts and
+    // nothing is begun; one refused later, in the analyzer or at the send,
+    // ends as any failed call does (analysis_keep_alive_test.dart).
+    testWidgets('an upload key saved for another address: said first, '
+        'nothing begun', (tester) async {
+      final held = _HeldAnalyzer();
+      await start(tester, held,
+          settings: FakeSettings(keys: {'server': 'up'})
+            ..provider = 'server'
+            ..serverBaseUrl = 'https://b.example'
+            ..keySavedFor = 'a.example');
+      await tester.pumpAndSettle();
+      expect(find.text(AppLocalizationsEn().errServerKeyOtherHost),
+          findsOneWidget);
+      expect(held.calls, 0);
+      expect(picker.loadedOriginals, isEmpty, reason: 'no photo is read');
+      expect(native, isEmpty);
+      expect(keepAlive.inFlight.value, isFalse);
     });
   });
 

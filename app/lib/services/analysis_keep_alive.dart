@@ -21,16 +21,20 @@
 ///
 /// Rules: ONE begin per request, always ended (in `finally`), whatever the
 /// request comes to (a meal saved, a failure, a refusal, the user backing
-/// out); each begin carries an id this Dart run never reuses, so a repeated
-/// or stray end changes nothing native. The requests of an engine that dies
-/// (Back finished the activity, a swipe from Recents) end with it:
-/// MainActivity drops its session in cleanUpFlutterEngine. A Dart run that
-/// starts over in the same engine (a hot restart: no cleanup, ids from 1
-/// again) drops what the last run left with its first call, "reset".
-/// Nothing is kept across processes. Built for the app's own engine on
-/// Android only (di.dart): iOS asks for background time per photo instead
-/// (background_time.dart), and the background engine has its job's own
-/// time.
+/// out). A refusal is the request's answer and ends it at once: the AI
+/// consent withheld, or the own server at an address the app sends nothing
+/// to or with an upload key saved for another server (refused by the
+/// analyzer before it sends, and by HttpsOnlyServerClient again at the
+/// send: services/server_http_client.dart). Each begin carries an id this
+/// Dart run never reuses, so a repeated or stray end changes nothing native.
+/// The requests of an engine that dies (Back finished the activity, a swipe
+/// from Recents) end with it: MainActivity drops its session in
+/// cleanUpFlutterEngine. A Dart run that starts over in the same engine (a
+/// hot restart: no cleanup, ids from 1 again) drops what the last run left
+/// with its first call, "reset". Nothing is kept across processes. Built
+/// for the app's own engine on Android only (di.dart): iOS asks for
+/// background time per photo instead (background_time.dart), and the
+/// background engine has its job's own time.
 library;
 
 import 'dart:async' show unawaited;
