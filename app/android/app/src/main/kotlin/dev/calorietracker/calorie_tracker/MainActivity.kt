@@ -6,14 +6,18 @@ import android.app.ActivityManager
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
+import android.database.ContentObserver
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.ext.SdkExtensions
 import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.provider.Settings
+import android.view.View
 import android.webkit.MimeTypeMap
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -45,6 +49,10 @@ class MainActivity : FlutterActivity() {
     /// recreated the activity while that screen was up (the call died with
     /// its engine, but the user still picked a place for the file).
     private var pendingSaveSource: File? = null
+
+    /// That copy's result, for the restarted app ("takeSaveResult"). Main
+    /// thread only.
+    private val lateSave = LateSaveResult<String>()
 
     /// Shares onNewIntent got before share intake listened for them, until
     /// it does (onNewIntent, releaseHeldShares). Main thread only.
@@ -362,8 +370,36 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    /// The phone's 12/24-hour switch (Settings.System.TIME_12_24). The
+    /// Flutter embedding sends it to Dart (alwaysUse24HourFormat) when its
+    /// view attaches and at a configuration change, and turning the switch
+    /// is neither: the app kept the old clock until a restart or a rotation
+    /// (Android QA Q7). The Settings app writes this setting and broadcasts
+    /// ACTION_TIME_CHANGED; the observer sees the write, from `settings
+    /// put` too. On a change the current configuration goes to the
+    /// FlutterView again (FlutterActivity.FLUTTER_VIEW_ID, its public id),
+    /// which re-sends the user settings exactly as a configuration change
+    /// does. Registered for the activity's engine (configureFlutterEngine
+    /// to cleanUpFlutterEngine), on the main thread.
+    private val clockFormatObserver = object : ContentObserver(Handler(Looper.getMainLooper())) {
+        override fun onChange(selfChange: Boolean) {
+            findViewById<View>(FlutterActivity.FLUTTER_VIEW_ID)
+                ?.dispatchConfigurationChanged(resources.configuration)
+        }
+    }
+
+    override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
+        contentResolver.unregisterContentObserver(clockFormatObserver)
+        super.cleanUpFlutterEngine(flutterEngine)
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        contentResolver.registerContentObserver(
+            Settings.System.getUriFor(Settings.System.TIME_12_24),
+            false,
+            clockFormatObserver,
+        )
         // Settings › 照片 › 后台扫描 asks whether the user set the app to
         // 电池 › 受限 (App info › App battery usage › Restricted). In that
         // bucket Android parks the periodic WorkManager job — the
@@ -372,11 +408,14 @@ class MainActivity : FlutterActivity() {
         // the UI engine goes through this activity; the background engine
         // never needs the answer. No manifest permission is involved.
         // openNotificationSettings: Settings' notifications-off remedy.
+        // installTimes: tells preferences restored from another install
+        // from this install's own (notification_permission.dart).
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
             .setMethodCallHandler { call, result ->
                 when (call.method) {
                     "isBackgroundRestricted" -> result.success(isBackgroundRestricted())
                     "openNotificationSettings" -> result.success(openNotificationSettings())
+                    "installTimes" -> result.success(installTimes())
                     else -> result.notImplemented()
                 }
             }
@@ -389,6 +428,8 @@ class MainActivity : FlutterActivity() {
         // which grants the picked photos only, with no permission at all.
         // saveFile: Export › Save to device, written where the user picks
         // (ACTION_CREATE_DOCUMENT grants that one document only).
+        // takeSaveResult: how a save whose call died with an earlier
+        // engine ended (LateSaveResult), once.
         // shareIntakeReady: share intake listens to shares now, so those
         // onNewIntent held go to the plugins (releaseHeldShares).
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, FILES_CHANNEL)
@@ -406,6 +447,9 @@ class MainActivity : FlutterActivity() {
                         call.argument<Any?>("mime") as? String,
                         result,
                     )
+                    "takeSaveResult" -> lateSave.take { status ->
+                        result.success(status?.let { saveAnswer(it) })
+                    }
                     else -> result.notImplemented()
                 }
             }
@@ -415,6 +459,19 @@ class MainActivity : FlutterActivity() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return false
         val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
         return am.isBackgroundRestricted
+    }
+
+    /// When this install was first installed and last updated (ms since
+    /// the epoch, PackageInfo). Preferences that Auto Backup restored, or a
+    /// device transfer brought, carry another install's notification-ask
+    /// flags; notification_permission.dart tells them apart by these. Null
+    /// when they cannot be read.
+    private fun installTimes(): Map<String, Long>? = try {
+        @Suppress("DEPRECATION")
+        val info = packageManager.getPackageInfo(packageName, 0)
+        mapOf("firstInstall" to info.firstInstallTime, "lastUpdate" to info.lastUpdateTime)
+    } catch (e: Exception) {
+        null
     }
 
     /// Opens the system's notification page for this app (API 26+), else
@@ -641,9 +698,10 @@ class MainActivity : FlutterActivity() {
     /// source is gone, so it is removed. The open call, if any, is
     /// answered; with none (Android recreated the activity while the screen
     /// was up) the copy still finishes, from the source saved in the
-    /// activity's state, since the user did choose a place for it, and a
-    /// cancel deletes the source here: its caller, which would have, is
-    /// gone (IntakeRules.dropSaveSource).
+    /// activity's state, since the user did choose a place for it, and its
+    /// result waits for the restarted app (answerSave); a cancel deletes
+    /// the source here: its caller, which would have, is gone
+    /// (IntakeRules.dropSaveSource).
     private fun onSaveTargetPicked(resultCode: Int, data: Intent?) {
         val call = if (saves.isOpen) saveCall else null
         val uri = data?.data
@@ -657,9 +715,10 @@ class MainActivity : FlutterActivity() {
         }
         if (step == IntakeRules.SaveStep.DISCARD || source == null) {
             discardDocument(uri)
-            call?.let { saves.answer(it, saveAnswer("failed")) }
+            answerSave(call, "failed")
             return
         }
+        if (call == null) lateSave.started()
         Thread {
             val ok = try {
                 val input = IntakeRules.openSaveSource(cacheDir, source.path) ?: throw IllegalStateException()
@@ -671,8 +730,15 @@ class MainActivity : FlutterActivity() {
                 false
             }
             if (!ok) discardDocument(uri)
-            runOnUiThread { call?.let { saves.answer(it, if (ok) saveAnswer("ok") else saveAnswer("failed")) } }
+            runOnUiThread { answerSave(call, if (ok) "ok" else "failed") }
         }.start()
+    }
+
+    /// A save's [status] to its open call [call]; with none (the call died
+    /// with its engine), to the restarted app, which asks for it once
+    /// ("takeSaveResult") and says so (LateSaveResult).
+    private fun answerSave(call: Long?, status: String) {
+        if (call != null) saves.answer(call, saveAnswer(status)) else lateSave.finished(status)
     }
 
     /// Removes a document the create-document screen just made (best

@@ -365,6 +365,32 @@ void main() {
         expect(sent, 0);
       });
 
+      // Review of PR 74: the upload key goes only to the host it was saved
+      // for. A new address saved before its key gets nothing, and the chat
+      // says why in the photo path's words.
+      test('a key saved for another address ($name): both text paths name '
+          'it, nothing is sent', () async {
+        SharedPreferences.setMockInitialValues(const {});
+        final s = await AppSettings.load(
+            prefs: await SharedPreferences.getInstance(),
+            keyStore: MemoryKeyStore());
+        await s.setProvider(AiProvider.server);
+        await s.setServerBaseUrl('https://10.0.0.5');
+        await s.setServerApiKey('upload-key');
+        await s.setServerBaseUrl('https://10.0.0.6');
+        var sent = 0;
+        final a = ServerAnalyzer(s, client: MockClient((_) async {
+          sent++;
+          return http.Response('{}', 200);
+        }));
+        final ex = DefaultNlExecutor(FakeDao(), a, s, l10n: l);
+        expect((await ex.handleText('lunch 500 kcal')).single.text,
+            '❌ ${l.errServerKeyOtherHost}');
+        expect((await ex.describeMeal('a bowl of rice')).error,
+            '❌ ${l.errServerKeyOtherHost}');
+        expect(sent, 0);
+      });
+
       test('not a web address ($name): both text paths say so', () async {
         SharedPreferences.setMockInitialValues(const {});
         final s = await AppSettings.load(

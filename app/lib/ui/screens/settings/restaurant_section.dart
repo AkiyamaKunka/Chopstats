@@ -15,10 +15,11 @@
 /// the change and cancels what is in flight.
 library;
 
-import 'dart:async' show unawaited;
+import 'dart:async' show Timer, unawaited;
 
 import 'package:flutter/material.dart';
 
+import '../../../core/ai_consent.dart' show aiConsentRoute;
 import '../../../core/server_transport.dart' show serverAddressRefused;
 import '../../../services/assist/clients/lookup_client.dart'
     show LookupRecipient, LookupSupport, LookupUnsupportedReason;
@@ -26,7 +27,7 @@ import '../../../services/assist/meal_assist.dart' show AssistWhereNow;
 import '../../l10n.dart';
 import '../../provider_names.dart' show providerDisplayLabel;
 import '../../restaurant_assist_controls.dart';
-import '../../services.dart' show SettingsStore;
+import '../../services.dart' show SettingsStore, serverKeyForOtherAddress;
 import '../../theme/app_dialog.dart';
 import '../../theme/app_theme.dart' show AppButtonStyles;
 import '../../widgets/grouped.dart';
@@ -82,9 +83,18 @@ class RestaurantAssistSection extends StatefulWidget {
 class RestaurantAssistSectionState extends State<RestaurantAssistSection> {
   AssistServerState _server = AssistServerState.unknown;
 
-  /// The server address the hint was asked for ('' = none asked).
-  String _serverAskedFor = '';
+  /// What the hint was asked for: the server address and a hash of the
+  /// upload key it went with (null = none asked).
+  (String, int)? _serverAskedFor;
   int _serverAsk = 0;
+
+  /// The address and key hash the last look saw, asked or not.
+  (String, int)? _serverSeen;
+
+  /// A key edit's ask, held until the key field rests: the field saves on
+  /// every keystroke, and each save would otherwise ask once.
+  Timer? _serverAskLater;
+  static const Duration _keyRest = Duration(seconds: 1);
 
   SettingsStore get _s => widget.settings;
   RestaurantAssistControls get _c => widget.controls;
@@ -101,21 +111,45 @@ class RestaurantAssistSectionState extends State<RestaurantAssistSection> {
     _maybeAskServer();
   }
 
+  @override
+  void dispose() {
+    _serverAskLater?.cancel();
+    super.dispose();
+  }
+
   /// Claude Plan on the claude backend: what the server says about
-  /// lookups, once per address (asked again when the address changes).
+  /// lookups, once per address and upload key (asked again when either
+  /// changes, so a key pasted after the address is asked with). Only while
+  /// the user allows that server: before Allow, and after Stop Sharing,
+  /// nothing is sent to it, not even this free check with the upload key
+  /// (the group is built at launch, so a cold start sent it: Android QA
+  /// Q2). The rebuild after an Allow asks. Never while the key was saved
+  /// for another server: it is sent nowhere else (a new address saved
+  /// before its key asked the new host with the previous server's key,
+  /// review of PR 74), so the ask waits for this server's key.
   void _maybeAskServer() {
     final ask = _c.serverState;
+    final address = _s.serverBaseUrl.trim();
+    final keyHash = _s.apiKey.trim().hashCode;
+    // Only the key changed since the last look: it is being typed or
+    // pasted (the field saves on every keystroke).
+    final seen = _serverSeen;
+    _serverSeen = (address, keyHash);
+    final keyEdit = seen != null && seen.$1 == address && seen.$2 != keyHash;
     final ownServer = _s.provider == 'server' &&
         _s.serverBackend == 'claude' &&
-        _s.serverBaseUrl.trim().isNotEmpty;
-    final key = ownServer && ask != null ? _s.serverBaseUrl.trim() : '';
-    if (key == _serverAskedFor) return;
-    _serverAskedFor = key;
+        address.isNotEmpty &&
+        _s.hasAiConsent(aiConsentRoute('server', 'claude')) &&
+        !serverKeyForOtherAddress(_s);
+    final askFor = ownServer && ask != null ? (address, keyHash) : null;
+    if (askFor == _serverAskedFor) return;
+    _serverAskedFor = askFor;
     final ticket = ++_serverAsk;
+    _serverAskLater?.cancel();
     // No setState: initState and didUpdateWidget are followed by a build.
     _server = AssistServerState.unknown;
-    if (key.isEmpty) return;
-    unawaited(() async {
+    if (askFor == null) return;
+    Future<void> asking() async {
       AssistServerState state;
       try {
         state = await ask!();
@@ -124,7 +158,15 @@ class RestaurantAssistSectionState extends State<RestaurantAssistSection> {
       }
       if (!mounted || ticket != _serverAsk) return;
       setState(() => _server = state);
-    }());
+    }
+
+    // A key edit is asked once it rests. A new address (saved when its
+    // edit ends), Allow, a setup link and the first ask go at once.
+    if (keyEdit) {
+      _serverAskLater = Timer(_keyRest, () => unawaited(asking()));
+    } else {
+      unawaited(asking());
+    }
   }
 
   LookupSupport _support() => restaurantLookupSupport(_c);

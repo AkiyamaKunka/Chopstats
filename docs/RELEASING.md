@@ -23,9 +23,10 @@ menu names as "as of this writing".
 flowchart LR
     Tag["git tag v1.6.0<br/>or Run workflow"] --> Plan["plan<br/>build name = x.y.z<br/>build number = 200 + run_number"]
     Plan --> iOS["ios (macos-26)<br/>keychain + 2 profiles<br/>flutter build ipa<br/>xcodebuild -exportArchive destination=upload"]
-    Plan --> And["android (ubuntu)<br/>key.properties<br/>flutter build appbundle + apk<br/>upload-google-play → internal"]
+    Plan --> And["android (ubuntu)<br/>key.properties<br/>flutter build appbundle + apk<br/>signer pinned, artifact kept"]
     iOS --> TF["TestFlight"]
-    And --> Play["Play internal track"]
+    And --> PlayJob["play (ubuntu)<br/>upload-google-play → internal"]
+    PlayJob --> Play["Play internal track"]
     And --> GH["GitHub Release<br/>arm64 APK for friends"]
 ```
 
@@ -334,14 +335,14 @@ When merging #22 after this PR:
 - **Never hand-merge the generated `app_localizations*.dart`.** Take
   either side, then run `flutter gen-l10n` in `app/`.
 - `app/test/ui/usual_copy_test.dart` pins the number of keys in each ARB
-  file: 809 on `main` since #22 merged, 953 on the iCloud Backup branch
+  file: 809 on `main` since #22 merged, 961 on the iCloud Backup branch
   merged with #33, the review-171 fixes, the Android photos, privacy,
-  background and ui lanes, the Play channel and the Android
-  look-and-defaults branch (`feat/icloud-backup` adds
-  72 `backup*` and `import*` keys, #33's source-link label 1, the Test AI
-  provider page's three `diagStatus*` check states 3, the Body tab's three
-  failure lines 3, the coverage window slider's screen-reader name
-  `covWindowLabel` 1, the Leftovers screen's two failure lines 2,
+  background and ui lanes, the Play channel, the Android
+  look-and-defaults branch and the Android lows lane (`feat/icloud-backup`
+  adds 72 `backup*` and `import*` keys, #33's source-link label 1, the
+  Test AI provider page's three `diagStatus*` check states 3, the Body
+  tab's three failure lines 3, the coverage window slider's screen-reader
+  name `covWindowLabel` 1, the Leftovers screen's two failure lines 2,
   Android's system photo picker `addChooseAllPhotos`, `addPickerNote`,
   `addPickerUnavailable` and `addOldPhotoLoggedToday` 4,
   `android/privacy`'s privacy and https strings 23, the Android background
@@ -349,9 +350,11 @@ When merging #22 after this PR:
   channel's block 20 (its notice, Diagnostics' build line and the `*Play`
   variants of the copy that names Watch Camera Roll or Photo Coverage or
   says a photo is kept or retried), the Android look-and-defaults
-  branch's `watchGlassesAndroidNote` and `covGlassesOffCount` 2, none
-  shared; review r171 deleted `bodyEmptyHintImperial`, the same text as
-  `bodyEmptyHint`). If either
+  branch's `watchGlassesAndroidNote` and `covGlassesOffCount` 2, the
+  Android lows lane's `outcomeShareFixAddressMsg` 1 (a share refused for
+  the server address) and its review's seven lines for an upload key
+  saved for another server address 7, none shared; review r171 deleted
+  `bodyEmptyHintImperial`, the same text as `bodyEmptyHint`). If either
   side adds keys before both merge, change the number in that test to the
   merged count, and here too (the test checks this line); both files must
   still have the same keys. Do not drop the check.
@@ -700,6 +703,7 @@ for the value instead).
 | Variable (plain text, optional) | Meaning | Default |
 |---|---|---|
 | `ANDROID_KEY_ALIAS` | alias inside the keystore | `upload` |
+| `ANDROID_UPLOAD_CERT_SHA256` | the upload certificate's SHA-256 that every Android build must be signed with; set it only after a deliberate key rotation (§ 6.3) | release.yml's `env`: `d0d95f7f…6b7f9b7c`, the v1.6.0 and android-v1.7.0 signer |
 | `ASC_APP_APPLE_ID` | the app's numeric Apple ID (§ 1.4) | unset; only the altool fallback reads it |
 
 What the workflow does with them: the `.p12` goes into a throw-away
@@ -1058,6 +1062,19 @@ step. Revisit if the app is ever published with a developer-run service.
   Release workflow checks the APK's `versionCode`, ABI and signer.
 - A `vX.Y.Z+N` tag must carry an `N` above `BUILD_NUMBER_OFFSET`; the plan
   job refuses pubspec's own small `+N`. Tag plain `vX.Y.Z` normally.
+- On a tag push that `N` must also be at least `BUILD_NUMBER_OFFSET` + the
+  run's number: every earlier run numbered its build below that (Android
+  1.7.0 is 200 + run 7), so a lower `N` may already be on App Store
+  Connect, on Play or in a GitHub APK, and a GitHub APK with it may not
+  install over one already out. The plan job refuses it. Push plain
+  `vX.Y.Z` instead; for a `+N`, go above `BUILD_NUMBER_OFFSET` + the
+  refused run's number. The corrected tag is a new push, so it starts a
+  new run with a higher number and a higher floor. Run workflow on a `+N`
+  tag whose GitHub Release is already out (to re-release it) gets a later
+  run number, so there it only warns; on a tag the plan refused (or one
+  that never released), it refuses too, before anything is built. To
+  finish a tag's run that failed after its plan passed, use *Re-run
+  failed jobs* on that run: a re-run keeps its run number.
 
 ---
 
@@ -1270,7 +1287,10 @@ by uninstalling.
    `v1.6.0` › the Android job › *Verify the bundle is signed with the upload
    key…*). keytool prints upper case with colons, the run lower case
    without; the hex digits must be the same. If they differ, stop: that
-   keystore is not the upload key.
+   keystore is not the upload key. The Release workflow pins that
+   certificate too (`ANDROID_UPLOAD_CERT_SHA256` in release.yml's `env`,
+   `d0d95f7f…6b7f9b7c`): its Android job stops when the bundle or the APK
+   is signed by any other key, not only by the debug key.
 2. Run the exact `java -jar pepk.jar …` command the page shows, on the
    Mac, against that keystore with alias `upload`; it writes an encrypted
    zip. Upload that zip. The keystore itself never leaves the Mac.
@@ -1294,11 +1314,14 @@ by uninstalling.
 
    A separate upload key later would also need release.yml's "APK signer
    == bundle signer" check to compare the APK with the app-signing
-   certificate instead.
+   certificate instead. A deliberate key rotation sets the repository
+   variable `ANDROID_UPLOAD_CERT_SHA256` to the new certificate's SHA-256
+   (§ 3); the env default stays as the record of the old one.
 
-**Signing secrets in the protected environment (owner action).** Both
-release.yml jobs already run in the environment `release`, which today has
-no protection rules, so **nothing in the workflow changes**:
+**Signing secrets in the protected environment (owner action).** The
+release.yml jobs that read secrets (ios, android and play) already run in
+the environment `release`, which today has no protection rules, so
+**nothing in the workflow changes**:
 
 1. Repository › Settings › Environments › `release`: *Required reviewers*
    = you; *Deployment branches and tags* = selected: `main`, `release/*`,
@@ -1311,7 +1334,7 @@ no protection rules, so **nothing in the workflow changes**:
    **environment** secrets with the same names (an environment secret
    wins over a repository secret of the same name).
 3. Run Run workflow › `main` › lane `play` once and check the signer
-   lines.
+   lines (the run stops if they are not the pinned upload certificate).
 4. Only then delete the repository-level copies. In this order every run
    stays signed.
 
@@ -1411,8 +1434,9 @@ Optional, and only after the first manual release (§ 6.3).
    `gh secret set PLAY_SERVICE_ACCOUNT_JSON --env release --repo AkiyamaKunka/Chopstats < ~/Downloads/<file>.json`,
    then delete the download.
 
-From then on every run with the Android lane uploads a completed release
-with the `.aab`, the R8 `mapping.txt` and the text from
+From then on every run with the Android lane uploads, in its `play` job,
+from the android job's kept artifact, a completed release with the
+`.aab`, its R8 mapping (`aab-mapping.txt`) and the text from
 `app/android/whatsnew/whatsnew-<locale>` (500 characters at most, pinned
 by `app/test/release_decisions_test.dart`; edit it before each upload):
 
@@ -1422,6 +1446,15 @@ by `app/test/release_decisions_test.dart`; edit it before each upload):
   default closed-testing track; Google's API page does not list it, so
   check the track's name in Play Console first. If your closed track has
   another name, add it to `play_track`'s options in release.yml.
+
+A failed upload (the first run's 403, a track Play does not know) fails
+the `play` job only: the android job has already kept the artifact, and
+on a tag the GitHub Release goes out without waiting for Play. Play
+commits nothing from a failed upload, so once the cause is fixed,
+*Re-run failed jobs* sends the same build number again. The `play` job
+runs in the `release` environment too (it reads this secret there), so
+with a required reviewer (§ 6.3) it waits for its own approval once the
+android job is done.
 
 Play adds an informational "you've not uploaded debug symbols" note on
 every upload; § 9 says why and how to change that.
@@ -1618,9 +1651,12 @@ the data stays. The Play build has no Watch Camera Roll (decision 1), so
 someone who moves from the GitHub APK to Play loses it (the Play build's
 first launch turns it off and says so in one notice, § 6.3). Until
 § 6.3's check has passed, tell people to export first (Settings › Your
-Data › *Export Data…*). The notes release.yml
-writes on `v*` tags still say the two "can carry different signatures";
-make them definitive after that check.
+Data › *Export Data…*), and to leave **Keep app data** unticked when they
+uninstall: the app declares `hasFragileUserData`, and kept data keeps the
+old signature, so a differently signed build then refuses to install. The
+notes release.yml writes on `v*` tags (and `scripts/build_share_apk.sh`'s
+note for a debug-signed APK) say so, and that the two "may carry
+different signatures"; make that definitive after the check.
 
 ### 6.7 Android platform checks
 
@@ -1879,7 +1915,9 @@ transport.
 
 **"This bundle is invalid. The value for key CFBundleVersion must contain a
 higher value"** — a build number was reused. Tag as `vX.Y.Z+N` with a
-higher N once, or raise `BUILD_NUMBER_OFFSET`; never lower it.
+higher N once (on a tag push it must also be above `BUILD_NUMBER_OFFSET`
++ the latest Release run's number, § 5), or raise `BUILD_NUMBER_OFFSET`;
+never lower it.
 
 **"Xcode 26.2 is not on this runner image"** (warning) — GitHub removed that
 patch release; the build used the default. Set `XCODE_VERSION` in both
@@ -1918,14 +1956,25 @@ App signing → *Request upload key reset* with the new certificate.
 entry above; the same rule.
 
 **Play: "This App Bundle contains native code, and you've not uploaded debug
-symbols"** — informational, on every upload. The Flutter engine's `.so`
-symbols are only produced when `app/android/app/build.gradle.kts` sets
-`ndk { debugSymbolLevel = "SYMBOL_TABLE" }` inside `buildTypes.release`,
-which needs Flutter's NDK (28.2) on the runner; the Ubuntu image ships
-27.3/29/30, so AGP would download ~1 GB on every run. The lane leaves it
-off. Add it, plus
-`debugSymbols: app/build/app/outputs/native-debug-symbols/release/native-debug-symbols.zip`
-on the upload step, if native crash traces ever matter.
+symbols"** — informational. The upload needs no `debugSymbols:` input for
+a bundle: AGP packs the native symbol tables into the `.aab` itself
+(`BUNDLE-METADATA/com.android.tools.build.debugsymbols/<abi>/…`), and Play
+reads them from the bundle (a separate symbols file is for APKs; Android's
+[Include native symbols](https://developer.android.com/build/include-native-symbols)
+page). See what a bundle carries with
+`unzip -l app-release.aab | grep debugsymbols`: a release bundle built on
+the Mac (2026-10-10) carried `libflutter.so.sym` and `libapp.so.sym` for
+every ABI with nothing set in `app/android/app/build.gradle.kts`. If a CI
+bundle ever lacks them and native crash traces matter, set
+`ndk { debugSymbolLevel = "SYMBOL_TABLE" }` inside `buildTypes.release`;
+that needs Flutter's NDK (28.2), which the Ubuntu image does not ship
+(27.3/29/30), so AGP would download ~1 GB on every run. Never give the
+upload step a file path the `play` job does not have: that job sees only
+the android job's artifact, so a file must first be added to the Keep
+step's paths under `app/build` (the artifact's root stays `app/build`, so
+it lands at the same path), then passed through a step output set only
+when the file exists, as "Find the bundle's mapping" does. r0adkll stats a
+`debugSymbols:` path and fails the whole upload when it is missing.
 
 **Play: `403 The caller does not have permission` / "Package not found"** —
 the service account is not invited to the app (§ 6.4), the permission has

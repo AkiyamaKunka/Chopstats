@@ -12,6 +12,7 @@ import 'package:calorie_tracker/l10n/app_localizations.dart';
 import 'package:calorie_tracker/l10n/app_localizations_en.dart';
 import 'package:calorie_tracker/l10n/app_localizations_zh.dart';
 import 'package:calorie_tracker/ui/format.dart';
+import 'package:calorie_tracker/ui/l10n.dart' show L10nX;
 import 'package:calorie_tracker/ui/outcome_text.dart';
 import 'package:calorie_tracker/ui/screens/meal_editor_screen.dart';
 import 'package:calorie_tracker/ui/screens/settings_screen.dart';
@@ -146,6 +147,30 @@ void main() {
     });
   });
 
+  // Android QA Q7: a meal time read the switch but did not depend on it,
+  // so when Android re-sent it nothing redrew until something else did.
+  testWidgets('a meal time redraws when Android re-sends the 12/24-hour '
+      'switch', (tester) async {
+    addTearDown(tester.platformDispatcher.clearAlwaysUse24HourTestValue);
+    tester.platformDispatcher.alwaysUse24HourFormatTestValue = false;
+    var builds = 0;
+    await tester.pumpWidget(MaterialApp(
+      home: Builder(builder: (context) {
+        builds++;
+        return Text(context.clock('04:56 AM'));
+      }),
+    ));
+    expect(find.text('4:56 AM'), findsOneWidget);
+    final before = builds;
+    tester.platformDispatcher.alwaysUse24HourFormatTestValue = true;
+    // What the re-sent settings bring: the metrics callback, after which
+    // MediaQuery carries the new switch.
+    tester.platformDispatcher.onMetricsChanged!();
+    await tester.pump();
+    expect(find.text('04:56'), findsOneWidget);
+    expect(builds, before + 1);
+  });
+
   group('the meal editor', () {
     Meal meal() => Meal(
           id: 1,
@@ -272,6 +297,25 @@ void main() {
           isTrue,
           reason: 'Report Time "$report" vs Next summary "$next"');
       await pump(tester); // the screen built again (a return to it)
+      expect(rowText(tester, 'reportTimeTile'), contains('21:30'));
+      expect(rowText(tester, 'nextSummaryRow'), contains('Today 21:30'));
+    });
+
+    // Android QA Q7: the switch reached the app only at a restart or a
+    // configuration change. MainActivity now hands the FlutterView its
+    // configuration again when the setting changes, which re-sends the
+    // user settings and then the display metrics, as a rotation does
+    // (the metrics callback below); both rows redraw at once.
+    testWidgets('a switch to 24-hour reaches both rows as soon as Android '
+        're-sends the settings', (tester) async {
+      addTearDown(
+          tester.platformDispatcher.clearAlwaysUse24HourTestValue);
+      tester.platformDispatcher.alwaysUse24HourFormatTestValue = false;
+      await pump(tester);
+      expect(rowText(tester, 'nextSummaryRow'), contains('Today 9:30 PM'));
+      tester.platformDispatcher.alwaysUse24HourFormatTestValue = true;
+      tester.platformDispatcher.onMetricsChanged!();
+      await tester.pumpAndSettle();
       expect(rowText(tester, 'reportTimeTile'), contains('21:30'));
       expect(rowText(tester, 'nextSummaryRow'), contains('Today 21:30'));
     });

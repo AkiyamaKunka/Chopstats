@@ -1847,6 +1847,15 @@
       }
     }
   },
+  "outcomeShareFixAddressMsg": "The shared photo was not analyzed. {reason} Then share it again.",
+  "@outcomeShareFixAddressMsg": {
+    "description": "Snackbar for a photo shared into the app that was not sent because the saved server address cannot be used: it is not https:// (errServerNeedsHttps), not a valid web address (errBadServerAddress), or the upload key was saved for another server address (errServerKeyOtherHost). {reason} is that full line, which ends by saying what to change in Settings. Sharing again fails the same way until that is changed, so unlike outcomeShareRetryMsg it never says 'later'; the shared copy is gone, so the photo has to be shared again.",
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
   "reasonRateLimited": "the provider is rate-limiting",
   "reasonQuotaPaused": "the daily quota was hit",
   "reasonBilling": "the provider account is out of balance — top it up first",
@@ -3766,5 +3775,43 @@
   "watchGlassesAndroidNote": "On Android, the Meta glasses photos switch starts off: these photos can't be checked for food on the phone first, so each one would go to the AI service unchecked.",
   "@watchGlassesAndroidNote": {
     "description": "Last line of the Settings › Photos footer, Android only (owner decision 8, 2026-11-20): why the 'Meta glasses photos' switch (settingsRowWatchGlasses) is off until the user turns it on there. An iPhone checks each glasses photo for food on the phone before sending it; Android has no such check. 'starts off' stays true after the user turns it on. Not shown in the Google Play build, which has no Photos section."
+  },
+  "errServerKeyOtherHost": "Your server upload key was saved for another server address, and Chopstats sends it only there. In AI Provider › Your own server, paste this server's key or use the saved one for it.",
+  "@errServerKeyOtherHost": {
+    "description": "A photo, a typed meal or a leftover was not analyzed because the server upload key was saved for another server address than the one now saved: the key is only ever sent to the server it was saved for, so nothing was sent. The photo is kept. Says where to fix it."
+  },
+  "reasonServerKeyOtherHost": "the upload key was saved for another server address",
+  "@reasonServerKeyOtherHost": {
+    "description": "Short reason inside parentheses, like reasonNoServerKey: the server upload key was saved for another server address, so nothing was sent."
+  },
+  "serverKeyOtherHostField": "Saved for {host}: not sent to the address above.",
+  "@serverKeyOtherHostField": {
+    "description": "Line under the Server upload key field when the saved key was saved for another server address than the one above. {host} is the host it was saved for (e.g. 203.0.113.5 or my.server.example). Nothing is sent with the key to the address above until the user pastes that server's key or taps serverKeyUseHere.",
+    "placeholders": {
+      "host": {
+        "type": "String"
+      }
+    }
+  },
+  "serverKeyUseHere": "Use this key for {host}",
+  "@serverKeyUseHere": {
+    "description": "Row shown with serverKeyOtherHostField under the Server upload key field: one tap makes the saved key the key for the address above (the same server at a new IP address, domain or port). {host} is the host of the address above.",
+    "placeholders": {
+      "host": {
+        "type": "String"
+      }
+    }
+  },
+  "autoScanServerKeyOtherHost": "Automatic logging is not running: your server upload key was saved for another server address, and Chopstats sends it only there. Fix it in AI Provider › Your own server.",
+  "@autoScanServerKeyOtherHost": {
+    "description": "Settings line, like autoScanNeedsHttps: the automatic scan does not run because the server upload key was saved for another server address, so nothing could be sent."
+  },
+  "diagServerKeyOtherHost": "The upload key was saved for another server address, so it is not sent to this one.",
+  "@diagServerKeyOtherHost": {
+    "description": "Test This Provider, configuration stage: the server upload key was saved for another server address, so nothing is sent with it to the address now saved."
+  },
+  "diagFixServerKeyOtherHost": "In Settings › AI Provider › Your own server, paste this server's upload key, or use the saved key for it.",
+  "@diagFixServerKeyOtherHost": {
+    "description": "Test This Provider: the fix line under diagServerKeyOtherHost."
   }
 }

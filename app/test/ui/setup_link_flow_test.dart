@@ -9,13 +9,18 @@ import 'package:calorie_tracker/core/setup_link.dart'
 import 'package:calorie_tracker/l10n/app_localizations.dart';
 import 'package:calorie_tracker/l10n/app_localizations_en.dart';
 import 'package:calorie_tracker/l10n/app_localizations_zh.dart';
+import 'package:calorie_tracker/services/settings/app_settings.dart';
 import 'package:calorie_tracker/ui/app.dart';
+import 'package:calorie_tracker/ui/di.dart' show createSettingsStore;
 import 'package:calorie_tracker/ui/provider_names.dart'
     show providerDisplayLabel;
+import 'package:calorie_tracker/ui/screens/settings/subscription_page.dart';
 import 'package:calorie_tracker/ui/services.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
+import '../analyzer/server_analyzer_test.dart' show MemoryKeyStore;
 import 'fakes.dart';
 
 void main() {
@@ -65,6 +70,12 @@ void main() {
     expect(settings.serverBackend, 'claude');
     expect(settings.serverBaseUrl, 'https://10.0.0.7');
     expect(settings.apiKey, key);
+    // Address and key in one change (review of PR 74): written one after
+    // the other, a frame between them saw the link's address with the
+    // previous server's key.
+    expect(settings.serverSetups, [('claude', 'https://10.0.0.7', key)]);
+    expect(settings.updateCalls, 0);
+    expect(settings.aiConsentWrites, [('server:claude', true)]);
     await links.close();
   });
 
@@ -357,6 +368,82 @@ void main() {
       await links.close();
     });
   });
+
+  // Review of PR 74, recheck: a link confirmed while Settings › Your own
+  // server was open left the page on top with both fields on the previous
+  // server. Its key, edited at the caret, was saved as the link's host's
+  // key and sent there; the address field invited typing the old address
+  // back. With the real store and the shell's own dialog: the page shows
+  // the link's server, and nothing of the previous key reaches it.
+  for (final (start, name) in const [
+    ('https://a.example', 'at the previous server'),
+    ('', 'with the address cleared'),
+  ]) {
+    testWidgets('confirmed with the server page open $name: the page shows '
+        'the link\'s address and key, and an edit carries none of the '
+        'previous key', (tester) async {
+      const keyA = 'key-a-0123456789';
+      SharedPreferences.setMockInitialValues({});
+      final app = await AppSettings.load(
+          prefs: await SharedPreferences.getInstance(),
+          keyStore: MemoryKeyStore());
+      await app.setProvider(AiProvider.server);
+      await app.setServerBaseUrl('https://a.example');
+      await app.setServerApiKey(keyA);
+      await app.setServerBaseUrl(start);
+      final store = createSettingsStore(app);
+      final links = StreamController<Uri>.broadcast();
+      addTearDown(links.close);
+      await tester.pumpWidget(MaterialApp(
+          home: HomeShell(
+              services: UiServices(
+        dao: FakeDao(),
+        analyzer: FakeAnalyzer(),
+        executor: FakeExecutor(),
+        settings: store,
+        picker: FakePicker(),
+        requestPhotoPermission: () async => true,
+        setupLinks: links.stream,
+      ))));
+      await tester.pumpAndSettle();
+      unawaited(Navigator.of(tester.element(find.byType(HomeShell))).push(
+          MaterialPageRoute<void>(
+              builder: (_) => SubscriptionProviderPage(settings: store))));
+      await tester.pumpAndSettle();
+      final keyField = find.byKey(const Key('serverUploadKeyField'));
+      String text(Key key) => tester
+          .widget<EditableText>(find.descendant(
+              of: find.byKey(key), matching: find.byType(EditableText)))
+          .controller
+          .text;
+      // The key field focused, as when the link comes in mid-edit.
+      await tester.tap(keyField);
+      await tester.pumpAndSettle();
+
+      links.add(good);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('setupLinkConfirm')));
+      await tester.pumpAndSettle();
+      expect(find.byType(SubscriptionProviderPage), findsOneWidget);
+      expect(text(const Key('serverUrlField')), 'https://10.0.0.7');
+      expect(text(const Key('serverUploadKeyField')), key);
+
+      await tester.tap(keyField);
+      await tester.pumpAndSettle();
+      final value = tester
+          .state<EditableTextState>(find.descendant(
+              of: keyField, matching: find.byType(EditableText)))
+          .textEditingValue;
+      tester.testTextInput
+          .updateEditingValue(value.replaced(value.selection, 'x'));
+      await tester.pumpAndSettle();
+      expect((app.serverApiKey, app.serverKeyHost), ('${key}x', '10.0.0.7'));
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      expect(app.serverBaseUrl, 'https://10.0.0.7');
+      expect((app.serverApiKey, app.serverKeyHost), ('${key}x', '10.0.0.7'));
+    });
+  }
 
   testWidgets('with the watcher off there is no camera-roll notice',
       (tester) async {

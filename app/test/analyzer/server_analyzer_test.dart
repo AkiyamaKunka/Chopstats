@@ -35,10 +35,14 @@ class MemoryKeyStore implements SecureKeyStore {
   Future<void> delete(String key) async => data.remove(key);
 }
 
+/// The user's own server on the Claude plan. [allowed]: the user allowed
+/// it (the AI consent); Settings' own checks (serverLoginState,
+/// serverFeatures) send nothing without that.
 Future<AppSettings> serverSettings({
   String? url = 'https://10.0.0.5',
   String? key = 'upload-key',
   String profile = '',
+  bool allowed = false,
 }) async {
   SharedPreferences.setMockInitialValues({});
   final s = await AppSettings.load(
@@ -48,6 +52,7 @@ Future<AppSettings> serverSettings({
   if (url != null) await s.setServerBaseUrl(url);
   if (key != null) await s.setServerApiKey(key);
   if (profile.isNotEmpty) await s.setDietaryProfile(profile);
+  if (allowed) await s.setAiConsent('server:claude', granted: true);
   return s;
 }
 
@@ -790,7 +795,7 @@ void main() {
 
   test('serverLoginState: only a JSON 401/403 is a rejected key; a portal '
       'or filter page answering one is "unreachable"', () async {
-    final s = await serverSettings();
+    final s = await serverSettings(allowed: true);
     Future<String?> state(http.Response reply) => ServerAnalyzer(s,
             client: MockClient((_) async => reply))
         .serverLoginState();
@@ -812,11 +817,76 @@ void main() {
     expect(await state(http.Response('{}', 500)), 'unreachable');
   });
 
+  // Android QA Q2: with sharing stopped, a cold start still sent POST
+  // /api/auth_check with the upload key (Settings' Restaurant nutrition
+  // group asks the server what it supports). The consent says nothing is
+  // sent before Allow and nothing more after Stop Sharing, so Settings' own
+  // two checks send nothing then either.
+  group('Settings\' checks send nothing while the server is not allowed', () {
+    Future<(ServerAnalyzer, List<http.BaseRequest>)> counted(
+        AppSettings s) async {
+      final seen = <http.BaseRequest>[];
+      final analyzer = ServerAnalyzer(s, client: MockClient((req) async {
+        seen.add(req);
+        return http.Response(
+            jsonEncode({
+              'ok': true,
+              'claude_login': 'token',
+              'features': {'restaurant_lookup': true, 'lookup_jobs': true},
+            }),
+            200);
+      }));
+      return (analyzer, seen);
+    }
+
+    test('never allowed: no request, so no upload key', () async {
+      final (a, seen) = await counted(await serverSettings());
+      expect(await a.serverLoginState(), isNull);
+      expect(await a.serverFeatures(), isNull);
+      expect(seen, isEmpty);
+    });
+
+    test('Stop Sharing: no request from then on; Allow again: one each',
+        () async {
+      final s = await serverSettings(allowed: true);
+      final (a, seen) = await counted(s);
+      expect(await a.serverLoginState(), 'token');
+      expect(await a.serverFeatures(), isNotNull);
+      expect(seen.map((r) => r.url.path),
+          ['/api/auth_check', '/api/auth_check']);
+
+      seen.clear();
+      await s.setAiConsent('server:claude', granted: false); // Stop Sharing
+      expect(await a.serverLoginState(), isNull);
+      expect(await a.serverFeatures(), isNull);
+      expect(seen, isEmpty);
+
+      await s.setAiConsent('server:claude', granted: true);
+      expect(await a.serverLoginState(), 'token');
+      expect(await a.serverFeatures(), isNotNull);
+      expect(seen, hasLength(2));
+    });
+
+    test('another plan allowed is not this one', () async {
+      final s = await serverSettings();
+      await s.setAiConsent('server:glm', granted: true);
+      await s.setAiConsent('gemini', granted: true);
+      final (a, seen) = await counted(s);
+      expect(await a.serverLoginState(), isNull);
+      expect(await a.serverFeatures(), isNull);
+      expect(seen, isEmpty);
+      // On the GLM plan, that grant is the one that counts.
+      await s.setServerBackend('glm');
+      expect(await a.serverFeatures(), isNotNull);
+      expect(seen, hasLength(1));
+    });
+  });
+
   group('serverFeatures (restaurant assist R1)', () {
     Future<(ServerFeatures?, List<http.BaseRequest>)> probe(
         http.Response Function() reply,
         {String? url = 'https://10.0.0.5', String? key = 'upload-key'}) async {
-      final s = await serverSettings(url: url, key: key);
+      final s = await serverSettings(url: url, key: key, allowed: true);
       final seen = <http.BaseRequest>[];
       final analyzer = ServerAnalyzer(s, client: MockClient((req) async {
         seen.add(req);
@@ -928,7 +998,7 @@ void main() {
 
   test('startClaudeAuth returns the official URL; completes with null on 200',
       () async {
-    final s = await serverSettings();
+    final s = await serverSettings(allowed: true);
     final calls = <http.Request>[];
     final analyzer = ServerAnalyzer(s, client: MockClient((req) async {
       calls.add(req);
@@ -954,7 +1024,7 @@ void main() {
   });
 
   test('auth failures surface the server reason, never a crash', () async {
-    final s = await serverSettings();
+    final s = await serverSettings(allowed: true);
     final analyzer = ServerAnalyzer(s, client: MockClient((req) async {
       // charset header matters: Flask sends UTF-8, and http.Response's
       // default (latin-1) cannot encode the reason's em dash.
@@ -975,7 +1045,7 @@ void main() {
     // The deadline covered only the headers, so a body that stalled after
     // them left Connect Claude spinning until the user left the page —
     // right after pasting the one-time code, for the complete call.
-    final s = await serverSettings();
+    final s = await serverSettings(allowed: true);
     final bodies = <StreamController<List<int>>>[];
     addTearDown(() {
       for (final b in bodies) {
@@ -999,6 +1069,30 @@ void main() {
         onTimeout: () => fail('complete outlived its deadline'));
     expect(completed, isNotNull);
     expect(bodies, hasLength(2));
+  });
+
+  // Connect Claude asks first (subscription_page.dart); without the
+  // consent the analyzer sends nothing either, with no words of its own
+  // (the page says it could not start).
+  test('startClaudeAuth sends nothing while the server is not allowed',
+      () async {
+    final s = await serverSettings();
+    final seen = <http.BaseRequest>[];
+    final analyzer = ServerAnalyzer(s, client: MockClient((req) async {
+      seen.add(req);
+      return http.Response(
+          jsonEncode({'ok': true, 'url': 'https://claude.ai/oauth/x'}), 200);
+    }));
+    var started = await analyzer.startClaudeAuth();
+    expect((started.url, started.error), (null, null), reason: 'never allowed');
+    await s.setAiConsent('server:claude', granted: true);
+    started = await analyzer.startClaudeAuth();
+    expect(started.url, 'https://claude.ai/oauth/x');
+    expect(seen, hasLength(1));
+    await s.setAiConsent('server:claude', granted: false); // Stop Sharing
+    started = await analyzer.startClaudeAuth();
+    expect((started.url, started.error), (null, null), reason: 'stopped');
+    expect(seen, hasLength(1));
   });
 
   test('startClaudeAuth refuses without an address/key', () async {
@@ -1629,6 +1723,74 @@ void main() {
   // the https switch on, NOTHING reaches the address on any path: no photo,
   // no meal text, no X-API-Key. Each case counts the requests the client
   // saw. With the switch off the old behaviour holds.
+  // Review of PR 74: every call reads the saved address and key as it is
+  // built, so a new address saved before its key (the address field saves
+  // as the key field is tapped) sent the previous server's key there: the
+  // Restaurant group's free check, an automatic photo, Connect Claude.
+  // The key now goes only to the host it was saved for; each path says so
+  // as user state, and sends nothing.
+  group('an upload key saved for another server address', () {
+    test('nothing is sent on any path, each says why', () async {
+      final s = await serverSettings(url: 'https://a.example', allowed: true);
+      await s.setServerBaseUrl('https://b.example');
+      final seen = <http.BaseRequest>[];
+      var decodes = 0;
+      final a = ServerAnalyzer(s,
+          normalizer: (b) async {
+            decodes++;
+            return b;
+          },
+          client: MockClient((req) async {
+            seen.add(req);
+            return http.Response(
+                jsonEncode({'ok': true, 'url': 'https://claude.ai/oauth/x'}),
+                200);
+          }));
+      final photo = await a.analyzePhoto(jpeg());
+      expect(photo.error, kServerKeyOtherHostMessage);
+      expect(photo.retryable, isTrue, reason: 'kept for the right key');
+      expect(classifyAnalysisError(photo.error), AnalysisErrorKind.noServerKey);
+      expect(decodes, 0, reason: 'checked before the decode');
+      expect((await a.textIntentOutcome('lunch 500 kcal')).error,
+          kServerKeyOtherHostMessage);
+      expect(await a.leftoverIntent(jpeg(), '{}'), isNull);
+      expect(await a.validateKey('upload-key'), kServerKeyOtherHostMessage);
+      expect(await a.serverLoginState(), isNull);
+      expect(await a.serverFeatures(), isNull);
+      final started = await a.startClaudeAuth();
+      expect((started.url, started.error), (null, null));
+      expect(await a.completeClaudeAuth('code#state'), isNotNull);
+      await expectLater(
+          a.client.post(Uri.parse('https://b.example/api/new_endpoint'),
+              headers: {'X-API-Key': 'upload-key'}),
+          throwsA(isA<http.ClientException>()),
+          reason: 'a method added later is refused at the client');
+      expect(seen, isEmpty, reason: 'the key went nowhere');
+
+      // This server's own key: the free check goes, with it, to b only.
+      await s.setServerApiKey('key-b');
+      expect(await a.serverFeatures(), isNotNull);
+      expect(seen.single.url.host, 'b.example');
+      expect(seen.single.headers['X-API-Key'], 'key-b');
+    });
+
+    test('the same server at a new address: the saved key, bound to it, '
+        'goes there', () async {
+      final s = await serverSettings(url: 'https://a.example', allowed: true);
+      await s.setServerBaseUrl('https://203.0.113.5');
+      final seen = <http.BaseRequest>[];
+      final a = ServerAnalyzer(s, client: MockClient((req) async {
+        seen.add(req);
+        return http.Response(jsonEncode({'ok': true}), 200);
+      }));
+      expect(await a.serverFeatures(), isNull);
+      await s.bindServerKeyToAddress();
+      expect(await a.serverFeatures(), isNotNull);
+      expect(seen.single.url.host, '203.0.113.5');
+      expect(seen.single.headers['X-API-Key'], 'upload-key');
+    });
+  });
+
   group('a plain http:// server address', () {
     // Each case sets the switch itself, so flipping kRequireHttpsServer
     // changes no result here (server_transport_test pins the value).
@@ -1637,7 +1799,8 @@ void main() {
 
     Future<(ServerAnalyzer, List<http.BaseRequest>, List<int>)> analyzerAt(
         String url) async {
-      final s = await serverSettings(url: url);
+      // Allowed: what holds the requests back here is the address alone.
+      final s = await serverSettings(url: url, allowed: true);
       final seen = <http.BaseRequest>[];
       final decodes = <int>[];
       final analyzer = ServerAnalyzer(s,

@@ -634,6 +634,7 @@
       }
     }
   },
+  "outcomeShareFixAddressMsg": "分享的照片没有分析。{reason}改好后请重新分享。",
   "outcomePickRetryMsg": "这张照片没能分析（{reason}）—— 请稍后重新选择它。",
   "@outcomePickRetryMsg": {
     "placeholders": {
@@ -1070,5 +1071,12 @@
   "diagFixPhotoTempPlay": "通常是限流或服务器繁忙 —— 一分钟后再试，没有被分析的照片请重新添加。",
   "diagFixQuotaPlay": "等暂停结束后再重新添加照片（期间照片不会被分析），或更换 Key / 服务立即恢复。",
   "outcomeFailedKeptMsgPlay": "照片分析失败。{reason}",
-  "watchGlassesAndroidNote": "在 Android 上，「包括 Meta 眼镜拍的照片」默认关闭：这些照片无法先在手机上检查有没有食物，打开后每一张都会不经检查就发送给 AI 服务。"
+  "watchGlassesAndroidNote": "在 Android 上，「包括 Meta 眼镜拍的照片」默认关闭：这些照片无法先在手机上检查有没有食物，打开后每一张都会不经检查就发送给 AI 服务。",
+  "errServerKeyOtherHost": "你的服务器上传密钥是为另一个服务器地址保存的，筷拍只会把它发送到那里。请到「AI 服务」›「你自己的服务器」粘贴这台服务器的密钥，或把已保存的密钥用于它。",
+  "reasonServerKeyOtherHost": "上传密钥是为另一个服务器地址保存的",
+  "serverKeyOtherHostField": "为 {host} 保存：不会发送到上面的地址。",
+  "serverKeyUseHere": "将此密钥用于 {host}",
+  "autoScanServerKeyOtherHost": "自动记录没有运行：你的服务器上传密钥是为另一个服务器地址保存的，筷拍只会把它发送到那里。请到「AI 服务」›「你自己的服务器」修改。",
+  "diagServerKeyOtherHost": "上传密钥是为另一个服务器地址保存的，所以不会发送给这台服务器。",
+  "diagFixServerKeyOtherHost": "在设置 ›「AI 服务」›「你自己的服务器」里粘贴这台服务器的上传密钥，或把已保存的密钥用于它。"
 }

@@ -120,6 +120,15 @@ class ProviderDiagnostics {
           fix: l.diagFixPasteKey);
       return;
     }
+    // The upload key was saved for another server address: it is sent
+    // nowhere else (services/server_http_client.dart), so the key check
+    // below would only call it rejected.
+    if (isServer && serverKeyForOtherAddress(settings)) {
+      yield DiagResult(l.diagStageConfiguration, DiagStatus.fail,
+          l.diagServerKeyOtherHost,
+          fix: l.diagFixServerKeyOtherHost);
+      return;
+    }
     yield DiagResult(
         l.diagStageConfiguration,
         DiagStatus.pass,
@@ -144,7 +153,8 @@ class ProviderDiagnostics {
         // Followed, a redirect to an http:// address or another host had a
         // request sent there, and the stage went by that address's answer
         // (Android review 2026-11-19).
-        await HttpsOnlyServerClient.wrap(client)
+        await HttpsOnlyServerClient.wrap(client,
+                keyFor: settings.serverKeyFor)
             .get(Uri.parse(probeUrl))
             .timeout(const Duration(seconds: 10));
         yield DiagResult(

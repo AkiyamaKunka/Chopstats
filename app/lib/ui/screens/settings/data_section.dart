@@ -41,6 +41,20 @@ String exportFileName(DateTime now) => 'chopstats-${isoDate(now)}.json';
 bool isExportFileName(String name) =>
     name.startsWith('chopstats-') || name.startsWith('calorietracker-');
 
+/// What a Save to Device answer says in a snackbar: "Export saved.", that
+/// another file window is still open, or that it failed; nothing for a
+/// close by the user or a build without the save. The app shell says the
+/// same for a save whose call died with an earlier engine
+/// (takeLateSaveResult, Android QA Q4).
+String? saveStatusLine(AppLocalizations l10n, SaveFileStatus status) =>
+    switch (status) {
+      SaveFileStatus.ok => l10n.exportSaved,
+      SaveFileStatus.busy => l10n.exportSaveBusy,
+      SaveFileStatus.failed => l10n.exportSaveFailed,
+      // Closed by the user: nothing to say.
+      SaveFileStatus.cancelled || SaveFileStatus.unavailable => null,
+    };
+
 /// Hands the export file at [path] to the share sheet.
 typedef ShareExportFile = Future<void> Function(String path, String subject);
 
@@ -458,13 +472,7 @@ class _DataSectionState extends State<DataSection> {
       return;
     }
     _deleteQuietly(file);
-    final line = switch (status) {
-      SaveFileStatus.ok => l10n.exportSaved,
-      SaveFileStatus.busy => l10n.exportSaveBusy,
-      SaveFileStatus.failed => l10n.exportSaveFailed,
-      // Closed by the user: nothing to say.
-      SaveFileStatus.cancelled || SaveFileStatus.unavailable => null,
-    };
+    final line = saveStatusLine(l10n, status);
     if (line != null && mounted) {
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text(line)));

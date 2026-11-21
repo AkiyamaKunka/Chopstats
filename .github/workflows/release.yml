@@ -47,10 +47,15 @@
 #     PLAY_SERVICE_ACCOUNT_JSON       the Play Console service account's JSON key, pasted whole.
 #                                     Optional: without it the signed .aab is built and kept as an
 #                                     artifact (for the first, manual Play upload) but not uploaded.
+#                                     With it, the `play` job uploads the kept .aab; a failed upload
+#                                     costs neither the artifact nor the GitHub Release APK.
 #
 # VARIABLES (Settings -> Secrets and variables -> Actions -> Variables; plain text, optional)
-#     ANDROID_KEY_ALIAS   alias inside the keystore (default: upload)
-#     ASC_APP_APPLE_ID    the app's numeric Apple ID from App Store Connect; only the altool fallback uses it
+#     ANDROID_KEY_ALIAS           alias inside the keystore (default: upload)
+#     ANDROID_UPLOAD_CERT_SHA256  the upload certificate's SHA-256 every Android build must be signed
+#                                 with (default: env ANDROID_UPLOAD_CERT_SHA256 below, the v1.6.0
+#                                 and android-v1.7.0 signer); set it only after a key rotation
+#     ASC_APP_APPLE_ID            the app's numeric Apple ID from App Store Connect; only the altool fallback uses it
 #
 # iOS UPLOAD TRANSPORT: IOS_UPLOAD_TRANSPORT (env below) is `xcodebuild` (xcodebuild
 # -exportArchive with destination=upload + the API key; Apple-documented since Xcode 15)
@@ -100,6 +105,12 @@ env:
   IOS_SHAREEXT_BUNDLE_ID: dev.calorietracker.calorieTracker.ShareExtension
   IOS_APP_GROUP: group.dev.calorietracker.calorieTracker
   ANDROID_PACKAGE: dev.calorietracker.calorie_tracker
+  # The upload certificate (SHA-256, lower case, no colons) that signed v1.6.0
+  # and android-v1.7.0: the Android job stops unless the bundle and the APK are
+  # signed by it. Certificate fingerprints are public (every APK carries its
+  # own). After a deliberate key rotation, set the repository variable of the
+  # same name instead of editing this (docs/RELEASING.md § 6.3).
+  ANDROID_UPLOAD_CERT_SHA256: d0d95f7f68be408da1c5f81d3e197dedd49f3de19b35eebdfb8effec6b7f9b7c
 
 defaults:
   run:
@@ -126,6 +137,8 @@ jobs:
           LANE: ${{ github.event.inputs.lane || 'both' }}
           INTERNAL_ONLY_INPUT: ${{ inputs.testflight_internal_only }}
           PLAY_TRACK: ${{ github.event_name == 'workflow_dispatch' && inputs.play_track || 'internal' }}
+          # Only for `gh release view` below (contents: read is enough).
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           pubspec_version=$(sed -n 's/^version:[[:space:]]*//p' app/pubspec.yaml | tr -d '[:space:]')
@@ -144,6 +157,29 @@ jobs:
               if [[ "$number" =~ ^[0-9]+$ ]] && (( number <= offset )); then
                 echo "::error::tag v$tag carries build number $number, which is not above BUILD_NUMBER_OFFSET ($offset). Tag v$name without a +N (CI numbers the build), or use a number above every build already uploaded."
                 exit 1
+              fi
+              # Every earlier run numbered its build BUILD_NUMBER_OFFSET +
+              # its run number, so offset + this run's number is the lowest
+              # number no CI build has used (android-v1.7.0 is 200 + run 7).
+              # Below it, App Store Connect or Play may refuse the upload as
+              # used or lower, and the GitHub APK may not install over one
+              # already out (a downgrade). A tag push is held to it. "Run
+              # workflow" on a +N tag gets a later run number, so it is let
+              # through only to re-release a tag whose GitHub Release is out:
+              # a tag the plan refused (or that never released) has none,
+              # and is refused here too, before anything is built or sent.
+              # An API error refuses as well.
+              floor=$((offset + GITHUB_RUN_NUMBER))
+              if [[ "$number" =~ ^[0-9]+$ ]] && (( number < floor )); then
+                if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
+                  echo "::error::tag v$tag carries build number $number, but this is Release run $GITHUB_RUN_NUMBER: earlier runs numbered their builds up to $((floor - 1)) (BUILD_NUMBER_OFFSET $offset + run number), so $number may already be on App Store Connect, on Play or in a GitHub APK. Tag v$name without a +N instead: CI numbers it BUILD_NUMBER_OFFSET + the new run's number, which no run has used. A +N must clear the floor of the run your new push starts, not this one's: that run is numbered $((GITHUB_RUN_NUMBER + 1)) or later, so use more than $floor, with room to spare if other Release runs may start first."
+                  exit 1
+                fi
+                if ! gh release view "v$tag" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+                  echo "::error::Run workflow on tag v$tag: build number $number is below $floor, and v$tag has no GitHub Release (its push was refused, or it never released). Its APK may not install over one already out (Android refuses a lower versionCode), and App Store Connect or Play may already have $number. Tag v$name without a +N instead, or use a +N above $floor, with room to spare if other Release runs may start first. To finish a run of v$tag that failed after its plan passed, use Re-run failed jobs on that run."
+                  exit 1
+                fi
+                echo "::warning::Run workflow on tag v$tag: re-releasing build $number (below $floor, the lowest number no earlier run has used). The GitHub Release's APK is replaced by a rebuild of the same number; App Store Connect and Play refuse $number if they already have it or a higher one."
               fi
             else
               number=$((offset + GITHUB_RUN_NUMBER)); source="BUILD_NUMBER_OFFSET + run_number"
@@ -587,7 +623,7 @@ jobs:
 
   # ---------------------------------------------------------------------------
   android:
-    name: Android → Play (internal or alpha)
+    name: Android → signed bundle and APK
     needs: plan
     if: needs.plan.outputs.run_android == 'true'
     runs-on: ubuntu-latest
@@ -595,6 +631,7 @@ jobs:
     timeout-minutes: 60
     outputs:
       built: ${{ steps.secrets.outputs.ready }}
+      play: ${{ steps.secrets.outputs.play }}
     env:
       BUILD_NAME: ${{ needs.plan.outputs.build_name }}
       BUILD_NUMBER: ${{ needs.plan.outputs.build_number }}
@@ -783,6 +820,8 @@ jobs:
         id: artifacts
         if: steps.secrets.outputs.ready == 'true'
         working-directory: app
+        env:
+          UPLOAD_CERT_SHA256: ${{ vars.ANDROID_UPLOAD_CERT_SHA256 || env.ANDROID_UPLOAD_CERT_SHA256 }}
         run: |
           set -euo pipefail
           aab=build/app/outputs/bundle/release/app-release.aab
@@ -812,6 +851,22 @@ jobs:
             echo "::error::app-release.apk is not signed with the same key as the bundle"
             exit 1
           fi
+          # Not the debug key is not enough: any other keystore pasted into
+          # the secrets (a test key, an old backup) passed the checks above
+          # and shipped green, and a GitHub APK signed by it cannot update
+          # any installed copy. Both must carry the pinned upload
+          # certificate: the repository variable ANDROID_UPLOAD_CERT_SHA256
+          # after a key rotation, else the env default above.
+          want=$(printf '%s' "$UPLOAD_CERT_SHA256" | tr -d ':[:space:]' | tr 'A-F' 'a-f')
+          if [[ ! "$want" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "::error::the pinned upload certificate SHA-256 '$UPLOAD_CERT_SHA256' (repository variable ANDROID_UPLOAD_CERT_SHA256, else release.yml's env default) is not 64 hex digits"
+            exit 1
+          fi
+          if [ "$aab_sha" != "$want" ]; then
+            echo "::error::app-release.aab and app-release.apk are signed by certificate SHA-256 ${aab_sha:-<none>}, not the upload key's $want. The keystore in ANDROID_UPLOAD_KEYSTORE_BASE64 (an environment secret wins over a repository one) is not the upload key. After a deliberate key rotation, set the repository variable ANDROID_UPLOAD_CERT_SHA256 to the new certificate's SHA-256 (docs/RELEASING.md § 6.3)."
+            exit 1
+          fi
+          echo "signed by the upload key: SHA-256 equals the pinned $want"
           badging=$("${tools}aapt2" dump badging "$apk")
           code=$(sed -n "s/.*versionCode='\([0-9]*\)'.*/\1/p" <<< "$badging" | head -n 1)
           abis=$(sed -n "s/^native-code: //p" <<< "$badging" | tr -d "'")
@@ -822,12 +877,11 @@ jobs:
           echo "app-release.apk: versionCode $code, $abis, same signer as the bundle"
           # The bundle's mapping is the copy taken right after the appbundle
           # build (the APK build has since overwritten
-          # build/app/outputs/mapping/release/mapping.txt with its own). Play
-          # gets that copy; a second copy goes next to the .aab so the kept
-          # artifact carries both mappings (aab-mapping.txt for the bundle,
-          # mapping.txt for the sideload APKs).
+          # build/app/outputs/mapping/release/mapping.txt with its own). It
+          # goes next to the .aab, so the kept artifact carries both
+          # mappings: aab-mapping.txt for the bundle (the play job sends it
+          # with the bundle), mapping.txt for the sideload APK.
           if [ -f "$RUNNER_TEMP/aab-mapping.txt" ]; then
-            echo "mapping=$RUNNER_TEMP/aab-mapping.txt" >> "$GITHUB_OUTPUT"
             cp "$RUNNER_TEMP/aab-mapping.txt" build/app/outputs/bundle/release/aab-mapping.txt
           fi
           # No native-debug-symbols.zip is produced: build.gradle.kts does not
@@ -836,23 +890,10 @@ jobs:
           # "you've not uploaded debug symbols" note is informational.
           true
 
-      # Tag pushes always go to internal; "Run workflow" picks internal or
-      # alpha (the closed test's track). inputs.* is empty on a push, hence
-      # the event check. status: completed needs the app's first release to
-      # have been made by hand (docs/RELEASING.md § 6.3; otherwise Play
-      # answers "Only releases with status draft may be created on draft app").
-      - name: Upload to Play (internal, or the dispatch's play_track)
-        if: steps.secrets.outputs.ready == 'true' && steps.secrets.outputs.play == 'true'
-        uses: r0adkll/upload-google-play@e738b9dd8f2476ea806d921b64aacd24f34515a5 # v1.1.5
-        with:
-          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
-          packageName: ${{ env.ANDROID_PACKAGE }}
-          releaseFiles: app/build/app/outputs/bundle/release/app-release.aab
-          tracks: ${{ github.event_name == 'workflow_dispatch' && inputs.play_track || 'internal' }}
-          status: completed
-          mappingFile: ${{ steps.artifacts.outputs.mapping }}
-          whatsNewDirectory: app/android/whatsnew
-
+      # Kept as soon as it is checked, and by this job alone: the Play
+      # upload is the `play` job's, so a failed upload (the first run's 403,
+      # a track Play does not know) neither loses this artifact nor holds
+      # back the GitHub Release, which takes its APK from it.
       - name: Keep the bundle, APKs, mapping and symbols
         if: steps.secrets.outputs.ready == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -870,6 +911,64 @@ jobs:
       - name: Remove signing material from the runner
         if: always()
         run: rm -f app/android/key.properties app/android/upload-keystore.jks
+
+  # ---------------------------------------------------------------------------
+  # Google Play, in a job of its own: it sends the bundle the android job
+  # built, checked and kept, from that job's artifact. A failed upload fails
+  # this job only; the artifact is already kept, and the GitHub Release does
+  # not wait for Play (Play is not reachable for the friends in mainland
+  # China). Play commits nothing from a failed upload, so "Re-run failed
+  # jobs" sends the same build number again once Play is fixed.
+  play:
+    name: Play upload (internal or alpha)
+    needs: [plan, android]
+    if: needs.android.outputs.built == 'true' && needs.android.outputs.play == 'true'
+    runs-on: ubuntu-latest
+    environment: release
+    timeout-minutes: 20
+    env:
+      BUILD_NAME: ${{ needs.plan.outputs.build_name }}
+      BUILD_NUMBER: ${{ needs.plan.outputs.build_number }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Into app/build: the artifact's root is that folder, so the bundle
+      # lands where the android job built it.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: android-${{ env.BUILD_NAME }}-${{ env.BUILD_NUMBER }}
+          path: app/build
+
+      # The mapping from the bundle's own R8 run (aab-mapping.txt; the APK
+      # build overwrote mapping.txt), when that build made one.
+      - name: Find the bundle's mapping
+        id: mapping
+        run: |
+          set -euo pipefail
+          aab=app/build/app/outputs/bundle/release/app-release.aab
+          [ -f "$aab" ] || { echo "::error::$aab is missing from the android artifact"; exit 1; }
+          f=app/build/app/outputs/bundle/release/aab-mapping.txt
+          if [ -f "$f" ]; then
+            echo "file=$f" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::no aab-mapping.txt in the android artifact: the bundle goes to Play without its R8 mapping"
+          fi
+
+      # Tag pushes always go to internal; "Run workflow" picks internal or
+      # alpha (the closed test's track). inputs.* is empty on a push, hence
+      # the event check. status: completed needs the app's first release to
+      # have been made by hand (docs/RELEASING.md § 6.3; otherwise Play
+      # answers "Only releases with status draft may be created on draft app").
+      - name: Upload to Play (internal, or the dispatch's play_track)
+        uses: r0adkll/upload-google-play@e738b9dd8f2476ea806d921b64aacd24f34515a5 # v1.1.5
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: ${{ env.ANDROID_PACKAGE }}
+          releaseFiles: app/build/app/outputs/bundle/release/app-release.aab
+          tracks: ${{ github.event_name == 'workflow_dispatch' && inputs.play_track || 'internal' }}
+          status: completed
+          mappingFile: ${{ steps.mapping.outputs.file }}
+          whatsNewDirectory: app/android/whatsnew
 
   # ---------------------------------------------------------------------------
   # Tags only: the arm64 APK goes on a GitHub Release so the WeChat/APK channel
@@ -910,7 +1009,7 @@ jobs:
           asset="Chopstats-v${BUILD_NAME}-b${BUILD_NUMBER}-arm64-v8a.apk"
           cp "$apk" "$asset"
           cat > notes.md <<EOF
-          **Android (sideload):** install \`$asset\` (arm64, every phone since ~2017). Builds before v1.5.0 were signed with a debug key, so Android refuses to upgrade over them: uninstall the old BiteWise once (export your log first: Settings → Export), then install this one. Installed from Google Play? Update there, not with this file: the Play build and this APK can carry different signatures, and switching between them needs an uninstall (export your log first).
+          **Android (sideload):** install \`$asset\` (arm64, nearly every phone since about 2017). Installing it over a GitHub build from v1.5.0 or later keeps your meal log. Builds before v1.5.0 were signed with a debug key, and Android will not install this APK over them. To switch: export your log (Settings › Export Data), uninstall the old app (if Android offers **Keep app data**, leave it unticked: kept data blocks an app with a different signature), then install this APK and import the file. Installed from Google Play? Update there, not with this file: the Play build and this APK may carry different signatures, so moving between them needs the same steps.
           EOF
           # Only a build this run really uploaded is named.
           if [ "$IOS_BUILT" = "true" ]; then

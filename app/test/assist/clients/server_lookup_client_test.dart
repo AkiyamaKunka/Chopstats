@@ -599,12 +599,27 @@ void main() {
       expect(stale.failure!.message.contains('someone-else'), isFalse);
       expect(s.requests, isEmpty);
 
-      // Re-consented for the new server, the same call goes through.
+      // Re-consented for the new server, the call still sends nothing
+      // while the upload key is the old server's: it goes only to the host
+      // it was saved for (review of PR 74).
+      final keyElsewhere = await c.submit(_bowl,
+          expectedRecipient: LookupRecipient.claudePlan,
+          expectedRecipientStamp: c.lookupSupport().recipientStamp);
+      expect(keyElsewhere.failure!.code, LookupFailureCode.noKey);
+      expect(keyElsewhere.failure!.message,
+          contains('saved for another server address'));
+      expect((await c.poll('job_abcdefgh01')).failure!.code,
+          LookupFailureCode.noKey);
+      expect(s.requests, isEmpty);
+
+      // With that server's own key, the same call goes through.
+      await settings.setServerApiKey('someone-else-key');
       final again = await c.submit(_bowl,
           expectedRecipient: LookupRecipient.claudePlan,
           expectedRecipientStamp: c.lookupSupport().recipientStamp);
       expect(again.kind, LookupOutcomeKind.pending);
       expect(s.requests.single.url.host, 'someone-else.example');
+      expect(s.requests.single.headers['X-API-Key'], 'someone-else-key');
     });
   });
 

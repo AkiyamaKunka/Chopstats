@@ -748,6 +748,66 @@ void connectClaudeTests() {
     expect(AppLocalizationsZh().connectNeedsServer, '请先在上方填写服务器地址和上传密钥。');
   });
 
+  // Connecting sends the server the upload key, then the pasted
+  // authorization code (the server hands it to `claude setup-token`). The
+  // consent says nothing is sent before Allow and nothing more after Stop
+  // Sharing, so Connect asks first, as Describe does.
+  for (final (state, consent) in [
+    ('never allowed', <String>{}),
+    (
+      'after Stop Sharing',
+      {...FakeSettings().aiConsent}..remove('server:claude'),
+    ),
+  ]) {
+    for (final allow in [false, true]) {
+      testWidgets('connect, $state: asks first; '
+          '${allow ? 'Allow starts it' : 'Not now sends nothing'}',
+          (tester) async {
+        tester.view.physicalSize = const Size(800, 2000);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.reset);
+        final settings = _configuredServer()..aiConsent = {...consent};
+        var starts = 0;
+        await tester.pumpWidget(_serverWrap(
+          settings: settings,
+          start: () async {
+            starts++;
+            return (url: null, error: 'stop here');
+          },
+          complete: (_) async => fail('must not be called'),
+          openUrl: (_) async => fail('must not be called'),
+        ));
+        await openSubscriptionPage(tester);
+        await tester.tap(find.byKey(const Key('connectClaudeButton')));
+        // Fixed pumps: the busy spinner runs while the question is up.
+        await tester.pump(const Duration(milliseconds: 300));
+        await tester.pump(const Duration(milliseconds: 300));
+        expect(find.byKey(const Key('aiConsentDialog')), findsOneWidget);
+        expect(starts, 0, reason: 'nothing before the answer');
+        // A second tap while the question is up stacks no second one.
+        await tester.tap(find.byKey(const Key('connectClaudeButton')),
+            warnIfMissed: false);
+        await tester.pump(const Duration(milliseconds: 300));
+        expect(find.byKey(const Key('aiConsentDialog')), findsOneWidget);
+
+        await tester.tap(find.byKey(
+            Key(allow ? 'aiConsentAllow' : 'aiConsentNotNow')));
+        await tester.pump(const Duration(milliseconds: 300));
+        await tester.pump(const Duration(milliseconds: 300));
+        expect(find.byKey(const Key('aiConsentDialog')), findsNothing);
+        if (allow) {
+          expect(starts, 1);
+          expect(settings.aiConsentWrites, [('server:claude', true)]);
+          expect(find.text('stop here'), findsOneWidget);
+        } else {
+          expect(starts, 0);
+          expect(settings.aiConsentWrites, isEmpty);
+          expect(find.text('Nothing was sent.'), findsOneWidget);
+        }
+      });
+    }
+  }
+
   testWidgets('button hidden off the server provider and without wiring',
       (tester) async {
     final settings = FakeSettings(); // gemini

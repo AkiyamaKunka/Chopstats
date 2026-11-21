@@ -98,7 +98,9 @@ lookup* below.
   yourself; from there it reaches the AI plan you configured on that
   server. While your server's address is set, the
   app also asks it for the day's Garmin activity summary for the Today
-  screen (only the date is sent). From version 1.7.0 the address must
+  screen (only the date is sent). On the Claude plan, **Connect Claude**
+  sends your server the sign-in code you paste from Anthropic's page, and
+  your server uses it to sign in to Claude. From version 1.7.0 the address must
   start with `https://`: the app refuses an `http://` address and sends
   nothing to it, so photos, meal text and your server's upload key never
   travel unencrypted. (Earlier versions also accepted an `http://`
@@ -423,7 +425,7 @@ date. Questions: see *Who we are* above, or open an issue at
 数据离开手机是为了连接你在设置中选择的 AI 服务，并使用**你自己的 API Key**（使用「你自己的服务器」时，是你自己运行的服务器）。除了 iPhone 上「**iCloud 备份**」保存在你自己 iCloud 里的副本（见下文「**iCloud 备份**」），除非你开启「**餐厅营养**」查询，否则不会有其他数据离开手机；开启后，在 iPhone 上照片的拍摄位置会发送给 Apple 地图，查询会发送给该 AI 服务的网页搜索，详见下文「**餐厅营养查询**」。
 
 - Google Gemini、OpenAI、Anthropic（Claude）、DeepSeek 深度求索、xAI（Grok）、OpenRouter、阿里云（Qwen 通义千问）、火山引擎 / 字节跳动（Doubao 豆包）或智谱（GLM）。它们如何处理你发送的内容，以它们各自的隐私政策和条款为准。
-- **你自己的服务器**（设置 › AI 服务 › 你自己的服务器）会把同样的数据发送到**你自己运行**、由你亲自填写地址的服务器，再由它转给你在该服务器上配置的 AI 套餐。填写了服务器地址后，应用还会向这台服务器请求当天的 Garmin 活动摘要，用于「今天」页面（只发送日期）。从 1.7.0 版本起，服务器地址必须以 `https://` 开头：应用会拒绝 `http://` 地址，也不会向它发送任何内容，所以照片、餐食文字和服务器上传密钥都不会以未加密的方式传输。（更早的版本也接受 `http://` 地址，并以未加密的方式把这些内容发送给它。）
+- **你自己的服务器**（设置 › AI 服务 › 你自己的服务器）会把同样的数据发送到**你自己运行**、由你亲自填写地址的服务器，再由它转给你在该服务器上配置的 AI 套餐。填写了服务器地址后，应用还会向这台服务器请求当天的 Garmin 活动摘要，用于「今天」页面（只发送日期）。使用 Claude 套餐时，「**连接 Claude**」会把你从 Anthropic 页面粘贴的登录代码发送给你的服务器，由服务器用它登录 Claude。从 1.7.0 版本起，服务器地址必须以 `https://` 开头：应用会拒绝 `http://` 地址，也不会向它发送任何内容，所以照片、餐食文字和服务器上传密钥都不会以未加密的方式传输。（更早的版本也接受 `http://` 地址，并以未加密的方式把这些内容发送给它。）
   <!-- gated: release_decisions_test checks kRequireHttpsServer = true in app/lib/core/server_transport.dart -->
 
 从 1.7.0 版本起，所有请求都通过加密的 HTTPS 连接离开手机。

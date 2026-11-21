@@ -663,10 +663,13 @@ void main() {
       // again: Who we are, adults only, https only, and Android's backup
       // leaving the keys out. If that branch merges on a later day, set the
       // date and kPolicyEffectiveDate to the merge date. The Android
-      // look-and-defaults branch (android/feel-and-defaults, 2026-11-20)
-      // changed it again: Android's cloud backup only end-to-end encrypted
-      // (a screen lock), and Meta glasses photos off by default on Android;
-      // if it merges on a later day, the same applies.
+      // look-and-defaults branch (android/feel-and-defaults, #72) changed it
+      // again and merged on 2026-11-20: Android's cloud backup only
+      // end-to-end encrypted (a screen lock), and Meta glasses photos off
+      // by default on Android. The Android lows lane
+      // (android/lows-and-release, #74, 2026-11-20) changed it again:
+      // Connect Claude sends your own server the sign-in code you paste; if
+      // it merges on a later day, set both to that day too.
       expect(
           RegExp(r'^Effective date: (\S+)$', multiLine: true)
               .allMatches(policy)
@@ -1412,6 +1415,301 @@ void main() {
           reason: 'android/photos not merged');
       expect(_read('lib/ui/screens/add_flow.dart'),
           contains('platformSystemPhotoPicker()'));
+    });
+  });
+
+  // The Android review of 2026-11-19, R4, R5, R15 and R16.
+  group('release.yml: the Android review\'s release items', () {
+    final workflow = _readRepo('.github/workflows/release.yml');
+
+    /// The job [name], through to the next job.
+    String job(String name) {
+      final start = workflow.indexOf('\n  $name:\n');
+      expect(start, isNonNegative, reason: name);
+      final next = RegExp(r'\n  [a-z][a-z-]*:\n').firstMatch(
+          workflow.substring(start + 1));
+      return workflow.substring(
+          start, next == null ? workflow.length : start + 1 + next.start);
+    }
+
+    /// The `needs:` of job [name], as a list.
+    List<String> needs(String name) {
+      final line = RegExp(r'^    needs: (.*)$', multiLine: true)
+          .firstMatch(job(name))!
+          .group(1)!;
+      return line.replaceAll(RegExp(r'[\[\]\s]'), '').split(',');
+    }
+
+    // R4: a failed Play upload threw away the run's bundle, APK, mappings
+    // and symbols (the Keep step after it was skipped), and the GitHub
+    // Release, which needs the android job's success, never came.
+    test('R4: the Play upload is a job of its own; the artifact is kept '
+        'first and the GitHub Release does not wait for Play', () {
+      final android = job('android');
+      expect(android, isNot(contains('upload-google-play')));
+      expect(android, contains('uses: actions/upload-artifact@'));
+      expect(android, contains(r'play: ${{ steps.secrets.outputs.play }}'));
+      final play = job('play');
+      expect(needs('play'), ['plan', 'android']);
+      expect(
+          play,
+          contains("if: needs.android.outputs.built == 'true' && "
+              "needs.android.outputs.play == 'true'"));
+      expect(play, contains('environment: release'));
+      expect(play, contains('uses: r0adkll/upload-google-play@'));
+      expect(play, contains('uses: actions/download-artifact@'));
+      // The android job's own bundle, where it built it (the artifact's
+      // root is app/build).
+      expect(play, contains('path: app/build'));
+      expect(play,
+          contains('name: android-\${{ env.BUILD_NAME }}-\${{ env.BUILD_NUMBER }}'));
+      expect(play,
+          contains('mappingFile: \${{ steps.mapping.outputs.file }}'));
+      expect('upload-google-play'.allMatches(workflow), hasLength(1));
+      expect(needs('github-release'), isNot(contains('play')));
+      expect(job('github-release'), isNot(contains('needs.play')));
+    });
+
+    // § 9 said to add `debugSymbols: <native-debug-symbols.zip>` on the
+    // upload step. After R4 that step is the play job's, which sees only
+    // the android job's artifact, and the artifact does not keep the zip:
+    // r0adkll fails the whole upload on a debugSymbols path that is not
+    // there. Any path the docs give the upload step must be kept.
+    test('RELEASING § 9 gives the Play upload no file its artifact lacks',
+        () {
+      final releasing = _readRepo('docs/RELEASING.md');
+      final android = job('android');
+      final keep = android.substring(
+          android.indexOf('- name: Keep the bundle, APKs, mapping'));
+      for (final m in RegExp(r'debugSymbols: (\S+)').allMatches(releasing)) {
+        final path = m.group(1)!.replaceAll('`', '');
+        expect(keep, contains(path),
+            reason: '$path is not in the android job\'s artifact');
+      }
+      expect(releasing, contains('The upload needs no `debugSymbols:` input'));
+      expect(job('play'), isNot(contains('debugSymbols:')));
+    });
+
+    // R5: the check passed for any key but the debug key, so a wrong
+    // keystore in the secrets shipped a green APK no installed copy could
+    // update to.
+    test('R5: the bundle and the APK must carry the pinned upload '
+        'certificate; a repository variable overrides it', () {
+      expect(
+          workflow,
+          contains('  ANDROID_UPLOAD_CERT_SHA256: '
+              'd0d95f7f68be408da1c5f81d3e197dedd49f3de19b35eebdfb8effec6b7f9b7c\n'));
+      final verify = job('android').substring(job('android').indexOf(
+          '- name: Verify the bundle is signed with the upload key'));
+      expect(
+          verify,
+          contains(r'UPLOAD_CERT_SHA256: ${{ vars.ANDROID_UPLOAD_CERT_SHA256 '
+              r'|| env.ANDROID_UPLOAD_CERT_SHA256 }}'));
+      expect(verify, contains(r'if [ "$aab_sha" != "$want" ]; then'));
+      expect(verify, contains(r'if [[ ! "$want" =~ ^[0-9a-f]{64}$ ]]; then'));
+      // After the APK == bundle check, so both carry it.
+      expect(verify.indexOf(r'"$apk_sha" != "$aab_sha"'),
+          lessThan(verify.indexOf(r'"$aab_sha" != "$want"')));
+      expect(
+          verify.indexOf(r'"$aab_sha" != "$want"'),
+          lessThan(verify.indexOf('- name: Keep the bundle')),
+          reason: 'a wrong key stops the run before anything is kept');
+      expect(workflow, contains('ANDROID_UPLOAD_CERT_SHA256  the upload'));
+      final releasing = _readRepo('docs/RELEASING.md');
+      expect(releasing, contains('`ANDROID_UPLOAD_CERT_SHA256`'));
+    });
+
+    // R15: a tag's +N was checked against the offset only. The plan step's
+    // own script, run as the workflow runs it.
+    group('R15: a tag\'s +N is held above every number CI has used', () {
+      String planScript() {
+        final at = workflow.indexOf('        id: plan\n');
+        final run = workflow.indexOf('        run: |\n', at);
+        final lines = <String>[];
+        for (final line in workflow
+            .substring(run + '        run: |\n'.length)
+            .split('\n')) {
+          if (line.trim().isNotEmpty && !line.startsWith('          ')) break;
+          lines.add(line.length >= 10 ? line.substring(10) : '');
+        }
+        return lines.join('\n');
+      }
+
+      final offset = RegExp(r'BUILD_NUMBER_OFFSET: (\d+)')
+          .firstMatch(workflow)!
+          .group(1)!;
+
+      /// The plan step at Release run [run]. [released]: whether `gh
+      /// release view` finds the tag's GitHub Release. A stub `gh` first
+      /// on PATH answers it and records its calls in `gh`: the developer's
+      /// own gh is never called.
+      Future<({int code, String log, String out, List<String> gh})> plan(
+          String event, String ref, int run,
+          {bool released = false}) async {
+        final dir = Directory.systemTemp.createTempSync('ct_plan');
+        addTearDown(() => dir.deleteSync(recursive: true));
+        Directory('${dir.path}/app').createSync();
+        File('${dir.path}/app/pubspec.yaml')
+            .writeAsStringSync('version: 1.7.0+9\n');
+        final script = File('${dir.path}/plan.sh')
+          ..writeAsStringSync(planScript());
+        final out = File('${dir.path}/out')..createSync();
+        final summary = File('${dir.path}/summary')..createSync();
+        final calls = File('${dir.path}/gh-calls')..createSync();
+        final bin = Directory('${dir.path}/bin')..createSync();
+        final gh = File('${bin.path}/gh')
+          ..writeAsStringSync('#!/usr/bin/env bash\n'
+              'echo "\$*" >> "${calls.path}"\n'
+              'exit ${released ? 0 : 1}\n');
+        expect((await Process.run('chmod', ['+x', gh.path])).exitCode, 0);
+        final r = await Process.run('bash', [script.path],
+            workingDirectory: dir.path,
+            environment: {
+              'PATH': '${bin.path}:${Platform.environment['PATH']}',
+              'GITHUB_REPOSITORY': 'owner/repo',
+              'GH_TOKEN': 'token',
+              'GITHUB_EVENT_NAME': event,
+              'GITHUB_REF': ref,
+              'GITHUB_RUN_NUMBER': '$run',
+              'BUILD_NUMBER_OFFSET': offset,
+              'GITHUB_OUTPUT': out.path,
+              'GITHUB_STEP_SUMMARY': summary.path,
+              'LANE': 'both',
+              'INTERNAL_ONLY_INPUT': 'true',
+              'PLAY_TRACK': 'internal',
+            });
+        return (
+          code: r.exitCode,
+          log: '${r.stdout}${r.stderr}',
+          out: out.readAsStringSync(),
+          gh: calls
+              .readAsLinesSync()
+              .where((l) => l.isNotEmpty)
+              .toList(),
+        );
+      }
+
+      test('a tag push below offset + run number stops, and says why',
+          () async {
+        for (final n in [205, 209]) {
+          final r = await plan('push', 'refs/tags/v1.7.0+$n', 10);
+          expect(r.code, 1, reason: '+$n at run 10');
+          expect(r.log, contains('this is Release run 10'));
+          expect(r.log, contains('up to 209'));
+          // The corrected tag is a new push, so a new run with a higher
+          // number and floor: this run's floor (210) is refused there too.
+          expect(r.log, contains('Tag v1.7.0 without a +N instead'));
+          expect(r.log, contains('that run is numbered 11 or later, so use '
+              'more than 210'));
+          expect(r.log, isNot(contains('this run numbers it')));
+          expect(r.log, isNot(contains('210 or more')));
+          expect(r.log, isNot(contains('not above BUILD_NUMBER_OFFSET')),
+              reason: '$n is above the offset; that message would be false');
+        }
+        // At or below the offset: the old message, still true there.
+        final low = await plan('push', 'refs/tags/v1.7.0+200', 10);
+        expect(low.code, 1);
+        expect(low.log, contains('not above BUILD_NUMBER_OFFSET'));
+      });
+
+      // What the owner does with the refusal: a new push, which is the
+      // next run. The advice must pass there (the old "use 210 or more"
+      // was refused again at run 11, whose floor is 211).
+      test('the refusal\'s advice passes on the next run', () async {
+        final refused = await plan('push', 'refs/tags/v1.7.0+205', 10);
+        final bound = int.parse(
+            RegExp(r'more than (\d+)').firstMatch(refused.log)!.group(1)!);
+        expect(bound, 210);
+        final plus = await plan('push', 'refs/tags/v1.7.0+${bound + 1}', 11);
+        expect(plus.code, 0, reason: plus.log);
+        expect(plus.out, contains('build_number=${bound + 1}\n'));
+        final plain = await plan('push', 'refs/tags/v1.7.0', 11);
+        expect(plain.code, 0, reason: plain.log);
+        expect(plain.out, contains('build_number=211\n'));
+        // The number the old message named is refused at run 11.
+        expect((await plan('push', 'refs/tags/v1.7.0+$bound', 11)).code, 1);
+      });
+
+      test('at or above it a tag push passes, plain tags as before',
+          () async {
+        for (final (ref, number) in [
+          ('refs/tags/v1.7.0+210', 210),
+          ('refs/tags/v1.7.0+215', 215),
+          ('refs/tags/v1.7.0', 210),
+        ]) {
+          final r = await plan('push', ref, 10);
+          expect(r.code, 0, reason: '$ref: ${r.log}');
+          expect(r.out, contains('build_number=$number\n'));
+        }
+      });
+
+      test('Run workflow on a +N tag whose release is out still works, with '
+          'a warning', () async {
+        final r = await plan('workflow_dispatch', 'refs/tags/v1.7.0+215', 16,
+            released: true);
+        expect(r.code, 0, reason: r.log);
+        expect(r.out, contains('build_number=215\n'));
+        expect(r.log, contains('::warning::'));
+        expect(r.log, contains('re-releasing build 215'));
+        expect(r.gh, ['release view v1.7.0+215 --repo owner/repo']);
+        final main = await plan('workflow_dispatch', 'refs/heads/main', 16);
+        expect(main.code, 0);
+        expect(main.out, contains('build_number=216\n'));
+        expect(main.gh, isEmpty);
+      });
+
+      // A tag whose push the plan refused has no GitHub Release: Run
+      // workflow on it built the low number and published it (Android
+      // refuses it as a downgrade over a higher build already out).
+      test('Run workflow on a +N tag with no release (its push was refused) '
+          'stops before anything is built', () async {
+        final pushed = await plan('push', 'refs/tags/v1.7.0+205', 8);
+        expect(pushed.code, 1);
+        expect(pushed.gh, isEmpty, reason: 'a push asks nothing');
+        final r = await plan('workflow_dispatch', 'refs/tags/v1.7.0+205', 9);
+        expect(r.code, 1, reason: r.log);
+        expect(r.gh, ['release view v1.7.0+205 --repo owner/repo']);
+        expect(r.log, contains('::error::Run workflow on tag v1.7.0+205: '
+            'build number 205 is below 209, and v1.7.0+205 has no GitHub '
+            'Release'));
+        expect(r.log, contains('use a +N above 209'));
+        expect(r.log, isNot(contains('::warning::')));
+        expect(r.out, isNot(contains('build_number=')));
+        // At or above the floor, Run workflow asks nothing.
+        final high = await plan('workflow_dispatch', 'refs/tags/v1.7.0+220', 16);
+        expect(high.code, 0, reason: high.log);
+        expect(high.gh, isEmpty);
+        expect(high.out, contains('build_number=220\n'));
+      });
+
+      test('the plan step has the token gh needs, and no more permission',
+          () {
+        final at = workflow.indexOf('        id: plan\n');
+        final step = workflow.substring(
+            at, workflow.indexOf('        run: |\n', at));
+        expect(step, contains(r'GH_TOKEN: ${{ github.token }}'));
+        expect(job('plan'), isNot(contains('permissions:')),
+            reason: 'the workflow\'s contents: read is enough');
+        expect(workflow, contains('\npermissions:\n  contents: read\n'));
+      });
+    }, skip: Platform.isWindows);
+
+    // R16: with hasFragileUserData, an uninstall that keeps the app data
+    // keeps the old signature, and a differently signed build then fails
+    // to install. The notes say to leave the box unticked, as the
+    // android-v1.7.0 notes do.
+    test('R16: the release notes and the share script say to leave "Keep '
+        'app data" unticked', () {
+      final notes = job('github-release');
+      expect(notes, contains('if Android offers **Keep app data**, leave it '
+          'unticked'));
+      expect(notes, contains('export your log (Settings › Export Data)'));
+      expect(notes, isNot(contains('needs an uninstall')));
+      final script = _readRepo('scripts/build_share_apk.sh');
+      expect(script, contains(r'if Android offers \"Keep app data\", leave it'));
+      expect(script, contains('unticked'));
+      expect(_read('android/app/src/main/AndroidManifest.xml'),
+          contains('android:hasFragileUserData="true"'));
     });
   });
 

@@ -378,7 +378,10 @@ void main() {
       'switch off)', () async {
     debugRequireHttpsServerOverride = false;
     addTearDown(() => debugRequireHttpsServerOverride = null);
-    SharedPreferences.setMockInitialValues({});
+    // A key saved with its server's address (a key in the store with no
+    // preferences at all is one a reinstall left: never sent).
+    SharedPreferences.setMockInitialValues(
+        {'settings.server_base_url': 'https://srv.example'});
     final keys = _Keys()..data['server_api_key'] = 'k-srv';
     final settings = await AppSettings.load(
         prefs: await SharedPreferences.getInstance(), keyStore: keys);
@@ -401,8 +404,10 @@ void main() {
       final lon = point.lon.toStringAsFixed(5);
       final req = _randomRequest(r, lat: lat, lon: lon, point: point);
       for (final https in [true, false]) {
+        // One server both ways: the upload key goes only to the host it
+        // was saved for (services/server_http_client.dart).
         await settings.setServerBaseUrl(
-            https ? 'https://srv.example' : 'http://10.0.0.5:5000');
+            https ? 'https://srv.example' : 'http://srv.example:5000');
         final support = client.lookupSupport();
         expect(support.locationAllowed, https);
         final before = s.requests.length;
@@ -484,7 +489,9 @@ void main() {
       'on: nothing is sent', () async {
     debugRequireHttpsServerOverride = true;
     addTearDown(() => debugRequireHttpsServerOverride = null);
-    SharedPreferences.setMockInitialValues({});
+    // A key saved with this address: only its http:// keeps it back.
+    SharedPreferences.setMockInitialValues(
+        {'settings.server_base_url': 'http://10.0.0.5:5000'});
     final keys = _Keys()..data['server_api_key'] = 'k-srv';
     final settings = await AppSettings.load(
         prefs: await SharedPreferences.getInstance(), keyStore: keys);

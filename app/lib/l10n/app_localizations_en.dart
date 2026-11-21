@@ -2323,6 +2323,11 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String outcomeShareFixAddressMsg(String reason) {
+    return 'The shared photo was not analyzed. $reason Then share it again.';
+  }
+
+  @override
   String get reasonRateLimited => 'the provider is rate-limiting';
 
   @override
@@ -3884,4 +3889,34 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get watchGlassesAndroidNote =>
       'On Android, the Meta glasses photos switch starts off: these photos can\'t be checked for food on the phone first, so each one would go to the AI service unchecked.';
+
+  @override
+  String get errServerKeyOtherHost =>
+      'Your server upload key was saved for another server address, and Chopstats sends it only there. In AI Provider › Your own server, paste this server\'s key or use the saved one for it.';
+
+  @override
+  String get reasonServerKeyOtherHost =>
+      'the upload key was saved for another server address';
+
+  @override
+  String serverKeyOtherHostField(String host) {
+    return 'Saved for $host: not sent to the address above.';
+  }
+
+  @override
+  String serverKeyUseHere(String host) {
+    return 'Use this key for $host';
+  }
+
+  @override
+  String get autoScanServerKeyOtherHost =>
+      'Automatic logging is not running: your server upload key was saved for another server address, and Chopstats sends it only there. Fix it in AI Provider › Your own server.';
+
+  @override
+  String get diagServerKeyOtherHost =>
+      'The upload key was saved for another server address, so it is not sent to this one.';
+
+  @override
+  String get diagFixServerKeyOtherHost =>
+      'In Settings › AI Provider › Your own server, paste this server\'s upload key, or use the saved key for it.';
 }
