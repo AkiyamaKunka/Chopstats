@@ -1292,9 +1292,9 @@ void main() {
 
     // Decision 4 (2026-11-13): an Android-only version ships with a
     // hand-made GitHub Release under an android-v* tag (android-v1.7.0 on
-    // 2026-11-19, android-v1.7.1 next; the iPhone's next tag from main is
-    // v1.7.1). That tag must start no run: the only push trigger is tags
-    // v*.
+    // 2026-11-19, android-v1.7.1 on 2026-11-21; the iPhone's next tag from
+    // main is v1.7.1). That tag must start no run: the only push trigger
+    // is tags v*.
     test('only v* tags start a run, so android-v* tags start none', () {
       final on = RegExp(r'^on:\n((?:[ \t]+.*\n|\n)*)', multiLine: true)
           .firstMatch(workflow)!
@@ -1308,6 +1308,7 @@ void main() {
       expect(_githubTagMatches('v*', 'v1.7.0'), isTrue);
       expect(_githubTagMatches('v*', 'v1.7.0+207'), isTrue);
       expect(_githubTagMatches('v*', 'android-v1.7.0'), isFalse);
+      expect(_githubTagMatches('v*', 'android-v1.7.1'), isFalse);
       // The plan job treats only refs/tags/v* as a tag build.
       expect(workflow,
           contains(r'if [[ "$GITHUB_REF" == refs/tags/v* ]]; then'));
@@ -1407,22 +1408,54 @@ void main() {
     // the artifact android-1.7.0-2xx while the next build had to be 1.7.1,
     // and § 6.8 sent the APK out as android-v1.7.0 again. What they tell
     // the next run to expect is pubspec's version, and so is the tag the
-    // cheat sheet pushes (release.yml refuses any other).
+    // cheat sheet pushes (release.yml refuses any other). android-v1.7.1
+    // is out (run 9, build 209, 2026-11-21): the first Play upload is that
+    // run's bundle, under the version it was built as, and § 6.6's steps
+    // call the next Android-only version X.Y.Z, pubspec's version bumped
+    // first, so they name no version that is already out.
     test("what § 6 and § 8 expect from the next run is pubspec's version",
         () {
       final version = _pubspecVersion(_read('pubspec.yaml'));
       Set<String?> named(RegExp re) =>
           re.allMatches(s6).map((m) => m.group(1)).toSet();
       expect(named(RegExp(r'build name `(\d+\.\d+\.\d+)`')), {version});
-      expect(named(RegExp(r'`android-(\d+\.\d+\.\d+)-2xx`')), {version});
-      expect(s6, contains('Name the release `$version (2xx)`'));
-      expect(s6, contains('GitHub APK as `android-v$version` by hand'));
+      expect(named(RegExp(r'`android-(\d+\.\d+\.\d+)-(?:2xx|2\d\d)`')),
+          {version});
+      expect(s6, contains('Download the artifact `android-$version-209`'));
+      expect(s6, contains('Name the release `$version (209)`'));
+      expect(s6,
+          contains('build 209, the same build as the GitHub APK '
+              '`android-v$version`'));
+      expect(s6,
+          contains('GitHub APK went out by hand as `android-v$version` '
+              '(build 209)'));
       expect(s6, contains('`android-v1.7.0` (build 207) is already out'));
       expect(s6, contains("the iPhone's next tag from `main` is `v$version`"));
       expect(releasing,
           contains('git tag v$version && git push origin v$version'));
       expect(s6, isNot(contains('The next Android build is 1.7.1.')),
           reason: 'the bump is done (§ 6.6)');
+      final android = s6.substring(
+          s6.indexOf('**An Android-only version (decision 4).**'),
+          s6.indexOf('Later, when the iPhone version is ready'));
+      expect(
+          android,
+          contains("The next one is pubspec's version at that time, bumped "
+              'first (`X.Y.Z` in the steps)'));
+      for (final step in [
+        'build name `X.Y.Z`, and the artifact `android-X.Y.Z-2xx`',
+        "tag the run's commit `android-vX.Y.Z`",
+        '`git tag android-vX.Y.Z <sha> && git push origin android-vX.Y.Z`',
+        'title `Chopstats Android X.Y.Z`',
+        'the APK renamed `Chopstats-vX.Y.Z-b2xx-arm64-v8a.apk`',
+      ]) {
+        expect(android, contains(step), reason: step);
+      }
+      expect(
+          android,
+          isNot(contains(RegExp(r'build name `\d|`android-\d|'
+              r'android-v\d+\.\d+\.\d+ <sha>|Chopstats Android \d|'
+              r'`Chopstats-v\d'))));
       // Decision 9 (RD-6): renewal after a stop is Android 12 and later
       // only, and the Play build runs the keep-alive's job too.
       expect(s6, contains('only on Android 12 and later, and only after a '
@@ -1489,18 +1522,28 @@ void main() {
     // Review of #77 (DT-2): android-v1.7.0 went out on 2026-11-19 in the
     // repo's local time (run 7 at 22:09 CST, published 23:31 CST), not
     // 2026-11-20 (UTC), and main's pubspec is 1.7.1 from the merge of PR
-    // #77 on, not from the day it was decided.
-    test('android-v1.7.0 is dated 2026-11-19, and the bump by its PR', () {
+    // #77 on, not from the day it was decided. android-v1.7.1 (run 9)
+    // went out on 2026-11-21. Every dated mention of a published Android
+    // tag names its build, and nothing still calls android-v1.7.1 next.
+    test('android-v1.7.0 is dated 2026-11-19 and android-v1.7.1 2026-11-21, '
+        'each with its build, and the bump by its PR', () {
       final flat = releasing.replaceAll(RegExp(r'\s+'), ' ');
-      final dated = [
-        for (final sentence in flat.split(RegExp(r'(?<=[.;])\s+')))
-          if (sentence.contains('android-v1.7.0'))
-            for (final d in RegExp(r'\d{4}-\d\d-\d\d').allMatches(sentence))
-              (date: d.group(0)!, sentence: sentence),
-      ];
-      expect(dated, hasLength(greaterThanOrEqualTo(3)));
-      for (final (:date, :sentence) in dated) {
-        expect(date, '2026-11-19', reason: sentence);
+      final sentences = flat.split(RegExp(r'(?<=[.;])\s+'));
+      for (final (tag, day, build) in [
+        ('android-v1.7.0', '2026-11-19', 'build 207'),
+        ('android-v1.7.1', '2026-11-21', 'build 209'),
+      ]) {
+        final dated = [
+          for (final sentence in sentences)
+            if (sentence.contains(tag))
+              for (final d in RegExp(r'\d{4}-\d\d-\d\d').allMatches(sentence))
+                (date: d.group(0)!, sentence: sentence),
+        ];
+        expect(dated, hasLength(greaterThanOrEqualTo(3)), reason: tag);
+        for (final (:date, :sentence) in dated) {
+          expect(date, day, reason: sentence);
+          expect(sentence, contains(build), reason: sentence);
+        }
       }
       expect(flat, isNot(contains('So on 2026-11-20 `version:`')));
       expect(flat, isNot(contains('both were 1.7.1 on 2026-11-20')));
@@ -1509,6 +1552,15 @@ void main() {
           contains('`kAppVersion` (`lib/services/backup/backup_files.dart`) '
               '`1.7.1` since PR #77, decided on 2026-11-20'));
       expect(flat, contains('(both are 1.7.1 since PR #77)'));
+      for (final stale in [
+        'Android 1.7.1 goes out the same way',
+        'and the next build of `main` is 1.7.1',
+        'The next one is 1.7.1',
+        'GitHub APK as `android-v1.7.1` by hand',
+        'for 1.7.1 the Meta glasses sentence',
+      ]) {
+        expect(flat, isNot(contains(stale)), reason: stale);
+      }
     });
 
     // Review of #77 (RV-1): two maintainer notes outside RELEASING waited
