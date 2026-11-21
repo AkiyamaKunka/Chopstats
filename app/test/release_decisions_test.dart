@@ -1194,6 +1194,31 @@ void main() {
       expect(shots, contains('24-bit PNG with no alpha'));
     });
 
+    // The shots themselves (scripts/play_screenshots.py). zh-CN has no 06:
+    // the Chinese API Key page says which providers need a VPN in mainland
+    // China, where Play is not offered, and the listing names no VPN (PR
+    // #76 review).
+    test('the screenshots: 4 to 8 per language, 1080 x 1920 24-bit PNGs, '
+        'no Chinese API Key page', () {
+      final dir = '${_appRoot().path}/android/store/screenshots';
+      for (final lang in ['en-US', 'zh-CN']) {
+        final pngs = Directory('$dir/$lang')
+            .listSync()
+            .whereType<File>()
+            .where((f) => f.path.endsWith('.png'))
+            .toList();
+        expect(pngs.length, inInclusiveRange(4, 8), reason: lang);
+        for (final png in pngs) {
+          expect(_pngHeader(png), (1080, 1920, 8, 2), reason: png.path);
+        }
+      }
+      expect(File('$dir/en-US/06_ai_provider.png').existsSync(), isTrue);
+      expect(File('$dir/zh-CN/06_ai_provider.png').existsSync(), isFalse);
+      final shots = _read('android/store/screenshots/SHOTS.md')
+          .replaceAll(RegExp(r'\s+'), ' ');
+      expect(shots, contains('VPN or mainland-China notes'));
+    });
+
     // Android 13+ themed icons need a monochrome layer (lint
     // MonochromeLauncherIcon). flutter_launcher_icons writes it from
     // pubspec.yaml, from the layers scripts/play_graphics.py --launcher
