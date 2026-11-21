@@ -3586,6 +3586,52 @@ void main() {
     expect(deviceRegion('en', const []), isNull);
   });
 
+  // Review of PR 79 (F1-region): Android 13 and later put a language picked
+  // for the app first in the app's own locales, with the region Android's
+  // picker gave it. 中文 (中国) picked there on an American phone read as
+  // CN, and every branded meal was skipped as outside the US; English
+  // (United States) on a Canadian phone read as US. The phone's own
+  // languages (MainActivity "phone") say where the phone is set to be.
+  test("phoneRegion: the phone's own languages where Android gives them",
+      () {
+    // 中文 (中国) picked for the app in Android's settings, phone in English
+    // (US): the app's locales start zh_CN.
+    expect(
+        phoneRegion(
+            phoneLocales: const ['en-US'],
+            localeName: 'zh_CN',
+            countryCodes: const ['CN', 'US']),
+        'US');
+    expect(
+        phoneRegion(
+            phoneLocales: const ['en-CA', 'fr-CA'],
+            localeName: 'en_US',
+            countryCodes: const ['US', 'CA']),
+        'CA');
+    // The first with a region, as deviceRegion reads it.
+    expect(
+        phoneRegion(
+            phoneLocales: const ['zh-Hans', 'en-US'],
+            localeName: 'zh_Hans_CN',
+            countryCodes: const ['CN']),
+        'US');
+    // Android 12 and lower, iOS, or no answer: as before.
+    for (final none in [null, const <String>[]]) {
+      expect(
+          phoneRegion(
+              phoneLocales: none,
+              localeName: 'zh',
+              countryCodes: const [null, 'US', 'CN']),
+          'US');
+      expect(
+          phoneRegion(
+              phoneLocales: none,
+              localeName: 'zh_CN',
+              countryCodes: const ['CN', 'US']),
+          'CN');
+    }
+  });
+
   test('regionOfLocale', () {
     expect(regionOfLocale('en_US'), 'US');
     expect(regionOfLocale('zh-Hans_US'), 'US');

@@ -1752,13 +1752,19 @@ void main() {
         ?.group(1);
     expect(channel,
         contains('"installTimes" -> result.success(installTimes())'));
+    // The version installed too: the app language's agreement tells the
+    // same version installed again by it (app_language_sync.dart).
     expect(
         code,
         contains('private fun installTimes(): Map<String, Long>? = try { '
             '@Suppress("DEPRECATION") val info = '
             'packageManager.getPackageInfo(packageName, 0) '
+            '@Suppress("DEPRECATION") val version = if (Build.VERSION.SDK_INT '
+            '>= Build.VERSION_CODES.P) info.longVersionCode else '
+            'info.versionCode.toLong() '
             'mapOf("firstInstall" to info.firstInstallTime, "lastUpdate" to '
-            'info.lastUpdateTime) } catch (e: Exception) { null }'));
+            'info.lastUpdateTime, "versionCode" to version) } catch (e: '
+            'Exception) { null }'));
   });
 
   // Android QA Q7: the phone's 12/24-hour switch reached the app only at a
@@ -1768,23 +1774,28 @@ void main() {
   // re-sends the user settings as a configuration change does.
   test('MainActivity re-sends the 12/24-hour switch when it changes', () {
     final code = _kotlinCode(_mainActivity());
+    // Android 13 and later: Dart also reads the phone's own clock again
+    // (review of PR 79): once the app has a language of its own, the
+    // FlutterView's clock is that language's.
     expect(
         code,
         contains('private val clockFormatObserver = object : '
             'ContentObserver(Handler(Looper.getMainLooper())) { override fun '
             'onChange(selfChange: Boolean) { findViewById<View>('
             'FlutterActivity.FLUTTER_VIEW_ID) '
-            '?.dispatchConfigurationChanged(resources.configuration) } }'));
+            '?.dispatchConfigurationChanged(resources.configuration) '
+            'appLanguageChannel?.invokeMethod("phoneChanged", null) } }'));
     expect(
         _kotlinFunction(code, 'override fun configureFlutterEngine('),
         startsWith('{ super.configureFlutterEngine(flutterEngine) '
             'contentResolver.registerContentObserver( '
             'Settings.System.getUriFor(Settings.System.TIME_12_24), false, '
             'clockFormatObserver, ) '));
-    // The same hook drops the engine's analysis keep-alive requests (the
-    // keep-alive test below).
+    // The same hook drops the channel it tells and the engine's analysis
+    // keep-alive requests (the keep-alive test below).
     expect(_kotlinFunction(code, 'override fun cleanUpFlutterEngine('),
         '{ contentResolver.unregisterContentObserver(clockFormatObserver) '
+        'appLanguageChannel = null '
         'AnalysisKeepAlive.drop(applicationContext, keepAliveSession) '
         'super.cleanUpFlutterEngine(flutterEngine) }');
   });
@@ -2212,9 +2223,11 @@ void main() {
         dart,
         contains('AnalysisKeepAlive( [this._channel = const '
             "MethodChannel(keepAliveChannelName)]) { _send('reset'); }"));
-    // The same hook also stops the 12/24-hour observer (Q7, above).
+    // The same hook also stops the 12/24-hour observer and drops the
+    // channel it tells (Q7, above).
     expect(_kotlinFunction(code, 'override fun cleanUpFlutterEngine('),
         '{ contentResolver.unregisterContentObserver(clockFormatObserver) '
+        'appLanguageChannel = null '
         'AnalysisKeepAlive.drop(applicationContext, keepAliveSession) '
         'super.cleanUpFlutterEngine(flutterEngine) }');
     expect(code, contains('private var keepAliveSession = 0L'));
@@ -2567,6 +2580,13 @@ void main() {
   // LocaleManager on the app's own channel, for the app itself (no
   // permission), only one of its languages or none, and nothing below
   // Android 13. MainActivity is a FlutterActivity, not AppCompat.
+  //
+  // Review of PR 79: the language goes in with the region of the phone's
+  // own locale in that language (F1: a bare "en" became the app's main
+  // locale, and Android and Flutter took its 12-hour clock for the
+  // phone's), and "phone" answers what the app's language hides from the
+  // app: the phone's own languages, for the restaurant assist's region
+  // (F1-region), and its own 12/24-hour clock (F1, F3).
   test("MainActivity reads and sets the app's own language, from Android 13 "
       'only', () {
     final code = _kotlinCode(_mainActivity());
@@ -2574,11 +2594,16 @@ void main() {
         contains('const val APP_LANGUAGE_CHANNEL = "$appLanguageChannelName"'));
     expect(
         _kotlinFunction(code, 'override fun configureFlutterEngine('),
-        contains('MethodChannel(flutterEngine.dartExecutor.binaryMessenger, '
-            'APP_LANGUAGE_CHANNEL) .setMethodCallHandler { call, result -> '
+        contains('appLanguageChannel = MethodChannel('
+            'flutterEngine.dartExecutor.binaryMessenger, APP_LANGUAGE_CHANNEL) '
+            '.apply { setMethodCallHandler { call, result -> '
             'when (call.method) { "get" -> result.success(appLanguage()) '
             '"set" -> result.success(setAppLanguage(call.argument<Any?>("tags") '
-            'as? String)) else -> result.notImplemented() } }'));
+            'as? String)) "phone" -> result.success(phone()) '
+            'else -> result.notImplemented() } } }'));
+    expect(code,
+        contains('private var appLanguageChannel: MethodChannel? = null'));
+    expect('appLanguageChannel'.allMatches(code), hasLength(4));
     expect(
         _kotlinFunction(code, 'private fun appLanguage('),
         '{ if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return '
@@ -2591,15 +2616,44 @@ void main() {
         'if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return '
         'false return try { val manager = getSystemService('
         'LocaleManager::class.java) ?: return false manager.applicationLocales '
-        '= LocaleList.forLanguageTags(language) true } catch (e: Exception) { '
-        'false } }');
-    expect('applicationLocales'.allMatches(code), hasLength(2));
-    expect(code, isNot(contains('AppCompat')));
+        '= LocaleList.forLanguageTags( IntakeRules.appLanguageTag(language, '
+        'manager.systemLocales.toLanguageTags()), ) true } catch (e: '
+        'Exception) { false } }');
     expect(
-        _kotlinCode(_intakeRules()),
+        _kotlinFunction(code, 'private fun phone('),
+        '{ if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return '
+        'null return try { val locales = getSystemService('
+        'LocaleManager::class.java)?.systemLocales ?: return null mapOf( '
+        '"locales" to locales.toLanguageTags(), "use24h" to '
+        'IntakeRules.usesTwentyFourHourClock( Settings.System.getString('
+        'contentResolver, Settings.System.TIME_12_24), if (locales.isEmpty) '
+        'null else IntakeRules.longTimePattern(locales[0]), ), ) } catch (e: '
+        'Exception) { null } }');
+    expect('applicationLocales'.allMatches(code), hasLength(2));
+    expect('systemLocales'.allMatches(code), hasLength(2));
+    expect(code, isNot(contains('AppCompat')));
+    final rules = _kotlinCode(_intakeRules());
+    expect(
+        rules,
         contains('fun appLanguageTags(tags: String?): String? = '
             'tags?.takeIf { it.isEmpty() || it in APP_LANGUAGES }'));
-    _expectJvmTests(
-        ['IntakeRules.appLanguageTags(', 'IntakeRules.APP_LANGUAGES']);
+    // The rules use no Android class (the JVM tests run them for real).
+    expect(
+        _kotlinFunction(rules, 'fun appLanguageTag('),
+        contains('Locale.forLanguageTag(tag.trim())'));
+    expect(
+        rules,
+        contains('fun longTimePattern(locale: Locale): String? = '
+            '(DateFormat.getTimeInstance(DateFormat.LONG, locale) as? '
+            'SimpleDateFormat)?.toPattern()'));
+    expect(_intakeRules(), contains('import java.text.DateFormat\n'));
+    expect(_intakeRules(), contains('import java.util.Locale\n'));
+    _expectJvmTests([
+      'IntakeRules.appLanguageTags(',
+      'IntakeRules.APP_LANGUAGES',
+      'IntakeRules.appLanguageTag(',
+      'IntakeRules.usesTwentyFourHourClock(',
+      'IntakeRules.longTimePattern(',
+    ]);
   });
 }

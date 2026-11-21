@@ -388,13 +388,21 @@ class MainActivity : FlutterActivity() {
     /// FlutterView again (FlutterActivity.FLUTTER_VIEW_ID, its public id),
     /// which re-sends the user settings exactly as a configuration change
     /// does. Registered for the activity's engine (configureFlutterEngine
-    /// to cleanUpFlutterEngine), on the main thread.
+    /// to cleanUpFlutterEngine), on the main thread. On Android 13 and
+    /// later Dart is also told on the app-language channel ("phoneChanged"),
+    /// and reads the phone's own clock again (phone): once the app has a
+    /// language of its own, the FlutterView's clock is that language's.
     private val clockFormatObserver = object : ContentObserver(Handler(Looper.getMainLooper())) {
         override fun onChange(selfChange: Boolean) {
             findViewById<View>(FlutterActivity.FLUTTER_VIEW_ID)
                 ?.dispatchConfigurationChanged(resources.configuration)
+            appLanguageChannel?.invokeMethod("phoneChanged", null)
         }
     }
+
+    /// The app-language channel of this activity's engine
+    /// (configureFlutterEngine to cleanUpFlutterEngine). Main thread only.
+    private var appLanguageChannel: MethodChannel? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -497,24 +505,29 @@ class MainActivity : FlutterActivity() {
         // Chopstats › Language, which lists the languages in
         // res/xml/locales_config.xml), kept in step with the app's Language
         // row by lib/services/settings/app_language_sync.dart: "get" answers
-        // it (appLanguage), "set" sets it (setAppLanguage). No permission:
-        // an app sets its own.
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, APP_LANGUAGE_CHANNEL)
-            .setMethodCallHandler { call, result ->
-                when (call.method) {
-                    "get" -> result.success(appLanguage())
-                    "set" -> result.success(setAppLanguage(call.argument<Any?>("tags") as? String))
-                    else -> result.notImplemented()
+        // it (appLanguage), "set" sets it (setAppLanguage). "phone" answers
+        // what the phone itself is set to, which the app's own language
+        // hides from the app (phone). No permission: an app sets its own.
+        appLanguageChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, APP_LANGUAGE_CHANNEL)
+            .apply {
+                setMethodCallHandler { call, result ->
+                    when (call.method) {
+                        "get" -> result.success(appLanguage())
+                        "set" -> result.success(setAppLanguage(call.argument<Any?>("tags") as? String))
+                        "phone" -> result.success(phone())
+                        else -> result.notImplemented()
+                    }
                 }
             }
     }
 
     /// The engine is going (the activity is destroyed): the 12/24-hour
-    /// observer registered for it stops (clockFormatObserver), and its
-    /// analyses go with it, so they no longer keep the process up. Its Dart
-    /// can never end them now.
+    /// observer registered for it stops (clockFormatObserver), with the
+    /// channel it tells, and its analyses go with it, so they no longer
+    /// keep the process up. Its Dart can never end them now.
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
         contentResolver.unregisterContentObserver(clockFormatObserver)
+        appLanguageChannel = null
         AnalysisKeepAlive.drop(applicationContext, keepAliveSession)
         super.cleanUpFlutterEngine(flutterEngine)
     }
@@ -558,19 +571,51 @@ class MainActivity : FlutterActivity() {
 
     /// Sets the app's own language to [tags] on Android 13 and later: one of
     /// the app's languages, or none for "" (IntakeRules.appLanguageTags);
-    /// true when it was set. Android hands the change to this activity as a
-    /// configuration change it takes itself (configChanges locale and
-    /// layoutDirection, AndroidManifest.xml), so it is not recreated for it:
-    /// FlutterView sends Dart the new locales, and nothing on screen is lost.
+    /// true when it was set. The language goes in with the region of the
+    /// phone's own locale in it (IntakeRules.appLanguageTag: "en-GB" on a
+    /// British phone), which keeps the phone's clock and region. Android
+    /// hands the change to this activity as a configuration change it takes
+    /// itself (configChanges locale and layoutDirection,
+    /// AndroidManifest.xml), so it is not recreated for it: FlutterView
+    /// sends Dart the new locales, and nothing on screen is lost.
     private fun setAppLanguage(tags: String?): Boolean {
         val language = IntakeRules.appLanguageTags(tags) ?: return false
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return false
         return try {
             val manager = getSystemService(LocaleManager::class.java) ?: return false
-            manager.applicationLocales = LocaleList.forLanguageTags(language)
+            manager.applicationLocales = LocaleList.forLanguageTags(
+                IntakeRules.appLanguageTag(language, manager.systemLocales.toLanguageTags()),
+            )
             true
         } catch (e: Exception) {
             false
+        }
+    }
+
+    /// What the phone itself is set to on Android 13 and later, which the
+    /// app's own language hides from the app: its locales then start with
+    /// the app's, and the FlutterView's 12/24-hour clock
+    /// (DateFormat.is24HourFormat of this activity) is that language's.
+    /// "locales": the phone's own languages as language tags, the
+    /// preferred first (LocaleManager.systemLocales, which no app language
+    /// changes); "use24h": the phone's own clock, its 'Use 24-hour format'
+    /// switch or its first language's
+    /// (IntakeRules.usesTwentyFourHourClock), null when neither tells. Null
+    /// below Android 13, where the app's are the phone's, or when they
+    /// cannot be read.
+    private fun phone(): Map<String, Any?>? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return null
+        return try {
+            val locales = getSystemService(LocaleManager::class.java)?.systemLocales ?: return null
+            mapOf(
+                "locales" to locales.toLanguageTags(),
+                "use24h" to IntakeRules.usesTwentyFourHourClock(
+                    Settings.System.getString(contentResolver, Settings.System.TIME_12_24),
+                    if (locales.isEmpty) null else IntakeRules.longTimePattern(locales[0]),
+                ),
+            )
+        } catch (e: Exception) {
+            null
         }
     }
 
@@ -581,14 +626,19 @@ class MainActivity : FlutterActivity() {
     }
 
     /// When this install was first installed and last updated (ms since
-    /// the epoch, PackageInfo). Preferences that Auto Backup restored, or a
-    /// device transfer brought, carry another install's notification-ask
-    /// flags; notification_permission.dart tells them apart by these. Null
-    /// when they cannot be read.
+    /// the epoch, PackageInfo), and the version installed then. Preferences
+    /// that Auto Backup restored, or a device transfer brought, carry
+    /// another install's notification-ask flags;
+    /// notification_permission.dart tells them apart by these. The app
+    /// language's agreement tells by them when the same version was
+    /// installed again (app_language_sync.dart). Null when they cannot be
+    /// read.
     private fun installTimes(): Map<String, Long>? = try {
         @Suppress("DEPRECATION")
         val info = packageManager.getPackageInfo(packageName, 0)
-        mapOf("firstInstall" to info.firstInstallTime, "lastUpdate" to info.lastUpdateTime)
+        @Suppress("DEPRECATION")
+        val version = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) info.longVersionCode else info.versionCode.toLong()
+        mapOf("firstInstall" to info.firstInstallTime, "lastUpdate" to info.lastUpdateTime, "versionCode" to version)
     } catch (e: Exception) {
         null
     }

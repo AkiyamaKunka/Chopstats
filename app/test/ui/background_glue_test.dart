@@ -34,7 +34,8 @@ import 'package:calorie_tracker/services/settings/app_settings.dart';
 import 'package:calorie_tracker/ui/app.dart';
 import 'package:calorie_tracker/ui/refresh_signal.dart';
 import 'package:calorie_tracker/ui/background_glue.dart';
-import 'package:calorie_tracker/ui/coach_strings.dart' show localizationsFor;
+import 'package:calorie_tracker/ui/coach_strings.dart'
+    show localizationsFor, notificationChannelFor;
 import 'package:calorie_tracker/ui/outcome_text.dart' show autoScanPausedLine;
 import 'package:calorie_tracker/ui/photo_pipeline.dart';
 import 'package:calorie_tracker/ui/play_channel.dart'
@@ -2448,6 +2449,128 @@ void main() {
       expect(now.serverBaseUrl, 'https://a.example');
       expect(now.serverApiKey, isNull);
       expect({for (final k in prefs.getKeys()) k: prefs.get(k)}, before);
+    });
+  });
+
+  // Review of PR 79 (F2): a language picked for the app in Android 13+'s
+  // settings reached only the app engine, at its next launch. The
+  // background engine kept the explicit setting it last read: its meal
+  // cards, the pause notice, the channel names and the model's meal names
+  // (saved to the log) came out in the language just turned off there.
+  // Android puts the app's language first in the engine's locales; the run
+  // takes it, and writes nothing.
+  group("Android 13 and later: the run takes a language picked in Android's "
+      'settings since the app last ran', () {
+    const zhCN = Locale.fromSubtags(
+        languageCode: 'zh', scriptCode: 'Hans', countryCode: 'CN');
+    final dispatcher = TestWidgetsFlutterBinding.instance.platformDispatcher;
+    tearDown(dispatcher.clearLocalesTestValue);
+
+    Future<(AppSettings, SharedPreferences)> loaded(
+        Map<String, Object> values) async {
+      SharedPreferences.setMockInitialValues(values);
+      final prefs = await SharedPreferences.getInstance();
+      final keys = MemoryKeyStore()..data['gemini_api_key'] = 'k';
+      return (await AppSettings.load(prefs: prefs, keyStore: keys), prefs);
+    }
+
+    test('its cards, channels and meal names are in it; nothing is written',
+        () async {
+      final (s, prefs) = await loaded({
+        'settings.watcher_enabled': true,
+        'settings.app_language': 'en',
+        'app_language.android_agreed': 'en@1@2@3',
+      });
+      // 中文 picked for the app in Android's settings, the app not opened.
+      dispatcher.localesTestValue = const [zhCN, Locale('en', 'US')];
+      expect(takeAndroidLanguageForRun(s, prefs, android: true), 'en@1@2@3');
+      expect(s.appLanguage, 'zh');
+      expect(s.repliesInChinese, isTrue, reason: "the model's meal names");
+      expect(notificationChannelFor(s.appLanguage).name,
+          localizationsFor('zh').notificationChannelName);
+      expect(prefs.getString('settings.app_language'), 'en',
+          reason: "only the app engine's sync writes it");
+      expect(prefs.getString('app_language.android_agreed'), 'en@1@2@3');
+
+      final titles = <String>[];
+      await headlessBackfillWith(
+        settings: s,
+        prefs: prefs,
+        intake: EmittingIntake()..batch = [photo(1)],
+        pipeline: () async => PhotoPipeline(
+            dao: FakeDao(),
+            analyzer: FakeAnalyzer()
+              ..nextPhotoOutcome = const AnalysisOutcome(
+                  analysis: {'is_food': true, 'food_items': []},
+                  isFood: true,
+                  wall: Duration.zero)),
+        showMealCard: (title, _) async => titles.add(title),
+        clock: () => DateTime(2026, 11, 21, 12),
+      );
+      expect(titles, [localizationsFor('zh').mealCardAutoTitle]);
+    });
+
+    test('iOS, no agreement, or a pick in the app since: the stored language',
+        () async {
+      dispatcher.localesTestValue = const [zhCN];
+      final (ios, iosPrefs) = await loaded({
+        'settings.app_language': 'en',
+        'app_language.android_agreed': 'en@1@2@3',
+      });
+      expect(takeAndroidLanguageForRun(ios, iosPrefs, android: false), isNull);
+      expect(ios.appLanguage, 'en');
+
+      // Android 12 and lower, or this version never ran in the app.
+      final (none, nonePrefs) = await loaded({'settings.app_language': 'en'});
+      expect(takeAndroidLanguageForRun(none, nonePrefs, android: true), isNull);
+      expect(none.appLanguage, 'en');
+
+      // English picked in the app after the agreement on 中文.
+      final (app, appPrefs) = await loaded({
+        'settings.app_language': 'en',
+        'app_language.android_agreed': 'zh@1@2@3',
+      });
+      takeAndroidLanguageForRun(app, appPrefs, android: true);
+      expect(app.appLanguage, 'en');
+    });
+
+    test("the summary it re-arms is in it, unless the app has agreed with "
+        'Android since the run began', () async {
+      final at = DateTime(2026, 11, 13, 19, 0); // a Friday
+      final armed = <String>[];
+      final notifier = ReportNotifier(
+        presenter: (_, _, _) async {},
+        scheduler: (id, title, _, when, _) async => armed.add(title),
+        canceller: (_) async {},
+        pendingIds: () async => const [],
+        pendingPayloads: () async => const {},
+      );
+      final values = <String, Object>{
+        'settings.app_language': 'en',
+        'app_language.android_agreed': 'en@1@2@3',
+      };
+      final (s, prefs) = await loaded(values);
+      dispatcher.localesTestValue = const [zhCN];
+      final agreedAtStart = takeAndroidLanguageForRun(s, prefs, android: true);
+      Future<void> rearm() => rearmSummaryAfterRun(
+          prefs: prefs,
+          settings: s,
+          notifier: notifier,
+          openDao: () async => FakeDao(),
+          ios: false,
+          now: () => at,
+          languageAgreedAtStart: agreedAtStart);
+      await rearm();
+      expect(armed.first, '周五：0 千卡');
+
+      // The app opened during the run and agreed with Android again: the
+      // stored language is the newer word (this engine's locales are as
+      // they were when it started).
+      armed.clear();
+      SharedPreferences.setMockInitialValues(
+          {...values, 'app_language.android_agreed': 'en@1@2@4'});
+      await rearm();
+      expect(armed.first, 'Fri: 0 kcal');
     });
   });
 

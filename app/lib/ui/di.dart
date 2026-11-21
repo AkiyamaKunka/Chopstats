@@ -371,9 +371,13 @@ class AppServices {
       mealsChanged: mealsChangedSignal,
       onMealsChanged: signalMealsChanged,
       inForeground: appEngineInForeground,
-      country: () => deviceRegion(
-            Platform.localeName,
-            PlatformDispatcher.instance.locales.map((l) => l.countryCode),
+      // The phone's own languages on Android 13 and later, which a
+      // language picked for the app never changes (app_language_sync.dart).
+      country: () => phoneRegion(
+            phoneLocales: PhoneSettings.locales,
+            localeName: Platform.localeName,
+            countryCodes:
+                PlatformDispatcher.instance.locales.map((l) => l.countryCode),
           ),
       repliesInChinese: () => settings.repliesInChinese,
       // The location path (design R6c), iOS only: the photo's position
