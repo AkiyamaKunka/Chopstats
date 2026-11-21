@@ -21,9 +21,9 @@
 /// the app's goes to Android. So at this version's first launch a language
 /// picked in the app before stays (no earlier version told Android), and
 /// so does one in preferences that came from another install (a backup
-/// restored, a new phone, an uninstall that kept the app's data): their
-/// agreement carries that install's first-install time, and Android may
-/// keep no language for the app here.
+/// restored after a reinstall, a new phone): their agreement carries that
+/// install's first-install time, and Android may keep no language for the
+/// app here.
 ///
 /// Android 12 and lower have no per-app language: MainActivity answers
 /// null and nothing is read or written. Built for the app's own engine on

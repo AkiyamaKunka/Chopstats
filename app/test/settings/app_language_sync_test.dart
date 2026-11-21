@@ -200,11 +200,11 @@ void main() {
       expect(android.tags, 'en-GB');
     });
 
-    // Preferences restored from a backup, brought to a new phone or kept
-    // by an uninstall that kept the app's data carry another install's
-    // agreement, while that phone's Android may have no language for the
-    // app: the language the user picked stays and goes to Android, where
-    // this install's own agreement would read as System default picked.
+    // Preferences restored from a backup after a reinstall, or brought to
+    // a new phone, carry another install's agreement, while Android there
+    // may have no language for the app: the language the user picked stays
+    // and goes to Android, where this install's own agreement would read
+    // as System default picked.
     test("another install's agreement counts as none", () async {
       android.tags = '';
       final (settings, prefs) = await started({
