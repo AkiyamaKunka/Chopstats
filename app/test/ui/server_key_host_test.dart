@@ -704,7 +704,8 @@ void main() {
   // at '' and at the first address saved, then bound to it, and a paste at
   // the caret saved key A + key B for b.example. The host is stored with
   // the key now; a key stored as plain text (1.7.0 and earlier) that a
-  // first launch finds has lost its host, and is never shown or sent.
+  // first launch finds has no known host: never shown or sent, until the
+  // user taps Use this key for the address (review of 2026-11-20).
   group('after a reinstall that kept the key and dropped the preferences',
       () {
     const keyA = 'key-a-0123456789';
@@ -724,15 +725,22 @@ void main() {
           prefs: await SharedPreferences.getInstance(), keyStore: saved);
       await s.setServerBaseUrl('https://a.example');
       await s.setServerApiKey(keyA);
-      return saved.data['server_api_key']!;
+      return saved.data['server_api_key_item']!;
     }
 
-    /// The reinstalled app's first launch: no preferences, [item] still in
-    /// the store. The user picks the plan again and allows it.
-    Future<void> reinstall(String item) async {
-      SharedPreferences.setMockInitialValues({});
+    /// The reinstalled app's first launch: no preferences ([prefsLeft]
+    /// for an update in place instead), [item] (this version's) or
+    /// [legacy] (1.7.0's plain text) still in the store. The user picks the
+    /// plan again and allows it.
+    Future<void> reinstall(
+        {String? item,
+        String? legacy,
+        Map<String, Object> prefsLeft = const {}}) async {
+      SharedPreferences.setMockInitialValues(prefsLeft);
       prefs = await SharedPreferences.getInstance();
-      keys = MemoryKeyStore()..data['server_api_key'] = item;
+      keys = MemoryKeyStore();
+      if (item != null) keys.data['server_api_key_item'] = item;
+      if (legacy != null) keys.data['server_api_key'] = legacy;
       settings = await AppSettings.load(prefs: prefs, keyStore: keys);
       await settings.setProvider(AiProvider.server);
       await settings.setAiConsent(aiConsentRoute('server', 'claude'),
@@ -760,6 +768,8 @@ void main() {
         tester.widget<EditableText>(keyEditable).controller.text;
     final savedForA =
         find.text('Saved for a.example: not sent to the address above.');
+    final savedWithoutAddress = find.text('Saved without its server address: '
+        'not sent anywhere until you use it for one.');
 
     bool carriesKeyA(String? text) {
       if (text == null) return false;
@@ -889,15 +899,22 @@ void main() {
 
     for (final (lost, kind) in const [
       (false, 'key A stored with its host'),
-      (true, 'key A stored as plain text (its host lost)'),
+      (true, 'key A stored as plain text (no known host)'),
     ]) {
+      Future<void> reinstallKeyA() async => lost
+          ? reinstall(legacy: keyA)
+          : reinstall(item: await itemSavedForA());
+
       /// The line under the field names a.example for a key stored with
-      /// its host; a lost host is named nowhere.
+      /// its host, and says a key with no known host was saved without its
+      /// address; at an address naming a host, the row makes it that
+      /// address's.
       void expectEmptyField(WidgetTester tester, {required bool atHost}) {
         expect(keyText(tester), isEmpty,
             reason: 'key A is not in the field to be edited');
         expect(savedForA, lost ? findsNothing : findsOneWidget);
-        expect(useHere, atHost && !lost ? findsOneWidget : findsNothing);
+        expect(savedWithoutAddress, lost ? findsOneWidget : findsNothing);
+        expect(useHere, atHost ? findsOneWidget : findsNothing);
       }
 
       for (final MapEntry(key: editName, value: edit) in edits.entries) {
@@ -906,7 +923,7 @@ void main() {
               'https://b.example';
           testWidgets('$kind: $editName $where: b.example gets only what is '
               'pasted', (tester) async {
-            await reinstall(lost ? keyA : await itemSavedForA());
+            await reinstallKeyA();
             await openServerPage(tester);
             expectEmptyField(tester, atHost: false);
             if (atB) {
@@ -922,15 +939,22 @@ void main() {
             await expectKeyAOnlyAtA();
             if (editName == 'one backspace') {
               // The field was empty: nothing deleted, nothing saved.
-              expect(settings.serverApiKey, keyA);
-              expect(settings.serverKeyHost, lost ? isNull : 'a.example');
+              if (lost) {
+                expect(settings.serverKeyHostUnknown, isTrue);
+                expect(settings.serverApiKey, isNull);
+              } else {
+                expect(settings.serverApiKey, keyA);
+                expect(settings.serverKeyHost, 'a.example');
+              }
               expectEmptyField(tester, atHost: true);
               expect(seen, isEmpty);
             } else {
               expect(settings.serverApiKey, 'key-b');
               expect(settings.serverKeyHost, 'b.example');
+              expect(settings.serverKeyHostUnknown, isFalse);
               expect(keyText(tester), 'key-b');
               expect(find.textContaining('Saved for'), findsNothing);
+              expect(savedWithoutAddress, findsNothing);
               expect(seen, ['b.example <- key-b']);
             }
           });
@@ -939,14 +963,14 @@ void main() {
 
       testWidgets('$kind: at a.example the field '
           '${lost ? 'stays empty' : 'is filled again'}', (tester) async {
-        await reinstall(lost ? keyA : await itemSavedForA());
+        await reinstallKeyA();
         await openServerPage(tester);
         await moveAddress(tester, 'https://b.example');
         await deleteOne(tester);
         await moveAddress(tester, 'https://a.example');
         await rest(tester);
         if (lost) {
-          // Nothing says it is a.example's.
+          // Nothing says it is a.example's: only the user can.
           expectEmptyField(tester, atHost: true);
           expect(seen, isEmpty);
         } else {
@@ -957,22 +981,23 @@ void main() {
         await expectKeyAOnlyAtA();
       });
 
-      testWidgets('$kind: Use this key '
-          '${lost ? 'is never offered' : 'makes it the same server\'s new '
-              'name\'s, by the tap alone'}', (tester) async {
-        await reinstall(lost ? keyA : await itemSavedForA());
+      testWidgets('$kind: Use this key makes it '
+          '${lost ? 'the address\'s' : 'the same server\'s new name\'s'}, by '
+          'the tap alone', (tester) async {
+        await reinstallKeyA();
         await openServerPage(tester);
         await moveAddress(tester, 'https://a2.example');
         await rest(tester);
         expect(seen, isEmpty);
-        if (lost) {
-          expect(useHere, findsNothing);
-          return;
-        }
+        expectEmptyField(tester, atHost: true);
         await tester.tap(useHere);
         await tester.pumpAndSettle();
         expect(settings.serverKeyHost, 'a2.example');
+        expect(settings.serverKeyHostUnknown, isFalse);
         expect(keyText(tester), keyA);
+        // From no key to key A, at one address, the Restaurant group asks
+        // once the key rests, as for a key pasted there.
+        await rest(tester);
         expect(seen, ['a2.example <- $keyA']);
         await moveAddress(tester, 'https://b.example');
         expect(keyText(tester), isEmpty);
@@ -991,7 +1016,7 @@ void main() {
 
       testWidgets('$kind: a setup link confirmed with the page open fills '
           'both fields with the link\'s server', (tester) async {
-        await reinstall(lost ? keyA : await itemSavedForA());
+        await reinstallKeyA();
         await openServerPage(tester);
         await store.applyServerSetup(
             serverBackend: 'claude',
@@ -1018,6 +1043,50 @@ void main() {
         expect(seen.last, 'b.example <- zz');
       });
     }
+
+    // Review of 2026-11-20, PN-1: an update in place from 1.7.0 whose
+    // address field had been cleared (1.7.0 saves ''), the key kept as
+    // plain text. No first launch and no address, so the key loaded as one
+    // typed before any address: the field held it masked at b.example, the
+    // address saved as the key field is tapped bound it there, and the
+    // Restaurant group asked b.example at once with key A.
+    testWidgets('an update from 1.7.0 with the address cleared: b.example is '
+        'asked nothing with key A, the field says it was saved without its '
+        'address, and Use this key alone makes it b.example\'s',
+        (tester) async {
+      await reinstall(legacy: keyA, prefsLeft: {
+        'settings.provider': 'server',
+        'settings.server_backend': 'claude',
+        'settings.server_base_url': '',
+        'settings.ai_consent_routes': <String>['server:claude'],
+      });
+      expect(settings.serverKeyHostUnknown, isTrue);
+      await openServerPage(tester);
+      expect(keyText(tester), isEmpty);
+      expect(savedWithoutAddress, findsOneWidget);
+      expect(useHere, findsNothing, reason: "'' names no host");
+      await moveAddress(tester, 'https://b.example');
+      await rest(tester);
+      expect(seen, isEmpty, reason: 'key A goes nowhere');
+      expect(keyText(tester), isEmpty);
+      expect(savedWithoutAddress, findsOneWidget);
+      expect(useHere, findsOneWidget);
+      await expectKeyAOnlyAtA();
+      // The next launch, with b.example saved: still not b.example's.
+      final next = await AppSettings.load(prefs: prefs, keyStore: keys);
+      expect(next.serverKeyHostUnknown, isTrue);
+      expect(next.serverKeyFor('b.example'), isNull);
+
+      await tester.tap(useHere);
+      await tester.pumpAndSettle();
+      expect((settings.serverApiKey, settings.serverKeyHost),
+          (keyA, 'b.example'));
+      expect(keyText(tester), keyA);
+      expect(savedWithoutAddress, findsNothing);
+      expect(useHere, findsNothing);
+      await rest(tester);
+      expect(seen, ['b.example <- $keyA']);
+    });
   });
 
   group('Settings › Your own server', () {
@@ -1163,6 +1232,80 @@ void main() {
     testWidgets('zh: the line and the row', (tester) async {
       await open(tester, keyFromAnotherServer(), locale: const Locale('zh'));
       expect(find.text('为 a.example 保存：不会发送到上面的地址。'), findsOneWidget);
+      expect(find.text('将此密钥用于 b.example'), findsOneWidget);
+    });
+
+    // A key saved without its server address (review of 2026-11-20):
+    // not the upload key, so the store's key is empty; the line says why
+    // the field is empty, and the row is the one way to make it this
+    // address's.
+    FakeSettings keyWithNoKnownHost({String url = 'https://b.example'}) =>
+        FakeSettings(keys: {})
+          ..provider = 'server'
+          ..serverBaseUrl = url
+          ..keyOfUnknownHost = 'key-a';
+    const savedWithoutAddress = 'Saved without its server address: not sent '
+        'anywhere until you use it for one.';
+
+    testWidgets('a key saved without its server address: the field is empty '
+        'and says so; one tap makes it this address\'s', (tester) async {
+      final settings = keyWithNoKnownHost();
+      await open(tester, settings);
+      expect(keyText(tester), isEmpty);
+      expect(find.text(savedWithoutAddress), findsOneWidget);
+      expect(find.textContaining('Saved for'), findsNothing);
+      // A tap outside the empty field saves nothing and keeps it.
+      final updates = settings.updateCalls;
+      await tester.tap(keyField);
+      await tester.pump();
+      await tester.tapAt(const Offset(5, 5));
+      await tester.pumpAndSettle();
+      expect(settings.updateCalls, updates);
+      expect(settings.keyFieldWrites, isEmpty);
+      expect(settings.serverKeyHostUnknown, isTrue);
+      await tester.tap(find.byKey(const Key('serverKeyUseHereRow')));
+      await tester.pumpAndSettle();
+      expect(settings.bindServerKeyCalls, 1);
+      expect(settings.apiKey, 'key-a');
+      expect(keyText(tester), 'key-a');
+      expect(find.text(savedWithoutAddress), findsNothing);
+      expect(find.byKey(const Key('serverKeyUseHereRow')), findsNothing);
+    });
+
+    testWidgets('a key saved without its server address, at an address '
+        'naming none: the line, and no row until there is one',
+        (tester) async {
+      final settings = keyWithNoKnownHost(url: '');
+      await open(tester, settings);
+      expect(find.text(savedWithoutAddress), findsOneWidget);
+      expect(find.byKey(const Key('serverKeyUseHereRow')), findsNothing);
+      await tester.enterText(
+          find.byKey(const Key('serverUrlField')), 'https://b.example');
+      await tester.tap(keyField);
+      await tester.pumpAndSettle();
+      expect(find.text(savedWithoutAddress), findsOneWidget);
+      expect(find.text('Use this key for b.example'), findsOneWidget);
+    });
+
+    testWidgets('a key saved without its server address: what is pasted '
+        'replaces it', (tester) async {
+      final settings = keyWithNoKnownHost();
+      await open(tester, settings);
+      await tester.enterText(keyField, 'key-b');
+      await tester.pumpAndSettle();
+      expect(settings.apiKey, 'key-b');
+      expect(settings.serverKeyHostUnknown, isFalse);
+      expect(find.text(savedWithoutAddress), findsNothing);
+      expect(find.byKey(const Key('serverKeyUseHereRow')), findsNothing);
+    });
+
+    testWidgets('zh: the line for a key saved without its server address',
+        (tester) async {
+      await open(tester, keyWithNoKnownHost(), locale: const Locale('zh'));
+      expect(
+          find.text('保存时没有记下服务器地址：'
+              '在你把它用于某个地址之前，不会发送到任何地方。'),
+          findsOneWidget);
       expect(find.text('将此密钥用于 b.example'), findsOneWidget);
     });
 

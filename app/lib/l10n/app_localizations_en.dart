@@ -3909,6 +3909,10 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String get serverKeyUnknownHostField =>
+      'Saved without its server address: not sent anywhere until you use it for one.';
+
+  @override
   String get autoScanServerKeyOtherHost =>
       'Automatic logging is not running: your server upload key was saved for another server address, and Chopstats sends it only there. Fix it in AI Provider › Your own server.';
 

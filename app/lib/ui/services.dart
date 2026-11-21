@@ -116,16 +116,23 @@ abstract class SettingsStore {
 
   /// The host the own server's upload key was saved for
   /// (AppSettings.serverKeyHost, lowercased); null: no key, one saved
-  /// before any address, or one whose host is lost (a reinstall kept the
-  /// key without it: never shown or sent). The key is sent to that host
-  /// only (core/server_transport.dart serverKeyForOtherHost).
+  /// before any address, or only a key whose server is not known
+  /// ([serverKeyHostUnknown]). The key is sent to that host only
+  /// (core/server_transport.dart serverKeyForOtherHost).
   String? get serverKeyHost;
+
+  /// Whether a key is kept whose server is not known
+  /// (AppSettings.serverKeyHostUnknown): one an earlier version stored
+  /// without its server address. It is not the upload key ([apiKey] is ''
+  /// on the server): never in the key field or sent, until the user uses
+  /// it for the address ([bindServerKeyToAddress]) or enters another key.
+  bool get serverKeyHostUnknown;
 
   /// The own server's upload key as its key field shows it at the saved
   /// address (AppSettings.serverKeyForAddress): the key while it is bound
   /// to the address's host, or to none yet; '' while it is bound to another
   /// host, or to one while the address names none, and at every address
-  /// while its host is lost.
+  /// for a key whose server is not known.
   String get serverKeyForAddress;
 
   /// The text of the upload key that may go to [host] (AppSettings
@@ -147,7 +154,8 @@ abstract class SettingsStore {
   Listenable get changes;
 
   /// Settings › Your own server › "Use this key for …": the saved
-  /// upload key is the current address's too (AppSettings
+  /// upload key is the current address's too, or the key kept whose server
+  /// is not known is the current address's (AppSettings
   /// .bindServerKeyToAddress). Only on the user's tap.
   Future<void> bindServerKeyToAddress();
 

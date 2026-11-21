@@ -335,10 +335,11 @@ When merging #22 after this PR:
 - **Never hand-merge the generated `app_localizations*.dart`.** Take
   either side, then run `flutter gen-l10n` in `app/`.
 - `app/test/ui/usual_copy_test.dart` pins the number of keys in each ARB
-  file: 809 on `main` since #22 merged, 961 on the iCloud Backup branch
+  file: 809 on `main` since #22 merged, 962 on the iCloud Backup branch
   merged with #33, the review-171 fixes, the Android photos, privacy,
   background and ui lanes, the Play channel, the Android
-  look-and-defaults branch and the Android lows lane (`feat/icloud-backup`
+  look-and-defaults branch, the Android lows lane and the legacy upload
+  key lane (`feat/icloud-backup`
   adds 72 `backup*` and `import*` keys, #33's source-link label 1, the
   Test AI provider page's three `diagStatus*` check states 3, the Body
   tab's three failure lines 3, the coverage window slider's screen-reader
@@ -353,7 +354,9 @@ When merging #22 after this PR:
   branch's `watchGlassesAndroidNote` and `covGlassesOffCount` 2, the
   Android lows lane's `outcomeShareFixAddressMsg` 1 (a share refused for
   the server address) and its review's seven lines for an upload key
-  saved for another server address 7, none shared; review r171 deleted
+  saved for another server address 7, the legacy upload key lane's
+  `serverKeyUnknownHostField` 1 (a key saved without its server address),
+  none shared; review r171 deleted
   `bodyEmptyHintImperial`, the same text as `bodyEmptyHint`). If either
   side adds keys before both merge, change the number in that test to the
   merged count, and here too (the test checks this line); both files must
@@ -1075,6 +1078,17 @@ step. Revisit if the app is ever published with a developer-run service.
   that never released), it refuses too, before anything is built. To
   finish a tag's run that failed after its plan passed, use *Re-run
   failed jobs* on that run: a re-run keeps its run number.
+- Going back to an older build is for testing only: Android installs a
+  lower `versionCode` only with `adb install -r -d` and a debuggable app
+  or device, the App Store has no way back, and TestFlight lists earlier
+  builds. From 1.7.1 the *Your own server* upload key is stored with its
+  server's host in the secure item `server_api_key_item`, and
+  `server_api_key`, the only name 1.7.0 and 1.6.0 read, holds `''`. So an
+  older build finds no key and asks for it, rather than sending the
+  item's text as the key. Installed again, this version moves a key
+  pasted into the older build: bound to the server address saved then,
+  or with none, kept unused until *Use this key for …*
+  (`app_settings_test`, "an older version installed over this one").
 
 ---
 

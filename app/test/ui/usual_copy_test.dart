@@ -190,8 +190,10 @@ final _placeholderRe = RegExp(r'\{(\w+)\}');
 /// after its review, the seven lines for an upload key saved for another
 /// server address (errServerKeyOtherHost, reasonServerKeyOtherHost,
 /// serverKeyOtherHostField, serverKeyUseHere, autoScanServerKeyOtherHost,
-/// diagServerKeyOtherHost, diagFixServerKeyOtherHost).
-const _keyCount = 961;
+/// diagServerKeyOtherHost, diagFixServerKeyOtherHost); and the legacy
+/// upload key lane's line for a key saved without its server address
+/// (serverKeyUnknownHostField).
+const _keyCount = 962;
 
 Directory _appRoot() {
   var dir = Directory.current;

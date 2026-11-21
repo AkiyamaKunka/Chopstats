@@ -839,9 +839,11 @@ Future<bool> _runAfterLaunch({
   final AppSettings settings;
   try {
     // Read-only key store: only the UI engine moves keys between keychain
-    // classes, so the two engines can never race on the one-time move.
+    // classes, or an upload key an earlier version stored into its item,
+    // so the two engines can never race on either one-time move.
     settings = await (loadSettings ??
-        () => AppSettings.load(keyStore: platformKeyStore(migrate: false)))();
+        () => AppSettings.load(
+            keyStore: platformKeyStore(migrate: false), readOnlyKeys: true))();
   } catch (e) {
     await recorder.finish(BackgroundStop.error(e));
     // Success, not a retry: the next scheduled run tries again, and a

@@ -1,11 +1,19 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:calorie_tracker/services/analyzer/provider_analyzers.dart'
     show ServerAnalyzer;
+import 'package:calorie_tracker/services/assist/clients/lookup_client.dart'
+    show LookupOutcomeKind;
+import 'package:calorie_tracker/services/assist/clients/server_lookup_client.dart'
+    show ServerLookupClient;
+import 'package:calorie_tracker/services/garmin_client.dart'
+    show makeGarminDailyFetch;
 import 'package:calorie_tracker/services/settings/app_settings.dart';
 import 'package:flutter/foundation.dart'
     show TargetPlatform, debugDefaultTargetPlatformOverride;
+import 'package:flutter/services.dart' show PlatformException;
 import 'package:flutter/widgets.dart' show Locale;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -13,6 +21,8 @@ import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 // ignore: depend_on_referenced_packages
 import 'package:shared_preferences_platform_interface/shared_preferences_platform_interface.dart';
+
+import '../assist/clients/support.dart' show bigMacRequest;
 
 /// In-memory stand-in for flutter_secure_storage (no platform channel in
 /// unit tests).
@@ -37,19 +47,33 @@ class _OrderedKeyStore extends MemoryKeyStore {
 
   @override
   Future<void> write(String key, String value) async {
-    if (key == 'server_api_key') {
+    if (key == kServerKeyItem) {
       final (k, host) = decodeServerKeyItem(value);
       log.add('write $k for $host $_url');
+    } else if (key == kLegacyServerKey) {
+      log.add('old name "$value" $_url');
     }
     return super.write(key, value);
   }
 
   @override
   Future<void> delete(String key) async {
-    if (key == 'server_api_key') log.add('delete $_url');
+    if (key == kServerKeyItem || key == kLegacyServerKey) {
+      log.add('delete $key $_url');
+    }
     return super.delete(key);
   }
 }
+
+/// The secure names of the server upload key: the item this version
+/// stores, and the name 1.7.0 and earlier stored the key under as plain
+/// text (the only one they read).
+const kServerKeyItem = 'server_api_key_item';
+const kLegacyServerKey = 'server_api_key';
+
+/// What this version leaves under the old name once the key is moved: a
+/// blank, which every older version trims to no key.
+const kRetiredOldName = ' ';
 
 /// The server upload key's secure item, as AppSettings stores it: the key
 /// and the host it is bound to, in one value.
@@ -59,10 +83,114 @@ class _OrderedKeyStore extends MemoryKeyStore {
   return (m['key'] as String, m['host'] as String?);
 }
 
-/// What [keys] holds for the server upload key: (key, host), or null.
+/// What [keys] holds for the server upload key: (key, host), or null. Also
+/// checks that the old name holds no key, which an older version would
+/// read and send as one.
 (String, String?)? storedServerKey(MemoryKeyStore keys) {
-  final item = keys.data['server_api_key'];
+  expect(keyAnOlderVersionReads(keys), isNull,
+      reason: 'the old name holds no key');
+  final item = keys.data[kServerKeyItem];
   return item == null ? null : decodeServerKeyItem(item);
+}
+
+/// The key [keys] keeps whose server is not known, or null.
+String? storedKeyOfUnknownHost(MemoryKeyStore keys) {
+  final item = keys.data[kServerKeyItem];
+  if (item == null) return null;
+  final m = jsonDecode(item) as Map<String, dynamic>;
+  if (m['hostUnknown'] != true) return null;
+  expect(m, {'key': m['key'], 'host': null, 'hostUnknown': true});
+  return m['key'] as String;
+}
+
+/// What 1.7.0 (android-v1.7.0, b207) and iPhone 1.6.0 load as the server
+/// upload key: the old name's text, trimmed, or none when blank
+/// (610df6c6 app_settings.dart:489-490).
+String? keyAnOlderVersionReads(MemoryKeyStore keys) {
+  final v = keys.data[kLegacyServerKey]?.trim();
+  return (v == null || v.isEmpty) ? null : v;
+}
+
+/// [MemoryKeyStore] whose writes of [failWrites] throw, as a keychain or
+/// Keystore write can, and whose reads of [unreadable] find nothing while
+/// the value stays (AndroidSecureKeyStore forgives a failed read as no
+/// key; a write still overwrites it).
+class _FailingKeys extends MemoryKeyStore {
+  final Set<String> failWrites = {};
+  final Set<String> unreadable = {};
+
+  @override
+  Future<String?> read(String key) async =>
+      unreadable.contains(key) ? null : data[key];
+
+  @override
+  Future<void> write(String key, String value) async {
+    if (failWrites.contains(key)) {
+      throw PlatformException(code: 'write failed for $key');
+    }
+    return super.write(key, value);
+  }
+}
+
+/// One key store under two engines: each engine's reads and writes of the
+/// server upload key wait for their turn in [order] ('app' or 'run' per
+/// step; any order once it runs out), every other key goes at once. [log]
+/// lists the server-key operations as they ran.
+class _TurnTakingKeys {
+  _TurnTakingKeys(this.order);
+  final List<String> order;
+  final Map<String, String> data = {};
+  final List<String> log = [];
+  int _step = 0;
+
+  SecureKeyStore engine(String name) => _EngineKeys(this, name);
+
+  Future<void> _turn(String engine) async {
+    while (_step < order.length && order[_step] != engine) {
+      await Future<void>.delayed(Duration.zero);
+    }
+    _step++;
+  }
+}
+
+class _EngineKeys implements SecureKeyStore {
+  _EngineKeys(this._keys, this._name);
+  final _TurnTakingKeys _keys;
+  final String _name;
+
+  Future<void> _op(String what, String key) async {
+    if (key != kServerKeyItem && key != kLegacyServerKey) return;
+    await _keys._turn(_name);
+    _keys.log.add('$_name $what $key');
+  }
+
+  @override
+  Future<String?> read(String key) async {
+    await _op('read', key);
+    return _keys.data[key];
+  }
+
+  @override
+  Future<void> write(String key, String value) async {
+    await _op('write', key);
+    _keys.data[key] = value;
+  }
+
+  @override
+  Future<void> delete(String key) async {
+    await _op('delete', key);
+    _keys.data.remove(key);
+  }
+}
+
+/// Every order of [app] 'app' steps and [run] 'run' steps.
+List<List<String>> _interleavings(int app, int run) {
+  if (app == 0) return [List.filled(run, 'run')];
+  if (run == 0) return [List.filled(app, 'app')];
+  return [
+    for (final rest in _interleavings(app - 1, run)) ['app', ...rest],
+    for (final rest in _interleavings(app, run - 1)) ['run', ...rest],
+  ];
 }
 
 Future<(AppSettings, SharedPreferences, MemoryKeyStore)> freshSettings(
@@ -762,49 +890,79 @@ void main() {
       await s.setServerApiKey('key-a');
       await s.setServerApiKey('');
       expect(s.serverKeyHost, isNull);
-      expect(keys.data.containsKey('server_api_key'), isFalse);
+      expect(storedServerKey(keys), isNull);
+      expect(keys.data.containsKey(kServerKeyItem), isFalse);
     });
 
-    test('an update keeps a key saved before hosts were kept with the '
-        'address saved with it, once', () async {
+    test('an update moves a key 1.7.0 stored as plain text into the item, '
+        'bound to the address saved with it, once', () async {
       final (s, prefs, keys) = await freshSettings(initial: {
         'settings.provider': 'server',
         'settings.server_base_url': 'https://owner.example',
       });
       expect(s.serverKeyHost, isNull, reason: 'no key yet');
-      keys.data['server_api_key'] = 'old-key';
+      keys.data[kLegacyServerKey] = 'old-key';
       final updated = await AppSettings.load(prefs: prefs, keyStore: keys);
       expect(updated.serverKeyHost, 'owner.example');
-      expect(prefs.getString('settings.server_key_host'), 'owner.example');
-      expect(keys.data['server_api_key'], 'old-key', reason: 'read only');
+      expect(updated.serverKeyHostUnknown, isFalse);
+      // Moved at once: the item, the old name retired (an older version
+      // finds no key there), no record left.
+      expect(storedServerKey(keys), ('old-key', 'owner.example'));
+      expect(keys.data[kLegacyServerKey], kRetiredOldName);
+      expect(keyAnOlderVersionReads(keys), isNull);
+      expect(prefs.getKeys().where((k) => k.contains('server_key')), isEmpty);
       expect(updated.serverKeyForOtherAddress, isFalse);
       // A later load reads it back, and a moved address stays refused.
       await updated.setServerBaseUrl('https://elsewhere.example');
       final again = await AppSettings.load(prefs: prefs, keyStore: keys);
       expect(again.serverKeyHost, 'owner.example');
       expect(again.serverKeyForOtherAddress, isTrue);
-      // Stored again, it goes with its host into the one item, and the
-      // record goes.
+      expect(again.serverKeyFor('elsewhere.example'), isNull);
+      // An iPhone reinstall keeps the item and drops the preferences: the
+      // binding stays (review of 2026-11-20, UPG-1).
+      SharedPreferences.setMockInitialValues({});
+      final reinstalled = await AppSettings.load(
+          prefs: await SharedPreferences.getInstance(), keyStore: keys);
+      expect((reinstalled.serverApiKey, reinstalled.serverKeyHost),
+          ('old-key', 'owner.example'));
+      expect(reinstalled.serverKeyHostUnknown, isFalse);
+      // Use this key, on the tap.
       await again.bindServerKeyToAddress();
       expect(storedServerKey(keys), ('old-key', 'elsewhere.example'));
-      expect(prefs.containsKey('settings.server_key_host'), isFalse);
       final bound = await AppSettings.load(prefs: prefs, keyStore: keys);
       expect(bound.serverKeyHost, 'elsewhere.example');
     });
 
-    // This branch's earlier builds kept the host in the preferences, next
-    // to a plain key: the record binds it.
+    // Builds before this one kept the host in the preferences, next to a
+    // plain key: the record binds it, and the move keeps it.
     test('a plain key with its host recorded keeps that host', () async {
       final (_, prefs, keys) = await freshSettings(initial: {
         'settings.provider': 'server',
         'settings.server_base_url': 'https://b.example',
         'settings.server_key_host': 'a.example',
       });
-      keys.data['server_api_key'] = 'key-a';
+      keys.data[kLegacyServerKey] = 'key-a';
       final s = await AppSettings.load(prefs: prefs, keyStore: keys);
       expect((s.serverApiKey, s.serverKeyHost), ('key-a', 'a.example'));
       expect(s.serverKeyFor('b.example'), isNull);
       expect(s.serverKeyForAddress, isNull);
+      expect(storedServerKey(keys), ('key-a', 'a.example'));
+      expect(prefs.getKeys().where((k) => k.contains('server_key')), isEmpty);
+    });
+
+    // Builds before this one stored the item under the old name: read as
+    // the item, moved as it is.
+    test('an item stored under the old name is moved with its host', () async {
+      final (_, prefs, keys) = await freshSettings(initial: {
+        'settings.provider': 'server',
+        'settings.server_base_url': 'https://b.example',
+      });
+      keys.data[kLegacyServerKey] =
+          jsonEncode({'key': 'key-a', 'host': 'a.example'});
+      final s = await AppSettings.load(prefs: prefs, keyStore: keys);
+      expect((s.serverApiKey, s.serverKeyHost), ('key-a', 'a.example'));
+      expect(s.serverKeyFor('b.example'), isNull);
+      expect(storedServerKey(keys), ('key-a', 'a.example'));
     });
 
     test('a plain key that looks like the item is a plain key; a key whose '
@@ -817,10 +975,11 @@ void main() {
       ]) {
         final (_, prefs, keys) = await freshSettings(
             initial: {'settings.server_base_url': 'https://a.example'});
-        keys.data['server_api_key'] = plain;
+        keys.data[kLegacyServerKey] = plain;
         final s = await AppSettings.load(prefs: prefs, keyStore: keys);
         expect((s.serverApiKey, s.serverKeyHost), (plain, 'a.example'),
             reason: plain);
+        expect(storedServerKey(keys), (plain, 'a.example'), reason: plain);
       }
       const looksLikeIt = '{"key":"x","host":"evil.example"}';
       final (s, prefs, keys) = await freshSettings();
@@ -897,6 +1056,9 @@ void main() {
       await s.applyServerSetup(
           backend: 'claude', baseUrl: 'https://c.example', key: 'key-c');
       expect(keys.log, [
+        // The old name holds nothing an older version would send, before
+        // the first item (its read may have failed, so it is overwritten).
+        'old name " " (url null)',
         'write early for null (url null)',
         'write early for a.example (url null)',
         'write key-a for a.example (url https://a.example)',
@@ -1091,16 +1253,19 @@ void main() {
     // and drops the preferences, so the key came back bound to no host: in
     // the key field at '' and at the first address saved, then bound to
     // that address, and a paste at the caret saved key A + key B for it.
-    // The host is now stored with the key, and a key that an install's
-    // first launch finds with no host has lost it: never shown, sent or
-    // bound to an address.
+    // The host is now stored with the key. A key that an install's first
+    // launch finds with no host has no known host: kept apart, never shown,
+    // sent or bound to an address saved, until the user uses it for one
+    // (Use this key) or enters another key.
     group('after a reinstall that kept the key and dropped the preferences',
         () {
       Future<(AppSettings, SharedPreferences, MemoryKeyStore)> reinstalled(
-          String item) async {
+          {String? item, String? legacy}) async {
         SharedPreferences.setMockInitialValues({});
         final prefs = await SharedPreferences.getInstance();
-        final keys = MemoryKeyStore()..data['server_api_key'] = item;
+        final keys = MemoryKeyStore();
+        if (item != null) keys.data[kServerKeyItem] = item;
+        if (legacy != null) keys.data[kLegacyServerKey] = legacy;
         final s = await AppSettings.load(prefs: prefs, keyStore: keys);
         await s.setProvider(AiProvider.server);
         return (s, prefs, keys);
@@ -1111,7 +1276,7 @@ void main() {
       test('a key stored with its host keeps it: the field is empty at any '
           'other address and at one naming none, and it is sent to its own '
           'host alone', () async {
-        final (s, _, _) = await reinstalled(boundToA);
+        final (s, _, _) = await reinstalled(item: boundToA);
         expect((s.serverApiKey, s.serverKeyHost), ('key-a', 'a.example'));
         for (final url in ['', 'https://', 'https://b.example']) {
           await s.setServerBaseUrl(url);
@@ -1124,12 +1289,14 @@ void main() {
         expect(s.serverKeyFor('a.example'), 'key-a');
       });
 
-      test('a key stored as plain text: its host is lost, and it is kept '
-          'but never shown, sent or bound to an address, at this launch or '
-          'a later one, until a key is entered', () async {
-        final (s, prefs, keys) = await reinstalled('key-a');
-        expect(s.serverApiKey, 'key-a', reason: 'kept, not deleted');
-        expect(keys.data['server_api_key'], 'key-a', reason: 'read only');
+      test('a key stored as plain text has no known host: kept apart, never '
+          'shown, sent or bound to an address saved, at this launch or a '
+          'later one, until a key is entered', () async {
+        final (s, prefs, keys) = await reinstalled(legacy: 'key-a');
+        expect(s.serverKeyHostUnknown, isTrue, reason: 'kept, not deleted');
+        expect(s.serverApiKey, isNull, reason: 'not the upload key');
+        expect(storedKeyOfUnknownHost(keys), 'key-a');
+        expect(keyAnOlderVersionReads(keys), isNull);
         for (final url in [
           '',
           'https://',
@@ -1141,42 +1308,75 @@ void main() {
           expect(s.serverKeyHost, isNull);
           expect(s.serverKeyFor('a.example'), isNull);
           expect(s.serverKeyFor('b.example'), isNull);
-          expect(s.canAutoAnalyze, isFalse);
+          expect(s.activeApiKey, isNull);
+          expect(s.canAnalyze, isFalse);
+          expect(s.serverKeyHostUnknown, isTrue, reason: 'never bound by it');
         }
-        await s.bindServerKeyToAddress(); // no row offers it; nothing anyway
-        expect(s.serverKeyHost, isNull);
-        expect(s.serverKeyFor('a.example'), isNull);
 
-        // A later launch has preferences: still lost.
+        // A later launch has preferences, and an address naming a host:
+        // still no known host.
         final again = await AppSettings.load(prefs: prefs, keyStore: keys);
-        expect(again.serverApiKey, 'key-a');
-        expect(again.serverKeyForAddress, isNull);
+        expect(again.serverKeyHostUnknown, isTrue);
+        expect(again.serverApiKey, isNull);
+        expect(again.serverKeyFor('a.example'), isNull);
         await again.setServerBaseUrl('https://c.example');
         expect(again.serverKeyHost, isNull);
         expect(again.serverKeyFor('c.example'), isNull);
-        // A backspace in the empty field enters nothing.
+        // A backspace in the empty field enters nothing, and keeps it.
         expect(
             await again.setServerKeyFromField('',
                 filledAt: again.serverBaseUrl),
             isTrue);
-        expect(again.serverApiKey, 'key-a');
-        // A key entered is the address's.
+        expect(again.serverKeyHostUnknown, isTrue);
+        expect(storedKeyOfUnknownHost(keys), 'key-a');
+        // A key entered is the address's, and replaces it.
         expect(
             await again.setServerKeyFromField('key-c',
                 filledAt: again.serverBaseUrl),
             isTrue);
         expect((again.serverApiKey, again.serverKeyHost),
             ('key-c', 'c.example'));
+        expect(again.serverKeyHostUnknown, isFalse);
         expect(storedServerKey(keys), ('key-c', 'c.example'));
         expect(prefs.getKeys().where((k) => k.contains('server_key')), isEmpty);
         final third = await AppSettings.load(prefs: prefs, keyStore: keys);
         expect(third.serverKeyFor('c.example'), 'key-c');
+        expect(third.serverKeyHostUnknown, isFalse);
       });
 
-      test('a lost key: pasted at an address it is that address\'s; at one '
-          'naming none, bound to the next; a setup link replaces it',
-          () async {
-        final (s, _, keys) = await reinstalled('key-a');
+      test('Use this key makes a key with no known host the address\'s, on '
+          'the tap alone, never at an address naming none', () async {
+        final (s, prefs, keys) = await reinstalled(legacy: 'key-a');
+        for (final none in ['', 'https://']) {
+          await s.setServerBaseUrl(none);
+          await s.bindServerKeyToAddress();
+          expect(s.serverKeyHostUnknown, isTrue, reason: '"$none"');
+          expect(s.serverApiKey, isNull);
+        }
+        await s.setServerBaseUrl('https://b.example');
+        expect(s.serverKeyHostUnknown, isTrue, reason: 'not by the address');
+        final rev = s.credentialRevision;
+        var notified = 0;
+        s.addListener(() => notified++);
+        await s.bindServerKeyToAddress();
+        expect((s.serverApiKey, s.serverKeyHost, s.serverKeyForAddress),
+            ('key-a', 'b.example', 'key-a'));
+        expect(s.serverKeyHostUnknown, isFalse);
+        expect(s.serverKeyFor('b.example'), 'key-a');
+        expect(s.serverKeyFor('a.example'), isNull);
+        expect(storedServerKey(keys), ('key-a', 'b.example'));
+        expect(prefs.getKeys().where((k) => k.contains('server_key')), isEmpty);
+        expect(s.credentialRevision, greaterThan(rev));
+        expect(notified, 1);
+        final again = await AppSettings.load(prefs: prefs, keyStore: keys);
+        expect((again.serverApiKey, again.serverKeyHost),
+            ('key-a', 'b.example'));
+      });
+
+      test('a key with no known host: pasted at an address it is that '
+          'address\'s; at one naming none, bound to the next; a setup link '
+          'replaces it', () async {
+        final (s, _, keys) = await reinstalled(legacy: 'key-a');
         await s.setServerBaseUrl('https://b.example');
         expect(
             await s.setServerKeyFromField('key-a', filledAt: s.serverBaseUrl),
@@ -1185,40 +1385,90 @@ void main() {
             ('b.example', 'key-a'));
         expect(storedServerKey(keys), ('key-a', 'b.example'));
 
-        final (none, _, _) = await reinstalled('key-a');
+        final (none, _, _) = await reinstalled(legacy: 'key-a');
         expect(await none.setServerKeyFromField('key-a', filledAt: ''), isTrue);
         expect(none.serverKeyForAddress, 'key-a');
         await none.setServerBaseUrl('https://d.example');
         expect(none.serverKeyFor('d.example'), 'key-a');
 
-        final (link, _, _) = await reinstalled('key-a');
+        final (link, _, linkKeys) = await reinstalled(legacy: 'key-a');
         await link.applyServerSetup(
             backend: 'claude', baseUrl: 'https://s.example', key: 'key-s');
         expect(
             (link.serverApiKey, link.serverKeyHost, link.serverKeyForAddress),
             ('key-s', 's.example', 'key-s'));
+        expect(link.serverKeyHostUnknown, isFalse);
+        expect(storedServerKey(linkKeys), ('key-s', 's.example'));
       });
 
-      test('a key stored bound to no host yet is as lost on a first launch; '
-          'on any other, it is a key typed before any address', () async {
+      test('a key stored bound to no host yet has no known host on a first '
+          'launch, at later launches too; on any other launch it is a key '
+          'typed before any address', () async {
         final unbound = jsonEncode({'key': 'early', 'host': null});
-        final (s, _, _) = await reinstalled(unbound);
+        final (s, prefs, keys) = await reinstalled(item: unbound);
+        expect(s.serverKeyHostUnknown, isTrue);
         expect(s.serverKeyForAddress, isNull);
         await s.setServerBaseUrl('https://b.example');
         expect(s.serverKeyHost, isNull);
         expect(s.serverKeyFor('b.example'), isNull);
+        expect(storedKeyOfUnknownHost(keys), 'early');
+        final again = await AppSettings.load(prefs: prefs, keyStore: keys);
+        expect(again.serverKeyHostUnknown, isTrue);
+        expect(again.serverKeyFor('b.example'), isNull);
 
-        for (final stored in [unbound, 'early']) {
+        // This version's item, and one a build before it stored under the
+        // old name.
+        for (final name in [kServerKeyItem, kLegacyServerKey]) {
           SharedPreferences.setMockInitialValues(
               {'settings.provider': 'server'});
           final typed = await AppSettings.load(
               prefs: await SharedPreferences.getInstance(),
-              keyStore: MemoryKeyStore()..data['server_api_key'] = stored);
-          expect(typed.serverKeyForAddress, 'early', reason: stored);
+              keyStore: MemoryKeyStore()..data[name] = unbound);
+          expect(typed.serverKeyForAddress, 'early', reason: name);
           await typed.setServerBaseUrl('https://b.example');
           expect(typed.serverKeyFor('b.example'), 'early');
         }
       });
+    });
+
+    // Review of 2026-11-20, PN-1: 1.7.0 stored '' when the address field
+    // was cleared, and kept the key as plain text. Updated in place (no
+    // first launch), the key loaded as one typed before any address: in the
+    // key field at any address, and bound to the first one saved, so the
+    // Restaurant group asked the new address at once with the old server's
+    // key, and every photo after sent it there.
+    test('an update finding a plain key with no address naming a host and '
+        'no record: no known host, at that launch and the next, and never '
+        'sent to or bound to the next address saved', () async {
+      for (final noHost in ['', 'https://']) {
+        final (_, prefs, keys) = await freshSettings(initial: {
+          'settings.provider': 'server',
+          'settings.server_backend': 'claude',
+          'settings.server_base_url': noHost,
+          'settings.ai_consent_routes': <String>['server:claude'],
+        });
+        keys.data[kLegacyServerKey] = 'KA-old-server';
+        final s = await AppSettings.load(prefs: prefs, keyStore: keys);
+        expect(s.serverKeyHostUnknown, isTrue, reason: '"$noHost"');
+        expect((s.serverApiKey, s.serverKeyHost, s.serverKeyForAddress),
+            (null, null, null));
+        expect(storedKeyOfUnknownHost(keys), 'KA-old-server');
+        expect(keyAnOlderVersionReads(keys), isNull);
+        await s.setServerBaseUrl('https://someone-else.example');
+        expect(s.serverKeyHostUnknown, isTrue);
+        expect(s.serverKeyFor('someone-else.example'), isNull);
+        expect(s.serverKeyForAddress, isNull);
+        final seen = <String>[];
+        await ServerAnalyzer(s, client: MockClient((req) async {
+          seen.add('${req.url.host} <- ${req.headers['X-API-Key']}');
+          return http.Response(jsonEncode({'ok': true, 'features': {}}), 200);
+        })).serverFeatures();
+        expect(seen, isEmpty);
+        final next = await AppSettings.load(prefs: prefs, keyStore: keys);
+        expect(next.serverKeyHostUnknown, isTrue);
+        expect(next.serverKeyFor('someone-else.example'), isNull);
+        expect(next.serverApiKey, isNull);
+      }
     });
 
     // Recheck of PR 74 (after 28821da5): the background engine loads its
@@ -1268,7 +1518,8 @@ void main() {
         final cache = await runCache();
         await app.applyServerSetup(
             backend: 'claude', baseUrl: 'https://s.example', key: 'key-link-s');
-        final run = await AppSettings.load(prefs: cache, keyStore: keys);
+        final run = await AppSettings.load(
+            prefs: cache, keyStore: keys, readOnlyKeys: true);
         expect(run.serverBaseUrl, 'https://a.example', reason: 'its cache');
         expect((run.serverApiKey, run.serverKeyHost),
             ('key-link-s', 's.example'));
@@ -1276,7 +1527,7 @@ void main() {
         expect(run.canAutoAnalyze, isFalse);
         expect(await asked(run), isEmpty);
         final next = await AppSettings.load(
-            prefs: await runCache(), keyStore: keys);
+            prefs: await runCache(), keyStore: keys, readOnlyKeys: true);
         expect(await asked(next), ['s.example <- key-link-s']);
       });
 
@@ -1286,43 +1537,356 @@ void main() {
         final cache = await runCache();
         await app.setServerBaseUrl('https://b.example');
         await app.setServerKeyFromField('k', filledAt: app.serverBaseUrl);
-        final run = await AppSettings.load(prefs: cache, keyStore: keys);
+        final run = await AppSettings.load(
+            prefs: cache, keyStore: keys, readOnlyKeys: true);
         expect(run.serverBaseUrl, 'https://a.example');
         expect((run.serverApiKey, run.serverKeyHost), ('k', 'b.example'));
         expect(await asked(run), isEmpty);
         final next = await AppSettings.load(
-            prefs: await runCache(), keyStore: keys);
+            prefs: await runCache(), keyStore: keys, readOnlyKeys: true);
         expect(await asked(next), ['b.example <- k']);
       });
 
       test('a key stored as plain text keeps the host it was bound to '
-          'whenever the run read its preferences', () async {
-        // Updated in place from 1.7.0: the app's first load records the
-        // address's host, and the key stays plain until it is stored again.
+          'whenever the run read its preferences; the run only reads, the '
+          'app moves it', () async {
+        // Updated in place from 1.7.0.
         SharedPreferences.setMockInitialValues({
           'settings.provider': 'server',
           'settings.server_base_url': 'https://a.example',
           'settings.ai_consent_routes': <String>['server:claude'],
         });
-        final keys = MemoryKeyStore()..data['server_api_key'] = 'key-a';
+        final keys = MemoryKeyStore()..data[kLegacyServerKey] = 'key-a';
         final appPrefs = await SharedPreferences.getInstance();
         final early = await runCache(); // before the app's first load
+        // A run before the app's first load: bound in memory, nothing moved.
+        final first = await AppSettings.load(
+            prefs: early, keyStore: keys, readOnlyKeys: true);
+        expect((first.serverApiKey, first.serverKeyHost),
+            ('key-a', 'a.example'));
+        expect(keys.data, {kLegacyServerKey: 'key-a'}, reason: 'read only');
+        expect(early.getKeys().where((k) => k.contains('server_key')),
+            isEmpty);
+        // The app's first load moves it.
         final app = await AppSettings.load(prefs: appPrefs, keyStore: keys);
         expect(app.serverKeyHost, 'a.example');
+        expect(storedServerKey(keys), ('key-a', 'a.example'));
         await app.setServerBaseUrl('https://b.example');
-        expect(keys.data['server_api_key'], 'key-a', reason: 'still plain');
         final late = await runCache();
         expect(late.getString('settings.server_base_url'), 'https://b.example');
         for (final (cache, sent) in [
           (early, ['a.example <- key-a']),
           (late, <String>[]),
         ]) {
-          final run = await AppSettings.load(prefs: cache, keyStore: keys);
+          final run = await AppSettings.load(
+              prefs: cache, keyStore: keys, readOnlyKeys: true);
           expect((run.serverApiKey, run.serverKeyHost), ('key-a', 'a.example'));
           expect(run.serverKeyFor('b.example'), isNull);
           expect(await asked(run), sent);
         }
       });
+    });
+  });
+
+  // Review of 2026-11-20 (PN-1, UPG-1, UPG-2): a key 1.7.0 (or iPhone
+  // 1.6.0) stored as plain text was never stored with its host, so a
+  // reinstall or a cleared address left it bound to none, in the key field
+  // at any address and bound to the next one saved. The app engine now
+  // moves it into the item at its first load, under a name 1.7.0 does not
+  // read; the background engine, which may load at the same moment, only
+  // reads.
+  group('an upload key an earlier version stored: the move into the item',
+      () {
+    /// Prefs as 1.7.0 left them on an own-server install.
+    Map<String, Object> prefs170({String url = 'https://a.example'}) => {
+          'settings.provider': 'server',
+          'settings.server_backend': 'claude',
+          'settings.server_base_url': url,
+          'settings.ai_consent_routes': <String>['server:claude'],
+        };
+
+    // Every interleaving of the two engines' server-key reads and writes:
+    // each engine finds the same key bound the same way, the background
+    // engine writes nothing, and the store ends as one item.
+    final scenarios = <(
+      String,
+      Map<String, Object>,
+      Map<String, String>,
+      (String, String?)?, // the upload key (key, host), or none
+      String?, // the key kept with no known host
+    )>[
+      (
+        'a plain key and the address saved with it',
+        prefs170(),
+        {kLegacyServerKey: 'key-a'},
+        ('key-a', 'a.example'),
+        null,
+      ),
+      (
+        'a plain key and the host recorded for it (a build before this one)',
+        {...prefs170(url: 'https://b.example'),
+          'settings.server_key_host': 'a.example'},
+        {kLegacyServerKey: 'key-a'},
+        ('key-a', 'a.example'),
+        null,
+      ),
+      (
+        'a plain key, no address naming a host, no record',
+        prefs170(url: ''),
+        {kLegacyServerKey: 'key-a'},
+        null,
+        'key-a',
+      ),
+      (
+        'a move cut short: the item and the plain key it holds',
+        prefs170(url: 'https://b.example'),
+        {
+          kLegacyServerKey: 'key-a',
+          kServerKeyItem: jsonEncode({'key': 'key-a', 'host': 'a.example'}),
+        },
+        ('key-a', 'a.example'),
+        null,
+      ),
+      (
+        'another key next to the item: an older version stored it after',
+        prefs170(url: 'https://c.example'),
+        {
+          kLegacyServerKey: 'key-c',
+          kServerKeyItem: jsonEncode({'key': 'key-a', 'host': 'a.example'}),
+        },
+        ('key-c', 'c.example'),
+        null,
+      ),
+    ];
+
+    for (final (name, prefs, stored, key, kept) in scenarios) {
+      test('both engines loading at once, in every order: $name', () async {
+        /// The app engine's load and the background engine's, together,
+        /// their server-key reads and writes taking turns as [order] says.
+        Future<(AppSettings, AppSettings, _TurnTakingKeys)> run(
+            List<String> order) async {
+          SharedPreferences.setMockInitialValues(prefs);
+          final appPrefs = await SharedPreferences.getInstance();
+          SharedPreferences.resetStatic();
+          final runPrefs = await SharedPreferences.getInstance();
+          final keys = _TurnTakingKeys(order)..data.addAll(stored);
+          final loaded = await Future.wait([
+            AppSettings.load(prefs: appPrefs, keyStore: keys.engine('app')),
+            AppSettings.load(
+                prefs: runPrefs,
+                keyStore: keys.engine('run'),
+                readOnlyKeys: true),
+          ]);
+          return (loaded[0], loaded[1], keys);
+        }
+
+        // Once in no set order, to count each engine's operations; then
+        // once per order those can run in.
+        final (_, _, alone) = await run(const []);
+        final appOps = alone.log.where((l) => l.startsWith('app ')).length;
+        final runOps = alone.log.where((l) => l.startsWith('run ')).length;
+        expect(runOps, 2, reason: 'the old name, then the item');
+        final orders = _interleavings(appOps, runOps);
+        expect(orders.length, greaterThan(1));
+        for (final order in orders) {
+          final (app, bg, keys) = await run(order);
+          final why = '$order: ${keys.log}';
+          for (final s in [app, bg]) {
+            expect(
+                s.serverApiKey == null
+                    ? null
+                    : (s.serverApiKey!, s.serverKeyHost),
+                key,
+                reason: why);
+            expect(s.serverKeyHostUnknown, kept != null, reason: why);
+          }
+          expect(keys.log.where((l) => l.startsWith('run ')),
+              everyElement(startsWith('run read')),
+              reason: 'the background engine only reads: $why');
+          final item = jsonDecode(keys.data[kServerKeyItem]!) as Map;
+          expect(item['key'], key?.$1 ?? kept, reason: why);
+          expect(item['host'], key?.$2, reason: why);
+          expect(item['hostUnknown'] == true, kept != null, reason: why);
+          expect(keys.data[kLegacyServerKey], kRetiredOldName, reason: why);
+          final after = await SharedPreferences.getInstance();
+          await after.reload();
+          expect(after.getKeys().where((k) => k.contains('server_key')),
+              isEmpty,
+              reason: why);
+        }
+      });
+    }
+
+    test('a key with no known host goes to no host from either engine',
+        () async {
+      SharedPreferences.setMockInitialValues(prefs170(url: ''));
+      final keys = MemoryKeyStore()..data[kLegacyServerKey] = 'key-a';
+      final app = await AppSettings.load(
+          prefs: await SharedPreferences.getInstance(), keyStore: keys);
+      await app.setServerBaseUrl('https://b.example');
+      SharedPreferences.resetStatic();
+      final bg = await AppSettings.load(
+          prefs: await SharedPreferences.getInstance(),
+          keyStore: keys,
+          readOnlyKeys: true);
+      for (final s in [app, bg]) {
+        final seen = <String>[];
+        final client = MockClient((req) async {
+          seen.add('${req.url.host} <- ${req.headers['X-API-Key']}');
+          return http.Response(jsonEncode({'ok': true}), 200);
+        });
+        final analyzer =
+            ServerAnalyzer(s, normalizer: (b) async => b, client: client);
+        expect(await makeGarminDailyFetch(s, client: client)('2026-11-20'),
+            isNull);
+        final lookups = ServerLookupClient(s, client: client);
+        final lookup = await lookups.submit(bigMacRequest,
+            expectedRecipientStamp: lookups.lookupSupport().recipientStamp);
+        expect(lookup.kind, isNot(LookupOutcomeKind.pending));
+        final photo = await analyzer
+            .analyzePhoto(Uint8List.fromList(const [0xFF, 0xD8, 0xFF]));
+        expect(photo.error, isNotNull);
+        expect((await analyzer.textIntentOutcome('lunch 500 kcal')).error,
+            isNotNull);
+        expect(await analyzer.serverFeatures(), isNull);
+        expect(await analyzer.serverLoginState(), isNull);
+        final started = await analyzer.startClaudeAuth();
+        expect(started.url, isNull);
+        await expectLater(
+            analyzer.client.post(Uri.parse('https://b.example/api/x'),
+                headers: {'X-API-Key': 'key-a'}),
+            throwsA(isA<http.ClientException>()),
+            reason: 'refused at the client too');
+        expect(seen, isEmpty);
+        for (final host in ['b.example', 'a.example', '']) {
+          expect(s.serverKeyFor(host), isNull);
+        }
+      }
+    });
+
+    test('an item write that fails leaves the plain key where it was, bound '
+        'as found, and the next load binds it the same way, not to an '
+        'address saved since', () async {
+      SharedPreferences.setMockInitialValues(prefs170());
+      final prefs = await SharedPreferences.getInstance();
+      final keys = _FailingKeys()..data[kLegacyServerKey] = 'key-a';
+      keys.failWrites.add(kServerKeyItem);
+      final app = await AppSettings.load(prefs: prefs, keyStore: keys);
+      expect((app.serverApiKey, app.serverKeyHost), ('key-a', 'a.example'));
+      expect(keys.data, {kLegacyServerKey: 'key-a'}, reason: 'still usable');
+      expect(prefs.getString('settings.server_key_host'), 'a.example');
+      // The address moves before the next launch.
+      await app.setServerBaseUrl('https://b.example');
+      expect(app.serverKeyFor('b.example'), isNull);
+      final bg = await AppSettings.load(
+          prefs: prefs, keyStore: keys, readOnlyKeys: true);
+      expect((bg.serverApiKey, bg.serverKeyHost), ('key-a', 'a.example'));
+      keys.failWrites.clear();
+      final next = await AppSettings.load(prefs: prefs, keyStore: keys);
+      expect((next.serverApiKey, next.serverKeyHost), ('key-a', 'a.example'));
+      expect(next.serverKeyFor('b.example'), isNull);
+      expect(storedServerKey(keys), ('key-a', 'a.example'));
+      expect(prefs.getKeys().where((k) => k.contains('server_key')), isEmpty);
+    });
+
+    test('an item write that fails for a key with no known host keeps it so '
+        'at the next load, though an address naming a host is saved by '
+        'then', () async {
+      SharedPreferences.setMockInitialValues(prefs170(url: ''));
+      final prefs = await SharedPreferences.getInstance();
+      final keys = _FailingKeys()..data[kLegacyServerKey] = 'key-a';
+      keys.failWrites.add(kServerKeyItem);
+      final app = await AppSettings.load(prefs: prefs, keyStore: keys);
+      expect(app.serverKeyHostUnknown, isTrue);
+      expect(keys.data, {kLegacyServerKey: 'key-a'});
+      expect(prefs.getBool('settings.server_key_host_lost'), isTrue);
+      await app.setServerBaseUrl('https://b.example');
+      for (final readOnly in [true, false]) {
+        if (!readOnly) keys.failWrites.clear();
+        final next = await AppSettings.load(
+            prefs: prefs, keyStore: keys, readOnlyKeys: readOnly);
+        expect(next.serverKeyHostUnknown, isTrue, reason: '$readOnly');
+        expect(next.serverApiKey, isNull);
+        expect(next.serverKeyFor('b.example'), isNull);
+      }
+      expect(storedKeyOfUnknownHost(keys), 'key-a');
+      expect(keys.data[kLegacyServerKey], kRetiredOldName);
+      expect(prefs.getKeys().where((k) => k.contains('server_key')), isEmpty);
+    });
+
+    test('a retire of the old name that fails: the item is written, the next '
+        'load finishes the move', () async {
+      SharedPreferences.setMockInitialValues(prefs170());
+      final prefs = await SharedPreferences.getInstance();
+      final keys = _FailingKeys()..data[kLegacyServerKey] = 'key-a';
+      keys.failWrites.add(kLegacyServerKey);
+      final app = await AppSettings.load(prefs: prefs, keyStore: keys);
+      expect((app.serverApiKey, app.serverKeyHost), ('key-a', 'a.example'));
+      expect(keys.data[kLegacyServerKey], 'key-a');
+      expect(decodeServerKeyItem(keys.data[kServerKeyItem]!),
+          ('key-a', 'a.example'));
+      expect(prefs.getString('settings.server_key_host'), 'a.example',
+          reason: 'kept while the old name holds the key');
+      await app.setServerBaseUrl('https://b.example');
+      keys.failWrites.clear();
+      final next = await AppSettings.load(prefs: prefs, keyStore: keys);
+      expect((next.serverApiKey, next.serverKeyHost), ('key-a', 'a.example'));
+      expect(storedServerKey(keys), ('key-a', 'a.example'));
+      expect(prefs.getKeys().where((k) => k.contains('server_key')), isEmpty);
+    });
+
+    test('a key stored while the old name could not be read overwrites it, '
+        'so it never comes back as a newer key', () async {
+      SharedPreferences.setMockInitialValues(
+          prefs170(url: 'https://b.example'));
+      final prefs = await SharedPreferences.getInstance();
+      // An older key under the old name that this run cannot read (Android
+      // forgives the failed read as no key, and keeps the value).
+      final keys = _FailingKeys()..data[kLegacyServerKey] = 'key-a';
+      keys.unreadable.add(kLegacyServerKey);
+      final app = await AppSettings.load(prefs: prefs, keyStore: keys);
+      expect(app.serverApiKey, isNull);
+      await app.setServerKeyFromField('key-b', filledAt: app.serverBaseUrl);
+      expect(keys.data[kLegacyServerKey], kRetiredOldName,
+          reason: 'overwritten');
+      keys.unreadable.clear();
+      final next = await AppSettings.load(prefs: prefs, keyStore: keys);
+      expect((next.serverApiKey, next.serverKeyHost), ('key-b', 'b.example'));
+      expect(next.serverKeyHostUnknown, isFalse);
+    });
+
+    // UPG-2: 1.7.0 reads only the old name, and took the item's text there
+    // for the key, sending it as X-API-Key. It finds no key there now.
+    test('an older version installed over this one finds no key; a key it '
+        'stores is the newer one at the next update', () async {
+      SharedPreferences.setMockInitialValues(prefs170());
+      final prefs = await SharedPreferences.getInstance();
+      final keys = MemoryKeyStore()..data[kLegacyServerKey] = 'key-a';
+      final s = await AppSettings.load(prefs: prefs, keyStore: keys);
+      await s.setServerBaseUrl('https://c.example');
+      expect(keyAnOlderVersionReads(keys), isNull,
+          reason: 'it asks for the key instead of sending the item');
+      // Back on 1.7.0, the user pastes c.example's key: plain text under the
+      // old name, the item left as it was.
+      keys.data[kLegacyServerKey] = 'key-c';
+      final upgraded = await AppSettings.load(prefs: prefs, keyStore: keys);
+      expect((upgraded.serverApiKey, upgraded.serverKeyHost),
+          ('key-c', 'c.example'));
+      expect(upgraded.serverKeyFor('a.example'), isNull);
+      expect(storedServerKey(keys), ('key-c', 'c.example'));
+      // The same key pasted back: the item's binding stands.
+      keys.data[kLegacyServerKey] = 'key-c';
+      await upgraded.setServerBaseUrl('https://d.example');
+      final again = await AppSettings.load(prefs: prefs, keyStore: keys);
+      expect((again.serverApiKey, again.serverKeyHost), ('key-c', 'c.example'));
+      expect(storedServerKey(keys), ('key-c', 'c.example'));
+      // With no address naming a host in the older version: no known host.
+      keys.data[kLegacyServerKey] = 'key-e';
+      await again.setServerBaseUrl('');
+      final none = await AppSettings.load(prefs: prefs, keyStore: keys);
+      expect(none.serverKeyHostUnknown, isTrue);
+      expect(none.serverApiKey, isNull);
+      expect(storedKeyOfUnknownHost(keys), 'key-e');
     });
   });
 

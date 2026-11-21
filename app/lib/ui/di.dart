@@ -745,6 +745,8 @@ class _AppSettingsStore implements SettingsStore {
   @override
   String? get serverKeyHost => _s.serverKeyHost;
   @override
+  bool get serverKeyHostUnknown => _s.serverKeyHostUnknown;
+  @override
   String get serverKeyForAddress => _s.serverKeyForAddress ?? '';
   @override
   String? serverKeyFor(String host) => _s.serverKeyFor(host);
