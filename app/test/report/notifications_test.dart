@@ -21,7 +21,15 @@ class _RecordingPlugin extends Fake implements FlutterLocalNotificationsPlugin {
   final _FakeAndroid? android;
   InitializationSettings? settings;
   final shown = <NotificationDetails?>[];
+  final shownPayloads = <String?>[];
   final cancelled = <int>[];
+
+  /// What a tap on a card calls while the app runs (initialize's).
+  DidReceiveNotificationResponseCallback? onTap;
+
+  /// What getNotificationAppLaunchDetails answers; null throws, as the
+  /// plugin does with no platform side.
+  NotificationAppLaunchDetails? launchDetails;
 
   @override
   Future<void> cancel({required int id, String? tag}) async =>
@@ -35,8 +43,14 @@ class _RecordingPlugin extends Fake implements FlutterLocalNotificationsPlugin {
         onDidReceiveBackgroundNotificationResponse,
   }) async {
     this.settings = settings;
+    onTap = onDidReceiveNotificationResponse;
     return true;
   }
+
+  @override
+  Future<NotificationAppLaunchDetails?>
+      getNotificationAppLaunchDetails() async =>
+          launchDetails ?? (throw PlatformException(code: 'no platform'));
 
   @override
   Future<void> show({
@@ -45,8 +59,10 @@ class _RecordingPlugin extends Fake implements FlutterLocalNotificationsPlugin {
     String? body,
     NotificationDetails? notificationDetails,
     String? payload,
-  }) async =>
-      shown.add(notificationDetails);
+  }) async {
+    shown.add(notificationDetails);
+    shownPayloads.add(payload);
+  }
 
   /// What zonedSchedule was handed, and the pending list it builds (the
   /// plugin's own record, as Android keeps it until the alarm fires).
@@ -359,6 +375,80 @@ void main() {
     expect(fired[0].$1, isNot(fired[1].$1));
     expect(fired.map((f) => f.$1),
         isNot(contains(ReportNotifier.dailyReportNotificationId)));
+  });
+
+  // Android, view-after-share lane: a Logged meals card names its meal, so
+  // a tap on it goes to that meal (ui/meal_reveal.dart).
+  group('a tap on a card', () {
+    NotificationResponse response(String? payload,
+            {NotificationResponseType type =
+                NotificationResponseType.selectedNotification}) =>
+        NotificationResponse(
+            notificationResponseType: type, id: 101, payload: payload);
+
+    test("a meal card carries its payload; the summary's own is kept",
+        () async {
+      final plugin = _RecordingPlugin();
+      final notifier = ReportNotifier(plugin: plugin);
+      await notifier.init();
+      await notifier.showMealCard('Meal logged', 'Ramen', payload: 'meal:42');
+      await notifier.showMealCard('Paused', 'Your key was rejected');
+      await notifier.showDailySummary('Today', '1800 kcal');
+      expect(plugin.shownPayloads, ['meal:42', null, null]);
+    });
+
+    test('while the app runs: the card itself reaches onTap, an action '
+        'button does not', () async {
+      final plugin = _RecordingPlugin();
+      final taps = <String?>[];
+      await ReportNotifier(plugin: plugin, onTap: taps.add).init();
+      expect(plugin.onTap, isNotNull);
+      plugin.onTap!(response('meal:42'));
+      plugin.onTap!(response(null));
+      plugin.onTap!(response('meal:7',
+          type: NotificationResponseType.selectedNotificationAction));
+      expect(taps, ['meal:42', null]);
+    });
+
+    test('with no onTap (iPhone, background runs) a tap only opens the '
+        'app, as before', () async {
+      final plugin = _RecordingPlugin();
+      await ReportNotifier(plugin: plugin).init();
+      expect(plugin.onTap, isNull);
+    });
+
+    test('a throwing onTap is contained', () async {
+      final plugin = _RecordingPlugin();
+      await ReportNotifier(
+              plugin: plugin, onTap: (_) => throw StateError('gone'))
+          .init();
+      plugin.onTap!(response('meal:42'));
+    });
+
+    test('launchPayload: the card that started the app, and only that',
+        () async {
+      final plugin = _RecordingPlugin();
+      final notifier = ReportNotifier(plugin: plugin);
+      plugin.launchDetails = NotificationAppLaunchDetails(true,
+          notificationResponse: response('meal:42'));
+      expect(await notifier.launchPayload(), 'meal:42');
+      plugin.launchDetails = NotificationAppLaunchDetails(false,
+          notificationResponse: response('meal:42'));
+      expect(await notifier.launchPayload(), isNull,
+          reason: 'started some other way');
+      plugin.launchDetails = NotificationAppLaunchDetails(true,
+          notificationResponse: response('meal:42',
+              type: NotificationResponseType.selectedNotificationAction));
+      expect(await notifier.launchPayload(), isNull);
+      plugin.launchDetails = const NotificationAppLaunchDetails(true);
+      expect(await notifier.launchPayload(), isNull);
+      plugin.launchDetails = null; // the platform cannot say: it throws
+      expect(await notifier.launchPayload(), isNull);
+      expect(
+          await ReportNotifier(presenter: (_, _, _) async {}).launchPayload(),
+          isNull,
+          reason: 'presenter mode never asks the plugin');
+    });
   });
 
   // Android draws the small icon from its alpha channel only: the

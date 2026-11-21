@@ -22,6 +22,7 @@ import 'meal_editor_screen.dart';
 import '../theme/tokens.dart';
 import '../widgets/grouped.dart' show GroupedCard;
 import '../widgets/meal_parts.dart';
+import '../widgets/reveal_highlight.dart';
 import '../widgets/states.dart';
 
 class DayDetailScreen extends StatefulWidget {
@@ -34,6 +35,7 @@ class DayDetailScreen extends StatefulWidget {
     this.mealInUse,
     this.restaurantAssist,
     this.settings,
+    this.revealMealId,
   });
 
   final MealsDao dao;
@@ -51,19 +53,36 @@ class DayDetailScreen extends StatefulWidget {
   final RestaurantAssistControls? restaurantAssist;
   final SettingsStore? settings;
 
+  /// A meal of this day the user asked to see (the shell's reveal,
+  /// ui/meal_reveal.dart): brought on screen and briefly ringed once the
+  /// day is loaded. Null: none.
+  final int? revealMealId;
+
   @override
   State<DayDetailScreen> createState() => _DayDetailScreenState();
 }
 
-class _DayDetailScreenState extends State<DayDetailScreen> {
+class _DayDetailScreenState extends State<DayDetailScreen>
+    with RevealsCards<DayDetailScreen> {
   bool _loading = true;
   String? _error;
   List<Meal> _meals = const [];
 
+  /// The day's total card, the list's first: with the rows, how a reveal
+  /// finds the scroll view.
+  final GlobalKey _totalKey = GlobalKey(debugLabel: 'dayTotal');
+
+  @override
+  BuildContext? get revealAnchor => _totalKey.currentContext;
+
   @override
   void initState() {
     super.initState();
-    _load();
+    _load().then((_) {
+      final id = widget.revealMealId;
+      if (id == null || !mounted || _error != null) return;
+      revealCard(id, [for (final m in _meals) m.id]);
+    });
   }
 
   Future<void> _load() async {
@@ -73,6 +92,7 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
       final meals =
           byMealClock(await widget.dao.mealsBetween(widget.date, widget.date));
       if (!mounted) return;
+      keepCardKeys(meals.map((m) => m.id));
       setState(() {
         _meals = meals;
         _loading = false;
@@ -156,6 +176,7 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
                         // made of, as one card (the bare headline over a
                         // divider read as loose text on the page).
                         GroupedCard(
+                          key: _totalKey,
                           margin: EdgeInsets.zero,
                           padding: const EdgeInsets.all(AppSpace.cardPadding),
                           child: Column(
@@ -189,15 +210,22 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
                           const SizedBox(
                               height: AppSpace.groupGap - AppSpace.cardGap),
                         for (final m in _meals)
-                          _MealRow(
-                            // Identity key: element state must follow the
-                            // MEAL when the list shifts (a delete above
-                            // otherwise leaves this row showing its old
-                            // neighbour's resolving photo).
-                            key: ValueKey('meal${m.id}'),
-                            meal: m,
-                            thumb: widget.thumbs?.thumbFor(m),
-                            onTap: () => _openEditor(meal: m),
+                          // Identity key: element state must follow the
+                          // MEAL when the list shifts (a delete above
+                          // otherwise leaves this row showing its old
+                          // neighbour's resolving photo). The reveal key
+                          // (RevealsCards) is that key, and how a reveal
+                          // finds the row.
+                          RevealHighlight(
+                            key: cardKey(m.id),
+                            trigger: revealTrigger(m.id),
+                            inset: _MealRow.margin,
+                            child: _MealRow(
+                              key: ValueKey('meal${m.id}'),
+                              meal: m,
+                              thumb: widget.thumbs?.thumbFor(m),
+                              onTap: () => _openEditor(meal: m),
+                            ),
                           ),
                       ],
                     ),
@@ -224,6 +252,9 @@ class _MealRow extends StatelessWidget {
   final VoidCallback onTap;
   final Future<Uint8List?>? thumb;
 
+  /// Above the row's cell (a reveal's ring follows the cell).
+  static const EdgeInsets margin = EdgeInsets.only(top: AppSpace.cardGap);
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -238,7 +269,7 @@ class _MealRow extends StatelessWidget {
     // the 18-pt corners (the old InkWell's radius-12 ink ran past them)
     // and VoiceOver announces the row as a button (A11).
     return GroupedCard(
-      margin: const EdgeInsets.only(top: AppSpace.cardGap),
+      margin: margin,
       padding: const EdgeInsets.all(AppSpace.cardPadding),
       onTap: onTap,
       child: Column(

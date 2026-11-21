@@ -21,19 +21,59 @@ final GlobalKey<ScaffoldMessengerState> messengerKey =
 /// DB-only) resolves while init is still running, and
 /// `currentState?.showSnackBar` dropped it on the floor. Held until a frame
 /// has mounted the ScaffoldMessenger, then shown in arrival order.
-final List<({String message, SnackBarAction? action})> _pendingSnackbars = [];
+final List<_AppSnack> _pendingSnackbars = [];
 
-void showAppSnackbar(String message) => _holdSnackbar(message, null);
+/// One message waiting for the messenger.
+class _AppSnack {
+  const _AppSnack(this.message, {this.action, this.offered, this.held = true});
+  final String message;
+  final SnackBarAction? action;
+
+  /// Asked as the message is shown: whether [action] is offered then. Null:
+  /// always. A throw counts as no.
+  final bool Function()? offered;
+
+  /// Whether [action] keeps the snackbar up under a screen reader.
+  final bool held;
+}
+
+void showAppSnackbar(String message) => _holdSnackbar(_AppSnack(message));
 
 /// [showAppSnackbar] with one action button: the restaurant assist's Undo
 /// after it applied a chain's published numbers (di.dart `notifyAction`).
 void showAppSnackbarWithAction(
         String message, String action, void Function() onAction) =>
-    _holdSnackbar(message, SnackBarAction(label: action, onPressed: onAction));
+    _holdSnackbar(_AppSnack(message,
+        action: SnackBarAction(label: action, onPressed: onAction)));
 
-void _holdSnackbar(String message, SnackBarAction? action) {
-  _pendingSnackbars.add((message: message, action: action));
+/// [showAppSnackbar] with a View that goes to a meal: the one a shared
+/// photo logged (Android, di.dart `notifyView`). Offered only when
+/// [available] says, as the message is shown, that the app could go there
+/// at once (nothing open over its tabs: meal_reveal.dart); else the plain
+/// message. It leaves after [kAppActionSnackDuration], under a screen
+/// reader too: the meal is on its list anyway, and a held View kept every
+/// later message waiting behind it (a several-photo share's each).
+void showAppSnackbarWithView(String message, String action,
+        void Function() onAction, bool Function() available) =>
+    _holdSnackbar(_AppSnack(message,
+        action: SnackBarAction(label: action, onPressed: onAction),
+        offered: available,
+        held: false));
+
+void _holdSnackbar(_AppSnack snack) {
+  _pendingSnackbars.add(snack);
   _flushSoon();
+}
+
+/// [_AppSnack.action] if it is offered now.
+SnackBarAction? _actionNow(_AppSnack s) {
+  final offered = s.offered;
+  if (s.action == null || offered == null) return s.action;
+  try {
+    return offered() ? s.action : null;
+  } catch (_) {
+    return null;
+  }
 }
 
 /// [_flushSnackbars] now, or after the next frame when the messenger is
@@ -77,7 +117,8 @@ Future<void>? _waitingFor;
 /// defaults to `action != null`): the lookup's Undo stayed up until tapped,
 /// and every later message queued unseen behind it. It times out after
 /// [kAppActionSnackDuration] and is held only with a screen reader on,
-/// where reaching Undo takes longer (the usual-foods rule).
+/// where reaching Undo takes longer (the usual-foods rule); a View
+/// ([showAppSnackbarWithView]) is never held.
 bool _flushSnackbars() {
   final messenger = messengerKey.currentState;
   if (messenger == null) return false;
@@ -103,13 +144,15 @@ bool _flushSnackbars() {
     return true;
   }
   final s = _pendingSnackbars.removeAt(0);
-  final controller = messenger.showSnackBar(s.action == null
+  final action = _actionNow(s);
+  final controller = messenger.showSnackBar(action == null
       ? SnackBar(content: Text(s.message))
       : SnackBar(
           content: Text(s.message),
-          action: s.action,
+          action: action,
           duration: kAppActionSnackDuration,
-          persist: MediaQuery.accessibleNavigationOf(messenger.context),
+          persist: s.held &&
+              MediaQuery.accessibleNavigationOf(messenger.context),
         ));
   _shown = (messenger: messenger, controller: controller);
   controller.closed.whenComplete(() {
@@ -160,6 +203,8 @@ Future<void> _boot() async {
       notify: showAppSnackbar,
       // The restaurant assist's "used the chain's numbers" line and its Undo.
       notifyAction: showAppSnackbarWithAction,
+      // Android: a shared photo's "Meal logged" line and its View.
+      notifyView: showAppSnackbarWithView,
     );
     runApp(CalorieTrackerApp(services: services.ui, messengerKey: messengerKey));
   } catch (e) {

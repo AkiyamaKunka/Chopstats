@@ -263,4 +263,100 @@ void main() {
     }
     expect(find.byType(SnackBar), findsNothing);
   });
+
+  // Android, view-after-share lane: a shared photo's "Meal logged" line
+  // offers View (di.dart notifyView), which goes to the meal, while the
+  // app could go there at once.
+  group('a View on a message (showAppSnackbarWithView)', () {
+    testWidgets('offered while the app could go there: a tap asks for the '
+        'meal', (tester) async {
+      await tester.pumpWidget(_app());
+      var viewed = 0;
+      showAppSnackbarWithView(
+          'Meal logged: Ramen — ~600 kcal', 'View', () => viewed++, () => true);
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      expect(find.text('View'), findsOneWidget);
+      await tester.tap(find.text('View'));
+      await tester.pump();
+      expect(viewed, 1);
+      await tester.pumpAndSettle();
+      expect(find.byType(SnackBar), findsNothing);
+    });
+
+    testWidgets('it leaves on its own after 8 s, a screen reader on too, so '
+        'the messages behind it are seen', (tester) async {
+      tester.platformDispatcher.accessibilityFeaturesTestValue =
+          const FakeAccessibilityFeatures(accessibleNavigation: true);
+      addTearDown(
+          tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
+      await tester.pumpWidget(_app());
+      showAppSnackbarWithView('Meal logged: Ramen', 'View', () {}, () => true);
+      showAppSnackbar('Meal logged: Tea');
+      await tester.pump();
+      for (var i = 0; i < 7; i++) {
+        await tester.pump(const Duration(seconds: 1));
+      }
+      expect(find.text('View'), findsOneWidget, reason: 'its full 8 s');
+      expect(await _seenWithin(tester, 'Meal logged: Tea', 3), isTrue,
+          reason: 'not held for the screen reader, unlike an Undo');
+      expect(find.text('View'), findsNothing);
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(seconds: 1));
+      }
+      expect(find.byType(SnackBar), findsNothing);
+    });
+
+    testWidgets('left off while the app could not go there: the plain '
+        'message, gone after 4 s', (tester) async {
+      await tester.pumpWidget(_app());
+      var viewed = 0;
+      showAppSnackbarWithView(
+          'Meal logged: Ramen', 'View', () => viewed++, () => false);
+      await tester.pump();
+      expect(find.text('Meal logged: Ramen'), findsOneWidget);
+      expect(find.text('View'), findsNothing);
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(seconds: 1));
+      }
+      expect(find.text('Meal logged: Ramen'), findsNothing);
+      expect(viewed, 0);
+    });
+
+    testWidgets('asked as the message shows, not when it was sent',
+        (tester) async {
+      await tester.pumpWidget(_app());
+      var open = false;
+      showAppSnackbar('Meal logged: Toast');
+      showAppSnackbarWithView('Meal logged: Ramen', 'View', () {}, () => open);
+      await tester.pump();
+      expect(find.text('Meal logged: Toast'), findsOneWidget);
+      open = true; // the screen over the tabs was closed meanwhile
+      expect(await _seenWithin(tester, 'Meal logged: Ramen', 6), isTrue);
+      expect(find.text('View'), findsOneWidget);
+      // And the other way: a View sent while it could go there, shown once
+      // a screen is up over the tabs, is left off.
+      showAppSnackbarWithView('Meal logged: Soup', 'View', () {}, () => open);
+      open = false;
+      expect(await _seenWithin(tester, 'Meal logged: Soup', 10), isTrue);
+      expect(find.text('View'), findsNothing);
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(seconds: 1));
+      }
+      expect(find.byType(SnackBar), findsNothing);
+    });
+
+    testWidgets('a check that throws leaves View off', (tester) async {
+      await tester.pumpWidget(_app());
+      showAppSnackbarWithView('Meal logged: Ramen', 'View', () {},
+          () => throw StateError('the shell went'));
+      await tester.pump();
+      expect(find.text('Meal logged: Ramen'), findsOneWidget);
+      expect(find.text('View'), findsNothing);
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(seconds: 1));
+      }
+      expect(find.byType(SnackBar), findsNothing);
+    });
+  });
 }

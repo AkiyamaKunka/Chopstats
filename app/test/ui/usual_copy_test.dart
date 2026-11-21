@@ -193,8 +193,9 @@ final _placeholderRe = RegExp(r'\{(\w+)\}');
 /// diagServerKeyOtherHost, diagFixServerKeyOtherHost); and the legacy
 /// upload key lane's line for a key saved without its server address
 /// (serverKeyUnknownHostField) and, after its review, the row that removes
-/// that key (serverKeyRemoveKept).
-const _keyCount = 963;
+/// that key (serverKeyRemoveKept); and the Android View-after-share lane's
+/// action on a shared photo's snackbar (mealViewAction).
+const _keyCount = 964;
 
 Directory _appRoot() {
   var dir = Directory.current;

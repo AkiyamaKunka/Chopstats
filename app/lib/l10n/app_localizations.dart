@@ -5896,6 +5896,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'In Settings › AI Provider › Your own server, paste this server\'s upload key, or use the saved key for it.'**
   String get diagFixServerKeyOtherHost;
+
+  /// Android: the action on the snackbar that says a shared photo was logged (outcomeSavedMsg) or that its leftovers were deducted (outcomeLeftoverMsg). Goes to that meal: Today, scrolled to the meal and briefly outlined, or the meal's day in History when it was logged for another day. Offered only while nothing is open over the app's tabs.
+  ///
+  /// In en, this message translates to:
+  /// **'View'**
+  String get mealViewAction;
 }
 
 class _AppLocalizationsDelegate

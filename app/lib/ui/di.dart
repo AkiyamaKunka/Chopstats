@@ -20,6 +20,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../core/app_channel.dart' show photoLibraryInBuild;
 import '../core/contracts.dart';
 import '../data/meals_dao_impl.dart';
+import '../l10n/app_localizations.dart' show AppLocalizations;
 import '../services/analysis_keep_alive.dart';
 import '../services/analyzer/platform_decode.dart' show isEngineBackgrounded;
 import '../services/analyzer/provider_analyzers.dart'
@@ -63,6 +64,7 @@ import 'outcome_text.dart'
     show assistAppliedSnackbar, assistUndoAction, outcomeSnackbar;
 import 'os_summary.dart';
 import 'meal_in_use.dart';
+import 'meal_reveal.dart';
 import 'meal_thumbs.dart';
 import 'photo_pipeline.dart';
 import 'play_channel.dart';
@@ -95,7 +97,10 @@ class AppServices {
   static Future<AppServices> init(
       {void Function(String)? notify,
       void Function(String message, String action, void Function() onAction)?
-          notifyAction}) async {
+          notifyAction,
+      void Function(String message, String action, void Function() onAction,
+              bool Function() available)?
+          notifyView}) async {
     if (_instance != null) return _instance!;
 
     final settings = await AppSettings.load();
@@ -166,6 +171,11 @@ class AppServices {
         loggedAssetIds: dao.loggedAssetIds,
         liveHeld: () => cloudBackup?.holdsPhotosNow ?? false);
     final shareIntake = createShareIntake(settings);
+    // Android: "show me that meal" (meal_reveal.dart), from the View on a
+    // shared photo's snackbar and a tap on a Logged meals card; the shell
+    // goes to it, only over itself. iOS keeps both as they were.
+    final mealReveals = Platform.isAndroid ? MealReveals() : null;
+    final cardTaps = mealReveals == null ? null : MealCardTaps(mealReveals);
 
     // Notification surface (spec §5.5/§6): init() also performs the runtime
     // permission request (Android 13+ / iOS) — without it every meal card
@@ -202,6 +212,9 @@ class AppServices {
           mealNotificationChannelFor(settings.appLanguage),
       // The Play build posts no meal cards: no channel for them.
       mealCards: photoLibraryInBuild,
+      // Android: a tap on a Logged meals card while the app runs goes to
+      // its meal (the background run names it in the card's payload).
+      onTap: cardTaps?.onTap,
       dailyBody: (slotDate) async {
         await postSummary();
         // NULL, not '': postSummary has ALREADY presented the coach summary
@@ -239,6 +252,18 @@ class AppServices {
     // the catch-up) and in `finally`, so a denial or a junk hh:mm resolves
     // the probe instead of leaving it pending.
     final summaryArmed = Completer<void>();
+    // Android: a tap on a Logged meals card that started the app goes to
+    // its meal too (the shell takes the request once it is up).
+    if (cardTaps != null) {
+      unawaited(() async {
+        try {
+          await notifier.init();
+          await cardTaps.launch(notifier.launchPayload);
+        } catch (_) {
+          // The app opens as it did before: on its first tab.
+        }
+      }());
+    }
     unawaited(() async {
       try {
         await notifier.init();
@@ -270,10 +295,15 @@ class AppServices {
     // language switch applies to the next snackbar; main.dart stays a
     // plain String sink. The add flow gets the same sink for a verdict
     // that lands after the user backed out.
+    // Android: a shared photo's save or leftover deduction offers View
+    // (outcomeAnnouncer).
     final void Function(PhotoOutcome)? announce = notify == null
         ? null
-        : (o) =>
-            notify(outcomeSnackbar(localizationsFor(settings.appLanguage), o));
+        : outcomeAnnouncer(
+            l10n: () => localizationsFor(settings.appLanguage),
+            notify: notify,
+            reveals: mealReveals,
+            notifyView: notifyView);
     final pipeline = PhotoPipeline(
         dao: dao,
         analyzer: analyzer,
@@ -583,6 +613,7 @@ class AppServices {
               shown: () => watchRetiredNoticeShown(prefs)),
       // A Save to Device that outlived its engine (MainActivity).
       lateSaveResult: Platform.isAndroid ? takeLateSaveResult : null,
+      mealReveals: mealReveals,
     );
     pipeline.bind(photoIntake); // automated watch (deliberate=false)
     // Share sheet (deliberate), each photo held until its AI recipient is
@@ -647,6 +678,34 @@ class AppServices {
         AppServices._(ui, pipeline, settings, mealInUse, mealAssist);
   }
 }
+
+/// The photo pipeline's snackbar sink (AppServices.init's `announce`): [o]
+/// in the app language of the moment ([l10n]). On Android ([reveals] set)
+/// a shared photo's save or leftover deduction comes with a View that asks
+/// the shell to go to the meal (meal_reveal.dart), offered while the shell
+/// could go there at once ([MealReveals.canShowNow], read as the message
+/// is shown: [notifyView]). Every other verdict, and every one on iPhone,
+/// is the plain line it always was.
+@visibleForTesting
+void Function(PhotoOutcome o) outcomeAnnouncer({
+  required AppLocalizations Function() l10n,
+  required void Function(String message) notify,
+  MealReveals? reveals,
+  void Function(String message, String action, void Function() onAction,
+          bool Function() available)?
+      notifyView,
+}) =>
+    (o) {
+      final l = l10n();
+      final line = outcomeSnackbar(l, o);
+      final reveal = reveals == null ? null : revealForShared(o);
+      if (reveals != null && notifyView != null && reveal != null) {
+        notifyView(line, l.mealViewAction, () => reveals.request(reveal),
+            () => reveals.canShowNow);
+        return;
+      }
+      notify(line);
+    };
 
 /// Test seam for the adapter below: it is the ONLY production code that
 /// maps the UI's provider-scoped apiKey/model onto AppSettings' seven

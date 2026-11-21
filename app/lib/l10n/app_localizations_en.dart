@@ -3926,4 +3926,7 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get diagFixServerKeyOtherHost =>
       'In Settings › AI Provider › Your own server, paste this server\'s upload key, or use the saved key for it.';
+
+  @override
+  String get mealViewAction => 'View';
 }

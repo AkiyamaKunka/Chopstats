@@ -7,6 +7,7 @@ import 'dart:io' show File, Platform;
 
 import '../core/ai_consent.dart' show aiConsentRoute, aiRoutesInMainlandChina;
 import '../core/app_channel.dart' show photoLibraryInBuild;
+import '../core/contracts.dart' show Meal;
 import '../core/setup_link.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
@@ -30,6 +31,8 @@ import 'ai_consent.dart'
         ensureAiConsent;
 import 'background_glue.dart' show foregroundCatchUp;
 import 'backup_sheets.dart';
+import 'format.dart' show isoDate;
+import 'meal_reveal.dart';
 import 'screens/add_flow.dart';
 import 'screens/body_screen.dart';
 import 'l10n.dart';
@@ -355,6 +358,10 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     // A photo shared into the app waits for the AI consent (5.1.2(i)); the
     // question needs this navigator, so the gate holds photos until now.
     widget.services.sharedPhotoConsent?.attach(_askShareConsent);
+    // Android: "show me that meal" (a shared photo's View, a tap on a
+    // Logged meals card), shown over the shell only (meal_reveal.dart).
+    widget.services.mealReveals
+        ?.attach(_revealWhenOnTop, canShowNow: _canRevealNow);
     final initial = widget.services.initialSetupLink;
     if (initial != null) {
       unawaited(initial().then((uri) {
@@ -590,8 +597,102 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     WidgetsBinding.instance.ensureVisualUpdate();
   }
 
+  /// Whether something is open over the shell: a screen, a sheet, a
+  /// dialog or a menu.
+  bool _covered() => Navigator.maybeOf(context)?.canPop() ?? false;
+
+  /// Whether a text field has the focus: the user is typing.
+  static bool _typingNow() {
+    final focused = FocusManager.instance.primaryFocus?.context;
+    if (focused == null || !focused.mounted) return false;
+    return focused.findAncestorStateOfType<EditableTextState>() != null;
+  }
+
+  /// Whether the shell could go to a meal at once
+  /// ([MealReveals.canShowNow]): nothing is open over it, and nobody is
+  /// typing.
+  bool _canRevealNow() => mounted && !_covered() && !_typingNow();
+
+  /// Set while [_tryReveal] waits for the typing to stop.
+  bool _waitingForTyping = false;
+
+  /// A meal to show is waiting (meal_reveal.dart): shown after this frame
+  /// if the shell is on top then. With something open over the shell it
+  /// waits for the shell to be back on top ([_OnRouteReturn]), so nothing
+  /// the user has open is closed or covered for it: an editor with unsaved
+  /// changes stays as it is, its discard question unasked. While a text
+  /// field has the focus it waits for the typing to stop.
+  void _revealWhenOnTop() {
+    if (!mounted || widget.services.mealReveals?.waiting == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) => _tryReveal());
+    // A post-frame callback alone waits for SOME frame; ask for one.
+    WidgetsBinding.instance.ensureVisualUpdate();
+  }
+
+  void _tryReveal() {
+    final reveals = widget.services.mealReveals;
+    if (!mounted || reveals == null || reveals.waiting == null) return;
+    if (_covered()) return;
+    if (_typingNow()) {
+      if (!_waitingForTyping) {
+        _waitingForTyping = true;
+        FocusManager.instance.addListener(_onFocusChange);
+      }
+      return;
+    }
+    final reveal = reveals.take();
+    if (reveal != null) unawaited(_reveal(reveal));
+  }
+
+  void _onFocusChange() {
+    if (_typingNow()) return;
+    FocusManager.instance.removeListener(_onFocusChange);
+    _waitingForTyping = false;
+    _revealWhenOnTop();
+  }
+
+  /// Goes to the meal [reveal] names: Today, scrolled to the meal and
+  /// briefly ringed; History with the meal's day open on it, for a meal
+  /// dated another day (a photo taken before midnight, say); Today alone
+  /// when the meal is gone. Where it is dated now, not when it was logged:
+  /// the editor may have moved it since.
+  Future<void> _reveal(MealReveal reveal) async {
+    final s = widget.services;
+    Meal? meal;
+    try {
+      meal = (await s.dao.mealSnapshot(reveal.mealId))?.meal;
+    } catch (_) {
+      // Unreadable now: Today, as for a meal that is gone.
+    }
+    if (!mounted) return;
+    // Something came up over the shell meanwhile: the request waits again,
+    // unless a newer one already does.
+    if (!_canRevealNow()) {
+      final reveals = s.mealReveals;
+      if (reveals != null && reveals.waiting == null) reveals.request(reveal);
+      return;
+    }
+    if (meal == null || meal.date == isoDate(DateTime.now())) {
+      setState(() => _index = 0);
+      final today = _todayKey.currentState;
+      if (meal == null) {
+        await today?.reload();
+      } else {
+        await today?.reveal(meal.id);
+      }
+      return;
+    }
+    setState(() => _index = 1);
+    final history = _historyKey.currentState;
+    if (history == null) return;
+    unawaited(history.reload());
+    await history.openDay(meal.date, revealMealId: meal.id);
+  }
+
   @override
   void dispose() {
+    if (_waitingForTyping) FocusManager.instance.removeListener(_onFocusChange);
+    widget.services.mealReveals?.detach(_revealWhenOnTop);
     widget.services.cloudBackup?.prompt.removeListener(_onBackupPrompt);
     widget.services.sharedPhotoConsent?.detach(_askShareConsent);
     _linkSub?.cancel();
@@ -978,10 +1079,13 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     // flow, say) is asked once that screen is popped. It waited until the
     // prompt changed or the app came back, holding the photos meanwhile.
     // The Play build's Watch Camera Roll notice waits the same way.
+    // A meal the user asked to see while a screen was open over the shell
+    // is shown once that screen is popped (_revealWhenOnTop).
     final page = _OnRouteReturn(
         onReturn: () {
           _onBackupPrompt();
           _tellWatchRetiredWhenIdle();
+          _revealWhenOnTop();
         },
         child: shell);
     // Android: while a shared photo is on its way to a meal, or any
