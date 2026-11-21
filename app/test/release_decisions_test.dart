@@ -1416,18 +1416,28 @@ void main() {
     test("what § 6 and § 8 expect from the next run is pubspec's version",
         () {
       final version = _pubspecVersion(_read('pubspec.yaml'));
+      // Run 9 (android-v1.7.1, build 209) is history: it keeps its name
+      // after the next bump, so its facts are pinned as 1.7.1, and every
+      // other build name or artifact § 6 names is pubspec's version.
+      const run9 = '1.7.1';
       Set<String?> named(RegExp re) =>
           re.allMatches(s6).map((m) => m.group(1)).toSet();
-      expect(named(RegExp(r'build name `(\d+\.\d+\.\d+)`')), {version});
-      expect(named(RegExp(r'`android-(\d+\.\d+\.\d+)-(?:2xx|2\d\d)`')),
-          {version});
-      expect(s6, contains('Download the artifact `android-$version-209`'));
-      expect(s6, contains('Name the release `$version (209)`'));
+      final buildNames = named(RegExp(r'build name `(\d+\.\d+\.\d+)`'));
+      expect(buildNames, contains(run9));
+      expect({version, run9}.containsAll(buildNames), isTrue,
+          reason: '$buildNames');
+      final artifacts =
+          named(RegExp(r'`android-(\d+\.\d+\.\d+)-(?:2xx|2\d\d)`'));
+      expect({version, run9}.containsAll(artifacts), isTrue,
+          reason: '$artifacts');
+      expect(s6, contains('Download the artifact `android-$run9-209`'));
+      expect(s6, contains('Name the release `$run9 (209)`'));
       expect(s6,
-          contains('build 209, the same build as the GitHub APK '
-              '`android-v$version`'));
+          contains('build 209, the same build number as the GitHub APK '
+              '`android-v$run9` (same run, same signer; the bundle is the '
+              'Play build, without Watch Camera Roll)'));
       expect(s6,
-          contains('GitHub APK went out by hand as `android-v$version` '
+          contains('GitHub APK went out by hand as `android-v$run9` '
               '(build 209)'));
       expect(s6, contains('`android-v1.7.0` (build 207) is already out'));
       expect(s6, contains("the iPhone's next tag from `main` is `v$version`"));
@@ -1511,8 +1521,11 @@ void main() {
             '`BUILD_NUMBER_OFFSET` 100, and none of the checks added since '
             '1.6.0',
         'So its build is numbered 100 + its run number',
-        "That is below `android-v1.7.0`'s 207, so Android refuses it on a "
-            'phone with 1.7.0',
+        "That is below `android-v1.7.1`'s 209 and `android-v1.7.0`'s 207, "
+            'so Android refuses it on a phone with 1.7.0 or 1.7.1',
+        '(110 or more: run 9 built `android-v1.7.1`)',
+        'so Android would install 1.6.1 (database schema 3) over 1.7.x '
+            '(schema 4)',
         "Keep that branch's own `release.yml`",
       ]) {
         expect(hotfix, contains(fact), reason: fact);

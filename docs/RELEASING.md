@@ -1508,13 +1508,15 @@ app-release.aab` says the same.
 
 **The first upload** is still to come, and it is 1.7.1: the bundle of
 Release run 9 (lane `play`, from `main` at `189f34c6`, where the tag
-`android-v1.7.1` is), build 209, the same build as the GitHub APK
-`android-v1.7.1`. `android-v1.7.0` (build 207) and `android-v1.7.1` went
-out on GitHub only, before the Play account existed (§ 6.6).
+`android-v1.7.1` is), build 209, the same build number as the GitHub APK
+`android-v1.7.1` (same run, same signer; the bundle is the Play build,
+without Watch Camera Roll). `android-v1.7.0` (build 207) and
+`android-v1.7.1` went out on GitHub only, before the Play account existed
+(§ 6.6).
 
 1. Actions › Release › run 9. Its plan summary says build name `1.7.1`
    and build number 209 (`BUILD_NUMBER_OFFSET` 200 + run 9), the build
-   GitHub `android-v1.7.1` users have, above `android-v1.7.0`'s 207.
+   number GitHub `android-v1.7.1` users have, above `android-v1.7.0`'s 207.
    Never upload a Mac hand build: it gets pubspec's `+10`, below 207.
    The run page keeps the artifact 90 days (§ 8). If it is gone, Run
    workflow › branch `main` › lane `play` (leave *play_track* at
@@ -1796,16 +1798,17 @@ tagged). A `v1.6.1` tag needs no § 11, since that branch has no iCloud
 entitlement, and it runs that branch's own `release.yml`: both lanes on
 a tag push, `BUILD_NUMBER_OFFSET` 100, and none of the checks added
 since 1.6.0 (the run floor and the `+N` tag check of § 5, the policy
-check above). So its build is numbered 100 + its run number (108 or
-more: run 7 built `android-v1.7.0`), inside § 11.2's 107–199: on a phone
+check above). So its build is numbered 100 + its run number (110 or
+more: run 9 built `android-v1.7.1`), inside § 11.2's 107–199: on a phone
 that installs it, later device test builds go above it. It also puts an
 Android 1.6.1 APK with that number on a new GitHub Release, `v1.6.1`.
-That is below `android-v1.7.0`'s 207, so Android refuses it on a phone
-with 1.7.0: say so in that release's notes, and leave the README's
+That is below `android-v1.7.1`'s 209 and `android-v1.7.0`'s 207, so
+Android refuses it on a phone with 1.7.0 or 1.7.1: say so in that
+release's notes, and leave the README's
 Android section on the 1.7.x release. Keep that branch's own
 `release.yml`: `main`'s would stop its Android job (the branch has no
 `kRequireHttpsServer`), and its offset 200 would number the APK above
-207, so Android would install 1.6.1 (database schema 3) over 1.7.0
+209, so Android would install 1.6.1 (database schema 3) over 1.7.x
 (schema 4).
 
 **Developer verification and the GitHub APK.** Because the package
