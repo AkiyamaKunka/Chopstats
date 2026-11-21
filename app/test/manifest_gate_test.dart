@@ -1132,6 +1132,69 @@ void main() {
         isNot(contains('requestedOrientation')));
   });
 
+  // RCREL-V-1 (2026-11-21): the bitewise://setup link reaches the app
+  // through app_links only. Flutter's own deep linking, on unless the
+  // activity's meta-data turns it off, pushed each link that arrived while
+  // the app was open as a named route: a bare link became "/", which opened
+  // a second HomeShell that brought back the last setup sheet and, when it
+  // closed, detached the sharing-consent asker.
+  test('Android: Flutter deep linking is off, so only app_links sees the '
+      'setup link', () {
+    final manifest = _uncommented(_manifest());
+    final activity = RegExp(r'<activity\b.*?</activity>', dotAll: true)
+        .firstMatch(manifest)
+        ?.group(0);
+    expect(activity, contains('android:name=".MainActivity"'));
+    expect(activity, contains('android:scheme="bitewise"'));
+    final flags = RegExp(r'<meta-data\b[^>]*>')
+        .allMatches(activity!)
+        .map((m) => m.group(0)!.replaceAll(RegExp(r'\s+'), ' '))
+        .where((m) => m.contains('flutter_deeplinking_enabled'))
+        .toList();
+    expect(flags, hasLength(1));
+    expect(flags.single, contains('android:value="false"'));
+    expect('flutter_deeplinking_enabled'.allMatches(manifest), hasLength(1),
+        reason: 'set once, on MainActivity');
+
+    // Nothing turns it back on: not the debug, profile or Play manifests,
+    // and not the app's Kotlin (FlutterActivity.shouldHandleDeeplinking).
+    final src = '${_appRoot().path}/android/app/src';
+    for (final variant in ['debug', 'profile', 'playChannel']) {
+      final xml = _uncommented(
+          File('$src/$variant/AndroidManifest.xml').readAsStringSync());
+      expect(xml, isNot(contains('flutter_deeplinking_enabled')),
+          reason: variant);
+    }
+    for (final file in _appKotlin().entries) {
+      expect(_kotlinCode(file.value),
+          isNot(contains('shouldHandleDeeplinking')),
+          reason: file.key);
+    }
+
+    // Flutter 3.44, where the SDK carries its sources: the meta-data key is
+    // this one, and deep linking is on when it is missing.
+    final flutter = _pluginRoot('flutter');
+    final configs = File('$flutter/../../engine/src/flutter/shell/platform/'
+        'android/io/flutter/embedding/android/'
+        'FlutterActivityLaunchConfigs.java');
+    if (configs.existsSync()) {
+      final java = configs
+          .readAsStringSync()
+          .replaceAll(RegExp(r'//[^\n]*'), '')
+          .replaceAll(RegExp(r'\s+'), ' ');
+      expect(
+          java,
+          contains('HANDLE_DEEPLINKING_META_DATA_KEY = '
+              '"flutter_deeplinking_enabled";'));
+      expect(
+          java,
+          contains('if (metaData != null && metaData.containsKey('
+              'HANDLE_DEEPLINKING_META_DATA_KEY)) { return '
+              'metaData.getBoolean(HANDLE_DEEPLINKING_META_DATA_KEY); } else '
+              '{ return true; }'));
+    }
+  });
+
   // With enableOnBackInvokedCallback, Flutter unregisters its back
   // callback at an idle root route and leaves Back there to Android.
   // Android 14 and later move the task to the back only when the home
