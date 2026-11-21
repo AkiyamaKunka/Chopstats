@@ -70,19 +70,22 @@ internal object KeepAliveRules {
     /// A job left from before then serves nothing: one finishing as its
     /// requests ended, or one WorkManager runs again after the system
     /// stopped it or its process died mid-run (a swipe from Recents). Such
-    /// a re-run waits out a backoff (30 s, then longer) and is never
-    /// expedited (runAttemptCount above 0), and KEEP adopted it: the new
-    /// request had no expedited job, and no running one for up to 30 s.
-    /// REPLACE puts a fresh, expedited job in its place. A request that
-    /// joins a live one keeps the job that runs for it.
+    /// a re-run is never expedited (runAttemptCount above 0) and waits out
+    /// its backoff (30 s from its enqueue, longer on later attempts), and
+    /// KEEP adopted it: the new request had no expedited job, and no
+    /// running one for up to 30 s. REPLACE puts a fresh, expedited job in
+    /// its place. A request that joins a live one keeps the job that runs
+    /// for it.
     fun replacesJob(liveBefore: Boolean): Boolean = !liveBefore
 
     /// Whether a keep-alive job the system stopped mid-run with
     /// [stopReason] (WorkInfo.STOP_REASON_*, Android 12 and later) is
     /// renewed while a request is still live (AnalysisKeepAlive
-    /// .renewAfterStop): WorkManager runs a stopped job again only after a
-    /// backoff, and never expedited, so the request was held by nothing in
-    /// between. A fresh job (REPLACE) is expedited again with no backoff.
+    /// .renewAfterStop): WorkManager runs a stopped job again as a plain
+    /// job, never expedited, and not before its backoff from its enqueue
+    /// has passed, so the request was held by a weaker job, or by nothing,
+    /// in between. A fresh job (REPLACE) is expedited again, with no
+    /// backoff.
     /// Renewed after the stops a fresh job can outlast: preempted, the
     /// device's state, the network gone for a moment (the fresh job waits
     /// for it), out of quota (the fresh job then runs as a plain one), the

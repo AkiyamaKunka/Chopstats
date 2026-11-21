@@ -115,7 +115,7 @@ internal object AnalysisKeepAlive {
     /// later): while a request is still live, and the stop is one a fresh
     /// job can outlast (KeepAliveRules.renewsAfterStop), a fresh job
     /// replaces it now, expedited again, instead of WorkManager's re-run of
-    /// the stopped one: plain, and only after a backoff.
+    /// the stopped one: plain, and subject to its backoff.
     fun renewAfterStop(context: Context, stopReason: Int) {
         if (!KeepAliveRules.renewsAfterStop(stopReason)) return
         if (!ledger.live(SystemClock.elapsedRealtime())) return

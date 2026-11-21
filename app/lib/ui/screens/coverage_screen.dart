@@ -74,9 +74,12 @@ class CoverageScreen extends StatefulWidget {
   /// the shell handed root Back back to Android (a task Play's Open button
   /// started was then finished, and the rest of the batch with it) and
   /// the keep-alive job was cancelled mid-batch. The run holds one request
-  /// for the whole batch, so neither happens until the last photo is done;
-  /// each photo's own request still gets its full cap. Null on iPhone and
-  /// in tests that are about something else.
+  /// for the whole batch: Back stays held until the last photo is done,
+  /// and the job has a live request between photos for the batch's first
+  /// 3 minutes (the native cap; past it, the next photo's own request
+  /// starts a job again at once). Each photo's own requests still get
+  /// their full cap. Null on iPhone and in tests that are about something
+  /// else.
   final AnalysisKeepAlive? keepAlive;
 
   @override
