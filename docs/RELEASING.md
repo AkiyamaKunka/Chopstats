@@ -1561,11 +1561,14 @@ read 2026-11-13):
   before publishing: `feature-graphic.png` for en-US and
   `feature-graphic-zh-CN.png` (1,024 × 500, 24-bit PNG, no alpha). It
   checks both itself (`--verify`), and so does the test.
-- **Screenshots:** none yet. The QA step captures at least 4 portrait
-  shots per language (9:16, at least 1,080 × 1,920, no alpha) from the
-  Play build, as `app/android/store/screenshots/SHOTS.md` lists. The
-  iPhone sets are about 2.17:1, and Play refuses anything longer than
-  2:1.
+- **Screenshots:** `app/android/store/screenshots/en-US/` and `zh-CN/`,
+  7 portrait shots per language (9:16, 1,080 × 1,920, 24-bit PNG, no
+  alpha) from the Play build's release APK on an emulator, with demo data
+  only, as `app/android/store/screenshots/SHOTS.md` lists.
+  `scripts/play_screenshots.py` takes them again (AVD, demo import file,
+  capture, check); redo them on a release candidate whose screens
+  changed. The iPhone sets are about 2.17:1, and Play refuses anything
+  longer than 2:1.
 - **What's new:** `app/android/whatsnew/whatsnew-{en-US,zh-CN}`, the
   first-release note (500 characters at most, no GitHub or APK pointers).
   It rides every upload, so rewrite it before the next one.
@@ -1739,7 +1742,8 @@ Do now:
 Only after the Play build (§ 6.3) is merged and the QA step has captured
 the screenshots:
 
-7. Upload the screenshots (at least 4 per language).
+7. Upload the screenshots (at least 4 per language) from
+   `app/android/store/screenshots/en-US/` and `zh-CN/`, in file order.
 8. Run workflow › `main` › lane `play`; check the plan summary's build
    number, the bundle's permissions (§ 6.3), and that
    `app/lib/core/server_transport.dart` says `kRequireHttpsServer = true`
