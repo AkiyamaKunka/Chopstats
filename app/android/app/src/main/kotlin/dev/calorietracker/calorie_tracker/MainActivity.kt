@@ -6,6 +6,7 @@ import android.app.ActivityManager
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.database.ContentObserver
 import android.net.Uri
 import android.os.Build
@@ -58,14 +59,26 @@ class MainActivity : FlutterActivity() {
     /// it does (onNewIntent, releaseHeldShares). Main thread only.
     private val heldShares = ShareHold<Intent>()
 
-    /// Whether the launcher's own intent created this activity's task
-    /// (IntakeRules.launcherTask). Decided at its first create, from that
-    /// intent, then kept in the saved state (onSaveInstanceState).
-    private var launcherTask = false
+    /// Whether the home screen made this activity's first start, the one
+    /// that created it, and its latest (HomeStarts): decided at its first
+    /// create, moved on by each start onNewIntent delivers (noteStart), and
+    /// kept in the saved state (onSaveInstanceState).
+    private var homeStarts = HomeStarts(first = false, latest = false)
 
     /// Whether Flutter's back callback stays registered at the root route
-    /// (setFrameworkHandlesBack). Set in onCreate, from launcherTask.
+    /// (setFrameworkHandlesBack), from homeStarts: set in onCreate, and
+    /// again at each start onNewIntent delivers (noteStart).
     private var backCallbackAtRoot = false
+
+    /// What Flutter last asked for (setFrameworkHandlesBack): whether it
+    /// has something to pop. Main thread only.
+    private var flutterHandlesBack = false
+
+    /// Whether another activity of this task (a picker, the share sheet, a
+    /// permission dialog) sat above this one when it last paused, until it
+    /// resumes: a start that comes meanwhile is not its own on Android 16
+    /// (HomeStarts.after). Kept in the saved state.
+    private var coveredInTask = false
 
     /// This activity's engine's session in the analysis keep-alive
     /// (AnalysisKeepAlive): set when the engine is configured, dropped
@@ -77,26 +90,24 @@ class MainActivity : FlutterActivity() {
         // before Dart read them) have no reader: no pick of this one is
         // open yet.
         IntakeRules.clearPickFolders(File(cacheDir, PICKED_PHOTO_FOLDER))
-        // Back at the root (setFrameworkHandlesBack): whether the launcher
-        // intent created this activity, the root of its task (singleTask).
-        // Android's own answer never changes: it checks the intent the
-        // activity was created with, and a launch from the icon into a
-        // task a share created arrives through onNewIntent and leaves that
-        // intent as it was. The first create reads that intent, before the
-        // replay rewrite below empties it. Every later create reads the
-        // saved state: an activity recreated after its process died gets
-        // the original intent again, but one relaunched in the same process
-        // (theme colours, Bold text, grammatical gender) gets whatever
-        // intent its last instance set, the replay rewrite's or a
-        // notification tap's.
-        launcherTask = IntakeRules.launcherTask(
-            saved = savedInstanceState?.takeIf { it.containsKey(STATE_LAUNCHER_TASK) }
-                ?.getBoolean(STATE_LAUNCHER_TASK),
-            fromIntent = intent?.let {
-                IntakeRules.isLauncherIntent(it.action, it.categories, it.data != null, it.type)
-            } ?: false,
-        )
-        backCallbackAtRoot = IntakeRules.keepsBackCallbackAtRoot(Build.VERSION.SDK_INT, launcherTask)
+        // Back at the root (setFrameworkHandlesBack): whether the home
+        // screen made this activity's first start, the root of its task
+        // (singleTask), and its latest (HomeStarts). The first create reads
+        // the start that created it (isHomeStart: the intent, and the
+        // caller Android recorded), before the replay rewrite below
+        // empties that intent; that start is its latest too. Every later
+        // create reads the saved state: an activity recreated after its
+        // process died gets the creating intent again, and one relaunched
+        // in the same process (theme colours, Bold text, grammatical
+        // gender) whatever intent its last instance set, the replay
+        // rewrite's or a notification tap's; neither tells of the starts
+        // since, which arrived through onNewIntent (noteStart).
+        homeStarts = HomeStarts.restore(
+            first = savedInstanceState?.savedBoolean(STATE_FIRST_HOME_START),
+            latest = savedInstanceState?.savedBoolean(STATE_LATEST_HOME_START),
+        ) { intent?.let { isHomeStart(it) } ?: false }
+        coveredInTask = savedInstanceState?.getBoolean(STATE_COVERED_IN_TASK) ?: false
+        backCallbackAtRoot = IntakeRules.keepsBackCallbackAtRoot(Build.VERSION.SDK_INT, homeStarts.systemMovesTaskBack)
         // receive_sharing_intent reads the launch intent while
         // super.onCreate attaches it: the copies must be there already.
         // A share is delivered once. An activity Android recreates (saved
@@ -122,37 +133,68 @@ class MainActivity : FlutterActivity() {
             intent?.let { setIntent(withSafeShares(it)) }
         }
         super.onCreate(savedInstanceState)
-        if (backCallbackAtRoot) setFrameworkHandlesBack(true)
+        applyBackCallback()
         pendingSaveSource = cachedFile(savedInstanceState?.getString(STATE_SAVE_SOURCE))
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         pendingSaveSource?.let { outState.putString(STATE_SAVE_SOURCE, it.path) }
-        outState.putBoolean(STATE_LAUNCHER_TASK, launcherTask)
+        outState.putBoolean(STATE_FIRST_HOME_START, homeStarts.first)
+        outState.putBoolean(STATE_LATEST_HOME_START, homeStarts.latest)
+        outState.putBoolean(STATE_COVERED_IN_TASK, coveredInTask)
+    }
+
+    /// Whether another activity of the task covers this one
+    /// (coveredInTask): one that does is the task's top as this one pauses
+    /// for it, while for the home screen or another task this one stays
+    /// its task's top.
+    override fun onPause() {
+        super.onPause()
+        coveredInTask = !isTopOfItsTask()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        coveredInTask = false
     }
 
     /// Flutter keeps its back callback registered only while it has
     /// something to pop (a route, a screen that asks before it closes, the
     /// shell while a shared photo is pending): at an idle root it hands
     /// Back to Android (enableOnBackInvokedCallback, AndroidManifest.xml).
-    /// Android 14 and later then move the task to the back only when the
-    /// home screen started it with the launcher's own intent; any other
-    /// root they finish, and its engine with it, mid-analysis: a task a
-    /// share, the bitewise://setup link, a notification or a plain
-    /// `am start -n` started (IntakeRules.keepsBackCallbackAtRoot). Such a
-    /// task keeps the callback, so Back at its root goes through Flutter
-    /// (handlePopRoute, SystemNavigator.pop, popSystemNavigator, which
-    /// moves the task to the back) as on Android 12 and lower, and gives up
-    /// Android's back-to-home preview. A task the launcher started keeps
-    /// the preview. A launcher-intent start that did not come from the home
-    /// screen (Play's Open button, `am start -a MAIN -c LAUNCHER`) looks the
-    /// same from here, and Android still finishes it on a Back at an idle
-    /// root; a pending shared photo or an analysis in flight keeps that Back
-    /// in Flutter there (SharedPhotosBackGuard). FlutterActivity also calls
+    /// Android 14 and later then move the task to the back only after
+    /// starts from the home screen, and finish any other root, its engine
+    /// with it, mid-analysis: Android 14 and 15 judge the start that
+    /// created the activity, Android 16 the latest start into it
+    /// (HomeStarts). Unless the home screen made both, the activity keeps
+    /// the callback (backCallbackAtRoot, IntakeRules.keepsBackCallbackAtRoot),
+    /// so Back at its root goes through Flutter (handlePopRoute,
+    /// SystemNavigator.pop, popSystemNavigator, which moves the task to the
+    /// back) as on Android 12 and lower, and gives up Android's
+    /// back-to-home preview: after a share, the bitewise://setup link, a
+    /// notification, Play's Open button or `am start`, for good when that
+    /// start created the task, until the next start from the home screen
+    /// when it came into the task later. What Flutter asks for is kept
+    /// (flutterHandlesBack), so a start can change the answer while the
+    /// activity runs (noteStart). Android 16 also judges a start the
+    /// activity never sees: a return from Recents, which delivers no
+    /// intent, counts as a start by the app that shows Recents, the home
+    /// app on most phones but not with a third-party home app as the
+    /// default. Android then finishes the activity on a Back at an idle
+    /// root, and a pending shared photo or an analysis in flight keeps that
+    /// Back in Flutter (SharedPhotosBackGuard). FlutterActivity also calls
     /// this from its onCreate, with the state it saved.
     override fun setFrameworkHandlesBack(frameworkHandlesBack: Boolean) {
-        super.setFrameworkHandlesBack(frameworkHandlesBack || backCallbackAtRoot)
+        flutterHandlesBack = frameworkHandlesBack
+        applyBackCallback()
+    }
+
+    /// Flutter's back callback registered while Flutter has something to
+    /// pop (flutterHandlesBack) or the activity keeps it at the root
+    /// (backCallbackAtRoot), and dropped otherwise.
+    private fun applyBackCallback() {
+        super.setFrameworkHandlesBack(flutterHandlesBack || backCallbackAtRoot)
     }
 
     /// Back at the root (Flutter's navigator has nothing left to pop) moves
@@ -166,16 +208,16 @@ class MainActivity : FlutterActivity() {
     /// Flutter keeps its callback there. At an idle root Flutter hands Back
     /// to Android (setFrameworkHandlesBack(false)): Android 13 moves a task
     /// whose root is a launcher activity, as MainActivity is, to the back,
-    /// and Android 14 and later a task the home screen started with the
-    /// launcher intent. Every task the launcher intent did not start keeps
-    /// the callback on Android 14 and later (setFrameworkHandlesBack above:
-    /// a share, the setup link, a notification, a plain `am start -n`), so
-    /// its Back lands here. One start is left that Android 14 and later
-    /// finish on a Back at an idle root: the launcher intent sent from
-    /// somewhere other than the home screen (Play's Open button,
-    /// `am start -a MAIN -c LAUNCHER`). So while a shared photo is pending
-    /// or an analysis the user started is in flight (AnalysisKeepAlive),
-    /// the shell keeps Back at the root in Flutter in every task
+    /// and Android 14 and later an activity the home screen started
+    /// (HomeStarts). On Android 14 and later the activity keeps the
+    /// callback unless the home screen made both its first start and its
+    /// latest (setFrameworkHandlesBack above), so after a share, the setup
+    /// link, a notification, Play's Open button or `am start` its Back lands
+    /// here. Android 16 still finishes it on a Back at an idle root after a
+    /// start it cannot see (a return from Recents, with a third-party home
+    /// app as the default). So while a shared photo is pending or an
+    /// analysis the user started is in flight (AnalysisKeepAlive), the
+    /// shell keeps Back at the root in Flutter in every task
     /// (SharedPhotosBackGuard, app.dart), and its SystemNavigator.pop()
     /// lands here on every Android version. A photo a finish still cuts off
     /// (a swipe from Recents, a Back before share intake has the share) is
@@ -191,13 +233,101 @@ class MainActivity : FlutterActivity() {
     /// listener and keeps nothing for later, and the share Android started
     /// a stopped process again for arrives before Dart has run. Until then
     /// it is held (ShareHold), not handed on, so the plugin cannot tell
-    /// Dart twice. Anything else passes as before.
+    /// Dart twice. Anything else passes as before. Every one is first a
+    /// start into the activity (noteStart).
     override fun onNewIntent(intent: Intent) {
+        noteStart(intent)
         val safe = withSafeShares(intent)
         val copied = safe !== intent && safe.action != null
         if (copied && !heldShares.pass(safe)) return
         super.onNewIntent(safe)
     }
+
+    /// [start], delivered to the running activity, is its latest start now
+    /// (HomeStarts.after), and Flutter's back callback at the root follows
+    /// (applyBackCallback). Called first in onNewIntent: getReferrer() names
+    /// this start's caller only during that call
+    /// (Instrumentation.callActivityOnNewIntent sets the activity's
+    /// referrer to the new intent's), and only while the activity's intent
+    /// is still the one it had before (getReferrer() reads a referrer extra
+    /// on it first, and flutter_local_notifications sets a notification
+    /// tap's intent in super.onNewIntent). A start from the home icon
+    /// arrives here too: MainActivity is singleTask, so Android hands it the
+    /// launcher's intent (ActivityStarter.complyActivityFlags). A return
+    /// from Recents delivers none.
+    private fun noteStart(start: Intent) {
+        homeStarts = homeStarts.after(isHomeStart(start), coveredInTask)
+        val keep = IntakeRules.keepsBackCallbackAtRoot(Build.VERSION.SDK_INT, homeStarts.systemMovesTaskBack)
+        if (keep == backCallbackAtRoot) return
+        backCallbackAtRoot = keep
+        applyBackCallback()
+    }
+
+    /// Whether [start] came from the home screen (IntakeRules.homeStart):
+    /// the launcher's own intent, from the caller Android recorded for it
+    /// (getReferrer: at the first create, the creating start's; in
+    /// onNewIntent, the new start's), which is the default home app. A
+    /// referrer the sender wrote into the intent (EXTRA_REFERRER,
+    /// EXTRA_REFERRER_NAME) is its own word, not Android's record, and
+    /// getReferrer() reports one on the activity's intent in place of the
+    /// record, so a start that carries one, or one that comes while the
+    /// activity's intent does, has no known caller
+    /// (IntakeRules.callerPackage). False when anything cannot be read.
+    private fun isHomeStart(start: Intent): Boolean = try {
+        val claimed = start.namesReferrer() || intent?.namesReferrer() == true
+        val from = referrer
+        IntakeRules.homeStart(
+            launcherIntent = IntakeRules.isLauncherIntent(start.action, start.categories, start.data != null, start.type),
+            referrerPackage = IntakeRules.callerPackage(from?.scheme, from?.host, claimed, start.flags),
+            homePackage = defaultHomePackage(),
+        )
+    } catch (e: Exception) {
+        false
+    }
+
+    private fun Intent.namesReferrer(): Boolean =
+        hasExtra(Intent.EXTRA_REFERRER) || hasExtra(Intent.EXTRA_REFERRER_NAME)
+
+    /// The package the home intent (ACTION_MAIN with CATEGORY_HOME)
+    /// resolves to: the default home app's, or the system chooser's
+    /// ("android") when no default is set, which IntakeRules.homeStart
+    /// takes for no home app. The app sees home apps through
+    /// AndroidManifest.xml's <queries>; without it, Android 11 and later
+    /// hide them from both this lookup and the referrer
+    /// (ActivityRecord.getFilteredReferrer).
+    @Suppress("DEPRECATION")
+    private fun defaultHomePackage(): String? {
+        val home = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+        val found = if (Build.VERSION.SDK_INT >= 33) {
+            packageManager.resolveActivity(
+                home,
+                PackageManager.ResolveInfoFlags.of(PackageManager.MATCH_DEFAULT_ONLY.toLong()),
+            )
+        } else {
+            packageManager.resolveActivity(home, PackageManager.MATCH_DEFAULT_ONLY)
+        }
+        return found?.activityInfo?.packageName
+    }
+
+    /// Whether this activity is the top one of its task, as Android
+    /// reports it (ActivityManager.getAppTasks); false when that cannot be
+    /// read. True below Android 14, where no answer depends on it
+    /// (keepsBackCallbackAtRoot).
+    private fun isTopOfItsTask(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) return true
+        val task = taskId
+        return try {
+            val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            am.appTasks.asSequence().mapNotNull { it.taskInfo }
+                .firstOrNull { it.taskId == task }?.topActivity == componentName
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /// The Boolean saved under [key], or null when none was.
+    private fun Bundle.savedBoolean(key: String): Boolean? =
+        if (containsKey(key)) getBoolean(key) else null
 
     /// Share intake listens now ("shareIntakeReady", sent after its listen
     /// on the same main thread): the shares onNewIntent held until then go
@@ -943,8 +1073,15 @@ class MainActivity : FlutterActivity() {
         /// was asked for (onSaveTargetPicked).
         const val STATE_SAVE_SOURCE = "chopstats.saveFile.source"
 
-        /// Saved state: whether the launcher's own intent created the
-        /// activity's task (launcherTask).
-        const val STATE_LAUNCHER_TASK = "chopstats.back.launcherTask"
+        /// Saved state: whether the home screen made the activity's first
+        /// start and its latest (homeStarts), and whether another activity
+        /// of its task covered it (coveredInTask). 1.7.1 saved
+        /// "chopstats.back.launcherTask" instead; nothing here reads it,
+        /// since an update stops the app and finishes its activities,
+        /// saved state and all, and a task reopened from Recents after that
+        /// starts a new activity with none.
+        const val STATE_FIRST_HOME_START = "chopstats.back.firstHomeStart"
+        const val STATE_LATEST_HOME_START = "chopstats.back.latestHomeStart"
+        const val STATE_COVERED_IN_TASK = "chopstats.back.coveredInTask"
     }
 }

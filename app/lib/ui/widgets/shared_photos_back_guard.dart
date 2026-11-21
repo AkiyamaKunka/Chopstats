@@ -23,19 +23,20 @@ import 'package:flutter/widgets.dart';
 /// later), at an idle root Flutter hands Back to Android
 /// (setFrameworkHandlesBack(false)), which answers it itself: Android 13
 /// moves a task whose root is a launcher activity, as MainActivity is, to
-/// the back, and Android 14 and later a task the home screen started with
-/// the launcher intent. Every task the launcher intent did not start keeps
-/// Flutter's callback on Android 14 and later
-/// (MainActivity.setFrameworkHandlesBack: a share, the setup link, a
-/// notification), so its Back reaches popSystemNavigator anyway. One start
-/// is left that Android 14 and later FINISH on a Back at an idle root: the
-/// launcher intent sent from somewhere other than the home screen (Play's
-/// Open button), which looks like the launcher's own to the app. A photo
-/// shared into such a task (singleTask: the share reaches the running
-/// activity), or any analysis started there, would die with its engine in
-/// the middle of the request: a shared photo came back only at the next
-/// start, sent to the AI a second time, or never when that start was a day
-/// later, and a picked photo, a typed meal or a fix was lost.
+/// the back, and Android 14 and later an activity the home screen started.
+/// On Android 14 and later MainActivity keeps Flutter's callback unless the
+/// home screen made both its first start and its latest
+/// (MainActivity.setFrameworkHandlesBack), so after a share, the setup
+/// link, a notification or Play's Open button its Back reaches
+/// popSystemNavigator anyway. Android 16 also judges a start the app cannot
+/// see, a return from Recents, by the app that shows Recents, which is not
+/// the home app with a third-party home app as the default; it then
+/// FINISHES the activity on a Back at an idle root. A photo shared into the
+/// running activity (singleTask), or any analysis started there, would die
+/// with its engine in the middle of the request: a shared photo came back
+/// only at the next start, sent to the AI a second time, or never when that
+/// start was a day later, and a picked photo, a typed meal or a fix was
+/// lost.
 ///
 /// So while either is true the root route does not pop (PopScope with
 /// canPop false): Flutter keeps the Back (setFrameworkHandlesBack(true))

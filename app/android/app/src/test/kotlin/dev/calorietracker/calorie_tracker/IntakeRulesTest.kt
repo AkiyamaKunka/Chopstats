@@ -41,14 +41,17 @@ class IntakeRulesTest {
         assertFalse(IntakeRules.isRedelivery(false, 0x10000000 or 0x00000001))
     }
 
-    // --- Back at the root: Android 14+ moves only a task the launcher's
-    // own intent created to the back, and finishes any other; those keep
-    // Flutter's back callback (MainActivity.setFrameworkHandlesBack).
+    // --- Back at the root: Android 14+ moves the task to the back only
+    // after starts from the home screen (the start that created the
+    // activity on Android 14 and 15, the latest one on Android 16) and
+    // finishes any other root; unless the home screen made both, Flutter
+    // keeps its back callback (MainActivity.setFrameworkHandlesBack).
 
     private val launcher = setOf("android.intent.category.LAUNCHER")
+    private val home = "com.google.android.apps.nexuslauncher"
 
     @Test
-    fun theLauncherIntentIsALauncherTask() {
+    fun theLaunchersOwnIntentIsRecognised() {
         assertEquals("android.intent.action.MAIN", Intent.ACTION_MAIN)
         assertEquals("android.intent.category.LAUNCHER", Intent.CATEGORY_LAUNCHER)
         assertTrue(IntakeRules.isLauncherIntent(Intent.ACTION_MAIN, launcher, hasData = false, type = null))
@@ -89,43 +92,205 @@ class IntakeRulesTest {
     }
 
     @Test
-    fun flutterKeepsBackAtTheRootOfAnyOtherTaskFromAndroid14() {
-        assertEquals(34, android.os.Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+    fun theCallerIsTheOneAndroidRecorded() {
+        assertEquals("android-app", IntakeRules.REFERRER_SCHEME)
+        // The home screen's tap (NEW_TASK | RESET_TASK_IF_NEEDED), and adb.
+        assertEquals(home, IntakeRules.callerPackage("android-app", home, claimed = false, flags = 0x10200000))
+        assertEquals("com.android.shell", IntakeRules.callerPackage("android-app", "com.android.shell", false, 0))
+        // A referrer the sender wrote itself (EXTRA_REFERRER, on the start's
+        // intent or the activity's), which getReferrer() reports in place
+        // of Android's record.
+        assertNull(IntakeRules.callerPackage("android-app", home, claimed = true, flags = 0))
+        // A task restored from Recents is started under the caller that
+        // first started it, not the one starting it now.
+        assertEquals(0x00100000, Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY)
+        assertNull(
+            IntakeRules.callerPackage("android-app", home, false, Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY or 0x10200000),
+        )
+        // No referrer, or none of Android's form.
+        assertNull(IntakeRules.callerPackage(null, null, false, 0))
+        assertNull(IntakeRules.callerPackage("https", home, false, 0))
+        assertNull(IntakeRules.callerPackage("android-app", null, false, 0))
+        assertNull(IntakeRules.callerPackage("android-app", "", false, 0))
+    }
+
+    @Test
+    fun onlyTheLauncherIntentFromTheDefaultHomeAppIsAHomeStart() {
+        assertTrue(IntakeRules.homeStart(launcherIntent = true, referrerPackage = home, homePackage = home))
+        // The same intent from anyone else: `am start`, Play's Open button,
+        // the package installer's, the app itself.
+        for (sender in listOf(
+            "com.android.shell",
+            "com.android.vending",
+            "com.google.android.packageinstaller",
+            "com.android.packageinstaller",
+            "dev.calorietracker.calorie_tracker",
+            "com.example.otherhome",
+        )) {
+            assertFalse(sender, IntakeRules.homeStart(true, sender, home))
+        }
+        // A share, the setup link, a notification tap: never the launcher's
+        // intent, whoever sends it.
+        assertFalse(IntakeRules.homeStart(launcherIntent = false, referrerPackage = home, homePackage = home))
+        // No known caller.
+        assertFalse(IntakeRules.homeStart(true, null, home))
+        // No known home app: nothing resolved, or the system's chooser
+        // (several home apps, no default), a caller in "android" included.
+        assertFalse(IntakeRules.homeStart(true, home, null))
+        assertFalse(IntakeRules.homeStart(true, null, null))
+        assertFalse(IntakeRules.homeStart(true, "android", "android"))
+    }
+
+    @Test
+    fun androidMovesTheTaskBackOnlyAfterHomeStartsFirstAndLatest() {
+        // Created from the home screen, nothing since.
+        val tapped = HomeStarts.restore(first = null, latest = null) { true }
+        assertEquals(HomeStarts(first = true, latest = true), tapped)
+        assertTrue(tapped.systemMovesTaskBack)
+        // Then a share, a notification tap, the setup link or Play's Open
+        // button into the running activity, which Android 16 judges.
+        val shared = tapped.after(home = false, covered = false)
+        assertEquals(HomeStarts(first = true, latest = false), shared)
+        assertFalse(shared.systemMovesTaskBack)
+        // The home icon again: both rules move the task back.
+        assertTrue(shared.after(home = true, covered = false).systemMovesTaskBack)
+        // Created by `am start`, Play's Open button or the installer's,
+        // which Android 14 and 15 judge for good.
+        val opened = HomeStarts.restore(null, null) { false }
+        assertFalse(opened.systemMovesTaskBack)
+        assertFalse(opened.after(home = true, covered = false).systemMovesTaskBack)
+        // A home start while another activity of the task covered this one
+        // (a picker, the share sheet): Android 16 gave it to that activity,
+        // which the start closed, so here it counts as none.
+        assertEquals(HomeStarts(true, false), tapped.after(home = true, covered = true))
+        assertFalse(shared.after(home = true, covered = true).systemMovesTaskBack)
+    }
+
+    @Test
+    fun theHomeStartsOutliveARelaunch() {
+        // A relaunch in the same process (Bold text, theme colours) gets the
+        // intent the last instance set, which tells nothing of the starts
+        // before: the saved state keeps both answers, and the intent is not
+        // asked.
+        assertEquals(HomeStarts(true, false), HomeStarts.restore(first = true, latest = false) { error("asked") })
+        assertEquals(HomeStarts(false, true), HomeStarts.restore(false, true) { error("asked") })
+        // Nothing saved (the first create): the creating start decides both.
+        assertEquals(HomeStarts(true, true), HomeStarts.restore(null, null) { true })
+        assertEquals(HomeStarts(false, false), HomeStarts.restore(null, null) { false })
+        // Half a state, which nothing writes: as if none.
+        assertEquals(HomeStarts(false, false), HomeStarts.restore(true, null) { false })
+        assertEquals(HomeStarts(false, false), HomeStarts.restore(null, true) { false })
+    }
+
+    @Test
+    fun flutterKeepsBackAtTheRootFromAndroid14UnlessAndroidMovesTheTaskBack() {
+        assertEquals(34, Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
         for (sdk in listOf(34, 35, 36, 37)) {
-            assertTrue(IntakeRules.keepsBackCallbackAtRoot(sdk, launcherTask = false))
-            // A task the launcher started: Android moves it to the back,
-            // with its back-to-home preview.
-            assertFalse(IntakeRules.keepsBackCallbackAtRoot(sdk, launcherTask = true))
+            assertTrue(IntakeRules.keepsBackCallbackAtRoot(sdk, systemMovesTaskBack = false))
+            // The home screen made the first and the latest start: Android
+            // moves the task to the back, with its back-to-home preview.
+            assertFalse(IntakeRules.keepsBackCallbackAtRoot(sdk, systemMovesTaskBack = true))
         }
         // Android 13 moves every root of a launcher activity to the back;
         // Android 12 and lower deliver Back through onBackPressed.
         for (sdk in listOf(24, 30, 32, 33)) {
-            assertFalse(IntakeRules.keepsBackCallbackAtRoot(sdk, launcherTask = false))
-            assertFalse(IntakeRules.keepsBackCallbackAtRoot(sdk, launcherTask = true))
+            assertFalse(IntakeRules.keepsBackCallbackAtRoot(sdk, systemMovesTaskBack = false))
+            assertFalse(IntakeRules.keepsBackCallbackAtRoot(sdk, systemMovesTaskBack = true))
         }
     }
 
-    @Test
-    fun theLauncherTaskDecisionOutlivesARelaunch() {
-        // A relaunch in the same process (Bold text, theme colours) gets the
-        // intent the last instance set: the replay rewrite's has no action.
-        // The saved state keeps the first create's answer.
-        val emptied = IntakeRules.isLauncherIntent(null, launcher, false, null)
-        assertFalse(emptied)
-        assertTrue(IntakeRules.launcherTask(saved = true, fromIntent = emptied))
-        assertFalse(
-            IntakeRules.keepsBackCallbackAtRoot(
-                34,
-                IntakeRules.launcherTask(saved = true, fromIntent = emptied),
-            ),
+    /// A start into MainActivity: whether its intent is the launcher's, the
+    /// package Android records as its caller, and whether another activity
+    /// of the task covered MainActivity when it came.
+    private data class Start(
+        val name: String,
+        val launcherIntent: Boolean,
+        val caller: String,
+        val covered: Boolean = false,
+    )
+
+    private val icon = Start("home icon", true, home)
+    private val adb = Start("am start -a MAIN -c LAUNCHER", true, "com.android.shell")
+    private val play = Start("Play's Open button", true, "com.android.vending")
+    private val installer = Start("the installer's Open button", true, "com.google.android.packageinstaller")
+    private val share = Start("a shared photo", false, "com.google.android.apps.photos")
+    private val setupLink = Start("the setup link", false, "com.google.android.GoogleCamera")
+    private val notification = Start("a notification tap", false, "dev.calorietracker.calorie_tracker")
+    private val iconOverPicker = Start("home icon over the photo picker", true, home, covered = true)
+    private val starts = listOf(icon, adb, play, installer, share, setupLink, notification, iconOverPicker)
+
+    /// MainActivity's answers after [history], whose first start created it.
+    private fun answers(history: List<Start>): HomeStarts {
+        fun isHome(start: Start) = IntakeRules.homeStart(
+            start.launcherIntent,
+            IntakeRules.callerPackage(IntakeRules.REFERRER_SCHEME, start.caller, false, 0),
+            home,
         )
-        // A task a share created stays one, whatever intent it has now.
-        val launcherNow = IntakeRules.isLauncherIntent(Intent.ACTION_MAIN, launcher, false, null)
-        assertTrue(launcherNow)
-        assertFalse(IntakeRules.launcherTask(saved = false, fromIntent = launcherNow))
-        // Nothing saved (the first create): the intent decides.
-        assertTrue(IntakeRules.launcherTask(saved = null, fromIntent = true))
-        assertFalse(IntakeRules.launcherTask(saved = null, fromIntent = false))
+        var answers = HomeStarts.restore(null, null) { isHome(history.first()) }
+        for (start in history.drop(1)) answers = answers.after(isHome(start), start.covered)
+        return answers
+    }
+
+    /// Whether Android [sdk] moves the task to the back on a Back at an idle
+    /// root after [history] (ActivityClientController.shouldMoveTaskToBack):
+    /// the intent that created the activity is the launcher's, and its
+    /// launch source is the home screen's. Android 14 and 15 keep the
+    /// creating start's; Android 16 takes each start's, on the task's top
+    /// activity, so a start that found MainActivity covered leaves its own.
+    private fun androidMovesTaskBack(sdk: Int, history: List<Start>): Boolean {
+        val source = if (sdk >= 36) history.last { !it.covered } else history.first()
+        return history.first().launcherIntent && source.caller == home
+    }
+
+    @Test
+    fun backIsLeftToAndroidOnlyWhereAndroid14To16MoveTheTaskBack() {
+        // Every history of up to three starts after the one that created
+        // the activity (a creating start finds nothing above it).
+        var histories = starts.filter { !it.covered }.map { listOf(it) }
+        val all = histories.toMutableList()
+        repeat(3) {
+            histories = histories.flatMap { h -> starts.map { h + it } }
+            all += histories
+        }
+        var leftToAndroid = 0
+        for (history in all) {
+            val answers = answers(history)
+            for (sdk in 34..36) {
+                if (IntakeRules.keepsBackCallbackAtRoot(sdk, answers.systemMovesTaskBack)) continue
+                leftToAndroid++
+                assertTrue("Android $sdk would finish after ${history.map { it.name }}", androidMovesTaskBack(sdk, history))
+            }
+        }
+        assertTrue(leftToAndroid > 0)
+    }
+
+    @Test
+    fun theMeasuredRunsKeepBackWhereAndroidFinished() {
+        // RC-171-verify.md's rows: whether Flutter keeps Back at the root
+        // (and moves the task to the back itself) on Android 15 and 16.
+        fun keeps(sdk: Int, vararg history: Start) =
+            IntakeRules.keepsBackCallbackAtRoot(sdk, answers(history.toList()).systemMovesTaskBack)
+        for (sdk in listOf(35, 36)) {
+            // A: started from the home screen. Android moves it back, with
+            // its preview.
+            assertFalse(keeps(sdk, icon))
+            // B: then `am start` into it (Play's Open button alike), which
+            // Android 16 finished.
+            assertTrue(keeps(sdk, icon, adb))
+            assertTrue(keeps(sdk, icon, play))
+            // D, E: the home icon after that. Android moves it back.
+            assertFalse(keeps(sdk, icon, icon))
+            assertFalse(keeps(sdk, icon, adb, icon))
+            // F: created by `am start`, then the home icon, which Android 15
+            // finished.
+            assertTrue(keeps(sdk, adb, icon))
+            assertTrue(keeps(sdk, installer, icon))
+            // G: one photo shared into it, which Android 16 finished; a
+            // notification tap or the setup link alike.
+            assertTrue(keeps(sdk, icon, share))
+            assertTrue(keeps(sdk, icon, notification))
+            assertTrue(keeps(sdk, icon, setupLink))
+        }
     }
 
     // --- The navigation bar's colour: the app sets it from Android 15,
