@@ -217,6 +217,85 @@ bool _githubTagMatches(String pattern, String tag) {
 /// this pin can only check that they agree, not that the date is new.
 const kPolicyEffectiveDate = '2026-11-21';
 
+/// x.y.z against x.y.z, number by number (1.10.0 is above 1.9.0).
+int _compareVersions(String a, String b) {
+  final x = [for (final p in a.split('.')) int.parse(p)];
+  final y = [for (final p in b.split('.')) int.parse(p)];
+  for (var i = 0; i < 3; i++) {
+    if (x[i] != y[i]) return x[i] - y[i];
+  }
+  return 0;
+}
+
+/// The versions docs/PRIVACY.md dates a change from, in English ("From
+/// version X.Y.Z", what release.yml's plan step reads) and in 中文 ("从
+/// X.Y.Z 版本起"), whitespace squeezed first as the plan step does.
+({List<String> en, List<String> zh}) _policyVersions(String policy) {
+  final flat = policy.replaceAll(RegExp(r'\s+'), ' ');
+  return (
+    en: [
+      for (final m in RegExp(r'From version (\d+\.\d+\.\d+)').allMatches(flat))
+        m.group(1)!,
+    ],
+    zh: [
+      for (final m in RegExp(r'从 (\d+\.\d+\.\d+) 版本起').allMatches(flat))
+        m.group(1)!,
+    ],
+  );
+}
+
+/// pubspec.yaml's x.y.z.
+String _pubspecVersion(String pubspec) =>
+    RegExp(r'^version:\s*(\d+\.\d+\.\d+)\+', multiLine: true)
+        .firstMatch(pubspec)!
+        .group(1)!;
+
+/// docs/RELEASING.md § 6.8's step before the lane play run (RD-1).
+const _kVersionStep = '`version:` in `app/pubspec.yaml` must not be below '
+    'the newest *From version X.Y.Z* in `docs/PRIVACY.md`';
+
+/// The docs/PRIVACY.md the release.yml plan harness (R15 below) writes
+/// unless a test gives its own: its newest version is the harness's
+/// pubspec version, 1.7.0.
+const _kStubPolicy = 'Effective date: 2026-11-20\n\n'
+    'From version 1.6.0 the app does A. From version 1.7.0, on Android,\n'
+    'it does B.\n';
+
+/// What docs/RELEASING.md lacks while pubspec is below the newest version
+/// the policy names: § 6.6 naming the version to bump to, and § 6.8's
+/// version step before its lane play run. Empty when pubspec is not behind.
+List<String> _versionGateGaps(
+    {required String policy,
+    required String pubspec,
+    required String releasing}) {
+  final v = _policyVersions(policy);
+  final named = [...v.en, ...v.zh];
+  if (named.isEmpty) return const [];
+  final newest =
+      named.reduce((a, b) => _compareVersions(a, b) >= 0 ? a : b);
+  final current = _pubspecVersion(pubspec);
+  if (_compareVersions(current, newest) >= 0) return const [];
+  final flat = releasing.replaceAll(RegExp(r'\s+'), ' ');
+  final gaps = <String>[];
+  if (!flat.contains('set `version:` in `app/pubspec.yaml` and '
+      '`kAppVersion` (`lib/services/backup/backup_files.dart`) to '
+      '`$newest` or later')) {
+    gaps.add('pubspec says $current and the policy names $newest: '
+        'RELEASING.md § 6.6 must say to bump ("… to `$newest` or later")');
+  }
+  final at = flat.indexOf('### 6.8 Owner checklist, in order');
+  final end = at < 0 ? -1 : flat.indexOf('### 6.9 ', at);
+  final s68 = at < 0 ? '' : flat.substring(at, end < 0 ? flat.length : end);
+  final step = s68.indexOf(_kVersionStep);
+  final run = s68.indexOf('Run workflow › `main` › lane `play`');
+  if (step < 0 || run < 0 || step > run) {
+    gaps.add('pubspec says $current and the policy names $newest: '
+        'RELEASING.md § 6.8 must keep its version step before the lane '
+        'play run');
+  }
+  return gaps;
+}
+
 void main() {
   group('R-F8: App Privacy answer B in the manifests', () {
     test('the plist reader reads what it should', () {
@@ -837,45 +916,88 @@ void main() {
       expect(flat, isNot(contains('--> 在 Android 上，只有在端到端加密时')));
     });
 
-    // android-v1.7.0 (b207) already carries the name 1.7.0. Whatever
-    // version the policy names last must be the next build's, so while
-    // pubspec is behind it, docs/RELEASING.md § 6.6 tells whoever builds
-    // next to bump first (review of #72).
-    test('the newest version the policy names is pubspec\'s, or RELEASING.md '
-        'says to bump to it before the next build', () {
-      List<int> parse(String v) => [for (final p in v.split('.')) int.parse(p)];
-      int compare(String a, String b) {
-        final (x, y) = (parse(a), parse(b));
-        for (var i = 0; i < 3; i++) {
-          if (x[i] != y[i]) return x[i] - y[i];
-        }
-        return 0;
-      }
+    // android-v1.7.0 (b207) carries the name 1.7.0, and the policy dates
+    // two Android changes from 1.7.1, so main is 1.7.1 since PR #77
+    // (decided on 2026-11-20, docs/RELEASING.md § 6.6). Whatever version
+    // the policy names last must be the next build's: while pubspec is
+    // behind it, § 6.6 names the version to bump to and § 6.8 keeps the
+    // step before the lane play run (review of #72; RD-1). release.yml's
+    // plan step refuses such an Android run (the R15 group runs it).
+    test('pubspec is not behind the newest version the policy names', () {
+      final v = _policyVersions(policy);
+      expect(v.en, contains('1.7.1'));
+      expect(v.en.toSet(), v.zh.toSet(),
+          reason: 'every version is named in English and in 中文');
+      final pubspec = _read('pubspec.yaml');
+      expect(_compareVersions(_pubspecVersion(pubspec), '1.7.1'),
+          greaterThanOrEqualTo(0),
+          reason: 'android-v1.7.0 went out as 1.7.0; the next build is '
+              '1.7.1 or later');
+      expect(
+          _versionGateGaps(
+              policy: policy,
+              pubspec: pubspec,
+              releasing: _readRepo('docs/RELEASING.md')),
+          isEmpty);
+    });
 
-      final named = [
-        for (final m in RegExp(r'From version (\d+\.\d+\.\d+)')
-            .allMatches(policy))
-          m.group(1)!,
-        for (final m in RegExp(r'从 (\d+\.\d+\.\d+) 版本起').allMatches(policy))
-          m.group(1)!,
-      ];
-      expect(named, contains('1.7.1'));
-      final newest =
-          named.reduce((a, b) => compare(a, b) >= 0 ? a : b);
-      final pubspec = RegExp(r'^version:\s*(\d+\.\d+\.\d+)\+', multiLine: true)
-          .firstMatch(_read('pubspec.yaml'))!
-          .group(1)!;
-      if (compare(pubspec, newest) < 0) {
-        final releasing =
-            _readRepo('docs/RELEASING.md').replaceAll(RegExp(r'\s+'), ' ');
-        expect(
-            releasing.contains('set `version:` in `app/pubspec.yaml` and '
-                '`kAppVersion` (`lib/services/backup/backup_files.dart`) to '
-                '`$newest` or later'),
-            isTrue,
-            reason: 'pubspec says $pubspec and the policy names $newest: '
-                'RELEASING.md § 6.6 must say to bump before the next build');
-      }
+    test('RELEASING.md § 6.6 and § 6.8 must catch up when the policy runs '
+        'ahead of pubspec', () {
+      final pubspec = _read('pubspec.yaml');
+      final parts =
+          _pubspecVersion(pubspec).split('.').map(int.parse).toList();
+      final next = '${parts[0]}.${parts[1]}.${parts[2] + 1}';
+      final ahead = '$policy\nFrom version $next, on Android, X. '
+          '从 $next 版本起，在 Android 上，X。\n';
+      final releasing =
+          _readRepo('docs/RELEASING.md').replaceAll(RegExp(r'\s+'), ' ');
+      final bump = ' Before the next build, set `version:` in '
+          '`app/pubspec.yaml` and `kAppVersion` '
+          '(`lib/services/backup/backup_files.dart`) to `$next` or later.';
+      final without = releasing.replaceAll(_kVersionStep, 'pubspec is fine');
+      expect(without, isNot(contains(_kVersionStep)));
+
+      // Today's § 6.8 has the step, and § 6.6 names no bump to `next`.
+      expect(
+          _versionGateGaps(policy: ahead, pubspec: pubspec, releasing: releasing)
+              .single,
+          contains('§ 6.6 must say to bump ("… to `$next` or later")'));
+      // § 6.6 names it, but § 6.8 lost its step.
+      expect(
+          _versionGateGaps(
+                  policy: ahead, pubspec: pubspec, releasing: without + bump)
+              .single,
+          contains('§ 6.8 must keep its version step'));
+      // Without either.
+      expect(
+          _versionGateGaps(policy: ahead, pubspec: pubspec, releasing: without),
+          hasLength(2));
+      // The step moved after the lane play run does not count.
+      final s68 = releasing.indexOf('### 6.8 Owner checklist, in order');
+      final run = releasing.indexOf('Run workflow › `main` › lane `play`', s68);
+      expect(releasing.indexOf(_kVersionStep, s68), inExclusiveRange(s68, run));
+      final moved = releasing.substring(0, s68) +
+          releasing.substring(s68, run).replaceFirst(_kVersionStep, 'see below') +
+          releasing
+              .substring(run)
+              .replaceFirst('### 6.9 ', '$_kVersionStep. ### 6.9 ');
+      expect(
+          _versionGateGaps(
+                  policy: ahead, pubspec: pubspec, releasing: moved + bump)
+              .single,
+          contains('§ 6.8'));
+      // Both: nothing missing.
+      expect(
+          _versionGateGaps(
+              policy: ahead, pubspec: pubspec, releasing: releasing + bump),
+          isEmpty);
+      // The 中文 sentence alone moves the newest version too.
+      expect(
+          _versionGateGaps(
+              policy: '$policy\n从 $next 版本起，X。\n',
+              pubspec: pubspec,
+              releasing: releasing),
+          hasLength(1));
     });
 
     test('Describe sends no meals; Fix sends the last 7 days', () {
@@ -1076,6 +1198,31 @@ void main() {
       expect(shots, contains('24-bit PNG with no alpha'));
     });
 
+    // The shots themselves (scripts/play_screenshots.py). zh-CN has no 06:
+    // the Chinese API Key page says which providers need a VPN in mainland
+    // China, where Play is not offered, and the listing names no VPN (PR
+    // #76 review).
+    test('the screenshots: 4 to 8 per language, 1080 x 1920 24-bit PNGs, '
+        'no Chinese API Key page', () {
+      final dir = '${_appRoot().path}/android/store/screenshots';
+      for (final lang in ['en-US', 'zh-CN']) {
+        final pngs = Directory('$dir/$lang')
+            .listSync()
+            .whereType<File>()
+            .where((f) => f.path.endsWith('.png'))
+            .toList();
+        expect(pngs.length, inInclusiveRange(4, 8), reason: lang);
+        for (final png in pngs) {
+          expect(_pngHeader(png), (1080, 1920, 8, 2), reason: png.path);
+        }
+      }
+      expect(File('$dir/en-US/06_ai_provider.png').existsSync(), isTrue);
+      expect(File('$dir/zh-CN/06_ai_provider.png').existsSync(), isFalse);
+      final shots = _read('android/store/screenshots/SHOTS.md')
+          .replaceAll(RegExp(r'\s+'), ' ');
+      expect(shots, contains('VPN or mainland-China notes'));
+    });
+
     // Android 13+ themed icons need a monochrome layer (lint
     // MonochromeLauncherIcon). flutter_launcher_icons writes it from
     // pubspec.yaml, from the layers scripts/play_graphics.py --launcher
@@ -1143,9 +1290,11 @@ void main() {
   group('release.yml: tags, Play tracks and the Gradle mirrors', () {
     final workflow = _readRepo('.github/workflows/release.yml');
 
-    // Decision 4 (2026-11-13): Android 1.7.0 ships with a hand-made GitHub
-    // Release under android-v1.7.0, so v1.7.0 stays free for the iPhone.
-    // That tag must start no run: the only push trigger is tags v*.
+    // Decision 4 (2026-11-13): an Android-only version ships with a
+    // hand-made GitHub Release under an android-v* tag (android-v1.7.0 on
+    // 2026-11-19, android-v1.7.1 next; the iPhone's next tag from main is
+    // v1.7.1). That tag must start no run: the only push trigger is tags
+    // v*.
     test('only v* tags start a run, so android-v* tags start none', () {
       final on = RegExp(r'^on:\n((?:[ \t]+.*\n|\n)*)', multiLine: true)
           .firstMatch(workflow)!
@@ -1252,6 +1401,184 @@ void main() {
       ]) {
         expect(s6, contains(fact), reason: fact);
       }
+    });
+
+    // RD-1: § 6.3 and § 6.6 told the owner to expect build name 1.7.0 and
+    // the artifact android-1.7.0-2xx while the next build had to be 1.7.1,
+    // and § 6.8 sent the APK out as android-v1.7.0 again. What they tell
+    // the next run to expect is pubspec's version, and so is the tag the
+    // cheat sheet pushes (release.yml refuses any other).
+    test("what § 6 and § 8 expect from the next run is pubspec's version",
+        () {
+      final version = _pubspecVersion(_read('pubspec.yaml'));
+      Set<String?> named(RegExp re) =>
+          re.allMatches(s6).map((m) => m.group(1)).toSet();
+      expect(named(RegExp(r'build name `(\d+\.\d+\.\d+)`')), {version});
+      expect(named(RegExp(r'`android-(\d+\.\d+\.\d+)-2xx`')), {version});
+      expect(s6, contains('Name the release `$version (2xx)`'));
+      expect(s6, contains('GitHub APK as `android-v$version` by hand'));
+      expect(s6, contains('`android-v1.7.0` (build 207) is already out'));
+      expect(s6, contains("the iPhone's next tag from `main` is `v$version`"));
+      expect(releasing,
+          contains('git tag v$version && git push origin v$version'));
+      expect(s6, isNot(contains('The next Android build is 1.7.1.')),
+          reason: 'the bump is done (§ 6.6)');
+      // Decision 9 (RD-6): renewal after a stop is Android 12 and later
+      // only, and the Play build runs the keep-alive's job too.
+      expect(s6, contains('only on Android 12 and later, and only after a '
+          'stop a fresh job can outlast'));
+      expect(s6, isNot(contains('a job the system stops mid-request is '
+          'replaced the same way')));
+      expect(s6, contains("the analysis keep-alive's one-time job still runs"));
+      expect(s6, isNot(contains('no WorkManager job is registered')));
+    });
+
+    // Review of #77 (RV-2, DT-1): release/1.6.1 holds a finished, untagged
+    // 1.6.1 cut from v1.6.0, so "the iPhone goes from 1.6.0 to 1.7.1" and
+    // "the first iPhone tag since 1.6.0, v1.7.1" held only for tags from
+    // main. What RELEASING says about the next iPhone version is main's,
+    // and § 6.6 says what a v1.6.1 tag on that branch does.
+    test("the iPhone's next version is main's, and a 1.6.x hotfix is "
+        'tagged on its own branch', () {
+      final version = _pubspecVersion(_read('pubspec.yaml'));
+      final flat = releasing.replaceAll(RegExp(r'\s+'), ' ');
+      for (final unscoped in [
+        "the iPhone's next tag is",
+        'the iPhone goes from 1.6.0 to',
+        'Before the first iPhone tag since 1.6.0',
+        'so no build may be named below',
+        'means that next App Store version',
+      ]) {
+        expect(flat, isNot(contains(unscoped)), reason: unscoped);
+      }
+      expect(s6, contains("`main`'s next iPhone version is $version"));
+      expect(
+          s6,
+          contains('so no build of `main` may be named below the newest '
+              'version it names'));
+      expect(
+          flat,
+          contains('Before the first tag from `main` since 1.6.0, '
+              '`v$version`'));
+      expect(
+          flat,
+          contains('means the first App Store version built from `main` '
+              'after 1.6.0, now $version, not a 1.6.x hotfix'));
+      // § 6.3 names the hotfix branch; § 6.6 says what its tag does.
+      expect(
+          s6,
+          contains('The 1.6.x hotfixes branch from tag `v1.6.0` (today '
+              '`release/1.6.1`, § 6.6)'));
+      expect(s6, contains('**A 1.6.x hotfix**'));
+      final hotfix = s6.substring(s6.indexOf('**A 1.6.x hotfix**'));
+      for (final fact in [
+        'A `v1.6.1` tag needs no § 11, since that branch has no iCloud '
+            'entitlement',
+        "runs that branch's own `release.yml`: both lanes on a tag push, "
+            '`BUILD_NUMBER_OFFSET` 100, and none of the checks added since '
+            '1.6.0',
+        'So its build is numbered 100 + its run number',
+        "That is below `android-v1.7.0`'s 207, so Android refuses it on a "
+            'phone with 1.7.0',
+        "Keep that branch's own `release.yml`",
+      ]) {
+        expect(hotfix, contains(fact), reason: fact);
+      }
+    });
+
+    // Review of #77 (DT-2): android-v1.7.0 went out on 2026-11-19 in the
+    // repo's local time (run 7 at 22:09 CST, published 23:31 CST), not
+    // 2026-11-20 (UTC), and main's pubspec is 1.7.1 from the merge of PR
+    // #77 on, not from the day it was decided.
+    test('android-v1.7.0 is dated 2026-11-19, and the bump by its PR', () {
+      final flat = releasing.replaceAll(RegExp(r'\s+'), ' ');
+      final dated = [
+        for (final sentence in flat.split(RegExp(r'(?<=[.;])\s+')))
+          if (sentence.contains('android-v1.7.0'))
+            for (final d in RegExp(r'\d{4}-\d\d-\d\d').allMatches(sentence))
+              (date: d.group(0)!, sentence: sentence),
+      ];
+      expect(dated, hasLength(greaterThanOrEqualTo(3)));
+      for (final (:date, :sentence) in dated) {
+        expect(date, '2026-11-19', reason: sentence);
+      }
+      expect(flat, isNot(contains('So on 2026-11-20 `version:`')));
+      expect(flat, isNot(contains('both were 1.7.1 on 2026-11-20')));
+      expect(
+          flat,
+          contains('`kAppVersion` (`lib/services/backup/backup_files.dart`) '
+              '`1.7.1` since PR #77, decided on 2026-11-20'));
+      expect(flat, contains('(both are 1.7.1 since PR #77)'));
+    });
+
+    // Review of #77 (RV-1): two maintainer notes outside RELEASING waited
+    // for "1.7.0" to ship on the App Store, which the iPhone skips.
+    test('the slide and screenshot notes wait for 1.7.1, not 1.7.0', () {
+      String flatRepo(String path) =>
+          _readRepo(path).replaceAll(RegExp(r'\s+'), ' ');
+      final slides = flatRepo('docs/readme/src/README.md');
+      expect(slides, isNot(contains('When 1.7.0 ships')));
+      expect(
+          slides,
+          contains('When the first App Store version built from `main` '
+              'after 1.6.0 ships (1.7.1: the iPhone skips 1.7.0'));
+      final shots = flatRepo('app/ios/store/marketing-src/README.md');
+      expect(shots, isNot(contains('(1.7.0, the native iOS design)')));
+      expect(
+          shots,
+          contains('(1.7.1, the native iOS design; the iPhone skips '
+              '1.7.0)'));
+    });
+
+    // § 6.8 met itself in the merge of main into #77 (2026-11-21): #76
+    // rewrote step 7 (where the screenshots are) while #77 put the version
+    // step after it and renumbered the rest. The steps run 1, 2, 3 … and
+    // the step numbers cited elsewhere still name the steps they mean.
+    test('§ 6.8: the shots, the version step and the lane play run in a '
+        'row, and the step numbers cited elsewhere match', () {
+      final at = releasing.indexOf('### 6.8 Owner checklist, in order');
+      final numbers = <int>[];
+      final steps = <int, String>{};
+      int? n;
+      for (final line in releasing
+          .substring(at, releasing.indexOf('### 6.9 ', at))
+          .split('\n')) {
+        final m = RegExp(r'^(\d+)\. (.*)$').firstMatch(line);
+        if (m != null) {
+          n = int.parse(m.group(1)!);
+          numbers.add(n);
+          steps[n] = m.group(2)!;
+        } else if (n != null && line.startsWith('   ')) {
+          steps[n] = '${steps[n]} ${line.trim()}';
+        } else {
+          n = null;
+        }
+      }
+      expect(numbers, [for (var i = 1; i <= numbers.length; i++) i]);
+      int stepWith(String text) {
+        final hits = [
+          for (final e in steps.entries)
+            if (e.value.replaceAll(RegExp(r'\s+'), ' ').contains(text)) e.key,
+        ];
+        expect(hits, hasLength(1), reason: text);
+        return hits.single;
+      }
+
+      final shots =
+          stepWith('from `app/android/store/screenshots/en-US/` and `zh-CN/`');
+      final version = stepWith(_kVersionStep);
+      final run = stepWith('Run workflow › `main` › lane `play`');
+      expect([version, run], [shots + 1, shots + 2]);
+      final https = stepWith('says `kRequireHttpsServer = true` at the run');
+      expect(steps[stepWith('"encrypted in transit: Yes"')],
+          contains('step $https checks it'));
+      final flat = releasing.replaceAll(RegExp(r'\s+'), ' ');
+      expect(flat, contains('(§ 6.8, step $version)'));
+      expect(flat, contains('§ 6.8 to keep step $version.'));
+      expect(
+          _read('android/store/data_safety.md')
+              .replaceAll(RegExp(r'\s+'), ' '),
+          contains('`docs/RELEASING.md` § 6.8 step $https has you check it'));
     });
 
     test('every Google page it cites carries its read date', () {
@@ -1523,8 +1850,10 @@ void main() {
       expect(releasing, contains('`ANDROID_UPLOAD_CERT_SHA256`'));
     });
 
-    // R15: a tag's +N was checked against the offset only. The plan step's
-    // own script, run as the workflow runs it.
+    // R15: a tag's +N was checked against the offset only. RD-5: then
+    // against the run's number only, not against other +N tags. RD-1: an
+    // Android run took pubspec's name without the policy's newest version.
+    // The plan step's own script, run as the workflow runs it.
     group('R15: a tag\'s +N is held above every number CI has used', () {
       String planScript() {
         final at = workflow.indexOf('        id: plan\n');
@@ -1546,26 +1875,56 @@ void main() {
       /// The plan step at Release run [run]. [released]: whether `gh
       /// release view` finds the tag's GitHub Release. A stub `gh` first
       /// on PATH answers it and records its calls in `gh`: the developer's
-      /// own gh is never called.
-      Future<({int code, String log, String out, List<String> gh})> plan(
-          String event, String ref, int run,
-          {bool released = false}) async {
+      /// own gh is never called. A stub `git` answers `git ls-remote` with
+      /// the repository's [tags] (or fails, [tagsFail]) and records its
+      /// calls in `git`. [pubspec] is pubspec's version, [policy]
+      /// docs/PRIVACY.md (none when null), [lane] the lane input.
+      Future<
+          ({
+            int code,
+            String log,
+            String out,
+            List<String> gh,
+            List<String> git
+          })> plan(String event, String ref, int run,
+          {bool released = false,
+          String lane = 'both',
+          String pubspec = '1.7.0+9',
+          String? policy = _kStubPolicy,
+          List<String> tags = const [],
+          bool tagsFail = false}) async {
         final dir = Directory.systemTemp.createTempSync('ct_plan');
         addTearDown(() => dir.deleteSync(recursive: true));
         Directory('${dir.path}/app').createSync();
         File('${dir.path}/app/pubspec.yaml')
-            .writeAsStringSync('version: 1.7.0+9\n');
+            .writeAsStringSync('version: $pubspec\n');
+        if (policy != null) {
+          Directory('${dir.path}/docs').createSync();
+          File('${dir.path}/docs/PRIVACY.md').writeAsStringSync(policy);
+        }
         final script = File('${dir.path}/plan.sh')
           ..writeAsStringSync(planScript());
         final out = File('${dir.path}/out')..createSync();
         final summary = File('${dir.path}/summary')..createSync();
         final calls = File('${dir.path}/gh-calls')..createSync();
+        final gitCalls = File('${dir.path}/git-calls')..createSync();
+        final refs = File('${dir.path}/tag-refs')
+          ..writeAsStringSync(
+              [for (final t in tags) '${'0' * 40}\trefs/tags/$t\n'].join());
         final bin = Directory('${dir.path}/bin')..createSync();
         final gh = File('${bin.path}/gh')
           ..writeAsStringSync('#!/usr/bin/env bash\n'
               'echo "\$*" >> "${calls.path}"\n'
               'exit ${released ? 0 : 1}\n');
-        expect((await Process.run('chmod', ['+x', gh.path])).exitCode, 0);
+        final git = File('${bin.path}/git')
+          ..writeAsStringSync('#!/usr/bin/env bash\n'
+              'echo "\$*" >> "${gitCalls.path}"\n'
+              '[ "\$1" = ls-remote ] || exit 2\n'
+              '${tagsFail ? 'echo "fatal: unable to access origin" >&2\n'
+                  'exit 128\n' : 'cat "${refs.path}"\n'}');
+        expect(
+            (await Process.run('chmod', ['+x', gh.path, git.path])).exitCode,
+            0);
         final r = await Process.run('bash', [script.path],
             workingDirectory: dir.path,
             environment: {
@@ -1578,18 +1937,18 @@ void main() {
               'BUILD_NUMBER_OFFSET': offset,
               'GITHUB_OUTPUT': out.path,
               'GITHUB_STEP_SUMMARY': summary.path,
-              'LANE': 'both',
+              'LANE': lane,
               'INTERNAL_ONLY_INPUT': 'true',
               'PLAY_TRACK': 'internal',
             });
+        List<String> lines(File f) =>
+            f.readAsLinesSync().where((l) => l.isNotEmpty).toList();
         return (
           code: r.exitCode,
           log: '${r.stdout}${r.stderr}',
           out: out.readAsStringSync(),
-          gh: calls
-              .readAsLinesSync()
-              .where((l) => l.isNotEmpty)
-              .toList(),
+          gh: lines(calls),
+          git: lines(gitCalls),
         );
       }
 
@@ -1684,6 +2043,262 @@ void main() {
         expect(high.code, 0, reason: high.log);
         expect(high.gh, isEmpty);
         expect(high.out, contains('build_number=220\n'));
+      });
+
+      // RD-5: the floor was the run's alone, so once a +N above it went
+      // out, a later tag's +N or a later run's own number could land on
+      // it, or below it. The plan step reads the repository's tags.
+      test('another +N tag holds a tag\'s +N above its number', () async {
+        const earlier = ['v1.6.9+215', 'v1.6.0', 'android-v1.7.0', 'v1.6.0+8'];
+        // Run 12's own floor is 212: 213 clears it, but not 215.
+        for (final n in [205, 213, 215]) {
+          final r =
+              await plan('push', 'refs/tags/v1.7.0+$n', 12, tags: earlier);
+          expect(r.code, 1, reason: '+$n: ${r.log}');
+          expect(
+              r.log,
+              contains('::error::tag v1.7.0+$n carries build number $n, but '
+                  'tag v1.6.9+215 numbered its build 215'));
+          expect(r.log, contains('Use a +N above 215.'));
+          expect(r.log, isNot(contains('Tag v1.7.0 without a +N instead')),
+              reason: 'a plain tag at the next run (213) is refused too');
+          expect(r.out, isNot(contains('build_number=')));
+          expect(r.git, ['ls-remote --tags --refs origin']);
+        }
+        final above =
+            await plan('push', 'refs/tags/v1.7.0+216', 12, tags: earlier);
+        expect(above.code, 0, reason: above.log);
+        expect(above.out, contains('build_number=216\n'));
+      });
+
+      test('a run numbered offset + run number waits until it is above '
+          'every +N tag', () async {
+        const earlier = ['v1.6.9+215'];
+        final base = int.parse(offset);
+        for (final (event, ref, lane) in [
+          ('push', 'refs/tags/v1.7.0', 'both'),
+          ('workflow_dispatch', 'refs/heads/main', 'play'),
+          ('workflow_dispatch', 'refs/heads/main', 'testflight'),
+        ]) {
+          for (final run in [10, 15]) {
+            final r = await plan(event, ref, run, lane: lane, tags: earlier);
+            expect(r.code, 1, reason: '$ref $lane at run $run: ${r.log}');
+            expect(
+                r.log,
+                contains('::error::this is Release run $run, so its build '
+                    'number is ${base + run}'));
+            expect(r.log, contains('but tag v1.6.9+215 numbered its build 215'));
+            expect(r.log, contains('Raise BUILD_NUMBER_OFFSET in release.yml'));
+            expect(r.out, isNot(contains('build_number=')));
+          }
+          final next = await plan(event, ref, 16, lane: lane, tags: earlier);
+          expect(next.code, 0, reason: '$ref $lane at run 16: ${next.log}');
+          expect(next.out, contains('build_number=${base + 16}\n'));
+        }
+      });
+
+      test('the tag being built, and tags that are not vX.Y.Z+N, do not '
+          'count', () async {
+        // Run workflow re-releasing v1.7.0+215 itself.
+        final self = await plan('workflow_dispatch', 'refs/tags/v1.7.0+215', 16,
+            released: true, tags: ['v1.7.0+215']);
+        expect(self.code, 0, reason: self.log);
+        expect(self.out, contains('build_number=215\n'));
+        // A higher +N tag next to it: still a re-release, with a warning.
+        final higher = await plan(
+            'workflow_dispatch', 'refs/tags/v1.7.0+215', 16,
+            released: true, tags: ['v1.7.0+215', 'v1.6.9+220']);
+        expect(higher.code, 0, reason: higher.log);
+        expect(higher.log, contains('re-releasing build 215 (below 221'));
+        // Not released, below another tag's number: refused, and why.
+        final unreleased = await plan(
+            'workflow_dispatch', 'refs/tags/v1.7.0+213', 12,
+            tags: ['v1.6.9+215']);
+        expect(unreleased.code, 1, reason: unreleased.log);
+        expect(
+            unreleased.log,
+            contains('::error::Run workflow on tag v1.7.0+213: build number '
+                '213 is not above 215, which tag v1.6.9+215 carries'));
+        // None of these is a vX.Y.Z+N tag.
+        final others = await plan('workflow_dispatch', 'refs/heads/main', 8,
+            tags: [
+              'android-v1.7.0',
+              'v1.6.0',
+              'v1.7.0-rc1+300',
+              'v1.7+300',
+              'release/v1.6.1+300',
+              'v1.6.0+8',
+            ]);
+        expect(others.code, 0, reason: others.log);
+        expect(others.out, contains('build_number=${int.parse(offset) + 8}\n'));
+      });
+
+      test('a failed read of the tags stops the run', () async {
+        final r = await plan('workflow_dispatch', 'refs/heads/main', 16,
+            tagsFail: true);
+        expect(r.code, 1);
+        expect(
+            r.log,
+            contains("::error::could not read the repository's tags "
+                '(git ls-remote)'));
+        expect(r.out, isEmpty);
+      });
+
+      // Review of #77 (RV-3, DT-3): RELEASING § 5 said two tags pushed
+      // together could each pass. A run reads the tags after the push that
+      // started it, so tags pushed in one push see each other, and a tag
+      // pushed after a run has read them starts a later run, which reads
+      // the earlier run's tag.
+      test('two tags that would collide never both pass', () async {
+        /// The plan of a push of tag [name] at Release run [run], with
+        /// [seen] the repository's tags then, and pubspec at its version.
+        Future<({int code, String log, String out})> push(
+            String name, int run, List<String> seen) async {
+          final version = name.substring(1).split('+').first;
+          final r = await plan('push', 'refs/tags/$name', run,
+              pubspec: '$version+9', tags: seen);
+          return (code: r.code, log: r.log, out: r.out);
+        }
+
+        // One push, two +N tags: each run sees both, the lower is refused.
+        const pair = ['v1.7.0+215', 'v1.7.1+216'];
+        final lower = await push('v1.7.0+215', 9, pair);
+        expect(lower.code, 1, reason: lower.log);
+        expect(lower.log, contains('but tag v1.7.1+216 numbered its build 216'));
+        final higher = await push('v1.7.1+216', 10, pair);
+        expect(higher.code, 0, reason: higher.log);
+        expect(higher.out, contains('build_number=216\n'));
+        // Equal: both are refused, whichever run starts first.
+        const equal = ['v1.7.0+215', 'v1.7.1+215'];
+        for (final (name, run) in [('v1.7.0+215', 9), ('v1.7.1+215', 10)]) {
+          final r = await push(name, run, equal);
+          expect(r.code, 1, reason: '$name: ${r.log}');
+          expect(r.out, isNot(contains('build_number=')));
+        }
+
+        // Pushed after run 9 had read the tags: run 10's floor is above
+        // run 9's own number, and run 10 counts run 9's +N.
+        final plain = await push('v1.7.0', 9, ['v1.7.0']);
+        expect(plain.out, contains('build_number=209\n'));
+        final same = await push('v1.7.1+209', 10, ['v1.7.0', 'v1.7.1+209']);
+        expect(same.code, 1, reason: same.log);
+        final after = await push('v1.7.1+210', 10, ['v1.7.0', 'v1.7.1+210']);
+        expect(after.code, 0, reason: after.log);
+        expect(after.out, contains('build_number=210\n'));
+        final plus = await push('v1.7.0+215', 9, ['v1.7.0+215']);
+        expect(plus.out, contains('build_number=215\n'));
+        for (final name in ['v1.7.1', 'v1.7.1+215']) {
+          final r = await push(name, 10, ['v1.7.0+215', name]);
+          expect(r.code, 1, reason: '$name: ${r.log}');
+          expect(r.log, contains('but tag v1.7.0+215 numbered its build 215'));
+        }
+        final above =
+            await push('v1.7.1+216', 10, ['v1.7.0+215', 'v1.7.1+216']);
+        expect(above.code, 0, reason: above.log);
+
+        // What RELEASING § 5 and the plan step's comment say about it.
+        final releasing =
+            _readRepo('docs/RELEASING.md').replaceAll(RegExp(r'\s+'), ' ');
+        expect(releasing,
+            isNot(contains('two tags pushed together can each pass')));
+        expect(releasing,
+            contains('So two tags that would collide never both pass.'));
+        expect(releasing,
+            contains('the checkout fetches no tag but the one being built'));
+        expect(workflow, isNot(contains('one pushed while this step runs')));
+        expect(workflow, isNot(contains('The checkout fetches no tags')));
+        expect(workflow,
+            contains('two tags that would collide never both pass'));
+      });
+
+      // RD-1: Run workflow › lane play built 1.7.0 while the policy dated
+      // that build's behaviour from 1.7.1.
+      test('an Android run stops while pubspec is below the newest "From '
+          'version" in docs/PRIVACY.md', () async {
+        const ahead = 'From version 1.7.0 the address must start with '
+            '`https://`.\nFrom version 1.7.1, on Android, that switch is '
+            'off.\n';
+        for (final (event, ref, lane) in [
+          ('workflow_dispatch', 'refs/heads/main', 'play'),
+          ('workflow_dispatch', 'refs/heads/main', 'both'),
+          ('push', 'refs/tags/v1.7.0', 'both'),
+        ]) {
+          final r = await plan(event, ref, 8, lane: lane, policy: ahead);
+          expect(r.code, 1, reason: '$ref $lane: ${r.log}');
+          expect(
+              r.log,
+              contains("::error::app/pubspec.yaml says 1.7.0, but "
+                  "docs/PRIVACY.md says 'From version 1.7.1', and this run "
+                  'builds Android'));
+          expect(r.log,
+              contains('to 1.7.1 or later first (docs/RELEASING.md § 6.6)'));
+          expect(r.out, isNot(contains('build_number=')));
+        }
+        // An iPhone-only run builds no Android.
+        final ios = await plan('workflow_dispatch', 'refs/heads/main', 8,
+            lane: 'testflight', policy: ahead);
+        expect(ios.code, 0, reason: ios.log);
+        // Bumped to it, or past it.
+        for (final version in ['1.7.1+10', '1.8.0+11']) {
+          final r = await plan('workflow_dispatch', 'refs/heads/main', 8,
+              lane: 'play', policy: ahead, pubspec: version);
+          expect(r.code, 0, reason: '$version: ${r.log}');
+          expect(r.out, contains('build_name=${version.split('+').first}\n'));
+        }
+      });
+
+      test('the policy check compares versions, reads across line breaks '
+          'and needs the policy', () async {
+        Future<({int code, String log})> android(
+            String pubspec, String? policy,
+            {String lane = 'play'}) async {
+          final r = await plan('workflow_dispatch', 'refs/heads/main', 8,
+              lane: lane, pubspec: pubspec, policy: policy);
+          return (code: r.code, log: r.log);
+        }
+
+        expect((await android('1.9.0+10', 'From version 1.10.0, X.\n')).code,
+            1, reason: '1.10.0 is above 1.9.0');
+        expect((await android('1.10.0+10', 'From version 1.9.0, X.\n')).code,
+            0);
+        expect(
+            (await android('1.7.0+9', 'A sentence that wraps. From\n'
+                    'version 1.7.1, on Android, X.\n'))
+                .code,
+            1,
+            reason: 'wrapped inside "From version"');
+        expect(
+            (await android('1.7.0+9', 'Effective date: 2026-11-20\n')).code, 0,
+            reason: 'no version named');
+        final missing = await android('1.7.0+9', null);
+        expect(missing.code, 1);
+        expect(missing.log, contains('docs/PRIVACY.md is missing'));
+        expect((await android('1.7.0+9', null, lane: 'testflight')).code, 0);
+      });
+
+      // The plan step and the gate above read the real policy alike.
+      test('against the real policy: pubspec passes, a version below its '
+          'newest stops', () async {
+        final policy = _readRepo('docs/PRIVACY.md');
+        final version = RegExp(r'^version:\s*(\S+)$', multiLine: true)
+            .firstMatch(_read('pubspec.yaml'))!
+            .group(1)!;
+        final ok = await plan('workflow_dispatch', 'refs/heads/main', 8,
+            lane: 'play', policy: policy, pubspec: version);
+        expect(ok.code, 0, reason: ok.log);
+        final v = _policyVersions(policy).en;
+        final newest =
+            v.reduce((a, b) => _compareVersions(a, b) >= 0 ? a : b);
+        final p = newest.split('.').map(int.parse).toList();
+        final below = p[2] > 0
+            ? '${p[0]}.${p[1]}.${p[2] - 1}'
+            : p[1] > 0
+                ? '${p[0]}.${p[1] - 1}.99'
+                : '${p[0] - 1}.99.99';
+        final r = await plan('workflow_dispatch', 'refs/heads/main', 8,
+            lane: 'play', policy: policy, pubspec: '$below+9');
+        expect(r.code, 1, reason: r.log);
+        expect(r.log, contains("docs/PRIVACY.md says 'From version $newest'"));
       });
 
       test('the plan step has the token gh needs, and no more permission',

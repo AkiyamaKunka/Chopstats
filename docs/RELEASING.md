@@ -40,7 +40,7 @@ Identifiers that must match everywhere:
 | Apple team in `Runner.xcodeproj` today | `WLQB3YB22M` — the paid Apple Developer Program (Individual) since 2026-10-29; the Team ID did not change on enrolment (§ 1.2), so the keychain and the dev build carry over |
 | Android package / application id | `dev.calorietracker.calorie_tracker` (permanent once the Play app record exists: Create app asks for it, § 6.1) |
 | Display name | `Chopstats` (Info.plist `CFBundleDisplayName` and en `InfoPlist.strings`, both targets; 筷拍 under zh-Hans); store name `Chopstats · 筷拍` (owner decision R-F9, 2026-10-29; formerly BiteWise) |
-| Version | `app/pubspec.yaml` `version: 1.7.0+9` → `CFBundleShortVersionString` / `versionName` = `1.7.0`; the build number is stamped by CI (§ 5) |
+| Version | `app/pubspec.yaml` `version: 1.7.1+10` → `CFBundleShortVersionString` / `versionName` = `1.7.1`; the build number is stamped by CI (§ 5) |
 
 ---
 
@@ -548,7 +548,7 @@ All done; this is what each one is and where it lives.
 - `ITSAppUsesNonExemptEncryption = false` in `app/ios/Runner/Info.plist`
   (the app only uses OS TLS, the keychain and SHA hashing, which are exempt;
   without the key every build sits in "Missing Compliance" until answered).
-- `app/pubspec.yaml` is `1.7.0+9`; the ShareExtension takes its version from
+- `app/pubspec.yaml` is `1.7.1+10`; the ShareExtension takes its version from
   `$(FLUTTER_BUILD_NAME)` / `$(FLUTTER_BUILD_NUMBER)`.
 
 1. **Privacy manifests — done.** Both targets ship a
@@ -1043,8 +1043,9 @@ step. Revisit if the app is ever published with a developer-run service.
   offset keeps CI above the hand-built era. It was `+100` up to 1.6.0
   (build 106) and is `+200` from 1.7.0, so the iCloud device tests can use
   107–199 (§ 11). Never lower `BUILD_NUMBER_OFFSET` in `release.yml`. Hand
-  builds on the Mac use the `+N` from pubspec (currently 9); keep those
-  below 200.
+  builds on the Mac use the `+N` from pubspec (currently 10; it goes up by
+  one with each version bump, so a hand build installs over the last one);
+  keep those below 200.
 - A tag may be pushed again only after deleting it on both sides; prefer a
   patch bump instead.
 - Friends' sideloaded APKs: Android upgrades when `versionCode` grows **and**
@@ -1067,8 +1068,9 @@ step. Revisit if the app is ever published with a developer-run service.
 - A `vX.Y.Z+N` tag must carry an `N` above `BUILD_NUMBER_OFFSET`; the plan
   job refuses pubspec's own small `+N`. Tag plain `vX.Y.Z` normally.
 - On a tag push that `N` must also be at least `BUILD_NUMBER_OFFSET` + the
-  run's number: every earlier run numbered its build below that (Android
-  1.7.0 is 200 + run 7), so a lower `N` may already be on App Store
+  run's number: every earlier run without a `+N` numbered its build below
+  that (Android 1.7.0 is 200 + run 7; the next item covers `+N` tags), so
+  a lower `N` may already be on App Store
   Connect, on Play or in a GitHub APK, and a GitHub APK with it may not
   install over one already out. The plan job refuses it. Push plain
   `vX.Y.Z` instead; for a `+N`, go above `BUILD_NUMBER_OFFSET` + the
@@ -1079,6 +1081,33 @@ step. Revisit if the app is ever published with a developer-run service.
   that never released), it refuses too, before anything is built. To
   finish a tag's run that failed after its plan passed, use *Re-run
   failed jobs* on that run: a re-run keeps its run number.
+- An earlier `+N` tag can carry a number above that floor, and a later
+  run would land on it or below it: after `v1.7.1+215` at run 9, a plain
+  tag at run 15 is numbered 215 too, and `v1.7.2+213` at run 12 clears
+  that run's floor (212) but sits below a build already out. So the plan
+  job also reads the repository's tags (`git ls-remote`; the checkout
+  fetches no tag but the one being built, and a failed read stops the
+  run) and takes the highest `N` of the other `vX.Y.Z+N` tags. A tag's
+  `+N` must be above it, and so must a run numbered
+  `BUILD_NUMBER_OFFSET` + its run number (a plain tag, or Run workflow on
+  a branch, lane `play` included): in the example, runs 10 to 15 are
+  refused until `BUILD_NUMBER_OFFSET` in `release.yml` is raised so that
+  it plus the next run's number is above 215 (never lower it). So take a
+  `+N` only a little above the floor.
+  Tags pushed close together are covered. Tags pushed in one push see
+  each other, so of two `+N` tags the lower one is refused, and both when
+  they are equal. A tag pushed after a run has read the tags is not
+  checked by that run, but its own run comes later and checks it against
+  the earlier one: its floor (`BUILD_NUMBER_OFFSET` + its run number) is
+  above the earlier run's, and it counts the earlier run's `+N`. So two
+  tags that would collide never both pass. What the check cannot see: a
+  `+N` tag deleted after its build went out (raise the offset above its
+  number before deleting it), and a tag on a branch cut before the check,
+  such as `release/1.6.1` (from `v1.6.0`), which runs that branch's own
+  `release.yml`: `BUILD_NUMBER_OFFSET` 100 and none of these checks
+  (§ 6.6, *A 1.6.x hotfix*). And it counts a `+N` tag whose run built
+  nothing (its plan refused it for another reason) until that tag is
+  deleted.
 - Going back to an older build is for testing only: Android installs a
   lower `versionCode` only with `adb install -r -d` and a debuggable app
   or device, the App Store has no way back, and TestFlight lists earlier
@@ -1104,10 +1133,11 @@ step. Revisit if the app is ever published with a developer-run service.
 
 ## 6. Google Play
 
-Rewritten 2026-11-13 for the first Google Play release (Android 1.7.0),
-from Google's pages as they read that day; each source below carries its
-read date. The console moves things around: match the wording, not the
-position. The paste-ready answers live next to the app in
+Rewritten 2026-11-13 for the first Google Play release (planned then as
+Android 1.7.0, which went out on GitHub only; the first Play upload is
+1.7.1, § 6.3), from Google's pages as they read that day; each source
+below carries its read date. The console moves things around: match the
+wording, not the position. The paste-ready answers live next to the app in
 [`app/android/store/`](../app/android/store/): `app_content.md`,
 `data_safety.md`, `metadata/`, `graphics/` and `screenshots/SHOTS.md`.
 
@@ -1130,7 +1160,12 @@ position. The paste-ready answers live next to the app in
 4. **Android 1.7.0 ships Android-only:** Run workflow › lane `play`, the
    bundle uploaded to Play by hand, and a GitHub Release made by hand
    under the tag `android-v1.7.0` (§ 6.6), so `v1.7.0` stays free for the
-   iPhone 1.7.0.
+   iPhone 1.7.0. Done on 2026-11-19 for GitHub (`android-v1.7.0`, build
+   207); no bundle reached Play. Android 1.7.1 goes out the same way.
+   The iPhone 1.7.0 never shipped (1.6.0 is live), and pubspec is 1.7.1
+   since PR #77, so the iPhone's next tag from `main` is `v1.7.1`:
+   `v1.7.0` stays unused (§ 6.6). A 1.6.x hotfix is tagged on its own
+   branch instead (§ 6.6, *A 1.6.x hotfix*).
 
 **The owner's decisions (2026-11-20):**
 
@@ -1206,11 +1241,22 @@ position. The paste-ready answers live next to the app in
    batch is one request from its first photo to its last), and adds no
    permission. The first request after a quiet spell replaces any job
    WorkManager still holds from a stop or a dead process, which it would
-   re-run only plain and after a 30-second backoff; a job the system stops
-   mid-request is replaced the same way. Automatic Watch Camera Roll
-   photos are not kept: the next scan or the background job offers them
-   again. To confirm on a physical Android 15 or 16 phone with the https
-   own server: that a reply reaches the app after Home and another app.
+   re-run only plain and after its backoff (30 seconds from the job's
+   enqueue, longer on later attempts). A job the system stops while a
+   request is still live is replaced at once (expedited again; plain when
+   out of quota) only on Android 12 and later, and only after a stop a
+   fresh job can outlast: preemption, the device's state, a lost network
+   (the fresh job waits for it), quota, the standby bucket or the system's
+   own processing (`KeepAliveRules.renewsAfterStop`). After any other stop
+   there (the user's, a background restriction the user set, a timeout, or
+   a reason that list does not know), and after every stop on Android 7 to
+   11, where the worker reads no stop reason, the request has no job until
+   WorkManager re-runs the stopped one, plain and after that backoff; the
+   re-run then holds it again until it ends or reaches its 3 minutes.
+   Automatic Watch Camera Roll photos are not kept: the next scan or the
+   background job offers them again. To confirm on a physical Android 15
+   or 16 phone with the https own server: that a reply reaches the app
+   after Home and another app.
 10. **Restaurant lookups** stay brand-only on Android (no photo location,
     no places service); the hint no longer says "for now" / 目前.
 11. **Shortcuts and a widget:** after launch, static shortcuts first and
@@ -1388,9 +1434,9 @@ the environment `release`, which today has no protection rules, so
 1. Repository › Settings › Environments › `release`: *Required reviewers*
    = you; *Deployment branches and tags* = selected: `main`, `release/*`,
    `hotfix/*` and tags `v*`. The 1.6.x hotfixes branch from tag `v1.6.0`
-   (today `release/1.6.1`); add whatever prefix a hotfix branch uses
-   before running the workflow from it. A run from any other branch then
-   stops before it can read a secret.
+   (today `release/1.6.1`, § 6.6); add whatever prefix a hotfix branch
+   uses before running the workflow from it. A run from any other branch
+   then stops before it can read a secret.
 2. Add `ANDROID_UPLOAD_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD` and
    `ANDROID_KEY_PASSWORD` (and later `PLAY_SERVICE_ACCOUNT_JSON`) as
    **environment** secrets with the same names (an environment secret
@@ -1421,8 +1467,11 @@ cd app && flutter build appbundle --release --dart-define=CHOPSTATS_CHANNEL=play
   `DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION`, nothing else.
 - **The app** (`app/lib/core/app_channel.dart`). Settings has no Photos
   group (Watch Camera Roll, Meta glasses photos, Backfill Lookback,
-  Background scan, Photo Coverage); no WorkManager job is registered and
-  no launch or resume catch-up runs; the app never asks for photo access.
+  Background scan, Photo Coverage); no periodic WorkManager job (the
+  background photo scan) is registered and no launch or resume catch-up
+  runs, though the analysis keep-alive's one-time job still runs while an
+  analysis the user started is on its way, as in every Android build
+  (decision 9); the app never asks for photo access.
   Log › From recent photos and Leftovers open Android's photo picker,
   even on a phone that granted the GitHub APK full access
   <!-- gated: release_decisions_test (system_photo_picker.dart and its use in add_flow.dart) -->;
@@ -1455,20 +1504,22 @@ the bundle's own manifest, both forms) must list no `READ_MEDIA_*` and no
 `READ_EXTERNAL_STORAGE`; `bundletool dump manifest --bundle
 app-release.aab` says the same.
 
-**The first upload.**
+**The first upload** is still to come, and it is 1.7.1: `android-v1.7.0`
+(build 207) went out on GitHub only, before the Play account existed,
+and the next build of `main` is 1.7.1 (§ 6.6).
 
 1. Actions › Release › Run workflow › branch `main` › lane `play` (leave
    *play_track* at `internal`). A dispatch creates no tag and no GitHub
-   Release. The plan summary says build name `1.7.0` and build number
-   2xx (`BUILD_NUMBER_OFFSET` 200 + run number), above the 106 that
-   GitHub 1.6.0 users have. Never upload a Mac hand build: it gets
-   pubspec's `+9`, below 106.
-2. Download the artifact `android-1.7.0-2xx` and take `app-release.aab`.
+   Release. The plan summary says build name `1.7.1` and build number
+   2xx (`BUILD_NUMBER_OFFSET` 200 + run number), above the 207 that
+   GitHub `android-v1.7.0` users have. Never upload a Mac hand build: it
+   gets pubspec's `+10`, below 207.
+2. Download the artifact `android-1.7.1-2xx` and take `app-release.aab`.
 3. Play Console › *Test and release* › *Testing* › *Internal testing* ›
    *Create new release* › upload it. **Do not roll it out yet.** First
    change the signing key (above) and clear every App content alert
    (§ 6.5).
-4. Name the release `1.7.0 (2xx)`, paste the release notes from
+4. Name the release `1.7.1 (2xx)`, paste the release notes from
    `app/android/whatsnew/`, *Save* › *Review* › *Roll out*, and add
    testers by email list.
 
@@ -1623,11 +1674,17 @@ read 2026-11-13):
   before publishing: `feature-graphic.png` for en-US and
   `feature-graphic-zh-CN.png` (1,024 × 500, 24-bit PNG, no alpha). It
   checks both itself (`--verify`), and so does the test.
-- **Screenshots:** none yet. The QA step captures at least 4 portrait
-  shots per language (9:16, at least 1,080 × 1,920, no alpha) from the
-  Play build, as `app/android/store/screenshots/SHOTS.md` lists. The
-  iPhone sets are about 2.17:1, and Play refuses anything longer than
-  2:1.
+- **Screenshots:** `app/android/store/screenshots/en-US/` and `zh-CN/`,
+  portrait shots (9:16, 1,080 × 1,920, 24-bit PNG, no alpha) from the
+  Play build's release APK on an emulator, with demo data only, as
+  `app/android/store/screenshots/SHOTS.md` lists: 7 in en-US and 6 in
+  zh-CN, which has no 06 (in Chinese the API Key page says which
+  providers need a VPN in mainland China, where Play is not offered;
+  § 7).
+  `scripts/play_screenshots.py` takes them again (AVD, demo import file,
+  capture, check); redo them on a release candidate whose screens
+  changed. The iPhone sets are about 2.17:1, and Play refuses anything
+  longer than 2:1.
 - **What's new:** `app/android/whatsnew/whatsnew-{en-US,zh-CN}`, the
   first-release note (500 characters at most, no GitHub or APK pointers).
   It rides every upload, so rewrite it before the next one.
@@ -1654,49 +1711,89 @@ read 2026-11-13):
   may ask for more testing. Then release to production with a staged
   rollout (for example 20%, then 100%).
 
-**Android 1.7.0, Android-only (decision 4).** release.yml runs both lanes
-on any `v*` tag, and the iOS lane stops until the iCloud container exists
-(§ 11.1). So Android goes first without a `v*` tag:
+**An Android-only version (decision 4).** release.yml runs both lanes on
+any `v*` tag, and the iOS lane stops until the iCloud container exists
+(§ 11.1). So Android goes first without a `v*` tag. Android 1.7.0 went
+out this way on 2026-11-19 (`android-v1.7.0`, build 207, GitHub only).
+The next one is 1.7.1, pubspec's version, which the steps name:
 
-1. Actions › Release › Run workflow › `main` › lane **`play`**. The
-   artifact `android-1.7.0-2xx` holds the bundle and the arm64 APK, with
-   one build number and one signer (the verify step checks both).
+1. Actions › Release › Run workflow › `main` › lane **`play`**. The plan
+   summary says build name `1.7.1`, and the artifact `android-1.7.1-2xx`
+   holds the bundle and the arm64 APK, with one build number and one
+   signer (the verify step checks both).
 2. The bundle goes to Play by hand (§ 6.3).
 3. The APK goes on a GitHub Release made by hand: tag the run's commit
-   `android-v1.7.0` and push the tag (`git tag android-v1.7.0 <sha> &&
-   git push origin android-v1.7.0`), then GitHub › Releases › *Draft a new
-   release* › tag `android-v1.7.0` › title `Chopstats Android 1.7.0` ›
-   attach the APK renamed `Chopstats-v1.7.0-b2xx-arm64-v8a.apk` (the name
+   `android-v1.7.1` and push the tag (`git tag android-v1.7.1 <sha> &&
+   git push origin android-v1.7.1`), then GitHub › Releases › *Draft a new
+   release* › tag `android-v1.7.1` › title `Chopstats Android 1.7.1` ›
+   attach the APK renamed `Chopstats-v1.7.1-b2xx-arm64-v8a.apk` (the name
    release.yml's own releases use) › notes (below) › *Publish*.
-   release.yml triggers only on tags matching `v*`, and `android-v1.7.0`
-   does not match it (pinned by `release_decisions_test.dart`), so no run
-   starts and no iOS build is attempted. `python-tests.yml` runs on every
-   push, tags included; that is harmless.
-4. Notes: what changed for Android since 1.6.0, including PR #60's fix to
-   shared photos; installing over a GitHub build from 1.5.0 or later keeps
-   the data. Say that the GitHub APK and the Play build can replace each
-   other **only after** § 6.3's step 2 check has passed, and say that the
-   Play build has no Watch Camera Roll.
+   release.yml triggers only on tags matching `v*`, and an `android-v*`
+   tag such as `android-v1.7.0` does not match it (pinned by
+   `release_decisions_test.dart`), so no run starts and no iOS build is
+   attempted. `python-tests.yml` runs on every push, tags included; that
+   is harmless.
+4. Notes: what changed for Android since the previous GitHub release (for
+   1.7.0 that was 1.6.0, with PR #60's fix to shared photos; for 1.7.1 it
+   is `android-v1.7.0`); installing over a GitHub build from 1.5.0 or
+   later keeps the data. Say that the GitHub APK and the Play build can
+   replace each other **only after** § 6.3's step 2 check has passed, and
+   say that the Play build has no Watch Camera Roll.
+5. README: once the release is out, update the Android section of
+   `README.md` and `README.zh-CN.md` in one commit, as README.md's
+   maintainer notes say (*Lines tied to a release*, item 5): the release
+   and its tag, the APK's name and size, and for 1.7.1 the Meta glasses
+   sentence given there.
 
-Later, when the iPhone 1.7.0 is ready, tag `v1.7.0` on `main` as usual
-(but read the next paragraph first).
-That run also builds Android again, with a higher build number: it puts
-that APK on the `v1.7.0` release and, with `PLAY_SERVICE_ACCOUNT_JSON`
-set, sends the bundle to the internal track. Both are harmless (an
-upgrade for anyone who installs them).
+Later, when the iPhone version is ready, tag `main` as usual with
+pubspec's version, `v1.7.1` (but read the next paragraph first): the
+iPhone 1.7.0 never shipped (1.6.0 is live), so `main`'s next iPhone
+version is 1.7.1 (a 1.6.x hotfix is tagged on its own branch, below),
+and `v1.7.0` stays unused. That run also builds Android again, with a
+higher build number: it puts that APK on the `v1.7.1` release and, with
+`PLAY_SERVICE_ACCOUNT_JSON` set, sends the bundle to the internal track.
+Both are harmless (an upgrade for anyone who installs them).
 
-**The next Android build is 1.7.1.** `android-v1.7.0` (b207) went out as
-1.7.0, and the privacy policy dates two Android changes from 1.7.1: Meta
-glasses photos off until turned on, and the Google backup only
-end-to-end encrypted (owner decisions 8 and 5). So before the next build
-of `main` that includes Android, by lane `play` or by any `v*` tag, set
-`version:` in `app/pubspec.yaml` and `kAppVersion`
-(`lib/services/backup/backup_files.dart`) to `1.7.1` or later: a build
-still named 1.7.0 would not do what the policy says 1.7.0 does. The tag
-must match pubspec, so this also makes the next iPhone release from
-`main` 1.7.1, not the 1.7.0 decision 4 kept free for it: ask the owner
-before bumping. `release_decisions_test` keeps this paragraph while
-pubspec is behind the newest version the policy names.
+**Pubspec and the versions the policy names.** The privacy policy dates
+changes by version ("From version X.Y.Z"), and every build opens it from
+`main`, so no build of `main` may be named below the newest version it
+names: a build named 1.7.0 that does what the policy dates from 1.7.1
+would not do what the policy says 1.7.0 does. `android-v1.7.0` (b207)
+went out as 1.7.0, and the policy dates two Android changes from 1.7.1:
+Meta glasses photos off until turned on, and the Google backup only
+end-to-end encrypted (owner decisions 8 and 5). So `version:` in
+`app/pubspec.yaml` is `1.7.1+10` and `kAppVersion`
+(`lib/services/backup/backup_files.dart`) `1.7.1` since PR #77, decided
+on 2026-11-20 by Claude on the owner's delegation. The tag must match
+pubspec, so this also made the next iPhone release from `main` 1.7.1,
+not the 1.7.0 decision 4 kept free for it. The rule stays for later
+versions: when the policy dates a change from a version above pubspec's,
+set `version:` in `app/pubspec.yaml` and `kAppVersion`
+(`lib/services/backup/backup_files.dart`) to that version or later
+before the next build of `main` that includes Android, by lane `play` or
+by any `v*` tag, and ask the owner first, since the tag names `main`'s
+next iPhone release too. release.yml's plan step refuses an Android run
+while pubspec is below the newest *From version* in `docs/PRIVACY.md`
+(§ 6.8, step 8). While pubspec is behind, `release_decisions_test` wants
+this paragraph to name the version to bump to and § 6.8 to keep step 8.
+
+**A 1.6.x hotfix** for the iPhone is tagged on its own branch from
+`v1.6.0`, not on `main`: today `release/1.6.1` (version 1.6.1+9, not
+tagged). A `v1.6.1` tag needs no § 11, since that branch has no iCloud
+entitlement, and it runs that branch's own `release.yml`: both lanes on
+a tag push, `BUILD_NUMBER_OFFSET` 100, and none of the checks added
+since 1.6.0 (the run floor and the `+N` tag check of § 5, the policy
+check above). So its build is numbered 100 + its run number (108 or
+more: run 7 built `android-v1.7.0`), inside § 11.2's 107–199: on a phone
+that installs it, later device test builds go above it. It also puts an
+Android 1.6.1 APK with that number on a new GitHub Release, `v1.6.1`.
+That is below `android-v1.7.0`'s 207, so Android refuses it on a phone
+with 1.7.0: say so in that release's notes, and leave the README's
+Android section on the 1.7.x release. Keep that branch's own
+`release.yml`: `main`'s would stop its Android job (the branch has no
+`kRequireHttpsServer`), and its offset 200 would number the APK above
+207, so Android would install 1.6.1 (database schema 3) over 1.7.0
+(schema 4).
 
 **Developer verification and the GitHub APK.** Because the package
 shipped as GitHub APKs before it existed on Play, Play Console may ask,
@@ -1797,44 +1894,53 @@ Do now:
 5. Create the app record and the store settings (§ 6.1), then fill in
    App content and Data safety from `app/android/store/` (§ 6.5). Data
    safety's "encrypted in transit: Yes" is true only for builds with
-   `kRequireHttpsServer = true`; step 8 checks it.
+   `kRequireHttpsServer = true`; step 9 checks it.
 6. Store listing: paste the en-US and zh-CN title, short and full
    descriptions; upload `icon-512.png` and the feature graphics.
 
 Only after the Play build (§ 6.3) is merged and the QA step has captured
 the screenshots:
 
-7. Upload the screenshots (at least 4 per language).
-8. Run workflow › `main` › lane `play`; check the plan summary's build
-   number, the bundle's permissions (§ 6.3), and that
+7. Upload the screenshots (at least 4 per language) from
+   `app/android/store/screenshots/en-US/` and `zh-CN/`, in file order.
+8. Before the run: `version:` in `app/pubspec.yaml` must not be below the
+   newest *From version X.Y.Z* in `docs/PRIVACY.md` (both are 1.7.1
+   since PR #77). If it is, bump it and `kAppVersion` first, with the
+   owner's OK (§ 6.6); release.yml's plan step refuses the Android lane
+   until then.
+9. Run workflow › `main` › lane `play`; check the plan summary's build
+   name (pubspec's version, 1.7.1 for the first upload) and number, the
+   bundle's permissions (§ 6.3), and that
    `app/lib/core/server_transport.dart` says `kRequireHttpsServer = true`
    at the run's commit (the Android job's *Check the app refuses plain-http
    servers* step stops the run otherwise).
-9. Upload the bundle to Internal testing. **Do NOT roll it out yet:**
-   change the signing key to the upload key first (§ 6.3), and check the
-   SHA-256.
-10. Roll out to internal; install from Play on a real phone; try the
+10. Upload the bundle to Internal testing. **Do NOT roll it out yet:**
+    change the signing key to the upload key first (§ 6.3), and check the
+    SHA-256.
+11. Roll out to internal; install from Play on a real phone; try the
     picker, a share, Describe a meal and the daily summary.
-11. Create the closed track, add at least 12 testers outside mainland
+12. Create the closed track, add at least 12 testers outside mainland
     China, roll out, share the opt-in link, and start the 14-day log.
-12. Publish the GitHub APK as `android-v1.7.0` by hand (§ 6.6).
+13. Publish the same run's GitHub APK as `android-v1.7.1` by hand, then
+    update the README's Android section (§ 6.6, steps 3 to 5).
+    `android-v1.7.0` (build 207) is already out, since 2026-11-19.
 
 Optional, only after the first manual rollout:
 
-13. The service account and `PLAY_SERVICE_ACCOUNT_JSON` in the `release`
+14. The service account and `PLAY_SERVICE_ACCOUNT_JSON` in the `release`
     environment (§ 6.4), then later builds go out with play_track
     `internal` or `alpha`.
 
 Only on day 15 or later of the closed test, with 12 or more testers still
 opted in:
 
-14. Dashboard › *Apply for production*. Then a staged production rollout.
+15. Dashboard › *Apply for production*. Then a staged production rollout.
 
 Only after the production release is live:
 
-15. Check Android developer verification lists the package and the key
+16. Check Android developer verification lists the package and the key
     (§ 6.1).
-16. Apply the support page text (§ 6.9) and update the README's Android
+17. Apply the support page text (§ 6.9) and update the README's Android
     section with the Play link.
 
 **Do NOT revoke the demo Gemini key** while any review is pending (the
@@ -1897,16 +2003,20 @@ the README, not this page.
 
 ## 8. Running a release (cheat sheet)
 
-(Before the first 1.7.0 tag: § 11, the iCloud container, or the iOS lane
-stops at "Check the Runner profile allows the iCloud container". Once
-1.7.0 is in the App Store: § 12, the support page. Android 1.7.0 goes
-first without a `v*` tag: § 6.6.)
+(Before the first tag from `main` since 1.6.0, `v1.7.1` (the iPhone
+skips 1.7.0, § 6.6): § 11, the iCloud container, or the iOS lane stops
+at "Check the Runner profile allows the iCloud container". Once that
+version is in the App Store: § 12, the support page, whose "1.7.0" means
+it. A 1.6.x hotfix is tagged on its own branch and needs neither: § 6.6,
+*A 1.6.x hotfix*. An Android-only version goes first without a `v*` tag:
+§ 6.6.)
 
 ```bash
-# 1. in the shipping PR: app/pubspec.yaml  version: 1.7.0+9   (the +N is for hand builds only)
+# 1. in the shipping PR: app/pubspec.yaml  version: 1.7.1+10   (the +N is for hand builds only;
+#    x.y.z not below the newest "From version" in docs/PRIVACY.md, § 6.6)
 # 2. edit app/android/whatsnew/whatsnew-*.{en-US,zh-CN}
 # 3. merge to main, then
-git tag v1.7.0 && git push origin v1.7.0     # iOS + Android lanes, external-eligible TestFlight build, GitHub Release
+git tag v1.7.1 && git push origin v1.7.1     # iOS + Android lanes, external-eligible TestFlight build, GitHub Release
 # or: Actions → Release → Run workflow → lane testflight | play | both (internal-only TestFlight build;
 #     play_track internal | alpha picks the Play track when PLAY_SERVICE_ACCOUNT_JSON is set)
 # Android only (decision 4): Run workflow → lane play, then a hand-made GitHub Release
@@ -1981,8 +2091,20 @@ transport.
 **"This bundle is invalid. The value for key CFBundleVersion must contain a
 higher value"** — a build number was reused. Tag as `vX.Y.Z+N` with a
 higher N once (on a tag push it must also be above `BUILD_NUMBER_OFFSET`
-+ the latest Release run's number, § 5), or raise `BUILD_NUMBER_OFFSET`;
-never lower it.
++ the latest Release run's number, and above every other `+N` tag's
+number, § 5), or raise `BUILD_NUMBER_OFFSET`; never lower it.
+
+**Plan: "… but tag vX.Y.Z+N numbered its build N"** — an earlier `+N` tag
+took a number at or above this run's (§ 5). For a tag, push a new one
+with a `+N` above that number; for a plain tag or Run workflow, raise
+`BUILD_NUMBER_OFFSET` in `release.yml` so that it plus the next run's
+number is above it (never lower it), or push such a `+N` tag.
+
+**Plan: "app/pubspec.yaml says X, but docs/PRIVACY.md says 'From version
+Y'"** — the privacy policy dates a change from a version above pubspec's,
+and the run builds Android. Set `version:` and `kAppVersion` to Y or
+later first (§ 6.6, with the owner's OK), then run again. A `testflight`
+run is not checked.
 
 **"Xcode 26.2 is not on this runner image"** (warning) — GitHub removed that
 patch release; the build used the default. Set `XCODE_VERSION` in both
@@ -2204,12 +2326,15 @@ phone, with Part B and § 11.1 done:
 `docs/SUPPORT.md` is the support URL of both store listings, so, like the
 README, it describes the version in the App Store (1.6.0 today). What only
 `main` has is written here instead and goes onto the page in a PR once
-1.7.0 is in the App Store. The labels are the app's on `main`:
-`app/test/ui/copy_consistency_test.dart` checks them against `app_en.arb`,
-and checks that `SUPPORT.md` does not name them yet; drop that check
-("names no 1.7.0 control …") in the same PR. If 1.7.0 ships without Part B
-(§ 11), leave out the iCloud Backup text (steps 1, 3 and 4) and keep
-step 2.
+1.7.0 is in the App Store. (The iPhone skips 1.7.0, § 6.6: "1.7.0" in
+this section and in the test named below means the first App Store
+version built from `main` after 1.6.0, now 1.7.1, not a 1.6.x hotfix
+such as 1.6.1, which has none of this.) The labels are the app's on
+`main`: `app/test/ui/copy_consistency_test.dart` checks them against
+`app_en.arb`, and checks that `SUPPORT.md` does not name them yet; drop
+that check ("names no 1.7.0 control …") in the same PR. If 1.7.0 ships
+without Part B (§ 11), leave out the iCloud Backup text (steps 1, 3
+and 4) and keep steps 2 and 5.
 
 1. **Intro**: "your meal log stays on your phone" becomes "your meal log
    stays on your phone (and, with iCloud Backup, in your own iCloud
