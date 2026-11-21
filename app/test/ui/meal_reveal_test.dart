@@ -10,6 +10,7 @@ import 'package:calorie_tracker/l10n/app_localizations_zh.dart';
 import 'package:calorie_tracker/ui/di.dart' show outcomeAnnouncer;
 import 'package:calorie_tracker/ui/meal_reveal.dart';
 import 'package:calorie_tracker/ui/photo_pipeline.dart';
+import 'package:flutter/foundation.dart' show Listenable;
 import 'package:flutter_test/flutter_test.dart';
 
 const _saved = PhotoOutcome(PhotoOutcomeKind.saved, 'Meal logged: Ramen — ~600 kcal',
@@ -133,6 +134,33 @@ void main() {
       expect(reveals.take(), isNull);
     });
 
+    // Review of PR 80: a request kept for 5 minutes fired on whichever
+    // Back finally reached the tabs, long after the tap.
+    test('the wait is a minute: a request still waiting after that is '
+        'dropped', () {
+      var now = DateTime(2026, 11, 21, 12);
+      final reveals = MealReveals(clock: () => now);
+      reveals.request(const MealReveal(9));
+      now = now.add(const Duration(seconds: 59));
+      expect(reveals.waiting, const MealReveal(9));
+      now = now.add(const Duration(seconds: 2));
+      expect(reveals.waiting, isNull);
+    });
+
+    test("the shell's changes reach whoever listens (the View on a "
+        'message)', () {
+      final reveals = MealReveals();
+      var heard = 0;
+      void listener() => heard++;
+      reveals.availability.addListener(listener);
+      reveals.availabilityChanged();
+      reveals.availabilityChanged();
+      expect(heard, 2);
+      reveals.availability.removeListener(listener);
+      reveals.availabilityChanged();
+      expect(heard, 2);
+    });
+
     test('a clock set back drops it too', () {
       var now = DateTime(2026, 11, 21, 12);
       final reveals = MealReveals(clock: () => now);
@@ -218,20 +246,28 @@ void main() {
         (AppLocalizationsZh(), '查看', '已记录：Ramen —— 约 600 千卡'),
       ]) {
         final plain = <String>[];
-        final views = <(String, String, void Function(), bool Function())>[];
+        final views = <(
+          String,
+          String,
+          void Function(),
+          bool Function(),
+          Listenable
+        )>[];
         final reveals = MealReveals();
         outcomeAnnouncer(
             l10n: () => l,
             notify: plain.add,
             reveals: reveals,
-            notifyView: (m, a, onAction, available) =>
-                views.add((m, a, onAction, available)))(_saved);
+            notifyView: (m, a, onAction, available, changes) =>
+                views.add((m, a, onAction, available, changes)))(_saved);
         expect(plain, isEmpty);
         expect(views, hasLength(1));
-        final (message, action, onAction, available) = views.single;
+        final (message, action, onAction, available, changes) = views.single;
         expect(message, line);
         expect(action, label);
         expect(available(), isFalse, reason: 'no shell attached');
+        expect(changes, same(reveals.availability),
+            reason: 'View is asked again as the shell changes');
         onAction();
         expect(reveals.waiting, const MealReveal(42),
             reason: 'View asks the shell for the meal');
@@ -245,7 +281,7 @@ void main() {
           l10n: AppLocalizationsEn.new,
           notify: plain.add,
           reveals: MealReveals(),
-          notifyView: (_, _, _, _) => views++);
+          notifyView: (_, _, _, _, _) => views++);
       announce(_notShared(_saved)); // a picked photo, an automatic one
       announce(const PhotoOutcome(PhotoOutcomeKind.skipped, 'No food',
           shared: true));
@@ -259,7 +295,7 @@ void main() {
       outcomeAnnouncer(
           l10n: AppLocalizationsEn.new,
           notify: plain.add,
-          notifyView: (_, _, _, _) => views++)(_saved);
+          notifyView: (_, _, _, _, _) => views++)(_saved);
       expect(views, 0);
       expect(plain, ['Meal logged: Ramen — ~600 kcal']);
     });

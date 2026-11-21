@@ -3,15 +3,19 @@
 /// to go to the meal (HomeShell): Today, scrolled to the meal and briefly
 /// ringed, or that day in History for a meal dated another day.
 ///
-/// The shell goes there only over itself. While a screen, sheet or dialog
-/// is open over the tabs (an editor with unsaved changes, a question) the
-/// request waits, and nothing is closed or covered for it: it is shown
-/// once the user is back on the tabs, if that is within
+/// The shell goes there at once when it can: the screens open over the
+/// tabs that Back would close without asking (a History day, a Settings
+/// page, an editor with nothing changed) are closed for it. Nothing is
+/// closed or covered while a screen holds unsaved changes (its discard
+/// guard), a dialog, sheet or menu is open, or a text field has the focus:
+/// the request waits until that ends, if that is within
 /// [MealReveals.waitLimit]. The View action is offered only while the
-/// shell could go there at once ([MealReveals.canShowNow]).
+/// shell could go there at once ([MealReveals.canShowNow]), and is taken
+/// away when that stops ([MealReveals.availability]).
 library;
 
-import 'package:flutter/foundation.dart' show VoidCallback, immutable;
+import 'package:flutter/foundation.dart'
+    show ChangeNotifier, Listenable, VoidCallback, immutable;
 
 import 'photo_pipeline.dart' show PhotoOutcome, PhotoOutcomeKind;
 
@@ -110,17 +114,29 @@ class MealCardTaps {
 /// Carries [MealReveal] requests to the app shell, which [attach]es once it
 /// is up. One request waits at a time, the newest: a request made before
 /// the shell is up (a cold start from a card), or while it cannot show it
-/// (something is open over it), is kept until the shell takes it, for at
-/// most [waitLimit].
+/// (unsaved changes or a question open over it, or typing), is kept until
+/// the shell takes it, for at most [waitLimit].
 class MealReveals {
   MealReveals({DateTime Function()? clock}) : _clock = clock ?? DateTime.now;
 
   final DateTime Function() _clock;
 
-  /// How long a request waits for the shell: a user who tapped View or a
-  /// card and then stayed in an editor longer than this has moved on, and
-  /// is not taken to the meal when they come back to the tabs.
-  static const Duration waitLimit = Duration(minutes: 5);
+  /// How long a request waits for the shell: a user who tapped a card
+  /// while an editor held unsaved changes, a question was open or they
+  /// were typing, and is still there a minute later, has moved on. They
+  /// are not taken to the meal when that ends.
+  static const Duration waitLimit = Duration(seconds: 60);
+
+  final _Signal _availability = _Signal();
+
+  /// Tells when [canShowNow] may have changed: a screen came or went over
+  /// the tabs, one held or let go of unsaved changes, or the focus moved
+  /// (the shell's [availabilityChanged]). The View on a message listens
+  /// while it is up, and is taken away once it is no longer offered.
+  Listenable get availability => _availability;
+
+  /// The shell: [canShowNow] may have changed.
+  void availabilityChanged() => _availability.ping();
 
   ({MealReveal reveal, DateTime at})? _waiting;
   VoidCallback? _wake;
@@ -157,9 +173,10 @@ class MealReveals {
     return r;
   }
 
-  /// Whether the shell could show a meal right now: it is up, nothing is
-  /// open over it, and nobody is typing. The View action is offered only
-  /// then. False with no shell, or when the shell cannot say.
+  /// Whether the shell could show a meal right now: it is up, nothing open
+  /// over it holds unsaved changes or asks a question, and nobody is
+  /// typing. The View action is offered only then. False with no shell, or
+  /// when the shell cannot say.
   bool get canShowNow {
     try {
       return _canShow?.call() ?? false;
@@ -183,4 +200,9 @@ class MealReveals {
     _wake = null;
     _canShow = null;
   }
+}
+
+/// [MealReveals.availability]: notifyListeners is protected.
+class _Signal extends ChangeNotifier {
+  void ping() => notifyListeners();
 }

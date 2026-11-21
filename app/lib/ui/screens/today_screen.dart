@@ -458,6 +458,9 @@ class TodayScreenState extends State<TodayScreen>
               RevealHighlight(
                 key: cardKey(meal.id),
                 trigger: revealTrigger(meal.id),
+                announcement: revealAnnounces(meal.id)
+                    ? mealRevealLine(context.l10n, meal)
+                    : null,
                 inset: MealCard.margin,
                 child: MealCard(
                   key: ValueKey('meal${meal.id}'),

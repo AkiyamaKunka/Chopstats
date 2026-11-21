@@ -219,6 +219,9 @@ class _DayDetailScreenState extends State<DayDetailScreen>
                           RevealHighlight(
                             key: cardKey(m.id),
                             trigger: revealTrigger(m.id),
+                            announcement: revealAnnounces(m.id)
+                                ? mealRevealLine(context.l10n, m)
+                                : null,
                             inset: _MealRow.margin,
                             child: _MealRow(
                               key: ValueKey('meal${m.id}'),

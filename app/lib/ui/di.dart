@@ -99,7 +99,7 @@ class AppServices {
       void Function(String message, String action, void Function() onAction)?
           notifyAction,
       void Function(String message, String action, void Function() onAction,
-              bool Function() available)?
+              bool Function() available, Listenable changes)?
           notifyView}) async {
     if (_instance != null) return _instance!;
 
@@ -684,15 +684,16 @@ class AppServices {
 /// a shared photo's save or leftover deduction comes with a View that asks
 /// the shell to go to the meal (meal_reveal.dart), offered while the shell
 /// could go there at once ([MealReveals.canShowNow], read as the message
-/// is shown: [notifyView]). Every other verdict, and every one on iPhone,
-/// is the plain line it always was.
+/// is shown and again at each [MealReveals.availability] change while it
+/// is up: [notifyView]). Every other verdict, and every one on iPhone, is
+/// the plain line it always was.
 @visibleForTesting
 void Function(PhotoOutcome o) outcomeAnnouncer({
   required AppLocalizations Function() l10n,
   required void Function(String message) notify,
   MealReveals? reveals,
   void Function(String message, String action, void Function() onAction,
-          bool Function() available)?
+          bool Function() available, Listenable changes)?
       notifyView,
 }) =>
     (o) {
@@ -701,7 +702,7 @@ void Function(PhotoOutcome o) outcomeAnnouncer({
       final reveal = reveals == null ? null : revealForShared(o);
       if (reveals != null && notifyView != null && reveal != null) {
         notifyView(line, l.mealViewAction, () => reveals.request(reveal),
-            () => reveals.canShowNow);
+            () => reveals.canShowNow, reveals.availability);
         return;
       }
       notify(line);

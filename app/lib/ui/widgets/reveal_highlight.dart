@@ -6,15 +6,19 @@ library;
 import 'dart:async' show Timer;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart' show AccessibilityFocusBlockType;
 
+import '../../core/contracts.dart' show Meal;
+import '../../l10n/app_localizations.dart' show AppLocalizations;
+import '../format.dart' show displayTotalCalories, mealDescription;
 import '../theme/tokens.dart';
 import 'grouped.dart' show kCellRadius;
 
 /// Paints an accent ring and a light accent tint over [child] for
 /// [duration] each time [trigger] changes to a new non-null value: held,
 /// then faded out. With animations turned off it is held, then gone,
-/// without a fade. Paints nothing otherwise, and takes no taps, focus or
-/// screen-reader node: the card under it works as before.
+/// without a fade. Paints nothing otherwise, and takes no taps or focus:
+/// the card under it works as before, its screen-reader node included.
 ///
 /// [inset] is the card's own margin inside [child], so the ring follows
 /// the card's rounded cell ([radius]) rather than the space around it.
@@ -23,6 +27,7 @@ class RevealHighlight extends StatefulWidget {
     super.key,
     required this.child,
     this.trigger,
+    this.announcement,
     this.inset = EdgeInsets.zero,
     this.radius = kCellRadius,
   });
@@ -31,6 +36,15 @@ class RevealHighlight extends StatefulWidget {
 
   /// A new non-null value lights the ring again; null lights nothing.
   final Object? trigger;
+
+  /// While set, a screen reader is told it: the ring is only seen, so a
+  /// TalkBack user hears which meal the reveal brought on screen
+  /// ([mealRevealLine]). A live region over the card's cell, the way
+  /// Android has a screen reader say something (its announcement events
+  /// are deprecated, and Flutter reports them unsupported there). It takes
+  /// no accessibility focus and no taps, so the card keeps its own node.
+  final String? announcement;
+
   final EdgeInsets inset;
   final double radius;
 
@@ -43,8 +57,16 @@ class RevealHighlight extends StatefulWidget {
 
 class RevealHighlightState extends State<RevealHighlight>
     with SingleTickerProviderStateMixin {
-  late final AnimationController _ring =
-      AnimationController(vsync: this, duration: RevealHighlight.duration);
+  /// The ring's clock. AnimationBehavior.preserve: with Android's Remove
+  /// animations on (disableAnimations, the platform flag the MediaQuery
+  /// value below comes from), a normal controller runs at 0.05x its
+  /// duration, and the ring was gone after about 0.1 s instead of 2 s. It
+  /// is a time the ring shows, not a motion: it keeps its full length,
+  /// without the fade.
+  late final AnimationController _ring = AnimationController(
+      vsync: this,
+      duration: RevealHighlight.duration,
+      animationBehavior: AnimationBehavior.preserve);
 
   /// Whether the ring is showing now.
   @visibleForTesting
@@ -73,17 +95,53 @@ class RevealHighlightState extends State<RevealHighlight>
   }
 
   @override
-  Widget build(BuildContext context) => CustomPaint(
-        foregroundPainter: _RingPainter(
-          _ring,
-          color: AppColors.of(context).accent,
-          inset: widget.inset,
-          radius: widget.radius,
-          still: MediaQuery.maybeDisableAnimationsOf(context) ?? false,
+  Widget build(BuildContext context) {
+    final say = widget.announcement;
+    final inset = widget.inset;
+    // Always a Stack, so the card keeps its element (and its photo's
+    // state) when the announcement comes and goes; passthrough, so the
+    // card gets the list's constraints as before.
+    return Stack(
+      fit: StackFit.passthrough,
+      children: [
+        CustomPaint(
+          foregroundPainter: _RingPainter(
+            _ring,
+            color: AppColors.of(context).accent,
+            inset: inset,
+            radius: widget.radius,
+            still: MediaQuery.maybeDisableAnimationsOf(context) ?? false,
+          ),
+          child: widget.child,
         ),
-        child: widget.child,
-      );
+        if (say != null)
+          Positioned(
+            left: inset.left,
+            top: inset.top,
+            right: inset.right,
+            bottom: inset.bottom,
+            child: Semantics(
+              key: const Key('revealAnnouncement'),
+              container: true,
+              liveRegion: true,
+              accessibilityFocusBlockType:
+                  AccessibilityFocusBlockType.blockNode,
+              label: say,
+              child: const SizedBox.expand(),
+            ),
+          ),
+      ],
+    );
+  }
 }
+
+/// What a screen reader says for a meal a reveal brought on screen
+/// ([RevealHighlight.announcement]): its name and calories, worded as the
+/// "Meal logged" line words them ("Ramen — ~600 kcal", "Ramen —— 约 600
+/// 千卡"), as the meal is now.
+String mealRevealLine(AppLocalizations l, Meal meal) => l.outcomeSavedSummary(
+    mealDescription(meal.analysis, fallback: l.nlUnnamedMeal),
+    displayTotalCalories(meal.analysis));
 
 /// How strongly the ring shows at [t] of its time (0 to 1): fully while
 /// held, for the first 60%, then fading out; with animations off ([still])
@@ -170,6 +228,14 @@ mixin RevealsCards<T extends StatefulWidget> on State<T> {
   /// [RevealHighlight.trigger] for the card of meal [id].
   Object? revealTrigger(int id) => _revealedId == id ? _reveals : null;
 
+  /// The meal whose card the reveal has brought on screen, while its ring
+  /// shows: what a screen reader is told then ([revealAnnounces]).
+  int? _announcedId;
+
+  /// Whether the card of meal [id] gets its [RevealHighlight.announcement]
+  /// now: the reveal has brought it on screen, and its ring still shows.
+  bool revealAnnounces(int id) => _announcedId == id;
+
   /// Rings the card of meal [id] and brings it on screen, centred where the
   /// list allows. [order]: the ids of the cards as listed, top to bottom.
   /// Nothing when [id] is not listed.
@@ -178,11 +244,16 @@ mixin RevealsCards<T extends StatefulWidget> on State<T> {
     _revealEnd?.cancel();
     setState(() {
       _revealedId = id;
+      _announcedId = null;
       _reveals++;
     });
     final reveal = _reveals;
     _revealEnd = Timer(RevealHighlight.duration, () {
-      if (mounted && _reveals == reveal) setState(() => _revealedId = null);
+      if (!mounted || _reveals != reveal) return;
+      setState(() {
+        _revealedId = null;
+        _announcedId = null;
+      });
     });
     await _scrollIntoView(id, order, reveal);
   }
@@ -202,6 +273,12 @@ mixin RevealsCards<T extends StatefulWidget> on State<T> {
             alignment: 0.5,
             duration: AppMotion.of(card, AppMotion.standard),
             curve: AppMotion.curve);
+        // On screen now: a screen reader is told which meal it is. Not
+        // before, while it may still lie off screen, where a live region
+        // can go unsaid.
+        if (mounted && _reveals == reveal && _revealedId == id) {
+          setState(() => _announcedId = id);
+        }
         return;
       }
       // Not built. Which way it lies: past the last card built, or before

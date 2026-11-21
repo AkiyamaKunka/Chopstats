@@ -49,6 +49,7 @@ import 'widgets/grouped.dart' show ContentWidthCap;
 import 'widgets/nav_bar_band.dart';
 import 'widgets/nav_bar_dimming.dart';
 import 'widgets/restaurant_consent_sheet.dart';
+import 'widgets/route_stack.dart';
 import 'widgets/shared_photos_back_guard.dart';
 
 class _AppleScrollBehavior extends MaterialScrollBehavior {
@@ -253,9 +254,18 @@ class _CalorieTrackerAppState extends State<CalorieTrackerApp> {
   final NavBarDimming _dimming = NavBarDimming();
   late final NavBarDimmingObserver _dialogs = NavBarDimmingObserver(_dimming);
 
+  /// Android: every route on the app's navigator, for the shell to go to
+  /// a meal the user asked to see (meal_reveal.dart): it closes the
+  /// screens over its tabs that Back would close without asking, and
+  /// waits while one holds unsaved changes or a question is open. Kept
+  /// across rebuilds with the navigator, like [_dialogs]. Not observed on
+  /// iPhone, which has no View or card tap to go to a meal.
+  final RouteStack _routes = RouteStack();
+
   @override
   void dispose() {
     _dimming.dispose();
+    _routes.dispose();
     super.dispose();
   }
 
@@ -273,7 +283,9 @@ class _CalorieTrackerAppState extends State<CalorieTrackerApp> {
 
     // ListenableBuilder: the language row writes settings, and the whole
     // app re-locales in place — no restart.
-    final shell = HomeShell(services: services);
+    final reveals = services.mealReveals != null;
+    final shell =
+        HomeShell(services: services, routes: reveals ? _routes : null);
     Widget appFor(Locale? locale) {
       // Chinese text takes no Latin tracking (every letterSpacing 0).
       final cjk = (locale ?? WidgetsBinding.instance.platformDispatcher.locale)
@@ -300,9 +312,22 @@ class _CalorieTrackerAppState extends State<CalorieTrackerApp> {
             GlobalCupertinoLocalizations.delegate,
           ],
           supportedLocales: const [Locale('en'), Locale('zh')],
-          navigatorObservers: [_dialogs],
-          builder: (context, child) => _SystemNavBarStyle(
-              dimming: _dimming, child: child ?? const SizedBox.shrink()),
+          navigatorObservers: [_dialogs, if (reveals) _routes],
+          builder: (context, child) {
+            final styled = _SystemNavBarStyle(
+                dimming: _dimming, child: child ?? const SizedBox.shrink());
+            if (!reveals) return styled;
+            // A route on top held or let go of its pop (a screen took or
+            // dropped unsaved changes): the shell asks again whether it
+            // can go to a meal at once (RouteStack). Passed on: WidgetsApp
+            // tells Android from it whether Flutter handles Back.
+            return NotificationListener<NavigationNotification>(
+                onNotification: (_) {
+                  _routes.popChanged();
+                  return false;
+                },
+                child: styled);
+          },
           home: shell,
         );
     }
@@ -321,7 +346,14 @@ class _CalorieTrackerAppState extends State<CalorieTrackerApp> {
 
 class HomeShell extends StatefulWidget {
   final UiServices services;
-  const HomeShell({super.key, required this.services});
+
+  /// Android: the app navigator's routes (CalorieTrackerApp), for going to
+  /// a meal the user asked to see over the screens open on the tabs. Null
+  /// on iPhone, and in tests that build the shell alone: then any screen
+  /// open over the tabs holds the request until it is closed.
+  final RouteStack? routes;
+
+  const HomeShell({super.key, required this.services, this.routes});
 
   @override
   State<HomeShell> createState() => _HomeShellState();
@@ -359,9 +391,15 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     // question needs this navigator, so the gate holds photos until now.
     widget.services.sharedPhotoConsent?.attach(_askShareConsent);
     // Android: "show me that meal" (a shared photo's View, a tap on a
-    // Logged meals card), shown over the shell only (meal_reveal.dart).
-    widget.services.mealReveals
-        ?.attach(_revealWhenOnTop, canShowNow: _canRevealNow);
+    // Logged meals card): the shell goes to it when it can at once, and
+    // tries again each time a route, a held pop or the focus changes
+    // (meal_reveal.dart).
+    final reveals = widget.services.mealReveals;
+    if (reveals != null) {
+      reveals.attach(_revealWhenOnTop, canShowNow: _canRevealNow);
+      widget.routes?.addListener(_onRevealConditions);
+      FocusManager.instance.addListener(_onRevealConditions);
+    }
     final initial = widget.services.initialSetupLink;
     if (initial != null) {
       unawaited(initial().then((uri) {
@@ -597,9 +635,30 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     WidgetsBinding.instance.ensureVisualUpdate();
   }
 
-  /// Whether something is open over the shell: a screen, a sheet, a
-  /// dialog or a menu.
-  bool _covered() => Navigator.maybeOf(context)?.canPop() ?? false;
+  /// Whether the shell could go to a meal at once
+  /// ([MealReveals.canShowNow]): every screen open over the tabs would
+  /// close with Back without asking (it holds no unsaved changes: its
+  /// discard guard lets the pop through), no dialog, sheet or menu is
+  /// open (a question waits for its answer), and no text field has the
+  /// focus (the user is typing). Without the app's [HomeShell.routes] (a
+  /// test that builds the shell alone), anything open over the tabs holds
+  /// it.
+  bool _canRevealNow() {
+    if (!mounted) return false;
+    final routes = widget.routes?.routes;
+    if (routes == null) {
+      if (Navigator.maybeOf(context)?.canPop() ?? false) return false;
+    } else {
+      // The shell is the app's home: the navigator's first route.
+      for (final route in routes.skip(1)) {
+        if (route is! PageRoute) return false;
+        if (route.popDisposition == RoutePopDisposition.doNotPop) {
+          return false;
+        }
+      }
+    }
+    return !_typingNow();
+  }
 
   /// Whether a text field has the focus: the user is typing.
   static bool _typingNow() {
@@ -608,20 +667,8 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     return focused.findAncestorStateOfType<EditableTextState>() != null;
   }
 
-  /// Whether the shell could go to a meal at once
-  /// ([MealReveals.canShowNow]): nothing is open over it, and nobody is
-  /// typing.
-  bool _canRevealNow() => mounted && !_covered() && !_typingNow();
-
-  /// Set while [_tryReveal] waits for the typing to stop.
-  bool _waitingForTyping = false;
-
   /// A meal to show is waiting (meal_reveal.dart): shown after this frame
-  /// if the shell is on top then. With something open over the shell it
-  /// waits for the shell to be back on top ([_OnRouteReturn]), so nothing
-  /// the user has open is closed or covered for it: an editor with unsaved
-  /// changes stays as it is, its discard question unasked. While a text
-  /// field has the focus it waits for the typing to stop.
+  /// if the shell can go there at once then ([_canRevealNow]).
   void _revealWhenOnTop() {
     if (!mounted || widget.services.mealReveals?.waiting == null) return;
     WidgetsBinding.instance.addPostFrameCallback((_) => _tryReveal());
@@ -629,33 +676,48 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     WidgetsBinding.instance.ensureVisualUpdate();
   }
 
+  /// Nothing is closed or covered for a waiting meal while a screen holds
+  /// unsaved changes (its discard question is never asked on its behalf),
+  /// a question is open or a text field has the focus: it waits for the
+  /// next change of routes, held pops or focus ([_onRevealConditions], or
+  /// the shell back on top: [_OnRouteReturn]), within
+  /// [MealReveals.waitLimit].
   void _tryReveal() {
     final reveals = widget.services.mealReveals;
     if (!mounted || reveals == null || reveals.waiting == null) return;
-    if (_covered()) return;
-    if (_typingNow()) {
-      if (!_waitingForTyping) {
-        _waitingForTyping = true;
-        FocusManager.instance.addListener(_onFocusChange);
-      }
-      return;
-    }
+    if (!_canRevealNow()) return;
     final reveal = reveals.take();
     if (reveal != null) unawaited(_reveal(reveal));
   }
 
-  void _onFocusChange() {
-    if (_typingNow()) return;
-    FocusManager.instance.removeListener(_onFocusChange);
-    _waitingForTyping = false;
-    _revealWhenOnTop();
+  /// Set while [_onRevealConditions] waits for its frame.
+  bool _revealConditionsDue = false;
+
+  /// Whether the shell can go to a meal at once may have changed: a route
+  /// came or went ([HomeShell.routes]), one held or let go of its pop, or
+  /// the focus moved. After the frame, when the change has settled, the
+  /// View on a message is asked again whether it is still offered
+  /// ([MealReveals.availabilityChanged]), and a waiting meal is tried
+  /// again.
+  void _onRevealConditions() {
+    if (_revealConditionsDue || !mounted) return;
+    _revealConditionsDue = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _revealConditionsDue = false;
+      final reveals = widget.services.mealReveals;
+      if (!mounted || reveals == null) return;
+      reveals.availabilityChanged();
+      _tryReveal();
+    });
+    WidgetsBinding.instance.ensureVisualUpdate();
   }
 
   /// Goes to the meal [reveal] names: Today, scrolled to the meal and
   /// briefly ringed; History with the meal's day open on it, for a meal
   /// dated another day (a photo taken before midnight, say); Today alone
   /// when the meal is gone. Where it is dated now, not when it was logged:
-  /// the editor may have moved it since.
+  /// the editor may have moved it since. The screens open over the tabs
+  /// close first, as Back would close each (none holds its pop).
   Future<void> _reveal(MealReveal reveal) async {
     final s = widget.services;
     Meal? meal;
@@ -665,13 +727,15 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       // Unreadable now: Today, as for a meal that is gone.
     }
     if (!mounted) return;
-    // Something came up over the shell meanwhile: the request waits again,
-    // unless a newer one already does.
+    // Something came up meanwhile that keeps the shell from going there:
+    // the request waits again, unless a newer one already does.
     if (!_canRevealNow()) {
       final reveals = s.mealReveals;
       if (reveals != null && reveals.waiting == null) reveals.request(reveal);
       return;
     }
+    final navigator = Navigator.of(context);
+    if (navigator.canPop()) navigator.popUntil((route) => route.isFirst);
     if (meal == null || meal.date == isoDate(DateTime.now())) {
       setState(() => _index = 0);
       final today = _todayKey.currentState;
@@ -690,9 +754,23 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   }
 
   @override
+  void didUpdateWidget(covariant HomeShell oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.routes != widget.routes &&
+        widget.services.mealReveals != null) {
+      oldWidget.routes?.removeListener(_onRevealConditions);
+      widget.routes?.addListener(_onRevealConditions);
+    }
+  }
+
+  @override
   void dispose() {
-    if (_waitingForTyping) FocusManager.instance.removeListener(_onFocusChange);
-    widget.services.mealReveals?.detach(_revealWhenOnTop);
+    final reveals = widget.services.mealReveals;
+    if (reveals != null) {
+      FocusManager.instance.removeListener(_onRevealConditions);
+      widget.routes?.removeListener(_onRevealConditions);
+      reveals.detach(_revealWhenOnTop);
+    }
     widget.services.cloudBackup?.prompt.removeListener(_onBackupPrompt);
     widget.services.sharedPhotoConsent?.detach(_askShareConsent);
     _linkSub?.cancel();
@@ -1079,8 +1157,8 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     // flow, say) is asked once that screen is popped. It waited until the
     // prompt changed or the app came back, holding the photos meanwhile.
     // The Play build's Watch Camera Roll notice waits the same way.
-    // A meal the user asked to see while a screen was open over the shell
-    // is shown once that screen is popped (_revealWhenOnTop).
+    // A meal the user asked to see while something over the shell held it
+    // is tried again once the shell is back on top (_revealWhenOnTop).
     final page = _OnRouteReturn(
         onReturn: () {
           _onBackupPrompt();
