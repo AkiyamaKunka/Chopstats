@@ -6,7 +6,7 @@ emulator, from the release build of the Play variant:
 
     cd app && flutter build apk --release --dart-define=CHOPSTATS_CHANNEL=play && cd ..
     python3 scripts/play_screenshots.py avd       # create + boot the AVD
-    python3 scripts/play_screenshots.py shots     # en-US and zh-CN, 01-07
+    python3 scripts/play_screenshots.py shots     # en-US 01-07, zh-CN the same but 06
     python3 scripts/play_screenshots.py stop      # stop the emulator (the AVD stays)
 
     python3 scripts/play_screenshots.py demo-file en-US --out demo.json   # the import file only
@@ -22,14 +22,16 @@ boots it headless on port 5562 (adb serial emulator-5562).
 animations off, gesture navigation, light mode, default font and display
 size, system language = the shot's language (adb root, persist.sys.locale
 and a reboot; the image is userdebug), a clean status bar (SystemUI demo
-mode: 20:45, full Wi-Fi and battery, no notification icons), notifications
-denied for the app so nothing pops up over it. Then a FRESH install of the
-APK, and the demo import file pushed to the emulator's Download folder and
+mode: 20:45, full Wi-Fi and battery, no notification icons), and the
+clock set to Friday 2026-11-20, 20:30 with automatic time off (DEMO_NOW),
+so every recapture shows the same days and numbers. Then a FRESH install
+of the APK, notifications denied for it so nothing pops up over it, and
+the demo import file pushed to the emulator's Download folder and
 imported the way a user would: Settings > Import Data... > Choose File... >
 Android's file picker. Then the shots, by tapping through the app with
 uiautomator, captured with `adb exec-out screencap -p`, flattened to RGB
 and checked with `scripts/play_graphics.py --check-shots`. Shot 07
-switches the system to dark mode and back.
+switches the system to dark mode and back. zh-CN has no 06 (see SHOTS).
 
 The demo data (`demo-file`) is a full export in the app's own format
 (MealsDao.exportJson / BackupFileWriter.writeFull, kind "full"): 30 days of
@@ -39,8 +41,8 @@ photos in docs/readme/photos/ (Unsplash License, docs/readme/CREDITS.md),
 the other days as described meals, and a weight and girth trend. Every
 item's numbers are consistent with its macros (4/4/9 kcal per gram) and
 every total is the sum of its items. No key, no server address, no real
-meal. Dates are relative to the emulator's own date (`--today` for
-demo-file).
+meal. Dates are relative to the emulator's date, which `shots` sets to
+DEMO_NOW (`--today` for demo-file, by default the same date).
 
 Needs Python 3 with Pillow, and the Android SDK at $ANDROID_HOME (or
 $ANDROID_SDK_ROOT; default ~/Library/Android/sdk on macOS, ~/Android/Sdk
@@ -82,6 +84,12 @@ PACKAGE = "dev.calorietracker.calorie_tracker"
 ACTIVITY = f"{PACKAGE}/.MainActivity"
 LANGS = ("en-US", "zh-CN")
 STATUS_CLOCK = "2045"  # the demo-mode status bar clock, hhmm
+# What the emulator's clock is set to before each language's capture, so
+# every recapture shows the committed shots' dates and numbers. A Friday:
+# the demo history's weekend days take extra random draws, so the weekday
+# decides every earlier day's meals (another Friday gives the same numbers
+# on other dates).
+DEMO_NOW = dt.datetime(2026, 11, 20, 20, 30)
 
 TMP = Path(tempfile.gettempdir()) / "play-screenshots"
 
@@ -109,8 +117,6 @@ TODAY_PHOTO_MEALS = [
     ("chicken-salad.jpg", (12, 38),
      "Chicken Caesar salad with soft-boiled egg",
      "鸡肉凯撒沙拉配溏心蛋",
-     # The egg second: on shot 01 the Chinese list is cut under its second
-     # line, and a short line makes the smallest fragment.
      [("Grilled chicken breast (~130 g)", "烤鸡胸肉（约130克）", 215, 40, 0, 5),
       ("Soft-boiled egg (1 large)", "溏心蛋（1个）", 72, 6, 0, 5),
       ("Caesar salad, croutons, parmesan (~170 g)", "凯撒沙拉配面包丁和帕玛森（约170克）", 300, 9, 15, 23)],
@@ -331,7 +337,7 @@ def build_demo_export(lang: str, today: dt.date, now: dt.datetime | None = None)
     """The demo data as a full export (kind 'full'), for [today]."""
     if lang not in LANGS:
         raise SystemExit(f"language must be one of {', '.join(LANGS)}")
-    now = now or dt.datetime.combine(today, dt.time(20, 30))
+    now = now or dt.datetime.combine(today, DEMO_NOW.time())
     rng = random.Random(20261120)  # seeded: the same date makes the same file
     meals: list[dict] = []
     ledger: list[dict] = []
@@ -526,12 +532,16 @@ class Device:
         self.sh("svc power stayon true")
         self.demo_mode()
 
-    def set_locale(self, lang: str) -> None:
-        if self.sh("getprop persist.sys.locale").strip() == lang:
-            return
+    def root(self) -> None:
+        """adbd as root (the image is userdebug); a no-op when it is."""
         self.adb("root")
         time.sleep(2)
         self.adb("wait-for-device")
+
+    def set_locale(self, lang: str) -> None:
+        if self.sh("getprop persist.sys.locale").strip() == lang:
+            return
+        self.root()
         self.sh(f"setprop persist.sys.locale {lang}")
         # The system reads persist.sys.locale as it starts.
         self.adb("reboot", check=False)
@@ -540,6 +550,17 @@ class Device:
         got = self.sh("getprop persist.sys.locale").strip()
         if got != lang:
             raise SystemExit(f"system language is {got!r}, not {lang}")
+
+    def pin_clock(self, at: dt.datetime) -> None:
+        """Set the system clock to [at], local time, with automatic time
+        off so nothing sets it back. A reboot takes the host's time again,
+        so this comes after set_locale."""
+        self.root()
+        self.sh("settings put global auto_time 0")
+        self.sh(f"date {at:%m%d%H%M%Y.%S}")  # toybox: MMDDhhmmCCYY.ss
+        got = self.sh("date +%Y-%m-%dT%H:%M").strip()
+        if not got.startswith(f"{at:%Y-%m-%dT%H:}"):
+            raise SystemExit(f"the emulator's clock reads {got!r}, not {at:%Y-%m-%d %H:%M}")
 
     def demo_mode(self) -> None:
         self.sh("settings put global sysui_demo_allowed 1")
@@ -740,13 +761,24 @@ def import_demo(device: Device, lang: str, file_name: str) -> None:
     print(f"  imported {file_name}")
 
 
+# How far 01 and 07 scroll Today. The large title collapses into the bar
+# after 69 dp, 181.1 px at this size, and the bar shows its small title
+# (and its chrome colour) only once the scroll is past that (SliverAppBar:
+# shrinkOffset > maxExtent - minExtent), so at least 182 px. Then the
+# totals card sits right under the bar and the meal cards get the room.
+# The lunch card's item lines must end above the tab bar (its hairline is
+# at y=1710) or start below it. Chinese: at 196 px the second line showed
+# its top 13 px; at 182 it starts on the hairline, out of sight. English:
+# at 196 the egg line ends at y=1706; at 182 the tab bar would cut it.
+TODAY_SCROLL = {"en-US": 196, "zh-CN": 182}
+
+
 def today_framed(device: Device, lang: str) -> None:
-    """Today with the large title collapsed into the bar (it takes 181 px
-    of scroll at this size), so the totals card sits right under the bar
-    and the meal cards below it get the room."""
+    """Today with the large title collapsed into the bar and no line cut
+    by the tab bar."""
     tab(device, lang, "today")
     scroll_to_top(device)
-    device.drag(540, 1300, 1300 - 196)
+    device.drag(540, 1300, 1300 - TODAY_SCROLL[lang])
 
 
 def shot_today(device: Device, lang: str, out: Path) -> None:
@@ -777,8 +809,13 @@ def shot_log_sheet(device: Device, lang: str, out: Path) -> None:
 
 
 def shot_history(device: Device, lang: str, out: Path) -> None:
+    """History framed as Today is: 196 px of scroll collapse the large
+    title into the bar and lift the chart card to y=195, so the tab bar
+    cuts between a day's bar and the next day's text, in both languages:
+    six whole days."""
     tab(device, lang, "history")
     scroll_to_top(device)
+    device.drag(540, 1300, 1300 - 196)
     device.screencap(out)
 
 
@@ -814,13 +851,18 @@ def shot_dark_today(device: Device, lang: str, out: Path) -> None:
 
 
 SHOTS = [
-    ("01", "today", shot_today),
-    ("02", "meal_editor", shot_editor),
-    ("03", "log_sheet", shot_log_sheet),
-    ("04", "history", shot_history),
-    ("05", "body", shot_body),
-    ("06", "ai_provider", shot_provider),
-    ("07", "dark_today", shot_dark_today),
+    # (number, name, take, the languages that have it)
+    ("01", "today", shot_today, LANGS),
+    ("02", "meal_editor", shot_editor, LANGS),
+    ("03", "log_sheet", shot_log_sheet, LANGS),
+    ("04", "history", shot_history, LANGS),
+    ("05", "body", shot_body, LANGS),
+    # English only: in Chinese the API Key page notes on every provider row
+    # but one whether it needs a VPN or connects directly in China, and its
+    # footer sends mainland users to four providers (需要 VPN, 中国直连,
+    # 中国大陆请选择…). Not for a listing Play shows outside mainland China.
+    ("06", "ai_provider", shot_provider, ("en-US",)),
+    ("07", "dark_today", shot_dark_today, LANGS),
 ]
 
 
@@ -832,19 +874,22 @@ def capture(device: Device, lang: str, apk: Path, only: set[str] | None) -> Path
     print(f"{lang}:")
     out_dir = SHOTS_DIR / lang
     device.prepare(lang)
+    device.pin_clock(DEMO_NOW)  # before the install: nothing dated after "now"
     device.fresh_install(apk)
     today = device_today(device)
-    if dt.datetime.now().hour == 23 and dt.datetime.now().minute >= 30:
-        print("  warning: close to midnight; the date may change mid-run")
     name = f"chopstats-{today.isoformat()}.json"  # the app's own export name
     local = write_demo_file(lang, today, TMP / lang / name)
     device.sh("rm -f /sdcard/Download/chopstats-*.json", check=False)
     device.adb("push", str(local), f"/sdcard/Download/{name}")
     import_demo(device, lang, name)
-    for num, slug, take in SHOTS:
+    for num, slug, take, langs in SHOTS:
+        out = out_dir / f"{num}_{slug}.png"
+        if lang not in langs:
+            out.unlink(missing_ok=True)  # an old capture's copy must not be uploaded
+            continue
         if only and num not in only:
             continue
-        take(device, lang, out_dir / f"{num}_{slug}.png")
+        take(device, lang, out)
         device.demo_mode()  # a SystemUI restart (dark mode) leaves demo mode
     device.sh("rm -f /sdcard/Download/chopstats-*.json", check=False)
     return out_dir
@@ -879,7 +924,7 @@ def cmd_avd(args) -> None:
 
 
 def cmd_demo_file(args) -> None:
-    today = dt.date.fromisoformat(args.today) if args.today else dt.date.today()
+    today = dt.date.fromisoformat(args.today) if args.today else DEMO_NOW.date()
     write_demo_file(args.lang, today, Path(args.out))
 
 
@@ -924,7 +969,8 @@ def cmd_shots(args) -> None:
     if failed:
         raise SystemExit("play_graphics.py --check-shots failed")
     print("Look at every PNG before committing: no key, address, provider logo, "
-          "Watch Camera Roll, Photo Coverage or Meta glasses row in view.")
+          "Watch Camera Roll, Photo Coverage or Meta glasses row, and no VPN or "
+          "mainland-China note (需要 VPN, 中国直连, 中国大陆请选择…) in view.")
 
 
 def cmd_stop(args) -> None:
@@ -939,7 +985,8 @@ def main(argv=None) -> int:
     sub.add_parser("avd", help=f"create the {AVD} AVD if needed and boot it headless")
     p = sub.add_parser("demo-file", help="write the demo import file")
     p.add_argument("lang", choices=LANGS)
-    p.add_argument("--today", help="YYYY-MM-DD (default: this computer's date)")
+    p.add_argument("--today", help=f"YYYY-MM-DD (default: {DEMO_NOW:%Y-%m-%d}, the date "
+                   "`shots` sets the emulator to)")
     p.add_argument("--out", required=True)
     p = sub.add_parser("shots", help="capture the shots on the running emulator")
     p.add_argument("--lang", choices=(*LANGS, "all"), default="all")

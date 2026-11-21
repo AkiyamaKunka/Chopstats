@@ -1,7 +1,7 @@
 # Google Play phone screenshots: the shot list
 
-The shots in `en-US/` and `zh-CN/` (01 to 07, in Play order) were captured
-on 2026-11-20 with
+The shots in `en-US/` (01 to 07, in Play order) and `zh-CN/` (the same
+without 06) were captured on 2026-11-20 with
 [`scripts/play_screenshots.py`](../../../../scripts/play_screenshots.py)
 from the **release build of the Play variant** (1.7.0; no Watch Camera
 Roll, no Photo Coverage; decision 1, 2026-11-13: `flutter build apk
@@ -32,7 +32,7 @@ zh-CN.
 ```bash
 cd app && flutter build apk --release --dart-define=CHOPSTATS_CHANNEL=play && cd ..
 python3 scripts/play_screenshots.py avd     # create play_shots if needed, boot it headless
-python3 scripts/play_screenshots.py shots   # en-US and zh-CN, 01-07, then --check-shots
+python3 scripts/play_screenshots.py shots   # en-US 01-07, zh-CN without 06, then --check-shots
 python3 scripts/play_screenshots.py stop    # stop the emulator; the AVD stays
 ```
 
@@ -65,8 +65,12 @@ how to do it by hand:
   shot's language (`adb root`, `adb shell setprop persist.sys.locale
   zh-CN`, `adb reboot`), the status bar clean (`adb shell settings put
   global sysui_demo_allowed 1` and the `com.android.systemui.demo`
-  broadcasts: 20:45, full Wi-Fi and battery, no notification icons), and
-  notifications denied to the app, so nothing pops up over a shot.
+  broadcasts: 20:45, full Wi-Fi and battery, no notification icons),
+  notifications denied to the app, so nothing pops up over a shot, and
+  the clock set to Friday 2026-11-20, 20:30 with automatic time off
+  (`adb shell settings put global auto_time 0`, then as root `adb shell
+  date 112020302026.00`), after the language's reboot, which takes the
+  host's time again.
 - **The app.** A fresh install of the APK, which the script first checks
   is the Play variant's release build (not debuggable, no
   `READ_MEDIA_IMAGES`). No API key is entered (the key field on 06 is
@@ -87,12 +91,16 @@ how to do it by hand:
 ## The demo data
 
 Demo data only: no real meal, no API key, no server address, no
-notification content from any account. Dates follow the emulator's own
-date. 30 days of plausible meals: today a breakfast, lunch, snack and
-dinner logged from photos (1,896 kcal), the 29 days before it described
-meals, a little more at weekends (in the committed shots the days run
-from 1,637 to 2,312 kcal, average 1,891); a weight trend from 74.6 to
-73.2 kg weighed on most mornings, and waist, chest and hip once a week.
+notification content from any account. Dates follow the emulator's date,
+which the script sets to Friday 2026-11-20, so every recapture shows the
+same days and numbers. The weekday matters: the weekend days take extra
+random draws, so another Friday gives the same numbers on other dates,
+and any other weekday other numbers (a Saturday: typical day ~1,999). 30
+days of plausible meals: today a breakfast, lunch, snack and dinner
+logged from photos (1,896 kcal), the 29 days before it described meals,
+a little more at weekends (the days run from 1,637 to 2,312 kcal,
+average 1,891); a weight trend from 74.6 to 73.2 kg weighed on most
+mornings, and waist, chest and hip once a week.
 Every food item's calories agree with its protein, carbs and fat (4/4/9
 kcal per gram) and every total is the sum of its items. The Chinese file
 has the same meals with the names the Chinese reply language makes the
@@ -114,21 +122,32 @@ kind of thumbnail (160 px, JPEG quality 70) made from:
 
 `dumplings.jpg` is not used.
 
-## The shots (same order in both languages)
+## The shots (the same in both languages, but zh-CN has no 06)
 
 | # | File | Screen | Shows |
 |---|---|---|---|
 | 1 | `01_today.png` | Today, its large title collapsed | The day's calories and macros (1,896 kcal, 4 meals, typical day ~1,860) and the first two meal cards with their photos |
 | 2 | `02_meal_editor.png` | Today's dinner, a photo meal, open in the editor | The totals, then the food items with the portion the AI assumed and their editable numbers |
 | 3 | `03_log_sheet.png` | The Log sheet over Today | From recent photos, My usual foods, Leftovers, Describe a meal, Enter manually, Fix or delete a meal |
-| 4 | `04_history.png` | History | The 30-day chart with its average, and the daily totals |
+| 4 | `04_history.png` | History, its large title collapsed | The 30-day chart with its average, and six days' totals |
 | 5 | `05_body.png` | Body | The weight trend and the measurements |
-| 6 | `06_ai_provider.png` | Settings › AI Provider › API Key | The provider list and the top of the empty key field (scrolled further, the field's footer names the provider's key page) |
+| 6 | `06_ai_provider.png` | Settings › AI Provider › API Key, **en-US only** | The provider list and the top of the empty key field (scrolled further, the field's footer names the provider's key page) |
 | 7 | `07_dark_today.png` | Today in dark mode | As shot 1 |
+
+zh-CN has no 06: in Chinese the API Key page notes on eight of its nine
+provider rows whether the provider needs a VPN or connects directly in
+China (需要 VPN, 免费额度 · VPN, 中国直连, 免费 · 中国直连), and its
+footer sends mainland users to DeepSeek, Qwen, Doubao or GLM. Play is not
+offered in mainland China (`docs/RELEASING.md` § 7), so the people who
+see the zh-CN listing need no VPN, and the listing's own text may not
+mention VPNs either (`test/release_decisions_test.dart`). Six shots are
+still more than the four Play wants.
 
 Never in a shot: Watch Camera Roll, Photo Coverage, Meta glasses rows,
 anything that names the GitHub APK, a real key or address, a provider's
-logo, or accuracy or user-count claims.
+logo, VPN or mainland-China notes (需要 VPN, 中国直连, 中国大陆请选择…),
+or accuracy or user-count claims. Nothing cut in half by the tab bar
+either: a line shows whole or not at all.
 
 After capture, the owner uploads them under **Grow users › Store presence
 › Main store listing** (and the zh-CN translation) with the graphics from

@@ -1562,9 +1562,12 @@ read 2026-11-13):
   `feature-graphic-zh-CN.png` (1,024 × 500, 24-bit PNG, no alpha). It
   checks both itself (`--verify`), and so does the test.
 - **Screenshots:** `app/android/store/screenshots/en-US/` and `zh-CN/`,
-  7 portrait shots per language (9:16, 1,080 × 1,920, 24-bit PNG, no
-  alpha) from the Play build's release APK on an emulator, with demo data
-  only, as `app/android/store/screenshots/SHOTS.md` lists.
+  portrait shots (9:16, 1,080 × 1,920, 24-bit PNG, no alpha) from the
+  Play build's release APK on an emulator, with demo data only, as
+  `app/android/store/screenshots/SHOTS.md` lists: 7 in en-US and 6 in
+  zh-CN, which has no 06 (in Chinese the API Key page says which
+  providers need a VPN in mainland China, where Play is not offered;
+  § 7).
   `scripts/play_screenshots.py` takes them again (AVD, demo import file,
   capture, check); redo them on a release candidate whose screens
   changed. The iPhone sets are about 2.17:1, and Play refuses anything
