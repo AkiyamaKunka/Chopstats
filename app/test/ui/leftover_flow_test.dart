@@ -1013,8 +1013,11 @@ void main() {
           settings: FakeSettings(keys: {'server': 'up'})
             ..provider = 'server'
             ..serverBaseUrl = 'https://b.example'
-            ..keySavedFor = 'a.example');
+            ..keySavedFor = 'a.example'
+            ..aiConsent = {});
       await tester.pumpAndSettle();
+      expect(find.byKey(const Key('aiConsentDialog')), findsNothing,
+          reason: 'said before the consent question');
       expect(find.text(AppLocalizationsEn().errServerKeyOtherHost),
           findsOneWidget);
       expect(held.calls, 0);
