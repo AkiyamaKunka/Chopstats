@@ -27,6 +27,13 @@ Lines tied to a release. Re-read them when a new App Store version ships:
 7. "What it costs": the sentence about Gemini's free tier and what Google may
    do with what is sent comes from Google's Gemini API pricing page, read on
    2026-11-10. Check it again when the default model or Google's terms change.
+8. "Your own server": PR #74 sends the upload key only to the server it was
+   saved for. The App Store version does not: in 1.6.0 the key follows a
+   changed address, and there is no Use this key row. When a version with
+   it is live, add this bullet after "The phone holds one upload key" here
+   and after "手机上只保存一个上传密钥" in README.zh-CN.md, in one commit:
+   - The phone sends that key only to the server it was saved for. After you change the address to another server, paste that server's key; for the same server at a new address, tap **Use this key for …** under the key field.
+   - 手机只把这个密钥发送给它所对应的服务器。把地址改成另一台服务器后，请粘贴那台服务器的密钥；如果是同一台服务器换了地址，请点「服务器上传密钥」下面的「将此密钥用于 …」。
 
 The slides:
 1. docs/readme/slides/NN-name.jpg (English) and docs/readme/zh/slides/

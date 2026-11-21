@@ -75,6 +75,34 @@ class PlatformFileSaver implements FileSaver {
   }
 }
 
+/// The method that tells the restarted app how a save whose call died
+/// with an earlier engine ended: Android recreated the activity while the
+/// save screen was up, the copy still ran, and the call that would have
+/// said "Export saved." was gone with that engine (Android QA Q4).
+/// MainActivity answers `{status: 'ok' | 'failed'}` once, or null when
+/// there is nothing to tell; an ask while the copy still runs is answered
+/// when it ends.
+const String takeSaveResultMethod = 'takeSaveResult';
+
+/// How such a save ended ([takeSaveResultMethod]): [SaveFileStatus.ok] or
+/// [SaveFileStatus.failed], once; null when there is nothing to tell, and
+/// on a build or phone that cannot say. Never throws.
+Future<SaveFileStatus?> takeLateSaveResult(
+    {MethodChannel channel = const MethodChannel(filesChannelName)}) async {
+  try {
+    final reply = await channel.invokeMethod<Object?>(takeSaveResultMethod);
+    if (reply is! Map) return null;
+    final status = saveFileStatusOf(reply);
+    return status == SaveFileStatus.ok || status == SaveFileStatus.failed
+        ? status
+        : null;
+  } on MissingPluginException {
+    return null;
+  } on PlatformException {
+    return null;
+  }
+}
+
 /// The native reply as a status. Anything that is not the contract's map
 /// is [SaveFileStatus.failed]: something answered, so the method exists,
 /// but nothing says the copy was written.

@@ -33,8 +33,20 @@ class FixMealScreen extends StatefulWidget {
   /// picks which meal a sentence fixes, so the restaurant assist waits
   /// until the correction has landed. Null: nothing to tell.
   final MealInUseRegistry? inUse;
+
+  /// A request sent here and left with Back while it was on its way (back
+  /// leaves at once then) lands after the screen has closed, and so after
+  /// Today reloaded for it (openAddFlow's onChanged): Today showed the old
+  /// totals until a tab switch (Android QA Q3). Called when such a request
+  /// has changed a meal, whether it lands during the screen's exit
+  /// transition or after it. Null: nothing to tell.
+  final Future<void> Function()? onChangedAfterClose;
   const FixMealScreen(
-      {super.key, required this.executor, required this.settings, this.inUse});
+      {super.key,
+      required this.executor,
+      required this.settings,
+      this.inUse,
+      this.onChangedAfterClose});
 
   @override
   State<FixMealScreen> createState() => _FixMealScreenState();
@@ -86,6 +98,7 @@ class _FixMealScreenState extends State<FixMealScreen> {
     // Held until the executor returns: its write is done by then (a staged
     // delete only lands after the modal, through confirmPendingDelete).
     final hold = widget.inUse?.acquireAll();
+    final changedAfterClose = widget.onChangedAfterClose;
     try {
       final List<NlReply> replies;
       try {
@@ -93,7 +106,20 @@ class _FixMealScreenState extends State<FixMealScreen> {
       } finally {
         hold?.release();
       }
-      if (!mounted) return;
+      // Left during the send: the executor wrote the change by now (a
+      // staged delete needs this screen's question, so it never lands).
+      // Left means popped, not only unmounted: Back completes the push at
+      // once, so Today reloads then, but the screen stays mounted through
+      // its exit transition (450 ms with Android's predictive-back one,
+      // 500 ms with iOS's Cupertino one), and a reply landing in it was
+      // presented over Today and never reloaded it. The route stops being
+      // active at the pop (a dialog on top leaves it active).
+      if (!mounted || !(ModalRoute.of(context)?.isActive ?? true)) {
+        if (changedAfterClose != null && replies.any((r) => r.applied)) {
+          await changedAfterClose();
+        }
+        return;
+      }
       // Sending ends when the executor returns; presentation (incl. the
       // blocking delete-confirmation modal) is not "sending".
       setState(() => _sending = false);

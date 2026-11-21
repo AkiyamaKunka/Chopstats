@@ -9,8 +9,11 @@
 // from then on. iPhone is unchanged.
 import 'dart:io';
 
+import 'dart:async' show Completer;
+
 import 'package:calorie_tracker/services/backup/file_pick_channel.dart';
 import 'package:calorie_tracker/services/backup/save_file_channel.dart';
+import 'package:calorie_tracker/ui/app.dart' show CalorieTrackerApp;
 import 'package:calorie_tracker/ui/screens/settings/data_section.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -321,6 +324,95 @@ void main() {
       messenger.setMockMethodCallHandler(
           channel, (_) async => throw PlatformException(code: 'io'));
       expect(await save(), SaveFileStatus.failed);
+    });
+
+    // Android QA Q4: a save whose call died with its engine (the activity
+    // was recreated while the save screen was up) still saved the file,
+    // and nothing said so. The restarted app asks MainActivity once.
+    test('takeSaveResult: ok or failed, once; anything else is nothing to '
+        'tell', () async {
+      final calls = <MethodCall>[];
+      Object? reply;
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        calls.add(call);
+        return reply;
+      });
+      for (final (wire, status) in [
+        ({'status': 'ok'}, SaveFileStatus.ok),
+        ({'status': 'failed'}, SaveFileStatus.failed),
+        ({'status': 'cancelled'}, null),
+        ({'status': 'busy'}, null),
+        ({'status': 'something new'}, SaveFileStatus.failed),
+        (null, null),
+        ('ok', null),
+      ]) {
+        reply = wire;
+        expect(await takeLateSaveResult(), status, reason: '$wire');
+      }
+      expect(calls.map((c) => c.method).toSet(), {'takeSaveResult'});
+      expect(calls.first.arguments, isNull);
+      expect(takeSaveResultMethod, 'takeSaveResult');
+    });
+
+    test('takeSaveResult on a build without it, or a platform error: '
+        'nothing to tell', () async {
+      expect(await takeLateSaveResult(), isNull);
+      messenger.setMockMethodCallHandler(
+          channel, (_) async => throw PlatformException(code: 'x'));
+      expect(await takeLateSaveResult(), isNull);
+    });
+  });
+
+  group('the app shell says how a save that outlived its engine ended', () {
+    Future<void> start(WidgetTester tester,
+        Future<SaveFileStatus?> Function() take,
+        {Locale locale = const Locale('en')}) async {
+      await tester.pumpWidget(CalorieTrackerApp(
+          services: makeServices(
+              settings: FakeSettings()..appLanguage = locale.languageCode,
+              lateSaveResult: take)));
+      await tester.pumpAndSettle();
+    }
+
+    for (final (status, en, zh) in [
+      (SaveFileStatus.ok, 'Export saved.', '导出文件已保存。'),
+      (
+        SaveFileStatus.failed,
+        'The export could not be saved. Try Share… instead.',
+        '导出文件没能保存。可以改用「分享…」。'
+      ),
+    ]) {
+      for (final locale in const [Locale('en'), Locale('zh')]) {
+        testWidgets('${status.name} (${locale.languageCode}): said once at '
+            'the start', (tester) async {
+          var asks = 0;
+          await start(tester, () async {
+            asks++;
+            return status;
+          }, locale: locale);
+          expect(find.text(locale.languageCode == 'zh' ? zh : en),
+              findsOneWidget);
+          expect(asks, 1);
+        });
+      }
+    }
+
+    testWidgets('a copy still running is waited for', (tester) async {
+      final copy = Completer<SaveFileStatus?>();
+      await start(tester, () => copy.future);
+      expect(find.byType(SnackBar), findsNothing);
+      copy.complete(SaveFileStatus.ok);
+      await tester.pumpAndSettle();
+      expect(find.text('Export saved.'), findsOneWidget);
+    });
+
+    testWidgets('nothing to tell, or a failed ask: nothing said',
+        (tester) async {
+      await start(tester, () async => null);
+      expect(find.byType(SnackBar), findsNothing);
+      await start(tester, () async => throw StateError('no channel'));
+      expect(find.byType(SnackBar), findsNothing);
+      expect(tester.takeException(), isNull);
     });
   });
 

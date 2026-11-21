@@ -144,7 +144,9 @@ Future<void> openAddFlow(BuildContext context, UiServices services,
         builder: (_) => FixMealScreen(
             executor: services.executor,
             settings: services.settings,
-            inUse: services.mealInUse)));
+            inUse: services.mealInUse,
+            // A fix sent and left with Back lands after the reload below.
+            onChangedAfterClose: onChanged)));
   } else {
     return;
   }

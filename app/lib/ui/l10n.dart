@@ -11,7 +11,8 @@ import 'package:flutter/widgets.dart';
 
 import '../l10n/app_localizations.dart';
 import '../l10n/app_localizations_en.dart';
-import 'format.dart' show displayClock, friendlyHistoryDay, isoDate;
+import 'format.dart'
+    show displayClock, friendlyHistoryDay, isoDate, phoneUses24HourClockIn;
 import 'meal_edit_logic.dart' show formatClock;
 
 export '../l10n/app_localizations.dart' show AppLocalizations;
@@ -33,8 +34,11 @@ extension L10nX on BuildContext {
         todayLabel: l10n.tabToday,
       );
 
-  /// Locale-aware meal clock over the stored `%I:%M %p` string.
-  String clock(String raw) => displayClock(raw, localeName: _localeName);
+  /// Locale-aware meal clock over the stored `%I:%M %p` string; the widget
+  /// that shows it follows the phone's 12/24-hour switch as it changes
+  /// ([phoneUses24HourClockIn]).
+  String clock(String raw) => displayClock(raw,
+      localeName: _localeName, use24h: phoneUses24HourClockIn(this));
 
   /// When a photo was taken, for a screen reader: day + clock in the
   /// app's own wording (今天 20:05 / 'Today 08:05 PM'), so a grid of

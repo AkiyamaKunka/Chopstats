@@ -64,7 +64,8 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart' show sha256;
 import 'package:http/http.dart' as http;
 
-import '../../../core/server_transport.dart' show serverAddressRefused;
+import '../../../core/server_transport.dart'
+    show serverAddressRefused, serverKeyForOtherHost;
 import '../../server_http_client.dart' show HttpsOnlyServerClient;
 import '../../settings/app_settings.dart';
 import 'http_lookup_client.dart' show LookupAbort, countOf, dedupe, redactRaw;
@@ -129,7 +130,8 @@ class ServerLookupClient implements LookupClient {
     http.Client? client,
     LookupBudget? budget,
     this.perCallDeadline = kServerLookupHttpDeadline,
-  })  : _client = HttpsOnlyServerClient.wrap(client),
+  })  : _client = HttpsOnlyServerClient.wrap(client,
+            keyFor: _settings.serverKeyFor),
         _budget = budget ?? const UnlimitedLookupBudget();
 
   final AppSettings _settings;
@@ -200,6 +202,9 @@ class ServerLookupClient implements LookupClient {
           transient: true,
           message: 'No server upload key — add it in Settings.'));
     }
+    if (serverKeyForOtherHost(_settings.serverKeyHost, server.base)) {
+      return _local(_keyElsewhere);
+    }
     if (cancel?.isCancelled ?? false) return _local(_cancelled);
     // The https gate: over http, only chains that printed text names.
     // Then the server gate's reading: a name or unit it would refuse as a
@@ -229,6 +234,16 @@ class ServerLookupClient implements LookupClient {
     return outcome;
   }
 
+  /// The upload key was saved for another server address
+  /// (AppSettings.serverKeyHost): it is sent nowhere else (the client
+  /// refuses too), so no lookup reaches this address until the user pastes
+  /// its key. A setup failure, like no key at all.
+  static const LookupFailure _keyElsewhere = LookupFailure(
+      LookupFailureCode.noKey,
+      transient: true,
+      message: 'The server upload key was saved for another server address '
+          '— check it in Settings.');
+
   /// Sends only the job id. A job id the server could never have issued is
   /// a resubmit with zero calls.
   @override
@@ -241,6 +256,9 @@ class ServerLookupClient implements LookupClient {
       return _local(const LookupFailure(LookupFailureCode.noKey,
           transient: true,
           message: 'No server upload key — add it in Settings.'));
+    }
+    if (serverKeyForOtherHost(_settings.serverKeyHost, server.base)) {
+      return _local(_keyElsewhere);
     }
     // The job's request is not known here (a poll can follow a restart):
     // item_index is bounded by the request cap. The server already bounded

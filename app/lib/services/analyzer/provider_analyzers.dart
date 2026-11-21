@@ -17,12 +17,17 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show ValueListenable, ValueNotifier;
 import 'package:http/http.dart' as http;
 
+import '../../core/ai_consent.dart' show aiConsentRoute;
 import '../../core/coerce.dart';
 import '../../core/contracts.dart';
 import '../../core/leftover_logic.dart' show formatRecentMealsBlock;
 import '../../core/prompts.dart';
 import '../../core/server_transport.dart'
-    show kServerNeedsHttpsMessage, serverAddressRefused;
+    show
+        kServerKeyOtherHostMessage,
+        kServerNeedsHttpsMessage,
+        serverAddressRefused,
+        serverKeyForOtherHost;
 import '../server_http_client.dart' show HttpsOnlyServerClient;
 import '../assist/clients/http_failure.dart'
     show

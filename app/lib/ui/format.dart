@@ -8,7 +8,8 @@ library;
 
 import 'dart:ui' as ui show PlatformDispatcher;
 
-import 'package:flutter/widgets.dart' show WidgetsBinding;
+import 'package:flutter/widgets.dart'
+    show BuildContext, MediaQuery, WidgetsBinding;
 import 'package:intl/intl.dart';
 
 import '../core/coerce.dart';
@@ -209,6 +210,16 @@ bool phoneUses24HourClock() {
   final view = dispatcher.implicitView;
   if (view == null || view.physicalSize.isEmpty) return true;
   return dispatcher.alwaysUse24HourFormat;
+}
+
+/// [phoneUses24HourClock] for a widget building in [context], which then
+/// builds again when the switch changes (MediaQuery's
+/// alwaysUse24HourFormat aspect). Read alone, the value changed and
+/// nothing on screen redrew until something else did: a meal time or
+/// "Next summary" kept the old clock (Android QA Q7).
+bool phoneUses24HourClockIn(BuildContext context) {
+  MediaQuery.maybeAlwaysUse24HourFormatOf(context);
+  return phoneUses24HourClock();
 }
 
 /// A time of day for an English reader: '9:30 PM' (no leading zero, the

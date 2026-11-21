@@ -229,6 +229,11 @@ class _LeftoverScreenState extends State<LeftoverScreen> {
       _snack(context.l10n.errServerNeedsHttps);
       return;
     }
+    // Its upload key was saved for another address: sent nowhere else.
+    if (serverKeyForOtherAddress(settings)) {
+      _snack(context.l10n.errServerKeyOtherHost);
+      return;
+    }
     _busy = true;
     // App Store 5.1.2(i): the photo and this meal go to the AI — permission
     // for this recipient before the photo's bytes are read.

@@ -2133,6 +2133,11 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
+  String outcomeShareFixAddressMsg(String reason) {
+    return '分享的照片没有分析。$reason改好后请重新分享。';
+  }
+
+  @override
   String get reasonRateLimited => '服务正在限流';
 
   @override
@@ -3494,4 +3499,32 @@ class AppLocalizationsZh extends AppLocalizations {
   @override
   String get watchGlassesAndroidNote =>
       '在 Android 上，「包括 Meta 眼镜拍的照片」默认关闭：这些照片无法先在手机上检查有没有食物，打开后每一张都会不经检查就发送给 AI 服务。';
+
+  @override
+  String get errServerKeyOtherHost =>
+      '你的服务器上传密钥是为另一个服务器地址保存的，筷拍只会把它发送到那里。请到「AI 服务」›「你自己的服务器」粘贴这台服务器的密钥，或把已保存的密钥用于它。';
+
+  @override
+  String get reasonServerKeyOtherHost => '上传密钥是为另一个服务器地址保存的';
+
+  @override
+  String serverKeyOtherHostField(String host) {
+    return '为 $host 保存：不会发送到上面的地址。';
+  }
+
+  @override
+  String serverKeyUseHere(String host) {
+    return '将此密钥用于 $host';
+  }
+
+  @override
+  String get autoScanServerKeyOtherHost =>
+      '自动记录没有运行：你的服务器上传密钥是为另一个服务器地址保存的，筷拍只会把它发送到那里。请到「AI 服务」›「你自己的服务器」修改。';
+
+  @override
+  String get diagServerKeyOtherHost => '上传密钥是为另一个服务器地址保存的，所以不会发送给这台服务器。';
+
+  @override
+  String get diagFixServerKeyOtherHost =>
+      '在设置 ›「AI 服务」›「你自己的服务器」里粘贴这台服务器的上传密钥，或把已保存的密钥用于它。';
 }

@@ -137,6 +137,46 @@ void main() {
       expect(results.single.fix, l.diagFixServerHttps);
       expect(contacted, 0);
     });
+
+    // Review of PR 74: the upload key goes only to the host it was saved
+    // for, so the key check would only have called it rejected.
+    test('an upload key saved for another address stops at Configuration, '
+        'contacting nothing ($locale)', () async {
+      final l = locale == 'zh' ? AppLocalizationsZh() : AppLocalizationsEn();
+      final settings = FakeSettings()
+        ..provider = 'server'
+        ..apiKey = 'k'
+        ..serverBaseUrl = 'https://new.example'
+        ..keySavedFor = 'old.example';
+      var contacted = 0;
+      final analyzer = _okAnalyzer()
+        ..onProbeKey = (_) async {
+          contacted++;
+          return const KeyProbe(KeyProbeResult.ok);
+        };
+      final results = await _diag(
+              settings: settings,
+              analyzer: analyzer,
+              l10n: l,
+              client: MockClient((_) async {
+                contacted++;
+                return http.Response('ok', 404);
+              }))
+          .run()
+          .toList();
+      expect(results, hasLength(1));
+      expect(results.single.stage, l.diagStageConfiguration);
+      expect(results.single.status, DiagStatus.fail);
+      expect(results.single.summary, l.diagServerKeyOtherHost);
+      expect(results.single.fix, l.diagFixServerKeyOtherHost);
+      expect(contacted, 0);
+      // The key its own again: checked as before.
+      settings.keySavedFor = null;
+      final ok = await _diag(settings: settings, analyzer: _okAnalyzer(), l10n: l)
+          .run()
+          .toList();
+      expect(ok.first.status, DiagStatus.pass);
+    });
   }
 
   test('a plain http:// server with the https switch off is checked as '

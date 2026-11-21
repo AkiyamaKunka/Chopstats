@@ -185,8 +185,13 @@ final _placeholderRe = RegExp(r'\{(\w+)\}');
 /// (android/feel-and-defaults): the Photos footer's line on why Meta
 /// glasses photos starts off on Android (watchGlassesAndroidNote), and
 /// Photo Coverage's count of glasses photos that switch keeps out
-/// (covGlassesOffCount).
-const _keyCount = 953;
+/// (covGlassesOffCount); and the Android lows lane's
+/// outcomeShareFixAddressMsg (a share refused for the server address) and,
+/// after its review, the seven lines for an upload key saved for another
+/// server address (errServerKeyOtherHost, reasonServerKeyOtherHost,
+/// serverKeyOtherHostField, serverKeyUseHere, autoScanServerKeyOtherHost,
+/// diagServerKeyOtherHost, diagFixServerKeyOtherHost).
+const _keyCount = 961;
 
 Directory _appRoot() {
   var dir = Directory.current;

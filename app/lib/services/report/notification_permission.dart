@@ -15,8 +15,11 @@
 ///     meals-changed signal).
 /// Never in a background run. An install from before this scheme counts as
 /// asked ([settleNotificationAskAtLaunch]): the old build asked it at every
-/// start. After the one ask, Settings' notifications-off row opens the
-/// app's notification settings ([fixNotificationsOff]).
+/// start. Preferences restored from another install (Auto Backup, a new
+/// phone) do not: that install asked, this one has not
+/// ([notificationAskInstallPrefsKey]). After the one ask, Settings'
+/// notifications-off row opens the app's notification settings
+/// ([fixNotificationsOff]).
 ///
 /// iOS is untouched: DarwinInitializationSettings asks during
 /// ReportNotifier.init, as before.
@@ -42,6 +45,45 @@ const String notificationPermissionAskedPrefsKey =
 /// Set at the first launch of this scheme ([settleNotificationAskAtLaunch]).
 const String notificationAskSchemePrefsKey = 'notifications.ask_scheme';
 
+/// The first-install time (ms) of the install these preferences belong to,
+/// written at every launch ([settleNotificationAskAtLaunch]). Preferences
+/// that Android's Auto Backup restored after a reinstall, or a device
+/// transfer brought to a new phone, carry another install's time, and
+/// with it that install's two flags above: Settings then offered "Open
+/// system settings" and Android's own dialog never came, though this
+/// install had asked nothing (Android QA Q6).
+const String notificationAskInstallPrefsKey = 'notifications.ask_install';
+
+/// MainActivity's answer on [backgroundRestrictionChannel]: this install's
+/// first-install and last-update times (PackageInfo), or null when they
+/// cannot be read (no such method, an error, another platform).
+Future<({int firstInstall, int lastUpdate})?> _installTimes(
+    MethodChannel channel) async {
+  try {
+    final reply = await channel.invokeMethod<Object?>('installTimes');
+    if (reply is! Map) return null;
+    final first = reply['firstInstall'], last = reply['lastUpdate'];
+    if (first is! int || last is! int) return null;
+    return (firstInstall: first, lastUpdate: last);
+  } catch (_) {
+    return null;
+  }
+}
+
+/// Whether [prefs] came to this install from another one (a backup
+/// restored, a device transfer): they were written under another
+/// first-install time ([notificationAskInstallPrefsKey]). Written before
+/// that time was kept (1.7.0 and older), they can be this install's own
+/// only if it was updated in place since it was installed: an install
+/// never updated holds an earlier version's preferences only because a
+/// backup was restored onto it.
+bool _fromAnotherInstall(
+    SharedPreferences prefs, ({int firstInstall, int lastUpdate}) times) {
+  final stamp = prefs.get(notificationAskInstallPrefsKey);
+  if (stamp is int) return stamp != times.firstInstall;
+  return times.lastUpdate <= times.firstInstall;
+}
+
 /// Test seam: the system request. Null: flutter_local_notifications'.
 @visibleForTesting
 Future<bool?> Function()? debugRequestNotificationPermission;
@@ -56,18 +98,35 @@ bool get notificationPermissionInContext =>
 /// Android makes permanent: a trigger would show nothing, and Settings'
 /// button must open the settings page). Such an install is told by the
 /// preferences an earlier version left; a fresh install has none at its
-/// first launch. Once per install. Android, app engine; never throws.
+/// first launch. Once per install.
+///
+/// Preferences restored from another install (Auto Backup after a
+/// reinstall, a device transfer) are told apart by MainActivity's install
+/// times ([_fromAnotherInstall]): their ask flags were that install's, so
+/// this one counts as never asked, and as past the old every-launch ask.
+/// Without the times (an older native build) they are taken as they are.
+/// Android, app engine; never throws.
 Future<void> settleNotificationAskAtLaunch(
-    {Future<SharedPreferences> Function()? prefs}) async {
+    {Future<SharedPreferences> Function()? prefs,
+    MethodChannel channel = backgroundRestrictionChannel}) async {
   if (!notificationPermissionInContext) return;
   try {
     final p = await (prefs ?? SharedPreferences.getInstance)();
-    if (p.getBool(notificationAskSchemePrefsKey) ?? false) return;
-    final earlier = p.getKeys().any((k) =>
-        k != notificationAskSchemePrefsKey &&
-        k != notificationPermissionAskedPrefsKey);
-    if (earlier) await p.setBool(notificationPermissionAskedPrefsKey, true);
-    await p.setBool(notificationAskSchemePrefsKey, true);
+    final times = await _installTimes(channel);
+    if (times != null && _fromAnotherInstall(p, times)) {
+      await p.remove(notificationPermissionAskedPrefsKey);
+      await p.setBool(notificationAskSchemePrefsKey, true);
+    } else if (!(p.getBool(notificationAskSchemePrefsKey) ?? false)) {
+      final earlier = p.getKeys().any((k) =>
+          k != notificationAskSchemePrefsKey &&
+          k != notificationPermissionAskedPrefsKey &&
+          k != notificationAskInstallPrefsKey);
+      if (earlier) await p.setBool(notificationPermissionAskedPrefsKey, true);
+      await p.setBool(notificationAskSchemePrefsKey, true);
+    }
+    if (times != null) {
+      await p.setInt(notificationAskInstallPrefsKey, times.firstInstall);
+    }
   } catch (_) {}
 }
 

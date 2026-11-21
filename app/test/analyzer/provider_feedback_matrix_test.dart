@@ -680,7 +680,10 @@ void main() {
             expect(calls, 1,
                 reason: '$why — a login page does not change in 15 s');
             expect(s.isQuotaPaused, isFalse, reason: why);
-            final probe = await a.probeKey('k');
+            // The saved key, as the Test page probes it (diagnostics.dart):
+            // the own server's client sends no other text as its key
+            // (HttpsOnlyServerClient, AppSettings.serverKeyFor).
+            final probe = await a.probeKey(s.activeApiKey!);
             final probeWhy = '${p.name}/${entry.key}: ${probe.message}';
             expect(probe.result, isNot(KeyProbeResult.ok),
                 reason: '$probeWhy — a portal page is not proof of a key');

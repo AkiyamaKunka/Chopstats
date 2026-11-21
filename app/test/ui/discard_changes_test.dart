@@ -8,7 +8,8 @@
 import 'dart:async';
 
 import 'package:calorie_tracker/core/contracts.dart';
-import 'package:calorie_tracker/ui/screens/add_flow.dart' show AddTextScreen;
+import 'package:calorie_tracker/ui/screens/add_flow.dart'
+    show AddTextScreen, openAddFlow;
 import 'package:calorie_tracker/ui/screens/body_screen.dart';
 import 'package:calorie_tracker/ui/screens/fix_meal_screen.dart';
 import 'package:calorie_tracker/ui/screens/meal_editor_screen.dart';
@@ -366,6 +367,128 @@ void main() {
       reply.complete(const [NlReply('✏️ Corrected.', applied: true)]);
       await tester.pumpAndSettle();
     });
+
+    // Android QA Q3: the fix still landed after Back, but the Log sheet
+    // reloaded Today as the screen closed, before it landed, so Today
+    // showed the old totals until a tab switch. It reloads again when a
+    // request left that way has changed a meal.
+    for (final (applied, reloads) in const [(true, 2), (false, 1)]) {
+      testWidgets('a request left with Back ${applied ? 'reloads Today again '
+          'when its fix lands' : 'that changed nothing reloads nothing more'}',
+          (tester) async {
+        tester.view.physicalSize = const Size(1200, 2600);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.reset);
+        final reply = Completer<List<NlReply>>();
+        final services =
+            makeServices(executor: _SlowExecutor(reply.future));
+        var reloaded = 0;
+        await tester.pumpWidget(MaterialApp(
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: Center(
+                child: TextButton(
+                  key: _open,
+                  // As the Today FAB opens it: the meals signal on close.
+                  onPressed: () => openAddFlow(context, services,
+                      onChanged: () async => reloaded++),
+                  child: const Text('open'),
+                ),
+              ),
+            ),
+          ),
+        ));
+        await tester.tap(find.byKey(_open));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('addFixMeal')));
+        await tester.pumpAndSettle();
+        await tester.enterText(
+            find.byKey(const Key('fixMealField')), 'the latte was oat milk');
+        await tester.tap(find.byKey(const Key('fixMealSend')));
+        await tester.pump();
+        await _systemBack(tester);
+        expect(find.byType(FixMealScreen), findsNothing);
+        expect(reloaded, 1, reason: 'reloaded as the screen closed');
+
+        reply.complete([
+          applied
+              ? const NlReply('✏️ Corrected.', applied: true)
+              : const NlReply('❌ Could not reach the AI. Try again.'),
+        ]);
+        await tester.pumpAndSettle();
+        expect(reloaded, reloads);
+      });
+    }
+
+    // The same, for a reply that lands while the screen is still sliding
+    // out: Back completes the push at once (Today reloads then), but the
+    // screen stays mounted through its exit transition: 450 ms with the
+    // app's Android one (the predictive-back builder, which slides and
+    // fades the page out for a Back that is not a gesture), 500 ms with
+    // the iOS Cupertino one. Such a reply was presented over Today (its
+    // snackbar, a staged delete's question) and never reloaded it.
+    for (final staged in [false, true]) {
+      testWidgets('a ${staged ? 'staged delete' : 'fix'} landing during the '
+          'exit transition ${staged ? 'asks nothing over Today' : 'reloads '
+          'Today, with no snackbar over it'}', (tester) async {
+        tester.view.physicalSize = const Size(1200, 2600);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.reset);
+        final reply = Completer<List<NlReply>>();
+        final executor = _SlowExecutor(reply.future);
+        final services = makeServices(executor: executor);
+        var reloaded = 0;
+        await tester.pumpWidget(MaterialApp(
+          // The app's own page transitions, each platform's.
+          theme: AppTheme.build(Brightness.light, cjk: false),
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: Center(
+                child: TextButton(
+                  key: _open,
+                  onPressed: () => openAddFlow(context, services,
+                      onChanged: () async => reloaded++),
+                  child: const Text('open'),
+                ),
+              ),
+            ),
+          ),
+        ));
+        await tester.tap(find.byKey(_open));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('addFixMeal')));
+        await tester.pumpAndSettle();
+        await tester.enterText(
+            find.byKey(const Key('fixMealField')), 'the latte was oat milk');
+        await tester.tap(find.byKey(const Key('fixMealSend')));
+        await tester.pump();
+        // Back, and one frame of the exit transition only.
+        await tester.binding.handlePopRoute();
+        await tester.pump();
+        expect(find.byType(FixMealScreen), findsOneWidget,
+            reason: 'still mounted, sliding out');
+        expect(reloaded, 1, reason: 'reloaded as Back completed the push');
+
+        reply.complete([
+          staged
+              ? const NlReply('Delete Latte?',
+                  needsDeleteConfirmation: true,
+                  pendingDeleteIds: [1],
+                  pendingDeleteLabels: ['Latte'])
+              : const NlReply('✏️ Corrected.', applied: true),
+        ]);
+        await tester.pump();
+        expect(reloaded, staged ? 1 : 2);
+        await tester.pumpAndSettle();
+        expect(find.byType(FixMealScreen), findsNothing);
+        expect(reloaded, staged ? 1 : 2);
+        expect(find.text('✏️ Corrected.'), findsNothing);
+        expect(find.byKey(const Key('nlDeleteConfirm')), findsNothing);
+        expect(executor.confirmedDeletes, isEmpty);
+      },
+          variant: TargetPlatformVariant(
+              const {TargetPlatform.android, TargetPlatform.iOS}));
+    }
 
     testWidgets('an applied request clears the field: back leaves at once',
         (tester) async {

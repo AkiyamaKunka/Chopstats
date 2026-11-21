@@ -19,6 +19,8 @@ import 'package:flutter/rendering.dart' show RenderParagraph;
 import 'package:flutter/services.dart' show FontLoader;
 import 'package:flutter_test/flutter_test.dart';
 
+import '../support/app_theme_harness.dart' show cjkFontPath;
+
 const _roboto = 'RobotoTest';
 
 /// Roboto's regular, medium and bold faces (the picker's header and
@@ -35,8 +37,63 @@ List<String> _robotoPaths() {
 
 final bool _haveRoboto = _robotoPaths().isNotEmpty;
 
+/// A CJK font for the Chinese header checks: the test environment has
+/// none, and its fallback boxes are under half the width of a real
+/// ideograph, so a Chinese date that Android cuts fitted in a test. The
+/// iPhone harness's Hiragino Sans GB on macOS (Android's Noto Sans CJK
+/// draws ideographs as wide); without it those checks are skipped.
+const _cjk = 'CjkTest';
+final bool _haveCjk = File(cjkFontPath).existsSync();
+
+/// The text scaler Android 14 and later give Flutter at font size 2.0.
+/// From Android 14 text scales non-linearly, small sizes more than large
+/// (AOSP FontScaleConverterFactory's 2.0 table, the same on main): 32 sp
+/// draws at 39.8 dp (1.24x), 29 sp at 37.7 (1.30x). Flutter asks the
+/// platform for each whole size and interpolates in between
+/// (PlatformDispatcher.scaleFontSize); the platform interpolates between
+/// its table's points (FontScaleConverter.convertSpToDp).
+class _Android14FontSize2 extends TextScaler {
+  const _Android14FontSize2();
+
+  static const _sp = <double>[8, 10, 12, 14, 18, 20, 24, 30, 100];
+  static const _dp = <double>[16, 20, 24, 26, 30, 34, 36, 38, 100];
+
+  /// convertSpToDp for a whole [size]: from 0 below the first point, the
+  /// last point's ratio above the last.
+  static double _platform(int size) {
+    final sp = size.toDouble();
+    var fromSp = 0.0, fromDp = 0.0;
+    for (var i = 0; i < _sp.length; i++) {
+      if (sp <= _sp[i]) {
+        return fromDp + (_dp[i] - fromDp) * (sp - fromSp) / (_sp[i] - fromSp);
+      }
+      fromSp = _sp[i];
+      fromDp = _dp[i];
+    }
+    return sp * _dp.last / _sp.last;
+  }
+
+  @override
+  double scale(double fontSize) {
+    final floor = fontSize.floor();
+    final low = _platform(floor);
+    return low + (_platform(fontSize.ceil()) - low) * (fontSize - floor);
+  }
+
+  @override
+  double get textScaleFactor => 2.0;
+
+  @override
+  bool operator ==(Object other) => other is _Android14FontSize2;
+
+  @override
+  int get hashCode => textScaleFactor.hashCode;
+}
+
 Future<void> _pump(WidgetTester tester, Size size, double scale,
     {Locale locale = const Locale('en'),
+    bool cjkFont = false,
+    TextScaler? textScaler,
     required Future<void> Function(BuildContext) open}) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1.0;
@@ -45,11 +102,13 @@ Future<void> _pump(WidgetTester tester, Size size, double scale,
     locale: locale,
     theme: AppTheme.build(Brightness.light,
         cjk: locale.languageCode == 'zh',
-        debugFontFamily: _haveRoboto ? _roboto : null),
+        debugFontFamily: _haveRoboto ? _roboto : null,
+        debugFontFallback: cjkFont && _haveCjk ? const [_cjk] : null),
     localizationsDelegates: AppLocalizations.localizationsDelegates,
     supportedLocales: AppLocalizations.supportedLocales,
     builder: (context, child) => MediaQuery(
-      data: MediaQuery.of(context).copyWith(textScaler: TextScaler.linear(scale)),
+      data: MediaQuery.of(context)
+          .copyWith(textScaler: textScaler ?? TextScaler.linear(scale)),
       child: child!,
     ),
     home: Scaffold(
@@ -113,6 +172,12 @@ void _expectMonthWhole(WidgetTester tester, String month) {
 
 void main() {
   setUpAll(() async {
+    if (_haveCjk) {
+      await (FontLoader(_cjk)
+            ..addFont(Future.value(ByteData.sublistView(
+                File(cjkFontPath).readAsBytesSync()))))
+          .load();
+    }
     if (!_haveRoboto) return;
     final loader = FontLoader(_roboto);
     for (final path in _robotoPaths()) {
@@ -169,6 +234,127 @@ void main() {
               .scale(1),
           1.0);
     });
+  });
+
+  // Android QA Q8: the header gives the selected date one line and cuts
+  // it with an ellipsis. In Chinese at 320 dp and font size 2.0 the weekday
+  // went ('11月13日周…'), and from about font size 1.3 the Chinese date
+  // did not fit wider phones either. The longest dates: two-digit months
+  // and days in Chinese, 'Wed' and 'May' in English.
+  group('the selected-date header fits its line', () {
+    final longest = {
+      'en': DateTime(2026, 5, 27), // Wed, May 27
+      'zh': DateTime(2026, 12, 30), // 12月30日周三
+    };
+
+    Future<void> Function(BuildContext) openAt(DateTime date) =>
+        (context) => showAppDatePicker(
+              context: context,
+              initialDate: date,
+              firstDate: DateTime(2020),
+              lastDate: DateTime(2027, 12, 31),
+              currentDate: date,
+            );
+
+    /// The header's date, as the dialog formats it.
+    Finder headline(WidgetTester tester, DateTime date) {
+      final l = MaterialLocalizations.of(
+          tester.element(find.byType(DatePickerDialog)));
+      return find.text(l.formatMediumDate(date));
+    }
+
+    void expectWhole(WidgetTester tester, DateTime date, String why) {
+      final title = headline(tester, date);
+      expect(title, findsOneWidget, reason: why);
+      final paragraph = _firstParagraph(tester.renderObject(title));
+      expect(paragraph.didExceedMaxLines, isFalse,
+          reason: '$why: "${(tester.widget<Text>(title)).data}" is cut');
+    }
+
+    for (final lang in const ['en', 'zh']) {
+      for (final width in const [320.0, 340.0, 360.0, 375.0, 411.0]) {
+        for (final scale in const [1.0, 1.3, 1.6, 2.0]) {
+          testWidgets('$lang at $width dp, font $scale: the longest date is '
+              'whole', (tester) async {
+            final date = longest[lang]!;
+            await _pump(tester, Size(width, 760), scale,
+                locale: Locale(lang), cjkFont: true, open: openAt(date));
+            expectWhole(tester, date, 'calendar');
+            expect(tester.takeException(), isNull);
+          }, skip: lang == 'zh' && !_haveCjk);
+        }
+      }
+      testWidgets('$lang at 320 dp, font 2.0: whole in the input mode too',
+          (tester) async {
+        final date = longest[lang]!;
+        await _pump(tester, const Size(320, 760), 2.0,
+            locale: Locale(lang), cjkFont: true, open: openAt(date));
+        await tester.tap(find.byIcon(Icons.edit_outlined));
+        await tester.pumpAndSettle();
+        expect(find.byType(InputDatePickerFormField), findsOneWidget);
+        expectWhole(tester, date, 'input');
+        expect(tester.takeException(), isNull);
+      }, skip: lang == 'zh' && !_haveCjk);
+    }
+
+    testWidgets('where the date fits, the theme\'s own headline stays',
+        (tester) async {
+      final date = longest['zh']!;
+      await _pump(tester, const Size(411, 760), 1.0,
+          locale: const Locale('zh'), cjkFont: true, open: openAt(date));
+      final style = tester.widget<Text>(headline(tester, date)).style;
+      expect(style?.fontSize, 32, reason: 'Material 3 headlineLarge');
+    });
+
+    testWidgets('zh at 320 dp, font 2.0: a smaller headline, not a cut one',
+        (tester) async {
+      final date = longest['zh']!;
+      await _pump(tester, const Size(320, 760), 2.0,
+          locale: const Locale('zh'), cjkFont: true, open: openAt(date));
+      final style = tester.widget<Text>(headline(tester, date)).style;
+      expect(style?.fontSize, lessThan(32));
+      expect(style?.fontSize, greaterThanOrEqualTo(20),
+          reason: 'still a headline');
+    }, skip: !_haveCjk);
+
+    test('the Android 14 stand-in scales as the platform does at 2.0', () {
+      const scaler = _Android14FontSize2();
+      expect(scaler.scale(14), 26);
+      expect(scaler.scale(32), closeTo(39.771, 0.001));
+      expect(scaler.scale(29), closeTo(37.667, 0.001));
+      expect(scaler.scale(28.5), closeTo(37.5, 0.001));
+      expect(scaler.scale(29) / 29, greaterThan(scaler.scale(32) / 32),
+          reason: 'a smaller size is scaled more');
+    });
+
+    // Android 14 and later scale text non-linearly ([_Android14FontSize2]).
+    // A headline shrunk in proportion to its 32-sp width drew wider than
+    // that, the smaller size being scaled more, so where the clamp let the
+    // scale through the Chinese date was still cut at font size 2.0:
+    // '12月30日周…' at 345.6 dp (one Display size under the largest on a
+    // 411-dp Pixel) and at every width from about 342 to 358 dp.
+    for (final lang in const ['en', 'zh']) {
+      for (final width in [
+        for (var w = 341; w <= 359; w++) w.toDouble(),
+        345.6,
+        352.65,
+      ]) {
+        testWidgets('$lang at $width dp, Android 14 font size 2.0: the '
+            'longest date is whole', (tester) async {
+          final date = longest[lang]!;
+          await _pump(tester, Size(width, 760), 2.0,
+              locale: Locale(lang),
+              cjkFont: true,
+              textScaler: const _Android14FontSize2(),
+              open: openAt(date));
+          expectWhole(tester, date, 'calendar');
+          final style = tester.widget<Text>(headline(tester, date)).style;
+          expect(style?.fontSize, greaterThanOrEqualTo(20),
+              reason: 'still a headline');
+          expect(tester.takeException(), isNull);
+        }, skip: lang == 'zh' && !_haveCjk);
+      }
+    }
   });
 
   testWidgets('the time picker keeps its 1.6 clamp at 320 dp', (tester) async {

@@ -19,6 +19,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show MethodChannel, SystemUiOverlayStyle;
 
 import '../services/backup/backup_coordinator.dart';
+import '../services/backup/save_file_channel.dart' show SaveFileStatus;
 import '../services/photo/background_time.dart' show appEngineInForeground;
 import 'ai_consent.dart'
     show
@@ -35,6 +36,7 @@ import 'l10n.dart';
 import 'theme/app_dialog.dart' show appAlertDialog;
 import 'theme/app_theme.dart';
 import 'screens/history_screen.dart';
+import 'screens/settings/data_section.dart' show saveStatusLine;
 import 'screens/settings/provider_page.dart';
 import 'screens/settings_screen.dart';
 import 'screens/today_screen.dart';
@@ -405,6 +407,10 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     // The Google Play build turned a GitHub install's Watch Camera Roll
     // off at launch (play_channel.dart): said once, after that question.
     _tellWatchRetiredWhenIdle();
+    // Android: a Save to Device whose call died with the engine before
+    // this one (the activity was recreated while the save screen was up)
+    // still saved the file; said here, once (Android QA Q4).
+    _tellLateSaveResult();
     // iCloud Backup (iPhone, 1.7.0): starts after the first frame (the
     // database is open by then: init opened it); its notice and restore
     // offer are asked here, one question at a time.
@@ -558,6 +564,32 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     WidgetsBinding.instance.ensureVisualUpdate();
   }
 
+  /// Android: how a Save to Device ended whose call died with the engine
+  /// before this one. Android recreated the activity while its save
+  /// screen was up, the copy still ran (MainActivity), and the
+  /// "Export saved." that Settings would have said never came (Android QA
+  /// Q4). Asked once, after the first frame; a copy still running is
+  /// waited for. The same line Settings says (saveStatusLine).
+  void _tellLateSaveResult() {
+    final take = widget.services.lateSaveResult;
+    if (take == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      SaveFileStatus? status;
+      try {
+        status = await take();
+      } catch (_) {
+        return; // nothing said
+      }
+      if (status == null || !mounted) return;
+      final line = saveStatusLine(context.l10n, status);
+      if (line == null) return;
+      ScaffoldMessenger.maybeOf(context)
+          ?.showSnackBar(SnackBar(content: Text(line)));
+    });
+    // A post-frame callback alone waits for SOME frame; ask for one.
+    WidgetsBinding.instance.ensureVisualUpdate();
+  }
+
   @override
   void dispose() {
     widget.services.cloudBackup?.prompt.removeListener(_onBackupPrompt);
@@ -657,12 +689,13 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     // that recipient, saved before anything can be sent to it.
     await s.setAiConsent(aiConsentRoute('server', link.backend),
         granted: true);
-    // Provider FIRST: the store routes apiKey to the active provider's slot.
-    await s.update(
-        provider: 'server',
+    // The address and its key together, bound to each other and notified
+    // once: written one after the other, a frame between them saw the
+    // link's address with the previous server's key (review of PR 74).
+    await s.applyServerSetup(
         serverBackend: link.backend,
-        serverBaseUrl: link.server);
-    await s.update(apiKey: link.key);
+        serverBaseUrl: link.server,
+        apiKey: link.key);
     if (!mounted) return;
     setState(() => _index = 3); // land on Settings, where the result shows
     ScaffoldMessenger.of(context)

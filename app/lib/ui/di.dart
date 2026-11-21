@@ -10,7 +10,8 @@ import 'dart:typed_data';
 import 'dart:ui' show PlatformDispatcher;
 
 import 'package:app_links/app_links.dart';
-import 'package:flutter/foundation.dart' show compute, visibleForTesting;
+import 'package:flutter/foundation.dart'
+    show Listenable, compute, visibleForTesting;
 
 import 'package:path_provider/path_provider.dart' show getTemporaryDirectory;
 import 'package:permission_handler/permission_handler.dart';
@@ -28,6 +29,7 @@ import '../services/assist/assist_places_store.dart';
 import '../services/assist/meal_assist.dart';
 import '../services/backup/backup_coordinator.dart';
 import '../services/backup/cloud_backup_channel.dart';
+import '../services/backup/save_file_channel.dart' show takeLateSaveResult;
 import '../services/nl/executor.dart';
 import '../services/garmin_client.dart';
 import '../services/photo/background_restriction.dart'
@@ -579,6 +581,8 @@ class AppServices {
           : OwedNotice(
               pending: () => watchRetiredNoticeOwed(prefs),
               shown: () => watchRetiredNoticeShown(prefs)),
+      // A Save to Device that outlived its engine (MainActivity).
+      lateSaveResult: Platform.isAndroid ? takeLateSaveResult : null,
     );
     pipeline.bind(photoIntake); // automated watch (deliberate=false)
     // Share sheet (deliberate), each photo held until its AI recipient is
@@ -738,6 +742,28 @@ class _AppSettingsStore implements SettingsStore {
   String get dietaryProfile => _s.dietaryProfile ?? '';
   @override
   String get serverBaseUrl => _s.serverBaseUrl;
+  @override
+  String? get serverKeyHost => _s.serverKeyHost;
+  @override
+  String get serverKeyForAddress => _s.serverKeyForAddress ?? '';
+  @override
+  String? serverKeyFor(String host) => _s.serverKeyFor(host);
+  @override
+  Future<bool> setServerKeyFromField(String value,
+          {required String filledAt}) =>
+      _s.setServerKeyFromField(value, filledAt: filledAt);
+  @override
+  Listenable get changes => _s;
+  @override
+  Future<void> bindServerKeyToAddress() => _s.bindServerKeyToAddress();
+  @override
+  Future<void> applyServerSetup({
+    required String serverBackend,
+    required String serverBaseUrl,
+    required String apiKey,
+  }) =>
+      _s.applyServerSetup(
+          backend: serverBackend, baseUrl: serverBaseUrl, key: apiKey);
   @override
   String get serverBackend => _s.serverBackend;
   @override

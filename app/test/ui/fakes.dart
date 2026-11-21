@@ -5,16 +5,23 @@ library;
 import 'dart:async';
 import 'dart:typed_data';
 
-import 'package:flutter/foundation.dart' show ChangeNotifier, ValueNotifier;
+import 'package:flutter/foundation.dart'
+    show ChangeNotifier, Listenable, ValueNotifier;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:calorie_tracker/core/ai_consent.dart'
     show aiConsentWordingVersion, allAiConsentRoutes;
 import 'package:calorie_tracker/core/contracts.dart';
 import 'package:calorie_tracker/core/server_transport.dart'
-    show serverAddressRefused;
+    show
+        serverAddressRefused,
+        serverKeyForOtherHost,
+        serverKeyHostOf,
+        serverKeyShownAt;
 import 'package:calorie_tracker/services/analysis_keep_alive.dart'
     show AnalysisKeepAlive;
+import 'package:calorie_tracker/services/backup/save_file_channel.dart'
+    show SaveFileStatus;
 import 'package:calorie_tracker/services/photo/photo_library.dart';
 import 'package:calorie_tracker/services/usual/usual_foods.dart'
     show UsualChoices, UsualFoods;
@@ -148,7 +155,10 @@ class FakeSettings with ChangeNotifier implements SettingsStore {
       canAnalyze &&
       autoScanBlockedKind == null &&
       // As AppSettings.autoAnalysisNeedsHttps.
-      !(provider == 'server' && serverAddressRefused(serverBaseUrl));
+      !(provider == 'server' && serverAddressRefused(serverBaseUrl)) &&
+      // As AppSettings.serverKeyForOtherAddress.
+      !(provider == 'server' &&
+          serverKeyForOtherHost(serverKeyHost, serverBaseUrl));
   @override
   String? autoScanBlockedKind;
   @override
@@ -238,6 +248,83 @@ class FakeSettings with ChangeNotifier implements SettingsStore {
   @override
   String serverBackend = 'claude';
   int updateCalls = 0;
+
+  /// The host the server upload key was saved for, when it is not the
+  /// current address's (AppSettings.serverKeyHost). Null, the default: the
+  /// key is the address's own, as one typed or set up for it is; a test of
+  /// a key saved for another server sets it. A new key, a setup link and
+  /// [bindServerKeyToAddress] clear it, as they bind the key here.
+  String? keySavedFor;
+  @override
+  String? get serverKeyHost => (keysByProvider['server'] ?? '').trim().isEmpty
+      ? null
+      : keySavedFor ?? serverKeyHostOf(serverBaseUrl);
+  @override
+  String get serverKeyForAddress {
+    final key = (keysByProvider['server'] ?? '').trim();
+    return key.isNotEmpty && serverKeyShownAt(serverKeyHost, serverBaseUrl)
+        ? key
+        : '';
+  }
+
+  @override
+  String? serverKeyFor(String host) {
+    final key = (keysByProvider['server'] ?? '').trim();
+    final bound = serverKeyHost;
+    return key.isNotEmpty && bound != null && bound == host.toLowerCase()
+        ? key
+        : null;
+  }
+
+  /// Every [setServerKeyFromField] call: (value, filledAt, accepted).
+  final List<(String, String, bool)> keyFieldWrites = [];
+
+  /// As AppSettings.setServerKeyFromField: refused once the address moved
+  /// to another host than the one the field was filled at; else the field
+  /// is the address's key (empty deletes it only when the field showed it).
+  @override
+  Future<bool> setServerKeyFromField(String value,
+      {required String filledAt}) async {
+    final accepted =
+        serverKeyHostOf(filledAt) == serverKeyHostOf(serverBaseUrl);
+    keyFieldWrites.add((value, filledAt, accepted));
+    if (!accepted) return false;
+    final v = value.trim();
+    if (v.isNotEmpty || serverKeyForAddress.isNotEmpty) {
+      keysByProvider['server'] = v;
+      keySavedFor = null; // bound here, or to the first address saved
+      notifyListeners();
+    }
+    return true;
+  }
+
+  @override
+  Listenable get changes => this;
+
+  int bindServerKeyCalls = 0;
+  @override
+  Future<void> bindServerKeyToAddress() async {
+    bindServerKeyCalls++;
+    keySavedFor = null;
+    notifyListeners();
+  }
+
+  /// Every [applyServerSetup] call: (backend, address, key).
+  final List<(String, String, String)> serverSetups = [];
+  @override
+  Future<void> applyServerSetup({
+    required String serverBackend,
+    required String serverBaseUrl,
+    required String apiKey,
+  }) async {
+    serverSetups.add((serverBackend, serverBaseUrl, apiKey));
+    provider = 'server';
+    this.serverBackend = serverBackend;
+    this.serverBaseUrl = serverBaseUrl;
+    keysByProvider['server'] = apiKey;
+    keySavedFor = null;
+    notifyListeners(); // once, as AppSettings.applyServerSetup
+  }
 
   FakeSettings({
     String apiKey = 'k',
@@ -337,7 +424,14 @@ class FakeSettings with ChangeNotifier implements SettingsStore {
     if (serverModel != null) this.serverModel = serverModel;
     if (serverEffort != null) this.serverEffort = serverEffort;
     if (calorieGoal != null) this.calorieGoal = calorieGoal;
-    if (apiKey != null) this.apiKey = apiKey;
+    if (apiKey != null) {
+      // As AppSettings: a changed server key is bound to the address it is
+      // saved for; an unchanged one keeps its host.
+      if (this.provider == 'server' && apiKey.trim() != this.apiKey.trim()) {
+        keySavedFor = null;
+      }
+      this.apiKey = apiKey;
+    }
     if (provider != null) this.provider = provider;
     if (model != null) this.model = model;
     if (lookbackDays != null) this.lookbackDays = lookbackDays;
@@ -456,6 +550,7 @@ UiServices makeServices({
   RestaurantAssistControls? restaurantAssist,
   UsualFoods? usualFoods,
   AnalysisKeepAlive? analysisKeepAlive,
+  Future<SaveFileStatus?> Function()? lateSaveResult,
 }) {
   final s = settings ?? FakeSettings();
   return UiServices(
@@ -477,6 +572,7 @@ UiServices makeServices({
     restaurantAssist: restaurantAssist,
     usualFoods: usualFoods,
     analysisKeepAlive: analysisKeepAlive,
+    lateSaveResult: lateSaveResult,
   );
 }
 
