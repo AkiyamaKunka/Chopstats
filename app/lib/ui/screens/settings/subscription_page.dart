@@ -26,9 +26,10 @@
 /// version saved without its server address, SettingsStore
 /// .serverKeyHostUnknown) leaves the field empty at every address and says
 /// so under it; at an address naming a host, the same one tap makes it that
-/// address's key, and only that tap or another key ends it. A change from
-/// elsewhere while the page is open (a setup link confirmed over it)
-/// refills both fields.
+/// address's key, and only that tap, another key or the Remove this key row
+/// under it (SettingsStore.removeServerKeyOfUnknownHost: the field cannot
+/// clear a key it does not show) ends it. A change from elsewhere while the
+/// page is open (a setup link confirmed over it) refills both fields.
 library;
 
 import 'dart:async';
@@ -641,6 +642,22 @@ class _SubscriptionProviderPageState
                   onTap: () async {
                     await settings.bindServerKeyToAddress();
                     // The key is this address's now: back in the field.
+                    if (mounted) setState(_syncKeyField);
+                  },
+                ),
+              // The one way to delete a key kept without its server
+              // address: its field is empty, so clearing it cannot, and an
+              // iPhone keeps it in the Keychain after the app is deleted.
+              if (keyHostUnknown)
+                GroupedRow(
+                  key: const Key('serverKeyRemoveKeptRow'),
+                  icon: Icons.delete_outline,
+                  iconColor: scheme.error,
+                  title: context.l10n.serverKeyRemoveKept,
+                  destructive: true,
+                  showChevron: false,
+                  onTap: () async {
+                    await settings.removeServerKeyOfUnknownHost();
                     if (mounted) setState(_syncKeyField);
                   },
                 ),

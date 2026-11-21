@@ -3522,6 +3522,9 @@ class AppLocalizationsZh extends AppLocalizations {
       '保存时没有记下服务器地址：在你把它用于某个地址之前，不会发送到任何地方。';
 
   @override
+  String get serverKeyRemoveKept => '删除此密钥';
+
+  @override
   String get autoScanServerKeyOtherHost =>
       '自动记录没有运行：你的服务器上传密钥是为另一个服务器地址保存的，筷拍只会把它发送到那里。请到「AI 服务」›「你自己的服务器」修改。';
 

@@ -163,18 +163,29 @@ void main() {
       final zhDelete = section(zhHalf, '### 删除数据');
       expect(enDelete, isNot(contains('everything it stored on the phone')));
       expect(zhDelete, isNot(contains('保存的全部数据')));
+      // Review of PR 78 (SEC-3, UXC-1): a key the server page keeps
+      // without its server address is not in the key field, so clearing
+      // the field cannot remove it; its own row does.
+      expect(en.serverKeyUnknownHostField,
+          startsWith('Saved without its server address'));
+      expect(zh.serverKeyUnknownHostField, startsWith('保存时没有记下服务器地址'));
       expect(
           enDelete,
           contains('iOS can keep API keys in the Keychain after an app is '
               'deleted, so to remove them too, first clear each key you '
               'entered in Settings › ${en.settingsRowAiProvider} (and the '
-              '**${en.serverUploadKeyLabel}** under *${en.subPageTitle}*).'));
+              '**${en.serverUploadKeyLabel}** under *${en.subPageTitle}*; '
+              'when that page says a key was *Saved without its server '
+              'address*, its field is empty, so tap '
+              '**${en.serverKeyRemoveKept}** under it instead).'));
       expect(
           zhDelete,
           contains('iOS 可能会在应用删除后仍把 API Key 留在钥匙串中，所以如果也要'
               '删除它们，请先在 设置 › ${zh.settingsRowAiProvider} 里清除你填写的'
               '每一个 Key（以及「${zh.subPageTitle}」里的'
-              '「**${zh.serverUploadKeyLabel}**」）。'));
+              '「**${zh.serverUploadKeyLabel}**」；如果那里显示密钥'
+              '「保存时没有记下服务器地址」，它的输入框是空的，请改点下面的'
+              '「**${zh.serverKeyRemoveKept}**」）。'));
     });
 
     // Review r171: four terms in the 中文 half sat in ASCII straight

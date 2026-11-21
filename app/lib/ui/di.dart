@@ -759,6 +759,9 @@ class _AppSettingsStore implements SettingsStore {
   @override
   Future<void> bindServerKeyToAddress() => _s.bindServerKeyToAddress();
   @override
+  Future<void> removeServerKeyOfUnknownHost() =>
+      _s.removeServerKeyOfUnknownHost();
+  @override
   Future<void> applyServerSetup({
     required String serverBackend,
     required String serverBaseUrl,

@@ -5867,11 +5867,17 @@ abstract class AppLocalizations {
   /// **'Use this key for {host}'**
   String serverKeyUseHere(String host);
 
-  /// Line under the Server upload key field, in place of serverKeyOtherHostField, when the app keeps a key saved without its server address: one that version 1.7.0 (or 1.6.0 on iPhone) stored with no record of its server, found with no server address saved (the address was cleared, or the key typed before any address), or one an iPhone reinstall kept without the settings that said which server it was for. The field is empty, and nothing is sent with that key until the user taps serverKeyUseHere (shown under this line once the address above names a host; 'one' is a server address) or enters another key, which replaces it.
+  /// Line under the Server upload key field, in place of serverKeyOtherHostField, when the app keeps a key saved without its server address: one that version 1.7.0 (or 1.6.0 on iPhone) stored with no record of its server, found with no server address saved (the address was cleared, or the key typed before any address), or one an iPhone reinstall kept without the settings that said which server it was for. The field is empty, and nothing is sent with that key until the user taps serverKeyUseHere (shown under this line once the address above names a host; 'one' is a server address) or enters another key, which replaces it. serverKeyRemoveKept, under it, deletes the key.
   ///
   /// In en, this message translates to:
   /// **'Saved without its server address: not sent anywhere until you use it for one.'**
   String get serverKeyUnknownHostField;
+
+  /// Row under serverKeyUnknownHostField (and under serverKeyUseHere when that row shows), in the Your own server settings: one tap deletes the upload key saved without its server address from this phone, so it is never used. Its field is empty, so clearing the field cannot remove it, and an iPhone keeps it in the Keychain even after the app is deleted. Nothing is sent. A destructive row (shown in red), like other delete rows.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove this key'**
+  String get serverKeyRemoveKept;
 
   /// Settings line, like autoScanNeedsHttps: the automatic scan does not run because the server upload key was saved for another server address, so nothing could be sent.
   ///

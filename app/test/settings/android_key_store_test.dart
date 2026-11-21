@@ -15,11 +15,17 @@
 // PlatformException is forgiven; a failed save or a missing plugin still
 // fails. iOS keeps MigratingKeyStore exactly as it was (owner rule: no
 // keychain changes), where a locked phone's failed read MUST propagate.
+import 'dart:convert' show jsonDecode, jsonEncode;
+
+import 'package:calorie_tracker/services/analyzer/provider_analyzers.dart'
+    show ServerAnalyzer;
 import 'package:calorie_tracker/services/settings/app_settings.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 const _channel = MethodChannel('plugins.it_nomads.com/flutter_secure_storage');
@@ -278,6 +284,59 @@ void main() {
           store.write('k', _secret), throwsA(isA<PlatformException>()));
       await expectLater(store.delete('k'), throwsA(isA<PlatformException>()));
       expect(logged.join('\n'), isNot(contains(_secret)));
+    });
+
+    // Review of PR 78, SEC-1: the upload key 1.7.0 stored as plain text,
+    // unreadable at the app's first load after the update (two failed
+    // reads are no key), the address then moved before a read that works.
+    // That read bound the old server's key to the new address, in the
+    // background run and in the app, and the app stored it so.
+    test('a 1.7.0 upload key unreadable at the first load after the update '
+        'goes to no address saved before it reads again', () async {
+      const oldKey = 'KA-old-server';
+      stored['server_api_key'] = oldKey;
+      broken.add('server_api_key');
+      SharedPreferences.setMockInitialValues({
+        'settings.provider': 'server',
+        'settings.server_backend': 'claude',
+        'settings.server_base_url': 'https://a.example',
+        'settings.ai_consent_routes': <String>['server:claude'],
+      });
+      final prefs = await SharedPreferences.getInstance();
+      final app = await AppSettings.load(
+          prefs: prefs, keyStore: platformKeyStore());
+      expect(app.serverApiKey, isNull);
+      expect(stored['server_api_key'], oldKey, reason: 'kept');
+      await app.setServerBaseUrl('https://b.example');
+
+      // Reads work again: a background run (its own cache, read-only
+      // store) and the next app start, each a new run of the store.
+      broken.clear();
+      AndroidSecureKeyStore.debugForgetUnreadable();
+      SharedPreferences.resetStatic();
+      final bg = await AppSettings.load(
+          prefs: await SharedPreferences.getInstance(),
+          keyStore: platformKeyStore(migrate: false),
+          readOnlyKeys: true);
+      AndroidSecureKeyStore.debugForgetUnreadable();
+      final next = await AppSettings.load(
+          prefs: prefs, keyStore: platformKeyStore());
+      for (final s in [bg, next]) {
+        expect(s.serverBaseUrl, 'https://b.example');
+        expect(s.serverApiKey, isNull);
+        expect(s.serverKeyHostUnknown, isTrue);
+        expect(s.serverKeyFor('b.example'), isNull);
+        final seen = <String>[];
+        await ServerAnalyzer(s, client: MockClient((req) async {
+          seen.add('${req.url.host} <- ${req.headers['X-API-Key']}');
+          return http.Response(jsonEncode({'ok': true, 'features': {}}), 200);
+        })).serverFeatures();
+        expect(seen, isEmpty);
+      }
+      expect(jsonDecode(stored['server_api_key_item']!),
+          {'key': oldKey, 'host': null, 'hostUnknown': true});
+      expect(stored['server_api_key'], ' ', reason: '1.7.0 reads no key');
+      expect(logged.join('\n'), isNot(contains(oldKey)));
     });
   });
 }

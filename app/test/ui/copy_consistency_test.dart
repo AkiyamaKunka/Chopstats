@@ -309,6 +309,7 @@ void main() {
         en.backupRowICloud,
         en.backupRowDelete,
         en.importChooseFile,
+        en.serverKeyRemoveKept,
       ]) {
         expect(support, isNot(contains(label)), reason: label);
       }
@@ -327,9 +328,17 @@ void main() {
         en.settingsRowImport,
         en.settingsRowExport,
         en.settingsSectionData,
+        // Review of PR 78: the row that removes a key kept without its
+        // server address, which clearing the empty field cannot.
+        en.serverKeyRemoveKept,
+        en.serverUploadKeyLabel,
+        en.subPageTitle,
       ]) {
         expect(s12, contains(label), reason: label);
       }
+      expect(en.serverKeyUnknownHostField,
+          startsWith('Saved without its server address'));
+      expect(s12, contains('*Saved without its server address*'));
       expect(s12, contains('Uninstalling does not delete it'));
       expect(s12, contains('iCloud Drive › Chopstats'));
       expect(s12, contains('app/test/ui/copy_consistency_test.dart'));

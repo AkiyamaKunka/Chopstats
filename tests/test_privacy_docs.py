@@ -731,3 +731,29 @@ def test_policy_says_photo_meals_keep_a_capture_note_in_exports_and_backups():
             "由拍摄时间和相机生成的简短代码",
             "这条说明是餐食的一部分：会包含在导出文件和手机的备份中"):
         assert needle in zh_stays, needle
+
+
+def test_deleting_your_data_says_how_a_key_saved_without_its_server_goes():
+    """iOS keeps keychain items after the app is deleted, and the policy
+    says to clear the keys first. An upload key the app keeps without its
+    server address is not in the key field, so clearing the field cannot
+    remove it; the server page's Remove this key row does, and the policy
+    names that row as the app does, in both languages (review of PR 78,
+    SEC-3 and UXC-1)."""
+    en, zh = _policy_halves()
+    en_del = _lookup_section(en, "### Deleting your data")
+    zh_del = _lookup_section(zh, "### 删除数据")
+    en_arb, zh_arb = _arb("en"), _arb("zh")
+    assert en_arb["serverKeyRemoveKept"] == "Remove this key"
+    assert zh_arb["serverKeyRemoveKept"] == "删除此密钥"
+    assert "**%s**" % en_arb["serverKeyRemoveKept"] in en_del
+    assert "「**%s**」" % zh_arb["serverKeyRemoveKept"] in zh_del
+    # The line the page shows for such a key, as the policy quotes it.
+    assert en_arb["serverKeyUnknownHostField"].startswith(
+        "Saved without its server address")
+    assert "*Saved without its server address*" in en_del
+    assert zh_arb["serverKeyUnknownHostField"].startswith("保存时没有记下服务器地址")
+    assert "「保存时没有记下服务器地址」" in zh_del
+    # Said with the Server upload key, where the policy says to clear it.
+    assert en_del.index("Server upload key") < en_del.index("Remove this key")
+    assert zh_del.index("服务器上传密钥") < zh_del.index("删除此密钥")

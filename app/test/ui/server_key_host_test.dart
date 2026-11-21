@@ -1087,6 +1087,55 @@ void main() {
       await rest(tester);
       expect(seen, ['b.example <- $keyA']);
     });
+
+    // Review of PR 78, SEC-3 and UXC-1: the field is empty, so clearing it
+    // kept key A, and the iPhone Keychain keeps it after the app is
+    // deleted. Remove this key is the way out.
+    testWidgets('an update from 1.7.0 with the address cleared: Remove this '
+        'key deletes key A from the store, and nothing is sent with it',
+        (tester) async {
+      await reinstall(legacy: keyA, prefsLeft: {
+        'settings.provider': 'server',
+        'settings.server_backend': 'claude',
+        'settings.server_base_url': '',
+        'settings.ai_consent_routes': <String>['server:claude'],
+      });
+      await openServerPage(tester);
+      final removeKept = find.byKey(const Key('serverKeyRemoveKeptRow'));
+      expect(savedWithoutAddress, findsOneWidget);
+      expect(removeKept, findsOneWidget, reason: 'at an address naming none');
+      // Clearing the empty field keeps it.
+      await deleteOne(tester);
+      await tester.tapAt(const Offset(5, 5));
+      await tester.pumpAndSettle();
+      expect(settings.serverKeyHostUnknown, isTrue);
+      expect(keys.data['server_api_key_item'], contains(keyA));
+
+      await tester.tap(removeKept);
+      await tester.pumpAndSettle();
+      expect(settings.serverKeyHostUnknown, isFalse);
+      expect(keys.data.containsKey('server_api_key_item'), isFalse);
+      expect(keys.data['server_api_key'], ' ');
+      for (final value in keys.data.values) {
+        expect(carriesKeyA(value), isFalse);
+      }
+      expect(savedWithoutAddress, findsNothing);
+      expect(removeKept, findsNothing);
+      expect(useHere, findsNothing);
+      await moveAddress(tester, 'https://b.example');
+      await rest(tester);
+      expect(seen, isEmpty);
+      await expectKeyAOnlyAtA();
+      // The next launch, and a reinstall: no key.
+      final next = await AppSettings.load(prefs: prefs, keyStore: keys);
+      SharedPreferences.setMockInitialValues({});
+      final reinstalled = await AppSettings.load(
+          prefs: await SharedPreferences.getInstance(), keyStore: keys);
+      for (final s in [next, reinstalled]) {
+        expect(s.serverKeyHostUnknown, isFalse);
+        expect(s.serverApiKey, isNull);
+      }
+    });
   });
 
   group('Settings › Your own server', () {
@@ -1307,6 +1356,48 @@ void main() {
               '在你把它用于某个地址之前，不会发送到任何地方。'),
           findsOneWidget);
       expect(find.text('将此密钥用于 b.example'), findsOneWidget);
+      expect(find.text('删除此密钥'), findsOneWidget);
+    });
+
+    // Review of PR 78, SEC-3 and UXC-1: the field of a key saved without
+    // its server address is empty, so clearing it removed nothing, and the
+    // iPhone Keychain keeps the key after the app is deleted.
+    final removeKept = find.byKey(const Key('serverKeyRemoveKeptRow'));
+    for (final url in ['https://b.example', '']) {
+      testWidgets('a key saved without its server address at "$url": '
+          'Remove this key deletes it, and the line and rows go',
+          (tester) async {
+        final settings = keyWithNoKnownHost(url: url);
+        await open(tester, settings);
+        expect(find.text(savedWithoutAddress), findsOneWidget);
+        expect(removeKept, findsOneWidget);
+        expect(find.text('Remove this key'), findsOneWidget);
+        expect(find.byKey(const Key('serverKeyUseHereRow')),
+            url.isEmpty ? findsNothing : findsOneWidget);
+        await tester.tap(removeKept);
+        await tester.pumpAndSettle();
+        expect(settings.removeKeptKeyCalls, 1);
+        expect(settings.bindServerKeyCalls, 0);
+        expect(settings.serverKeyHostUnknown, isFalse);
+        expect(settings.apiKey, isEmpty, reason: 'nothing became the key');
+        expect(keyText(tester), isEmpty);
+        expect(find.text(savedWithoutAddress), findsNothing);
+        expect(removeKept, findsNothing);
+        expect(find.byKey(const Key('serverKeyUseHereRow')), findsNothing);
+      });
+    }
+
+    testWidgets('no Remove this key for a key that is the upload key, saved '
+        'here or for another server', (tester) async {
+      for (final settings in [
+        keyFromAnotherServer(),
+        FakeSettings(keys: {'server': 'key-b'})
+          ..provider = 'server'
+          ..serverBaseUrl = 'https://b.example',
+      ]) {
+        await open(tester, settings);
+        expect(removeKept, findsNothing);
+      }
     });
 
     testWidgets('Connect Claude says so and sends nothing, asking nothing',

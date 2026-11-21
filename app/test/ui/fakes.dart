@@ -264,7 +264,7 @@ class FakeSettings with ChangeNotifier implements SettingsStore {
   /// .serverKeyHostUnknown). Not the upload key: leave the server's entry in
   /// [keysByProvider] empty with it. [bindServerKeyToAddress] at an address
   /// naming a host makes it the key; a key entered or a setup link replaces
-  /// it.
+  /// it; [removeServerKeyOfUnknownHost] removes it.
   String? keyOfUnknownHost;
   @override
   bool get serverKeyHostUnknown => keyOfUnknownHost != null;
@@ -322,6 +322,18 @@ class FakeSettings with ChangeNotifier implements SettingsStore {
       keyOfUnknownHost = null;
     }
     keySavedFor = null;
+    notifyListeners();
+  }
+
+  int removeKeptKeyCalls = 0;
+
+  /// As AppSettings.removeServerKeyOfUnknownHost: the key kept whose
+  /// server is not known goes; the upload key stays.
+  @override
+  Future<void> removeServerKeyOfUnknownHost() async {
+    removeKeptKeyCalls++;
+    if (keyOfUnknownHost == null) return;
+    keyOfUnknownHost = null;
     notifyListeners();
   }
 

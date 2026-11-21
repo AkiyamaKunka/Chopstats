@@ -416,6 +416,33 @@ void main() {
       expect((s.serverApiKey, s.serverKeyHost), ('key-a', 'b.example'));
     });
 
+    // Review of PR 78, SEC-3 and UXC-1: the Keychain keeps items after the
+    // app is deleted, and a key with no known host is not in the key field
+    // for a clear to delete. Remove this key does.
+    test('iOS: Remove this key leaves no server upload key in the keychain '
+        'under either name, and a reinstall finds none', () async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      keychain.items['server_api_key'] = ('key-a', 'unlocked');
+      final s = await load(); // a reinstall's first launch
+      expect(s.serverKeyHostUnknown, isTrue);
+      await s.removeServerKeyOfUnknownHost();
+      expect(s.serverKeyHostUnknown, isFalse);
+      expect(keychain.items.containsKey('server_api_key_item'), isFalse);
+      expect(
+          keychain.items.keys.where((k) => k.startsWith('server_api_key_item')),
+          isEmpty,
+          reason: 'no staged copy either');
+      final (old, oldClass) = keychain.items['server_api_key']!;
+      expect(old, ' ', reason: '1.6.0 reads this name as no key');
+      expect(oldClass, 'first_unlock');
+      for (final values in keychain.items.values) {
+        expect(values.$1, isNot(contains('key-a')));
+      }
+      final again = await load(); // another reinstall
+      expect(again.serverKeyHostUnknown, isFalse);
+      expect(again.serverApiKey, isNull);
+    });
+
     test('iOS: uses first_unlock, never a this-device class (backups restore)',
         () async {
       debugDefaultTargetPlatformOverride = TargetPlatform.iOS;

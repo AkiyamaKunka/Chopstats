@@ -3804,7 +3804,11 @@
   },
   "serverKeyUnknownHostField": "Saved without its server address: not sent anywhere until you use it for one.",
   "@serverKeyUnknownHostField": {
-    "description": "Line under the Server upload key field, in place of serverKeyOtherHostField, when the app keeps a key saved without its server address: one that version 1.7.0 (or 1.6.0 on iPhone) stored with no record of its server, found with no server address saved (the address was cleared, or the key typed before any address), or one an iPhone reinstall kept without the settings that said which server it was for. The field is empty, and nothing is sent with that key until the user taps serverKeyUseHere (shown under this line once the address above names a host; 'one' is a server address) or enters another key, which replaces it."
+    "description": "Line under the Server upload key field, in place of serverKeyOtherHostField, when the app keeps a key saved without its server address: one that version 1.7.0 (or 1.6.0 on iPhone) stored with no record of its server, found with no server address saved (the address was cleared, or the key typed before any address), or one an iPhone reinstall kept without the settings that said which server it was for. The field is empty, and nothing is sent with that key until the user taps serverKeyUseHere (shown under this line once the address above names a host; 'one' is a server address) or enters another key, which replaces it. serverKeyRemoveKept, under it, deletes the key."
+  },
+  "serverKeyRemoveKept": "Remove this key",
+  "@serverKeyRemoveKept": {
+    "description": "Row under serverKeyUnknownHostField (and under serverKeyUseHere when that row shows), in the Your own server settings: one tap deletes the upload key saved without its server address from this phone, so it is never used. Its field is empty, so clearing the field cannot remove it, and an iPhone keeps it in the Keychain even after the app is deleted. Nothing is sent. A destructive row (shown in red), like other delete rows."
   },
   "autoScanServerKeyOtherHost": "Automatic logging is not running: your server upload key was saved for another server address, and Chopstats sends it only there. Fix it in AI Provider › Your own server.",
   "@autoScanServerKeyOtherHost": {

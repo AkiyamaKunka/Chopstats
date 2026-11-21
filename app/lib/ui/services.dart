@@ -159,6 +159,13 @@ abstract class SettingsStore {
   /// .bindServerKeyToAddress). Only on the user's tap.
   Future<void> bindServerKeyToAddress();
 
+  /// Settings › Your own server › "Remove this key": deletes the key kept
+  /// whose server is not known ([serverKeyHostUnknown]) from the phone
+  /// (AppSettings.removeServerKeyOfUnknownHost); its field is empty, so
+  /// clearing the field cannot. Only on the user's tap; the upload key, if
+  /// there is one instead, is never touched.
+  Future<void> removeServerKeyOfUnknownHost();
+
   /// A confirmed setup link: the own server on [serverBackend] at
   /// [serverBaseUrl] with [apiKey], set together and notified once
   /// (AppSettings.applyServerSetup), so nothing sees the new address with

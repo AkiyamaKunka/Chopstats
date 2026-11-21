@@ -973,14 +973,18 @@ class _NoKeys implements SecureKeyStore {
 /// precedent is AppSettings.reloadAiConsent). Read again from disk through
 /// AppSettings' own loader, which only reads (its one possible write, the
 /// one-time consent seed, depends on the provider alone and is written by
-/// the first load), with no key store: the keys stay out of it. The run's
-/// own copy when the store cannot be read.
+/// the first load), with no key store: the keys stay out of it. Loaded as
+/// the background engine (readOnlyKeys): finding no upload key, the app
+/// engine's load records the address's host for one it may not have read
+/// (AppSettings._noteServerKeyUnread), which this load, with no key store
+/// at all, must never do. The run's own copy when the store cannot be read.
 @visibleForTesting
 Future<AppSettings> summarySettingsNow(
     SharedPreferences prefs, AppSettings loaded) async {
   try {
     await prefs.reload();
-    return await AppSettings.load(prefs: prefs, keyStore: const _NoKeys());
+    return await AppSettings.load(
+        prefs: prefs, keyStore: const _NoKeys(), readOnlyKeys: true);
   } catch (_) {
     return loaded;
   }

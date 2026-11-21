@@ -405,6 +405,14 @@ class AppSettings extends ChangeNotifier {
   // name is retired. Builds before this one wrote them too.
   static const String _kServerKeyHost = 'settings.server_key_host';
   static const String _kServerKeyHostLost = 'settings.server_key_host_lost';
+  // The host the saved address named ('' for none) at the app engine's
+  // first load that found no upload key, the old name reading as nothing
+  // ([_noteServerKeyUnread]). On Android that is also a read that failed,
+  // a key 1.7.0 stored perhaps still there for a later read: this is the
+  // host it was in use with. Gone once the old name is retired by a write
+  // ([_removeServerKeyRecords]), or read blank.
+  static const String _kServerKeyHostUnread =
+      'settings.server_key_host_unread';
   static const String _kServerBackend = 'settings.server_backend';
   static const String _kQwenModel = 'settings.qwen_model';
   static const String _kDoubaoModel = 'settings.doubao_model';
@@ -468,8 +476,9 @@ class AppSettings extends ChangeNotifier {
   String? _serverKeyHost;
   // An upload key kept whose server is not known ([_loadServerKey]): never
   // shown, sent or bound to an address until the user uses it for one
-  // ([bindServerKeyToAddress]) or enters another key. [_serverApiKey] is
-  // null while it is kept, so no request can carry it.
+  // ([bindServerKeyToAddress]), enters another key or removes it
+  // ([removeServerKeyOfUnknownHost]). [_serverApiKey] is null while it is
+  // kept, so no request can carry it.
   String? _serverKeyOfUnknownHost;
   // What [_kLegacyServerKey] holds as this engine last read or wrote it,
   // trimmed: null when the read found nothing (or failed: Android forgives
@@ -784,12 +793,15 @@ class AppSettings extends ChangeNotifier {
   /// Whether an upload key is kept whose server is not known
   /// ([_loadServerKey]): one an earlier version stored as plain text, found
   /// by an update with no server address saved and no record of its server
-  /// (the address was cleared, or the key typed before any), or one an
-  /// iPhone reinstall kept without the preferences that said which server
-  /// it was for. It is not the upload key ([serverApiKey] is null): never
-  /// in the key field, never sent, never bound to an address saved, until
-  /// the user uses it for the address ([bindServerKeyToAddress], Settings ›
-  /// Your own server › "Use this key for …") or enters another key.
+  /// (the address was cleared, or the key typed before any), or read only
+  /// after the address moved from the one recorded when it could not be
+  /// read, or one an iPhone reinstall kept without the preferences that
+  /// said which server it was for. It is not the upload key ([serverApiKey]
+  /// is null): never in the key field, never sent, never bound to an
+  /// address saved, until the user uses it for the address
+  /// ([bindServerKeyToAddress], Settings › Your own server › "Use this key
+  /// for …"), enters another key, or removes it
+  /// ([removeServerKeyOfUnknownHost], "Remove this key").
   bool get serverKeyHostUnknown => _serverKeyOfUnknownHost != null;
 
   /// Whether the own server is the provider and its upload key was saved
@@ -959,8 +971,14 @@ class AppSettings extends ChangeNotifier {
     _legacyServerKeyText = '';
   }
 
+  static const List<String> _serverKeyRecords = [
+    _kServerKeyHost,
+    _kServerKeyHostLost,
+    _kServerKeyHostUnread,
+  ];
+
   Future<void> _removeServerKeyRecords() async {
-    for (final record in const [_kServerKeyHost, _kServerKeyHostLost]) {
+    for (final record in _serverKeyRecords) {
       if (_prefs.containsKey(record)) await _prefs.remove(record);
     }
   }
@@ -1017,15 +1035,31 @@ class AppSettings extends ChangeNotifier {
   /// an earlier version stored there, as plain text (1.7.0, iPhone 1.6.0)
   /// or, from builds before this one, as the item. Next to an item, its
   /// own text is a move cut short (or the same key pasted into an older
-  /// version): the item counts. Another key next to an item was stored by
-  /// an older version installed over this one, after the item (this
-  /// version never leaves another key there, [_storeServerKey]): it is the
-  /// newer key, and any record (older still) does not count for it.
+  /// version): the item counts. In the app engine, another key next to an
+  /// item was stored by an older version installed over this one, after
+  /// the item (this version never leaves another key there,
+  /// [_storeServerKey], and blanks a value it could not read next to its
+  /// item, below): it is the newer key, and any record (older still) does
+  /// not count for it. The background engine ([readOnly]) takes the item
+  /// whenever there is one: its two reads can straddle the app engine's
+  /// save of a new key (the old name blanked, then the new item written),
+  /// so another key it finds under the old name may be the one the new
+  /// item replaced, and taken as newer it was bound to the address in the
+  /// run's preferences (review of PR 78, SEC-2). The item's key goes to the
+  /// item's host alone; the app engine's next load takes a key an older
+  /// version stored.
   ///
   /// A key under the old name is bound to the first of:
   /// - the host stored with it (an item of a build before this one);
   /// - no known host, when a move recorded that ([_kServerKeyHostLost]);
   /// - the host a move recorded for it ([_kServerKeyHost]);
+  /// - for a plain key the app engine could not read at its first load
+  ///   with no key ([_kServerKeyHostUnread]): the host the address named
+  ///   then, while the saved address still names it; no known host once
+  ///   the address names another or none, since that key may be the one
+  ///   1.7.0 used at the address recorded, or one an older version
+  ///   installed over this one stored since at the address saved now
+  ///   (review of PR 78, SEC-1);
   /// - the host of the address saved with it (an update in place: the
   ///   address it was in use with);
   /// - for a plain key, no known host: no record, and no saved address
@@ -1043,13 +1077,14 @@ class AppSettings extends ChangeNotifier {
   ///
   /// A key with no known host is kept apart ([serverKeyHostUnknown]): not
   /// the upload key, so never in the key field, in a request or bound to an
-  /// address saved, until the user uses it for one or enters another key.
+  /// address saved, until the user uses it for one, enters another key or
+  /// removes it ([removeServerKeyOfUnknownHost]).
   ///
   /// The app engine stores what it finds as the item at once, and retires
-  /// the old name ([_moveServerKey]); the background engine ([readOnly])
-  /// only reads, so the move has a single mover, and a reader between its
-  /// two writes finds the same key bound the same way (the item is written
-  /// before the old name is retired, and [load] reads the old name first).
+  /// the old name ([_moveServerKey]); the background engine only reads, so
+  /// the move has a single mover, and a reader between its two writes
+  /// finds the same key bound the same way (the item is written before the
+  /// old name is retired, and [load] reads the old name first).
   Future<void> _loadServerKey(
       {required String? legacy,
       required String? item,
@@ -1063,9 +1098,17 @@ class AppSettings extends ChangeNotifier {
     final oldKey = old == null ? '' : (oldItem?.key ?? old);
     final hostLostRecorded = _prefs.getBool(_kServerKeyHostLost) ?? false;
 
-    if (oldKey.isEmpty || (stored != null && stored.key == oldKey)) {
-      // The item counts; under the old name, nothing or its own text.
-      if (stored == null) return;
+    if (oldKey.isEmpty ||
+        (readOnly && stored != null) ||
+        (stored != null && stored.key == oldKey)) {
+      // The item counts; under the old name, nothing or its own text (in
+      // the background engine, whatever it holds).
+      if (stored == null) {
+        if (!readOnly) {
+          await _noteServerKeyUnread(legacy, firstLaunch: firstLaunch);
+        }
+        return;
+      }
       final lost = stored.host == null &&
           !stored.hostUnknown &&
           (firstLaunch || hostLostRecorded);
@@ -1075,9 +1118,13 @@ class AppSettings extends ChangeNotifier {
       _bindLoadedServerKey(found);
       if (readOnly) return;
       if (lost) {
-        await _moveServerKey(found, retire: old != null);
-      } else if (old != null) {
-        // A move cut short after the item was written: finish it.
+        await _moveServerKey(found, retire: legacy != '');
+      } else if (legacy != '') {
+        // A move cut short after the item was written: finish it. Or the
+        // old name read as nothing, which on Android is also a read that
+        // failed (AndroidSecureKeyStore): blanked too, so a value this load
+        // could not read never comes back at a later one as a newer key,
+        // bound to an address saved since. The item holds this key.
         try {
           await _retireLegacyServerKey();
           await _removeServerKeyRecords();
@@ -1096,11 +1143,12 @@ class AppSettings extends ChangeNotifier {
       host = oldItem!.host;
     } else if (oldItem != null || (!newer && hostLostRecorded)) {
       host = null;
+    } else if (newer) {
+      host = serverKeyHostOf(_serverBaseUrl);
     } else {
-      final recorded = newer
-          ? ''
-          : (_prefs.getString(_kServerKeyHost) ?? '').trim().toLowerCase();
-      host = recorded.isNotEmpty ? recorded : serverKeyHostOf(_serverBaseUrl);
+      final recorded =
+          (_prefs.getString(_kServerKeyHost) ?? '').trim().toLowerCase();
+      host = recorded.isNotEmpty ? recorded : _plainServerKeyHost();
     }
     final found = (
       key: oldKey,
@@ -1110,6 +1158,53 @@ class AppSettings extends ChangeNotifier {
     );
     _bindLoadedServerKey(found);
     if (!readOnly) await _moveServerKey(found, retire: true);
+  }
+
+  /// The host of a plain key under the old name that no move recorded a
+  /// host for: the saved address's, the address it was in use with. Unless
+  /// the app engine could not read it at its first load with no key, and
+  /// the address names another host now (or none): the key may then be
+  /// the one 1.7.0 used at the address recorded, or one an older version
+  /// installed over this one stored since at the address saved now, and
+  /// nothing says which. No known host then ([_kServerKeyHostUnread]).
+  String? _plainServerKeyHost() {
+    final saved = serverKeyHostOf(_serverBaseUrl);
+    final unread = _prefs.getString(_kServerKeyHostUnread);
+    if (unread == null) return saved;
+    return saved != null && saved == unread.trim().toLowerCase() ? saved : null;
+  }
+
+  /// The app engine's load found no upload key under either name.
+  ///
+  /// The old name read as nothing: on Android that is also a read that
+  /// failed (AndroidSecureKeyStore forgives one as no key), with a key
+  /// 1.7.0 stored perhaps still there, readable at a later load. The host
+  /// it was in use with is the one the saved address names now: recorded
+  /// at once ([_kServerKeyHostUnread]), once, so an address saved before
+  /// that later read never binds it; a later load in either engine binds
+  /// it to that host only while the address still names it
+  /// ([_plainServerKeyHost]; review of PR 78, SEC-1). Not on an install's
+  /// first launch: no address is saved yet, and [load] writes no
+  /// preference then (settleNotificationAskAtLaunch takes any as an
+  /// earlier install's).
+  ///
+  /// The old name blank: this version retired it, so no key a record could
+  /// be about is there; any record left is removed.
+  Future<void> _noteServerKeyUnread(String? legacy,
+      {required bool firstLaunch}) async {
+    try {
+      if (legacy == '') {
+        await _removeServerKeyRecords();
+        return;
+      }
+      if (legacy != null || firstLaunch) return;
+      if (_serverKeyRecords.any(_prefs.containsKey)) return;
+      await _prefs.setString(
+          _kServerKeyHostUnread, serverKeyHostOf(_serverBaseUrl) ?? '');
+    } catch (e) {
+      debugPrint('Settings: the server address for an upload key not read '
+          'was not recorded (${e.runtimeType})');
+    }
   }
 
   void _bindLoadedServerKey(
@@ -1173,6 +1268,19 @@ class AppSettings extends ChangeNotifier {
     }
     if (_serverApiKey == null || host == _serverKeyHost) return;
     await _saveServerKey(_serverApiKey, host);
+  }
+
+  /// Settings › Your own server › "Remove this key", only ever on the
+  /// user's tap: deletes a key kept whose server is not known
+  /// ([serverKeyHostUnknown]) from the phone. Its field is empty, so
+  /// clearing the field could not remove it, and the iPhone Keychain keeps
+  /// it after the app is deleted (review of PR 78, SEC-3, UXC-1). As a
+  /// cleared key goes ([_storeServerKey]): the item deleted, the old name
+  /// left blank, the records removed. Nothing else changes: the upload key,
+  /// when there is one instead, is never touched.
+  Future<void> removeServerKeyOfUnknownHost() async {
+    if (_serverKeyOfUnknownHost == null) return;
+    await _saveServerKey(null, null);
   }
 
   /// A confirmed setup link: the own server on [backend] at [baseUrl]

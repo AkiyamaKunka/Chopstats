@@ -215,7 +215,7 @@ bool _githubTagMatches(String pattern, String tag) {
 /// "Effective date:" line must say the same. Whoever merges a branch that
 /// changes the policy sets both to the merge date (docs/RELEASING.md § 6.8);
 /// this pin can only check that they agree, not that the date is new.
-const kPolicyEffectiveDate = '2026-11-20';
+const kPolicyEffectiveDate = '2026-11-21';
 
 void main() {
   group('R-F8: App Privacy answer B in the manifests', () {
@@ -669,7 +669,11 @@ void main() {
       // by default on Android. The Android lows lane
       // (android/lows-and-release, #74, 2026-11-20) changed it again:
       // Connect Claude sends your own server the sign-in code you paste; if
-      // it merges on a later day, set both to that day too.
+      // it merges on a later day, set both to that day too. The legacy
+      // upload key lane (android/legacy-key-host, #78, 2026-11-21) changed
+      // it again: a Server upload key saved without its server address is
+      // removed with Remove this key, its field being empty; if it merges
+      // on a later day, set both to that day too.
       expect(
           RegExp(r'^Effective date: (\S+)$', multiLine: true)
               .allMatches(policy)

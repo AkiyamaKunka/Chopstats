@@ -192,8 +192,9 @@ final _placeholderRe = RegExp(r'\{(\w+)\}');
 /// serverKeyOtherHostField, serverKeyUseHere, autoScanServerKeyOtherHost,
 /// diagServerKeyOtherHost, diagFixServerKeyOtherHost); and the legacy
 /// upload key lane's line for a key saved without its server address
-/// (serverKeyUnknownHostField).
-const _keyCount = 962;
+/// (serverKeyUnknownHostField) and, after its review, the row that removes
+/// that key (serverKeyRemoveKept).
+const _keyCount = 963;
 
 Directory _appRoot() {
   var dir = Directory.current;

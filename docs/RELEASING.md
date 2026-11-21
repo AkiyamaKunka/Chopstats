@@ -335,7 +335,7 @@ When merging #22 after this PR:
 - **Never hand-merge the generated `app_localizations*.dart`.** Take
   either side, then run `flutter gen-l10n` in `app/`.
 - `app/test/ui/usual_copy_test.dart` pins the number of keys in each ARB
-  file: 809 on `main` since #22 merged, 962 on the iCloud Backup branch
+  file: 809 on `main` since #22 merged, 963 on the iCloud Backup branch
   merged with #33, the review-171 fixes, the Android photos, privacy,
   background and ui lanes, the Play channel, the Android
   look-and-defaults branch, the Android lows lane and the legacy upload
@@ -355,8 +355,9 @@ When merging #22 after this PR:
   Android lows lane's `outcomeShareFixAddressMsg` 1 (a share refused for
   the server address) and its review's seven lines for an upload key
   saved for another server address 7, the legacy upload key lane's
-  `serverKeyUnknownHostField` 1 (a key saved without its server address),
-  none shared; review r171 deleted
+  `serverKeyUnknownHostField` and `serverKeyRemoveKept` 2 (a key saved
+  without its server address, and the row that removes it), none shared;
+  review r171 deleted
   `bodyEmptyHintImperial`, the same text as `bodyEmptyHint`). If either
   side adds keys before both merge, change the number in that test to the
   merged count, and here too (the test checks this line); both files must
@@ -1083,12 +1084,21 @@ step. Revisit if the app is ever published with a developer-run service.
   or device, the App Store has no way back, and TestFlight lists earlier
   builds. From 1.7.1 the *Your own server* upload key is stored with its
   server's host in the secure item `server_api_key_item`, and
-  `server_api_key`, the only name 1.7.0 and 1.6.0 read, holds `''`. So an
-  older build finds no key and asks for it, rather than sending the
-  item's text as the key. Installed again, this version moves a key
-  pasted into the older build: bound to the server address saved then,
-  or with none, kept unused until *Use this key for …*
-  (`app_settings_test`, "an older version installed over this one").
+  `server_api_key`, the only name 1.7.0 and 1.6.0 read, holds a single
+  space, which those versions trim to no key. So an older build finds no
+  key and asks for it, rather than sending the item's text as the key.
+  Installed again, this version moves a key pasted into the older build
+  (`app_settings_test`, the two tests named "an older version installed
+  over …"):
+  - a key other than the item's is bound to the server address saved
+    then; with none saved, it is kept unused until *Use this key for …*;
+  - the same key as the item's keeps the host it had: pasted back at a
+    new address, the page says *Saved for* the old host until *Use this
+    key for …* is tapped;
+  - on a phone where this version never stored a key, it is bound to the
+    address saved then only if that names the same host as when this
+    version started with no key saved; otherwise it is kept unused until
+    *Use this key for …*.
 
 ---
 
@@ -2228,6 +2238,11 @@ step 2.
    Backup** off offers **Delete It…**; with the switch already off, tap
    **Delete iCloud Backup…**), or in the Files app under iCloud Drive ›
    Chopstats."
+5. **Delete everything**'s Keychain sentence ends as `docs/PRIVACY.md`'s
+   does: "(and the **Server upload key** under *Your own server*; when
+   that page says a key was *Saved without its server address*, its field
+   is empty, so tap **Remove this key** under it instead)". In 1.6.0 the
+   field always shows the key, so clearing it is enough there.
 
 The README has its own list (*Lines tied to a release*, in its maintainer
 notes; go through all of it, for README.zh-CN.md too) and so do the slides
