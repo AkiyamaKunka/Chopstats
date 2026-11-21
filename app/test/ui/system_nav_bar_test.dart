@@ -15,8 +15,11 @@
 // bar showed its form under the buttons at rest (A36-2). The colour now
 // also goes to MainActivity, which sets it on the window from Android 15
 // (ending the forced buttons, and tinting the scrim), and the scrim is on:
-// Android draws it behind the 3-button bar only. Every screen without the
-// tab bar ends its scroll past that bar: scroll_end_inset_test.dart.
+// Android draws it behind the 3-button bar only. At 80% it still let a
+// field under the buttons show through (QA KAA-1), so the app paints an
+// opaque band of the same colour under it: nav_bar_band_test.dart. Every
+// screen without the tab bar ends its scroll past that bar:
+// scroll_end_inset_test.dart.
 //
 // The scrim is a view Android draws above the app, which no Flutter barrier
 // can dim (review NAV-2): every dialog and the overlay that dims Add photo
@@ -99,9 +102,10 @@ void main() {
     expect(style.systemNavigationBarColor!.a, 1.0, reason: 'opaque');
     expect(style.systemNavigationBarDividerColor, _transparent);
     // The contrast scrim: Android 15+ draws the colour at 80% behind the
-    // 3-button bar (none behind the gesture bar), so no screen's content
-    // sits under the buttons at rest. On the opaque bar below Android 15 it
-    // changes nothing.
+    // 3-button bar (none behind the gesture bar), over the app's opaque
+    // band of the same colour (nav_bar_band_test.dart), so no screen's
+    // content shows under the buttons. On the opaque bar below Android 15
+    // it changes nothing.
     expect(style.systemNavigationBarContrastEnforced, isTrue);
   }
 

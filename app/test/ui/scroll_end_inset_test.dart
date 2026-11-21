@@ -1,7 +1,8 @@
 // A36-2's other half (review NAV-1, 2026-11-20). From Android 15 the app
-// draws edge to edge, and with 3-button navigation the bar's contrast scrim
-// (the tab bar's colour at 80%, app.dart _SystemNavBarStyle) covers the
-// bottom 48 dp of every screen. A screen without the tab bar whose scroll
+// draws edge to edge, and with 3-button navigation the bar covers the
+// bottom 48 dp of every screen: the app's opaque band in the tab bar's
+// colour, under Android's contrast scrim (nav_bar_band_test.dart, app.dart
+// _SystemNavBarStyle). A screen without the tab bar whose scroll
 // ended 8 to 32 dp above the screen's bottom kept its last line, or its
 // last row of photos, under the buttons however far it scrolled: a
 // Settings subpage's last footer, Diagnostics' last card (a failing stage's
@@ -315,7 +316,7 @@ void main() {
         final barTop = _height - bottom / _ratio;
         expect(lowest, lessThanOrEqualTo(barTop + 0.01),
             reason: 'its last content ends above the bar, out from under '
-                'its scrim and buttons');
+                'its band and buttons');
       });
     }
   }

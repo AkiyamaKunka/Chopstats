@@ -1124,13 +1124,17 @@ position. The paste-ready answers live next to the app in
    buttons Android forced on a window that started light, which stayed on
    the dark 3-button bar after a switch to dark on Android 16 (QA A36-1),
    and with the contrast scrim on, Android draws that colour at 80% behind
-   the 3-button bar only, so no screen's fields sit under its buttons at
-   rest (A36-2); the gesture bar stays transparent. Every screen without
-   the tab bar ends its scroll past the bar (`scrollEndInset`), so its last
-   line or row of photos can always be scrolled clear of the scrim, and
-   while a dialog or the analyzing overlay dims the app, the colour sent is
-   the tab bar's under that dim, since Android draws the scrim above the
-   app where no Flutter barrier reaches it.
+   the 3-button bar only. At 80% a field under the buttons still showed
+   through (QA KAA-1), so with 3-button navigation the app paints the
+   bar's height in the same colour itself, opaque, above its screens and
+   under the scrim (`NavBarBand`): nothing shows under the buttons
+   (A36-2). The gesture bar gets neither and stays transparent, edge to
+   edge. Every screen without the tab bar ends its scroll past the bar
+   (`scrollEndInset`), so its last line or row of photos can always be
+   scrolled clear of it, and while a dialog or the analyzing overlay dims
+   the app, the colour sent and painted is the tab bar's under that dim,
+   since Android draws the scrim above the app, and the band lies above
+   its screens, where no Flutter barrier reaches either.
 7. **Orientation:** portrait on phones
    (`android:screenOrientation="portrait"`). Android 16 ignores it at
    600 dp and wider, where the width-capped layout applies. Tablets stay

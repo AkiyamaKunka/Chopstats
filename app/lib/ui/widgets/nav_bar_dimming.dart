@@ -8,8 +8,10 @@
 /// ([AnalyzingOverlay]) left a bright strip under the buttons, where the
 /// transparent bar of before had let the barrier through. While one is up,
 /// the shell hands MainActivity the bar colour under the barrier's instead
-/// (Color.alphaBlend), and the bar's own colour again once it is gone.
-/// Bottom sheets are left alone: a sheet covers the bar's area itself.
+/// (Color.alphaBlend), and the bar's own colour again once it is gone. The
+/// opaque band the app paints under that scrim (NavBarBand), above its
+/// routes, takes the same colour. Bottom sheets are left alone: a sheet
+/// reaches the bar's area itself, with only its bottom inset there.
 library;
 
 import 'package:flutter/widgets.dart';

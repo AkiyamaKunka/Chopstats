@@ -41,6 +41,7 @@ import 'screens/today_screen.dart';
 import 'refresh_signal.dart';
 import 'services.dart';
 import 'widgets/grouped.dart' show ContentWidthCap;
+import 'widgets/nav_bar_band.dart';
 import 'widgets/nav_bar_dimming.dart';
 import 'widgets/restaurant_consent_sheet.dart';
 import 'widgets/shared_photos_back_guard.dart';
@@ -106,15 +107,21 @@ Future<void> sendNavigationBarColor(Color color,
 ///   [SystemUiOverlayStyle.systemNavigationBarIconBrightness].
 /// - With the contrast scrim on, Android draws that colour at 80% behind
 ///   the 3-button bar only (the gesture bar suppresses the scrim, so it
-///   stays transparent, edge to edge): a screen with no tab bar no longer
-///   shows its fields under the buttons at rest (A36-2), and the tab bar's
-///   own colour runs on under them.
-/// - That scrim is a view Android draws above the app, which no Flutter
-///   barrier can dim: while a dialog or the analyzing overlay dims the app
-///   ([dimming], NavBarDimming), the colour sent is the tab bar's under
+///   stays transparent, edge to edge), and the tab bar's own colour runs
+///   on under the buttons.
+/// - At 80%, a field that lay under the buttons at rest on a screen with
+///   no tab bar (Edit meal at its first scroll) still showed through
+///   (A36-2, QA KAA-1). So with 3-button navigation the app paints the
+///   bar's height in the same colour itself, above its navigator and
+///   under Android's scrim (NavBarBand): nothing shows under the buttons.
+///   The gesture bar gets no band.
+/// - That scrim is a view Android draws above the app, and the band is
+///   above the app's routes, so no Flutter barrier dims either: while a
+///   dialog or the analyzing overlay dims the app ([dimming],
+///   NavBarDimming), the colour sent and painted is the tab bar's under
 ///   the barrier's scrim, and the tab bar's own again once it is gone, so
-///   no bright strip stays under the buttons (NAV-2). Bottom sheets cover
-///   the bar's area themselves and change nothing.
+///   no bright strip stays under the buttons (NAV-2). Bottom sheets
+///   change nothing: a sheet has only its bottom inset under the bar.
 /// Sent after the frame, behind Flutter's own style, so the buttons'
 /// light/dark is set before Android stops forcing it. iPhone has no such
 /// bar: nothing is set there.
@@ -141,6 +148,10 @@ class _SystemNavBarStyleState extends State<_SystemNavBarStyle> {
   Color? _chrome;
   Color? _scrim;
 
+  /// The colour wanted now, which the band under a 3-button bar paints
+  /// (NavBarBand): a change repaints it, and never rebuilds.
+  final ValueNotifier<Color?> _band = ValueNotifier<Color?>(null);
+
   @override
   void initState() {
     super.initState();
@@ -159,12 +170,14 @@ class _SystemNavBarStyleState extends State<_SystemNavBarStyle> {
   @override
   void dispose() {
     widget.dimming?.removeListener(_sendWanted);
+    _band.dispose();
     super.dispose();
   }
 
-  /// Hands MainActivity the colour wanted now, once per change: the tab
-  /// bar's, or under a barrier the tab bar's dimmed by the barrier's scrim.
-  /// Never a rebuild: a barrier may come while a frame is being built.
+  /// Hands MainActivity the colour wanted now, once per change, and the
+  /// band the same: the tab bar's, or under a barrier the tab bar's dimmed
+  /// by the barrier's scrim. Never a rebuild: a barrier may come while a
+  /// frame is being built.
   void _sendWanted() {
     final chrome = _chrome;
     final scrim = _scrim;
@@ -172,6 +185,7 @@ class _SystemNavBarStyleState extends State<_SystemNavBarStyle> {
     final wanted = widget.dimming?.dimmed ?? false
         ? Color.alphaBlend(scrim, chrome)
         : chrome;
+    _band.value = wanted;
     if (wanted == _sent) return;
     _sent = wanted;
     // Flutter sends the style below in a microtask queued while this
@@ -200,9 +214,19 @@ class _SystemNavBarStyleState extends State<_SystemNavBarStyle> {
             dark ? Brightness.light : Brightness.dark,
         systemNavigationBarContrastEnforced: true,
       ),
-      child: dimming == null
-          ? widget.child
-          : NavBarDimmingScope(dimming: dimming, child: widget.child),
+      // The band lies over every route, the navigator's dialogs and
+      // sheets included, and paints nothing without a 3-button bar.
+      child: Stack(
+        fit: StackFit.expand,
+        alignment: Alignment.topLeft,
+        children: [
+          dimming == null
+              ? widget.child
+              : NavBarDimmingScope(dimming: dimming, child: widget.child),
+          Positioned(
+              left: 0, right: 0, bottom: 0, child: NavBarBand(color: _band)),
+        ],
+      ),
     );
   }
 }
