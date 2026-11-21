@@ -4,6 +4,9 @@ import android.content.Intent
 import android.os.Build
 import java.io.File
 import java.io.InputStream
+import java.text.DateFormat
+import java.text.SimpleDateFormat
+import java.util.Locale
 
 /// MainActivity's decisions, kept free of Android objects so the JVM unit
 /// tests (src/test, `./gradlew :app:testDebugUnitTest`, run by
@@ -64,6 +67,80 @@ internal object IntakeRules {
     /// bar's contrast scrim with the colour set. Below that Flutter sets
     /// the colour as before, an opaque bar.
     fun colorsNavigationBar(sdk: Int): Boolean = sdk >= Build.VERSION_CODES.VANILLA_ICE_CREAM
+
+    /// The app's languages, as Android 13 and later list them for it
+    /// (res/xml/locales_config.xml): lib/l10n/app_en.arb and app_zh.arb.
+    val APP_LANGUAGES = setOf("en", "zh")
+
+    /// What MainActivity sets as the app's own language on Android 13 and
+    /// later (setAppLanguage) for [tags] from Dart (app_language_sync.dart):
+    /// one of [APP_LANGUAGES], or "" for none, which hands the app back to
+    /// the system's language. Null for anything else, which is never set.
+    fun appLanguageTags(tags: String?): String? = tags?.takeIf { it.isEmpty() || it in APP_LANGUAGES }
+
+    /// The locale MainActivity gives Android for the app's [language] (one
+    /// of [APP_LANGUAGES], or "" for none, which stays ""): the first of
+    /// the phone's own languages ([systemTags], LocaleManager's
+    /// systemLocales as language tags, the preferred first) in that
+    /// language, as language, script and region, so the app keeps the
+    /// phone's region: "en-GB" for English on a British phone. A bare "en"
+    /// would be the app's main locale, and Android and Flutter take its
+    /// clock (12-hour) for the phone's. For "zh", the app's Simplified
+    /// Chinese, only a Simplified one counts (isSimplifiedChinese). The
+    /// bare tag when the phone has none in that language.
+    fun appLanguageTag(language: String, systemTags: String): String {
+        if (language.isEmpty()) return language
+        for (tag in systemTags.split(',')) {
+            val locale = Locale.forLanguageTag(tag.trim())
+            if (locale.language != language) continue
+            if (language == "zh" && !isSimplifiedChinese(locale)) continue
+            return Locale.Builder()
+                .setLanguage(locale.language)
+                .setScript(locale.script)
+                .setRegion(locale.country)
+                .build()
+                .toLanguageTag()
+        }
+        return language
+    }
+
+    /// Where a Chinese locale with no script is written in Traditional
+    /// characters (CLDR's likely subtags: zh-TW, zh-HK and zh-MO are Hant).
+    private val TRADITIONAL_CHINESE_REGIONS = setOf("TW", "HK", "MO")
+
+    /// Whether a Chinese [locale] is Simplified: its script says so, or it
+    /// names none and its region is not one of TRADITIONAL_CHINESE_REGIONS
+    /// ("zh-CN", "zh-SG", "zh").
+    private fun isSimplifiedChinese(locale: Locale): Boolean =
+        if (locale.script.isNotEmpty()) locale.script == "Hans" else locale.country !in TRADITIONAL_CHINESE_REGIONS
+
+    /// The pattern Android tells [locale]'s clock by
+    /// (DateFormat.is24HourLocale): its long time format, "HH:mm:ss z" for
+    /// en-GB, "h:mm:ss a z" for en. Null when it is no pattern.
+    fun longTimePattern(locale: Locale): String? =
+        (DateFormat.getTimeInstance(DateFormat.LONG, locale) as? SimpleDateFormat)?.toPattern()
+
+    /// Whether the phone itself uses the 24-hour clock, decided as
+    /// Android's DateFormat.is24HourFormat decides it for the phone (its
+    /// status bar): its 'Use 24-hour format' switch ([setting],
+    /// Settings.System.TIME_12_24, "24" or "12") when set, else, with 'Use
+    /// locale default', what its own first language uses ([pattern],
+    /// longTimePattern): an hour of 0-23 (H) outside quoted text. Null when
+    /// neither tells. Flutter reads the activity's, which follows the app's
+    /// own language once the app has one (MainActivity.phone).
+    fun usesTwentyFourHourClock(setting: String?, pattern: String?): Boolean? {
+        if (setting != null) return setting == "24"
+        if (pattern == null) return null
+        var quoted = false
+        for (c in pattern) {
+            if (c == '\'') {
+                quoted = !quoted
+            } else if (!quoted && c == 'H') {
+                return true
+            }
+        }
+        return false
+    }
 
     /// share_plus's FileProvider authority after the package name (its
     /// AndroidManifest.xml: ${applicationId}.flutter.share_provider).

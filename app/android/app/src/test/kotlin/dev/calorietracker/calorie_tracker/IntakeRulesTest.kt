@@ -5,6 +5,7 @@ import android.os.Build
 import java.io.File
 import java.io.IOException
 import java.nio.file.Files
+import java.util.Locale
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -141,6 +142,82 @@ class IntakeRulesTest {
         for (sdk in listOf(35, 36, 37)) {
             assertTrue(IntakeRules.colorsNavigationBar(sdk))
         }
+    }
+
+    // --- The app's own language on Android 13 and later
+    // (MainActivity.setAppLanguage): one of the app's languages
+    // (res/xml/locales_config.xml) or none, nothing else.
+
+    @Test
+    fun theAppSetsOnlyItsOwnLanguagesOrNone() {
+        assertEquals(setOf("en", "zh"), IntakeRules.APP_LANGUAGES)
+        assertEquals("en", IntakeRules.appLanguageTags("en"))
+        assertEquals("zh", IntakeRules.appLanguageTags("zh"))
+        // None: the app follows the system's language again.
+        assertEquals("", IntakeRules.appLanguageTags(""))
+        for (tags in listOf(null, "fr", "EN", " en", "en,zh", "zh-Hant", "zh-CN", "und", "system")) {
+            assertNull(tags, IntakeRules.appLanguageTags(tags))
+        }
+    }
+
+    // --- The language goes to Android with the region of the phone's own
+    // locale in it (MainActivity.setAppLanguage): a bare "en" became the
+    // app's main locale, and English times went 12-hour on a phone whose
+    // own language is 24-hour (review of PR 79, F1).
+
+    @Test
+    fun theAppsLanguageKeepsThePhonesRegion() {
+        assertEquals("en-GB", IntakeRules.appLanguageTag("en", "en-GB"))
+        assertEquals("zh-Hans-CN", IntakeRules.appLanguageTag("zh", "zh-Hans-CN,en-US"))
+        // The first in the language, wherever it is in the phone's list.
+        assertEquals("en-US", IntakeRules.appLanguageTag("en", "zh-Hans-CN,en-US,en-GB"))
+        assertEquals("zh-CN", IntakeRules.appLanguageTag("zh", "en-US,zh-CN"))
+        assertEquals("zh-Hans-SG", IntakeRules.appLanguageTag("zh", "zh-Hans-SG"))
+        assertEquals("zh-Hans-HK", IntakeRules.appLanguageTag("zh", "zh-Hans-HK"))
+        // Language, script and region only: Android 14's regional
+        // preferences (Unicode extensions) stay the phone's.
+        assertEquals("en-GB", IntakeRules.appLanguageTag("en", "en-GB-u-mu-celsius-fw-mon"))
+        // The app's Chinese is Simplified: Traditional Chinese never counts,
+        // with its script or by its region.
+        assertEquals("zh", IntakeRules.appLanguageTag("zh", "zh-Hant-TW,en-US"))
+        assertEquals("zh", IntakeRules.appLanguageTag("zh", "zh-TW"))
+        assertEquals("zh", IntakeRules.appLanguageTag("zh", "zh-HK,zh-MO"))
+        assertEquals("zh-CN", IntakeRules.appLanguageTag("zh", "zh-Hant-HK,zh-CN"))
+        // None in the language: the bare tag.
+        assertEquals("en", IntakeRules.appLanguageTag("en", "de-DE"))
+        assertEquals("en", IntakeRules.appLanguageTag("en", ""))
+        assertEquals("zh", IntakeRules.appLanguageTag("zh", "en-US"))
+        // Follow system clears the app's language, whatever the phone's.
+        assertEquals("", IntakeRules.appLanguageTag("", "en-GB"))
+    }
+
+    // --- The phone's own 12/24-hour clock (MainActivity.phone), which the
+    // FlutterView no longer reports once the app has a language of its own.
+
+    @Test
+    fun thePhonesOwnClockIsItsSwitchElseItsFirstLanguages() {
+        // 'Use 24-hour format' set: that, whatever the language.
+        assertEquals(true, IntakeRules.usesTwentyFourHourClock("24", "h:mm:ss a z"))
+        assertEquals(false, IntakeRules.usesTwentyFourHourClock("12", "HH:mm:ss z"))
+        assertEquals(true, IntakeRules.usesTwentyFourHourClock("24", null))
+        // 'Use locale default': the first language's long time format.
+        assertEquals(true, IntakeRules.usesTwentyFourHourClock(null, "HH:mm:ss z"))
+        assertEquals(true, IntakeRules.usesTwentyFourHourClock(null, "z HH:mm:ss"))
+        assertEquals(true, IntakeRules.usesTwentyFourHourClock(null, "H:mm:ss z"))
+        assertEquals(false, IntakeRules.usesTwentyFourHourClock(null, "h:mm:ss a z"))
+        assertEquals(false, IntakeRules.usesTwentyFourHourClock(null, "z ah:mm:ss"))
+        assertEquals(false, IntakeRules.usesTwentyFourHourClock(null, "Bh:mm:ss [z]"))
+        // Quoted text is no hour (DateFormat.hasDesignator).
+        assertEquals(false, IntakeRules.usesTwentyFourHourClock(null, "h 'H' mm a"))
+        assertEquals(true, IntakeRules.usesTwentyFourHourClock(null, "'h' HH:mm"))
+        assertNull(IntakeRules.usesTwentyFourHourClock(null, null))
+        // The patterns themselves, from the locale data (the JDK's here,
+        // ICU's on the phone): British English is 24-hour, bare English
+        // 12-hour, as on the phone.
+        assertEquals(true, IntakeRules.usesTwentyFourHourClock(null, IntakeRules.longTimePattern(Locale.UK)))
+        assertEquals(true, IntakeRules.usesTwentyFourHourClock(null, IntakeRules.longTimePattern(Locale.GERMANY)))
+        assertEquals(false, IntakeRules.usesTwentyFourHourClock(null, IntakeRules.longTimePattern(Locale.ENGLISH)))
+        assertEquals(false, IntakeRules.usesTwentyFourHourClock(null, IntakeRules.longTimePattern(Locale.US)))
     }
 
     // --- A share that comes before share intake listens waits for it

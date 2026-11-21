@@ -14,6 +14,8 @@ import 'package:calorie_tracker/services/photo/photo_changes.dart'
 import 'package:calorie_tracker/services/places/places.dart'
     show placesChannelName;
 import 'package:calorie_tracker/services/report/notifications.dart';
+import 'package:calorie_tracker/services/settings/app_language_sync.dart'
+    show appLanguageChannelName;
 import 'package:calorie_tracker/ui/app.dart' show systemBarsChannelName;
 import 'package:calorie_tracker/ui/background_glue.dart'
     show backgroundNativeLaunchPrefsKey;
@@ -1750,13 +1752,19 @@ void main() {
         ?.group(1);
     expect(channel,
         contains('"installTimes" -> result.success(installTimes())'));
+    // The version installed too: the app language's agreement tells the
+    // same version installed again by it (app_language_sync.dart).
     expect(
         code,
         contains('private fun installTimes(): Map<String, Long>? = try { '
             '@Suppress("DEPRECATION") val info = '
             'packageManager.getPackageInfo(packageName, 0) '
+            '@Suppress("DEPRECATION") val version = if (Build.VERSION.SDK_INT '
+            '>= Build.VERSION_CODES.P) info.longVersionCode else '
+            'info.versionCode.toLong() '
             'mapOf("firstInstall" to info.firstInstallTime, "lastUpdate" to '
-            'info.lastUpdateTime) } catch (e: Exception) { null }'));
+            'info.lastUpdateTime, "versionCode" to version) } catch (e: '
+            'Exception) { null }'));
   });
 
   // Android QA Q7: the phone's 12/24-hour switch reached the app only at a
@@ -1766,23 +1774,28 @@ void main() {
   // re-sends the user settings as a configuration change does.
   test('MainActivity re-sends the 12/24-hour switch when it changes', () {
     final code = _kotlinCode(_mainActivity());
+    // Android 13 and later: Dart also reads the phone's own clock again
+    // (review of PR 79): once the app has a language of its own, the
+    // FlutterView's clock is that language's.
     expect(
         code,
         contains('private val clockFormatObserver = object : '
             'ContentObserver(Handler(Looper.getMainLooper())) { override fun '
             'onChange(selfChange: Boolean) { findViewById<View>('
             'FlutterActivity.FLUTTER_VIEW_ID) '
-            '?.dispatchConfigurationChanged(resources.configuration) } }'));
+            '?.dispatchConfigurationChanged(resources.configuration) '
+            'appLanguageChannel?.invokeMethod("phoneChanged", null) } }'));
     expect(
         _kotlinFunction(code, 'override fun configureFlutterEngine('),
         startsWith('{ super.configureFlutterEngine(flutterEngine) '
             'contentResolver.registerContentObserver( '
             'Settings.System.getUriFor(Settings.System.TIME_12_24), false, '
             'clockFormatObserver, ) '));
-    // The same hook drops the engine's analysis keep-alive requests (the
-    // keep-alive test below).
+    // The same hook drops the channel it tells and the engine's analysis
+    // keep-alive requests (the keep-alive test below).
     expect(_kotlinFunction(code, 'override fun cleanUpFlutterEngine('),
         '{ contentResolver.unregisterContentObserver(clockFormatObserver) '
+        'appLanguageChannel = null '
         'AnalysisKeepAlive.drop(applicationContext, keepAliveSession) '
         'super.cleanUpFlutterEngine(flutterEngine) }');
   });
@@ -2210,9 +2223,11 @@ void main() {
         dart,
         contains('AnalysisKeepAlive( [this._channel = const '
             "MethodChannel(keepAliveChannelName)]) { _send('reset'); }"));
-    // The same hook also stops the 12/24-hour observer (Q7, above).
+    // The same hook also stops the 12/24-hour observer and drops the
+    // channel it tells (Q7, above).
     expect(_kotlinFunction(code, 'override fun cleanUpFlutterEngine('),
         '{ contentResolver.unregisterContentObserver(clockFormatObserver) '
+        'appLanguageChannel = null '
         'AnalysisKeepAlive.drop(applicationContext, keepAliveSession) '
         'super.cleanUpFlutterEngine(flutterEngine) }');
     expect(code, contains('private var keepAliveSession = 0L'));
@@ -2451,5 +2466,194 @@ void main() {
         contains('fun colorsNavigationBar(sdk: Int): Boolean = '
             'sdk >= Build.VERSION_CODES.VANILLA_ICE_CREAM'));
     _expectJvmTests(['IntakeRules.colorsNavigationBar(']);
+  });
+
+  // Android 13 and later list an app under Settings › Apps › Language only
+  // when its manifest names a locale config. The list is the app's own
+  // languages, by the tags it uses: those of its ARB files, which are
+  // Flutter's supportedLocales ("zh" is app_zh.arb's Simplified Chinese).
+  // A language listed that the app does not have would show it in English
+  // there; one left out could never be picked there. MainActivity sets no
+  // other. Named once, in the main manifest: the debug, profile and Play
+  // manifests leave it alone (the Play overlay keeps to its three
+  // permissions, the test above), and Gradle generates none
+  // (generateLocaleConfig would clash with this file).
+  test("Android 13 and later list exactly the app's own languages under "
+      'Settings › Apps › Language', () {
+    final main = '${_appRoot().path}/android/app/src/main';
+    final manifest = _uncommented(_manifest());
+    final application =
+        RegExp(r'<application\b[^>]*>').firstMatch(manifest)?.group(0);
+    expect(application,
+        contains('android:localeConfig="@xml/locales_config"'));
+    expect('localeConfig'.allMatches(manifest), hasLength(1));
+
+    final config = File('$main/res/xml/locales_config.xml');
+    expect(config.existsSync(), isTrue, reason: config.path);
+    final xml = _uncommented(config.readAsStringSync());
+    expect(
+        RegExp(r'<([a-zA-Z0-9-]+)')
+            .allMatches(xml)
+            .map((m) => m.group(1))
+            .toSet(),
+        {'locale-config', 'locale'});
+    expect(
+        xml,
+        contains('<locale-config '
+            'xmlns:android="http://schemas.android.com/apk/res/android">'));
+    final listed = [
+      for (final m in RegExp(r'<locale\s+android:name="([^"]*)"\s*/>')
+          .allMatches(xml))
+        m.group(1)!,
+    ];
+    expect('<locale '.allMatches(xml), hasLength(listed.length),
+        reason: 'every <locale> names one language, and nothing else');
+    final arbs = [
+      for (final f in Directory('${_appRoot().path}/lib/l10n')
+          .listSync()
+          .whereType<File>()
+          .where((f) => f.path.endsWith('.arb')))
+        (jsonDecode(f.readAsStringSync()) as Map)['@@locale'] as String,
+    ];
+    expect(arbs.toSet(), {'en', 'zh'});
+    expect(listed, unorderedEquals(arbs));
+    expect(
+        File('${_appRoot().path}/lib/ui/app.dart').readAsStringSync(),
+        contains("supportedLocales: const [Locale('en'), Locale('zh')]"));
+    // The launcher name in Chinese (values/ is English).
+    expect(File('$main/res/values-zh/strings.xml').existsSync(), isTrue);
+    expect(
+        _kotlinCode(_intakeRules()),
+        contains('val APP_LANGUAGES = '
+            'setOf(${listed.map((l) => '"$l"').join(', ')})'));
+
+    final src = '${_appRoot().path}/android/app/src';
+    for (final variant in ['debug', 'profile', 'playChannel']) {
+      final variantXml =
+          File('$src/$variant/AndroidManifest.xml').readAsStringSync();
+      expect(variantXml, isNot(contains('localeConfig')), reason: variant);
+    }
+    expect(
+        File('${_appRoot().path}/android/app/build.gradle.kts')
+            .readAsStringSync(),
+        isNot(contains('generateLocaleConfig')));
+  });
+
+  // A per-app language picked in Android's settings or in the app is a
+  // configuration change. An activity that does not take locale and
+  // layoutDirection itself is destroyed and created again for it, and
+  // Flutter's engine with it: a shared photo still being analyzed, a
+  // screen with unsaved changes. MainActivity takes both itself, so it
+  // stays: FlutterView sends Dart the new locales, and the app reads its
+  // language again then (app_language_sync.dart).
+  test('a language change reaches the running MainActivity, which is never '
+      'recreated for it', () {
+    final manifest = _uncommented(_manifest());
+    final activity =
+        RegExp(r'<activity\b[^>]*>').firstMatch(manifest)?.group(0);
+    final changes = RegExp(r'android:configChanges="([^"]*)"')
+        .firstMatch(activity ?? '')
+        ?.group(1)
+        ?.split('|');
+    expect(changes, containsAll(['locale', 'layoutDirection']));
+    // Flutter 3.44's embedding, where the SDK carries its sources.
+    final view = File('${_pluginRoot('flutter')}/../../engine/src/flutter/'
+        'shell/platform/android/io/flutter/embedding/android/FlutterView.java');
+    if (view.existsSync()) {
+      final java = view.readAsStringSync().replaceAll(RegExp(r'\s+'), ' ');
+      final changed = java.substring(
+          java.indexOf('protected void onConfigurationChanged('));
+      expect(changed.substring(0, changed.indexOf('} }')),
+          contains('localizationPlugin.sendLocalesToFlutter(newConfig);'));
+    }
+    final sync = File('${_appRoot().path}/lib/services/settings/'
+            'app_language_sync.dart')
+        .readAsStringSync()
+        .replaceAll(RegExp(r'\s+'), ' ');
+    expect(
+        sync,
+        contains('void didChangeLocales(List<Locale>? locales) => '
+            'unawaited(_round());'));
+  });
+
+  // The app's own language on Android 13 and later: read and set through
+  // LocaleManager on the app's own channel, for the app itself (no
+  // permission), only one of its languages or none, and nothing below
+  // Android 13. MainActivity is a FlutterActivity, not AppCompat.
+  //
+  // Review of PR 79: the language goes in with the region of the phone's
+  // own locale in that language (F1: a bare "en" became the app's main
+  // locale, and Android and Flutter took its 12-hour clock for the
+  // phone's), and "phone" answers what the app's language hides from the
+  // app: the phone's own languages, for the restaurant assist's region
+  // (F1-region), and its own 12/24-hour clock (F1, F3).
+  test("MainActivity reads and sets the app's own language, from Android 13 "
+      'only', () {
+    final code = _kotlinCode(_mainActivity());
+    expect(code,
+        contains('const val APP_LANGUAGE_CHANNEL = "$appLanguageChannelName"'));
+    expect(
+        _kotlinFunction(code, 'override fun configureFlutterEngine('),
+        contains('appLanguageChannel = MethodChannel('
+            'flutterEngine.dartExecutor.binaryMessenger, APP_LANGUAGE_CHANNEL) '
+            '.apply { setMethodCallHandler { call, result -> '
+            'when (call.method) { "get" -> result.success(appLanguage()) '
+            '"set" -> result.success(setAppLanguage(call.argument<Any?>("tags") '
+            'as? String)) "phone" -> result.success(phone()) '
+            'else -> result.notImplemented() } } }'));
+    expect(code,
+        contains('private var appLanguageChannel: MethodChannel? = null'));
+    expect('appLanguageChannel'.allMatches(code), hasLength(4));
+    expect(
+        _kotlinFunction(code, 'private fun appLanguage('),
+        '{ if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return '
+        'null return try { getSystemService(LocaleManager::class.java)'
+        '?.applicationLocales?.toLanguageTags() } catch (e: Exception) { null '
+        '} }');
+    expect(
+        _kotlinFunction(code, 'private fun setAppLanguage('),
+        '{ val language = IntakeRules.appLanguageTags(tags) ?: return false '
+        'if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return '
+        'false return try { val manager = getSystemService('
+        'LocaleManager::class.java) ?: return false manager.applicationLocales '
+        '= LocaleList.forLanguageTags( IntakeRules.appLanguageTag(language, '
+        'manager.systemLocales.toLanguageTags()), ) true } catch (e: '
+        'Exception) { false } }');
+    expect(
+        _kotlinFunction(code, 'private fun phone('),
+        '{ if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return '
+        'null return try { val locales = getSystemService('
+        'LocaleManager::class.java)?.systemLocales ?: return null mapOf( '
+        '"locales" to locales.toLanguageTags(), "use24h" to '
+        'IntakeRules.usesTwentyFourHourClock( Settings.System.getString('
+        'contentResolver, Settings.System.TIME_12_24), if (locales.isEmpty) '
+        'null else IntakeRules.longTimePattern(locales[0]), ), ) } catch (e: '
+        'Exception) { null } }');
+    expect('applicationLocales'.allMatches(code), hasLength(2));
+    expect('systemLocales'.allMatches(code), hasLength(2));
+    expect(code, isNot(contains('AppCompat')));
+    final rules = _kotlinCode(_intakeRules());
+    expect(
+        rules,
+        contains('fun appLanguageTags(tags: String?): String? = '
+            'tags?.takeIf { it.isEmpty() || it in APP_LANGUAGES }'));
+    // The rules use no Android class (the JVM tests run them for real).
+    expect(
+        _kotlinFunction(rules, 'fun appLanguageTag('),
+        contains('Locale.forLanguageTag(tag.trim())'));
+    expect(
+        rules,
+        contains('fun longTimePattern(locale: Locale): String? = '
+            '(DateFormat.getTimeInstance(DateFormat.LONG, locale) as? '
+            'SimpleDateFormat)?.toPattern()'));
+    expect(_intakeRules(), contains('import java.text.DateFormat\n'));
+    expect(_intakeRules(), contains('import java.util.Locale\n'));
+    _expectJvmTests([
+      'IntakeRules.appLanguageTags(',
+      'IntakeRules.APP_LANGUAGES',
+      'IntakeRules.appLanguageTag(',
+      'IntakeRules.usesTwentyFourHourClock(',
+      'IntakeRules.longTimePattern(',
+    ]);
   });
 }

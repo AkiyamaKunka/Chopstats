@@ -78,13 +78,19 @@
          the app, and Android 14 and later still finish it on such a Back.
          While a shared photo is pending or an analysis the user started is
          in flight, the shell keeps Back at the root in Flutter in every
-         task (SharedPhotosBackGuard). -->
+         task (SharedPhotosBackGuard).
+         localeConfig (res/xml/locales_config.xml): the app's two
+         languages, so Android 13 and later list Chopstats under Settings ›
+         Apps › Language and on its App info page. That setting and the
+         app's own Language row are one
+         (lib/services/settings/app_language_sync.dart). -->
     <application
         android:label="@string/app_name"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:hasFragileUserData="true"
         android:enableOnBackInvokedCallback="true"
+        android:localeConfig="@xml/locales_config"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules">
         <!-- singleTask (review 171, C6): a share while the app runs reaches
@@ -97,7 +103,13 @@
              stay upright, like the iPhone app (Info.plist). For targetSdk 36,
              Android 16 ignores the lock on displays 600 dp and wider (tablets,
              unfolded foldables), where the width-capped layout
-             (ContentWidthCap) keeps the content readable in any orientation. -->
+             (ContentWidthCap) keeps the content readable in any orientation.
+             configChanges: the activity takes these changes itself and is
+             never recreated for them. With locale and layoutDirection, a
+             language picked in Android's settings or in the app (Android 13
+             and later's per-app language) reaches the running app as new
+             locales (FlutterView.onConfigurationChanged), with nothing on
+             screen or in flight lost. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"

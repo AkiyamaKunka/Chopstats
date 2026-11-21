@@ -55,6 +55,7 @@ import '../services/report/notifications.dart';
 import '../services/report/daily_summary.dart';
 import '../services/usual/usual_foods.dart';
 import 'coach_strings.dart';
+import '../services/settings/app_language_sync.dart';
 import '../services/settings/app_settings.dart';
 import 'ai_consent.dart' show SharedPhotoConsentGate;
 import 'background_glue.dart';
@@ -117,6 +118,12 @@ class AppServices {
       // A repair must never block startup; the next launch tries again,
       // and nothing below starts the watcher in that build anyway.
     }
+    // Android 13 and later: the per-app language in Android's settings and
+    // the app's Language row are one (app_language_sync.dart). Agreed
+    // before anything below reads the language and before the first frame,
+    // so the app opens in the one picked in either place. It writes
+    // preferences, so it comes after the notification ask's settling.
+    if (Platform.isAndroid) await AppLanguageSync.startForApp(settings);
     if (Platform.isIOS) {
       // This engine's GPU goes off whenever the app is in the background:
       // no dart:ui decode may start there (platform_decode.dart).
@@ -364,9 +371,13 @@ class AppServices {
       mealsChanged: mealsChangedSignal,
       onMealsChanged: signalMealsChanged,
       inForeground: appEngineInForeground,
-      country: () => deviceRegion(
-            Platform.localeName,
-            PlatformDispatcher.instance.locales.map((l) => l.countryCode),
+      // The phone's own languages on Android 13 and later, which a
+      // language picked for the app never changes (app_language_sync.dart).
+      country: () => phoneRegion(
+            phoneLocales: PhoneSettings.locales,
+            localeName: Platform.localeName,
+            countryCodes:
+                PlatformDispatcher.instance.locales.map((l) => l.countryCode),
           ),
       repliesInChinese: () => settings.repliesInChinese,
       // The location path (design R6c), iOS only: the photo's position

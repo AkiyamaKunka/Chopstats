@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 13+ (android:localeConfig, AndroidManifest.xml): the languages
+     Settings › Apps › Chopstats › Language offers, which are exactly the
+     app's own: lib/l10n/app_en.arb and app_zh.arb (Flutter's
+     supportedLocales, Locale('en') and Locale('zh'), lib/ui/app.dart), and
+     res/values and res/values-zh for the launcher name. The tags are the
+     ones those use: "zh" is the app's Simplified Chinese. The app's
+     Language row and this setting are one (lib/services/settings/
+     app_language_sync.dart). manifest_gate_test keeps this list, the ARB
+     files and MainActivity's in step. -->
+<locale-config xmlns:android="http://schemas.android.com/apk/res/android">
+    <locale android:name="en"/>
+    <locale android:name="zh"/>
+</locale-config>

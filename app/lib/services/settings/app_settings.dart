@@ -1485,6 +1485,17 @@ class AppSettings extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// The background engine's language for its run, never written and
+  /// told to no one: a language picked for the app in Android's settings
+  /// since the app last ran (background_glue.dart takeAndroidLanguageForRun,
+  /// app_language_sync.dart backgroundAppLanguage). The run's cards,
+  /// notification channels and meal names ([repliesInChinese]) follow it;
+  /// the app engine's sync writes it at the app's next launch. Anything
+  /// else is ignored.
+  void takeLanguageForRun(String value) {
+    if (const {'system', 'en', 'zh'}.contains(value)) _appLanguage = value;
+  }
+
   /// Body-data unit system for DISPLAY ('metric' | 'imperial'). Storage
   /// stays metric everywhere; the Chinese UI ignores this and renders
   /// metric regardless (user decision 2026-08-03). App-only (spec §9).

@@ -11,6 +11,9 @@ import 'package:calorie_tracker/core/contracts.dart';
 import 'package:calorie_tracker/l10n/app_localizations.dart';
 import 'package:calorie_tracker/l10n/app_localizations_en.dart';
 import 'package:calorie_tracker/l10n/app_localizations_zh.dart';
+import 'package:calorie_tracker/services/settings/app_language_sync.dart'
+    show PhoneSettings;
+import 'package:calorie_tracker/ui/app_formats.dart';
 import 'package:calorie_tracker/ui/format.dart';
 import 'package:calorie_tracker/ui/l10n.dart' show L10nX;
 import 'package:calorie_tracker/ui/outcome_text.dart';
@@ -333,4 +336,140 @@ void main() {
       });
     }
   });
+
+  // Review of PR 79 (F1, F3): once the app has a language of its own,
+  // Android 13 and later take the FlutterView's 12/24-hour clock from it
+  // (DateFormat.is24HourFormat of the activity, its main locale): a bare
+  // 'en' read 12-hour on a British or Chinese phone whose status bar is
+  // 24-hour. The app's times follow the phone's own clock, as MainActivity
+  // reads it (PhoneSettings.use24HourClock). (Last in this file: the test
+  // binding keeps the view's MediaQuery from test to test and reads the
+  // switch into it only at a metrics change, so a test that re-sent it
+  // leaves the next one's re-send of the same value unseen, the Q7 test's
+  // included.)
+  group("the phone's own clock, where Android reports it apart", () {
+    tearDown(PhoneSettings.reset);
+
+    testWidgets('meal times and Next summary follow it', (tester) async {
+      addTearDown(tester.platformDispatcher.clearAlwaysUse24HourTestValue);
+      addTearDown(tester.view.reset);
+      // The app's bare 'en': Flutter says 12-hour; the phone, 24-hour.
+      tester.platformDispatcher.alwaysUse24HourFormatTestValue = false;
+      PhoneSettings.use24HourClock.value = true;
+      expect(phoneUses24HourClock(), isTrue);
+      expect(displayClock('09:30 PM', localeName: 'en'), '21:30');
+      expect(dayTimeLabel(en, DateTime(2026, 7, 17, 21, 30), now: now),
+          'Today 21:30');
+      PhoneSettings.use24HourClock.value = false;
+      tester.platformDispatcher.alwaysUse24HourFormatTestValue = true;
+      expect(displayClock('09:30 PM', localeName: 'en'), '9:30 PM');
+      // No answer (iOS, Android 12 and lower): Flutter's, as before.
+      PhoneSettings.use24HourClock.value = null;
+      expect(phoneUses24HourClock(), isTrue);
+      tester.platformDispatcher.alwaysUse24HourFormatTestValue = false;
+      expect(phoneUses24HourClock(), isFalse);
+      // The headless engine keeps its 24-hour clock.
+      PhoneSettings.use24HourClock.value = false;
+      tester.view.physicalSize = Size.zero;
+      expect(phoneUses24HourClock(), isTrue);
+    });
+
+    testWidgets("Report Time, its picker's dial and meal times under the "
+        "app's MaterialApp follow it; nothing below is built anew",
+        (tester) async {
+      addTearDown(tester.platformDispatcher.clearAlwaysUse24HourTestValue);
+      // Flutter's clock as the app's bare 'en' gives it: 12-hour. The
+      // phone's own: 24-hour.
+      tester.platformDispatcher.alwaysUse24HourFormatTestValue = false;
+      PhoneSettings.use24HourClock.value = true;
+      var inits = 0, wrapperInits = 0;
+      await tester.pumpWidget(MaterialApp(
+        // Under the scope, as the app's _SystemNavBarStyle is: a widget
+        // with state of its own and no key to be moved by.
+        builder: (context, child) => PhoneClockScope(
+            child: _Kept(onInit: () => wrapperInits++, child: child!)),
+        home: _ClockProbe(onInit: () => inits++),
+      ));
+      // The view's MediaQuery takes Flutter's switch (see above).
+      tester.platformDispatcher.onMetricsChanged!();
+      await tester.pump();
+      expect(find.text('21:30 | 21:30 | true'), findsOneWidget);
+      await tester.tap(find.text('pick'));
+      await tester.pumpAndSettle();
+      expect(find.text('PM'), findsNothing, reason: 'a 24-hour dial');
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+
+      // No answer (iOS, Android 12 and lower): Flutter's own.
+      PhoneSettings.use24HourClock.value = null;
+      await tester.pump();
+      expect(find.text('9:30 PM | 9:30 PM | false'), findsOneWidget);
+      await tester.tap(find.text('pick'));
+      await tester.pumpAndSettle();
+      expect(find.text('PM'), findsOneWidget, reason: 'a 12-hour dial');
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+
+      PhoneSettings.use24HourClock.value = true;
+      await tester.pump();
+      expect(find.text('21:30 | 21:30 | true'), findsOneWidget);
+      expect(inits, 1, reason: 'the screens below keep their state');
+      expect(wrapperInits, 1, reason: 'so does what sits under the scope');
+    });
+  });
+}
+
+/// [child] under a state of its own; [onInit] counts its creations.
+class _Kept extends StatefulWidget {
+  const _Kept({required this.onInit, required this.child});
+  final VoidCallback onInit;
+  final Widget child;
+
+  @override
+  State<_Kept> createState() => _KeptState();
+}
+
+class _KeptState extends State<_Kept> {
+  @override
+  void initState() {
+    super.initState();
+    widget.onInit();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
+}
+
+/// Report Time's way (AppFormats.time), a meal time's (context.clock) and
+/// what a time picker reads (MediaQuery), with a button that opens one;
+/// [onInit] counts its state's creations.
+class _ClockProbe extends StatefulWidget {
+  const _ClockProbe({required this.onInit});
+  final VoidCallback onInit;
+
+  @override
+  State<_ClockProbe> createState() => _ClockProbeState();
+}
+
+class _ClockProbeState extends State<_ClockProbe> {
+  @override
+  void initState() {
+    super.initState();
+    widget.onInit();
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        body: Column(children: [
+          Text('${AppFormats.time(context, const TimeOfDay(hour: 21, minute: 30))}'
+              ' | ${context.clock('09:30 PM')}'
+              ' | ${MediaQuery.alwaysUse24HourFormatOf(context)}'),
+          TextButton(
+            onPressed: () => showTimePicker(
+                context: context,
+                initialTime: const TimeOfDay(hour: 21, minute: 30)),
+            child: const Text('pick'),
+          ),
+        ]),
+      );
 }

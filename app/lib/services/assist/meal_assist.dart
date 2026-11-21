@@ -478,6 +478,26 @@ String? deviceRegion(String localeName, Iterable<String?> countryCodes) {
   return null;
 }
 
+/// The phone's region for the assist ([deviceRegion]): on Android 13 and
+/// later from the phone's own languages ([phoneLocales], language tags,
+/// the preferred first: app_language_sync.dart PhoneSettings.locales),
+/// the first one's region, then the others'. A language picked for the
+/// app comes first in the app's own locales ([localeName],
+/// [countryCodes]), with the region Android's picker gave it: 中文 (中国)
+/// picked for the app on an American phone read as CN, and every branded
+/// meal was skipped as outside the US. Elsewhere, and when Android gave no
+/// answer, from [localeName] and [countryCodes] as before.
+String? phoneRegion({
+  List<String>? phoneLocales,
+  required String localeName,
+  required Iterable<String?> countryCodes,
+}) {
+  if (phoneLocales != null && phoneLocales.isNotEmpty) {
+    return deviceRegion(phoneLocales.first, phoneLocales.map(regionOfLocale));
+  }
+  return deviceRegion(localeName, countryCodes);
+}
+
 /// The first 16 hex characters of SHA-256 over [request]'s canonical JSON:
 /// a stored job answers the meal only while its request still hashes the
 /// same.

@@ -30,6 +30,7 @@ import 'ai_consent.dart'
         ensureAiConsent;
 import 'background_glue.dart' show foregroundCatchUp;
 import 'backup_sheets.dart';
+import 'format.dart' show PhoneClockScope;
 import 'screens/add_flow.dart';
 import 'screens/body_screen.dart';
 import 'l10n.dart';
@@ -298,8 +299,12 @@ class _CalorieTrackerAppState extends State<CalorieTrackerApp> {
           ],
           supportedLocales: const [Locale('en'), Locale('zh')],
           navigatorObservers: [_dialogs],
-          builder: (context, child) => _SystemNavBarStyle(
-              dimming: _dimming, child: child ?? const SizedBox.shrink()),
+          // Times follow the phone's own 12/24-hour clock, which Android 13
+          // and later stop reporting once the app has a language of its
+          // own (format.dart PhoneClockScope).
+          builder: (context, child) => PhoneClockScope(
+              child: _SystemNavBarStyle(
+                  dimming: _dimming, child: child ?? const SizedBox.shrink())),
           home: shell,
         );
     }
