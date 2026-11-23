@@ -1786,6 +1786,8 @@ void main() {
         '- Until `android-v1.7.2` is published, 1.7.1: the bundle of '
             'Release run 9',
         'in the artifact `android-1.7.1-209`, which GitHub keeps 90 days.',
+        // GitHub's expires_at for it: 2027-02-19T19:37Z (13:37 CST).
+        'GitHub deletes `android-1.7.1-209` on 2027-02-19.',
         '- From then on, 1.7.2: the bundle of the run that `android-v1.7.2` '
             "comes from (§ 6.6), in that run's artifact `android-1.7.2-2xx`.",
         'If it is gone before `android-v1.7.2` is out, no run can make it '

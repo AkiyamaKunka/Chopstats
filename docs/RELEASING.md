@@ -1553,7 +1553,8 @@ number and name instead.
    and build number 209 (`BUILD_NUMBER_OFFSET` 200 + run 9), the build
    number GitHub `android-v1.7.1` users have, above `android-v1.7.0`'s 207.
    Never upload a Mac hand build: it gets pubspec's `+11`, below 207.
-   The run page keeps the artifact 90 days (§ 8). If it is gone before
+   The run page keeps the artifact 90 days (§ 8): GitHub deletes
+   `android-1.7.1-209` on 2027-02-19. If it is gone before
    `android-v1.7.2` is out, no run can make it again: Run workflow ›
    branch `main` › lane `play` now builds pubspec's version, 1.7.2, with
    a higher number. Make that run 1.7.2's release (§ 6.6) and upload its
