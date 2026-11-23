@@ -405,6 +405,8 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       widget.routes?.addListener(_onRevealConditions);
       FocusManager.instance.addListener(_onRevealConditions);
     }
+    // The initial link goes to the engine's first shell only: a second or
+    // rebuilt one gets null (UiServices.initialSetupLink, LINK-1).
     final initial = widget.services.initialSetupLink;
     if (initial != null) {
       unawaited(initial().then((uri) {
