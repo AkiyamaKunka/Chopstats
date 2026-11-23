@@ -23,12 +23,8 @@ Lines tied to a release. Re-read them when a new App Store version ships:
    because the policy on main may already describe the next version.
 5. "Android" names the newest GitHub release, its APK file and its size.
    Update them with each release (docs/RELEASING.md § 6.6, step 5). Today
-   that is android-v1.7.0. Its Meta glasses sentence is true for 1.7.0 and
-   1.7.1. When android-v1.7.1 is out, replace it with the one below, here
-   and in README.zh-CN.md, in one commit (from 1.7.1 the switch starts off
-   on Android):
-   - Meta glasses photos are not checked for food on the phone, so Watch Camera Roll leaves them out until you turn on **Meta glasses photos** (Settings › Photos).
-   - Meta 眼镜拍的照片不会先在手机上检查有没有食物，所以在你打开「设置 › 照片」里的「包括 Meta 眼镜拍的照片」之前，「监控相册」不会发送它们。
+   that is android-v1.7.1. Its Meta glasses sentence is true from 1.7.1,
+   the first version in which the switch starts off on Android.
 6. "For developers" names the tag the App Store version was built from. Its
    two test counts are dated lower bounds.
 7. "What it costs": the sentence about Gemini's free tier and what Google may
@@ -270,12 +266,12 @@ Export your data to a file at any time. The [privacy policy](docs/PRIVACY.md) ha
 
 ## Android
 
-Chopstats is not on Google Play. The newest Android version, 1.7.0, is on the [Releases page](https://github.com/AkiyamaKunka/Chopstats/releases/tag/android-v1.7.0) as an APK, the Android install file: `Chopstats-v1.7.0-b207-arm64-v8a.apk`, about 22 MB. This repository's release workflow built and signed it from the commit tagged `android-v1.7.0`. It is newer than the iPhone app in the App Store, which this page describes.
+Chopstats is not on Google Play. The newest Android version, 1.7.1, is on the [Releases page](https://github.com/AkiyamaKunka/Chopstats/releases/tag/android-v1.7.1) as an APK, the Android install file: `Chopstats-v1.7.1-b209-arm64-v8a.apk`, about 22 MB. This repository's release workflow built and signed it from the commit tagged `android-v1.7.1`. It is newer than the iPhone app in the App Store, which this page describes.
 
 - **arm64 phones only.** A phone with a 32-bit processor refuses it.
 - **You install it yourself.** Android asks you to allow installs from your browser or file manager. The app does not update itself: install the next APK from the Releases page when one comes out.
 - **Coming from the 1.4.0 preview?** That August 2026 build is still named Bitewise. It sends photos with their embedded metadata, which includes the location if your camera recorded it, and it asks no permission first. Android cannot install this APK over it. Export your log in the old app, uninstall it, install this APK, then open **Settings › Your Data › Import Data**.
-- **A few things differ from iPhone.** Restaurant nutrition looks up printed brands only and never reads where a photo was taken. Meta glasses photos are not checked for food on the phone: with Watch Camera Roll on, they are sent like any other photo while **Meta glasses photos** is on (Settings › Photos). The screenshots on this page are from an iPhone.
+- **A few things differ from iPhone.** Restaurant nutrition looks up printed brands only and never reads where a photo was taken. Meta glasses photos are not checked for food on the phone, so Watch Camera Roll leaves them out until you turn on **Meta glasses photos** (Settings › Photos). The screenshots on this page are from an iPhone.
 
 Developers can also [build the app from source](#build-from-source).
 
