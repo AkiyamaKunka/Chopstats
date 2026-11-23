@@ -641,6 +641,78 @@ class IntakeRulesTest {
         assertFalse(IntakeRules.REFUSED_SHARE_TYPE.startsWith("text"))
     }
 
+    // --- An item refused for its type carries its name's extension, so
+    // share intake can name an image format Android has no type for: a CR3
+    // in a share of several was called a kind of file (device QA
+    // 2026-11-22, PR81-QA-3).
+
+    private val fileType = IntakeRules.ShareRefusal.FILE_TYPE
+
+    @Test
+    fun anItemRefusedForItsTypeCarriesItsNamesExtension() {
+        // The six RAW formats Android's MIME table does not know.
+        assertEquals("/chopstats-refused/file_type/cr3", IntakeRules.refusedSharePath(fileType, "IMG_0001.CR3"))
+        assertEquals("/chopstats-refused/file_type/3fr", IntakeRules.refusedSharePath(fileType, "B0000001.3FR"))
+        assertEquals("/chopstats-refused/file_type/rwl", IntakeRules.refusedSharePath(fileType, "L1000001.rwl"))
+        assertEquals("/chopstats-refused/file_type/sr2", IntakeRules.refusedSharePath(fileType, "DSC00001.SR2"))
+        assertEquals("/chopstats-refused/file_type/srf", IntakeRules.refusedSharePath(fileType, "DSC00001.srf"))
+        assertEquals("/chopstats-refused/file_type/x3f", IntakeRules.refusedSharePath(fileType, "SDIM0001.X3F"))
+        // Any other: share intake names only an image format it does not
+        // read, so a PDF stays a kind of file there.
+        assertEquals("/chopstats-refused/file_type/pdf", IntakeRules.refusedSharePath(fileType, "menu.pdf"))
+        assertEquals("/chopstats-refused/file_type/txt", IntakeRules.refusedSharePath(fileType, "notes.TXT"))
+        // The part after the last dot, whatever comes before it.
+        assertEquals("/chopstats-refused/file_type/avif", IntakeRules.refusedSharePath(fileType, "a.b.AVIF"))
+        assertEquals("/chopstats-refused/file_type/cr3", IntakeRules.refusedSharePath(fileType, ".cr3"))
+        // Lower-cased as the root locale does it, whatever the phone's.
+        val phone = Locale.getDefault()
+        try {
+            Locale.setDefault(Locale.forLanguageTag("tr-TR"))
+            assertEquals("/chopstats-refused/file_type/ico", IntakeRules.refusedSharePath(fileType, "FAVICON.ICO"))
+        } finally {
+            Locale.setDefault(phone)
+        }
+        // Still a path no file has, outside the share folder.
+        val path = IntakeRules.refusedSharePath(fileType, "IMG_0001.CR3")
+        assertTrue(path, path.startsWith(IntakeRules.REFUSED_SHARE_PATH + "/"))
+        assertFalse(path, File(path).exists())
+        assertFalse(path, path.contains("shared_photos"))
+    }
+
+    @Test
+    fun nothingElseOfTheNameTravels() {
+        // No extension, or a part after the last dot that is no short run
+        // of letters a-z and digits: the reason alone, as before.
+        for (name in listOf(
+            null, "", "IMG_1731500000000", "IMG.", ".", "Dinner with J.Smith", "Lunch with.Sarah",
+            "photo.jpeg2000", "a.cr 3", "a.c-3", "a.c_3", "a.cr3 ", "a.étc",
+            // The Kelvin sign lower-cases to a plain k, and full-width
+            // letters are no a-z: both are left out before lower-casing.
+            "a.K", "a.ＣＲ３",
+        )) {
+            assertEquals("$name", "/chopstats-refused/file_type", IntakeRules.refusedSharePath(fileType, name))
+            assertNull("$name", IntakeRules.refusedExtension(name))
+        }
+        // At most MAX_REFUSED_EXTENSION, the longest image format share
+        // intake names ('avif').
+        assertEquals(4, IntakeRules.MAX_REFUSED_EXTENSION)
+        assertEquals("abcd", IntakeRules.refusedExtension("x.ABCD"))
+        assertNull(IntakeRules.refusedExtension("x.abcde"))
+        // Only a refusal for the item's type carries one.
+        for (refusal in listOf(
+            IntakeRules.ShareRefusal.VIDEO,
+            IntakeRules.ShareRefusal.TOO_BIG,
+            IntakeRules.ShareRefusal.UNREADABLE,
+        )) {
+            assertEquals(
+                refusal.name,
+                "/chopstats-refused/${refusal.token}",
+                IntakeRules.refusedSharePath(refusal, "IMG_0001.CR3"),
+            )
+        }
+        assertEquals("/chopstats-refused/file_type", IntakeRules.refusedSharePath(fileType))
+    }
+
     // --- A shared image whose name has no extension Android knows is
     // copied under the one its type gives, so share intake reads it.
 

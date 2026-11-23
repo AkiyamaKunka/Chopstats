@@ -82,6 +82,18 @@ const _file = ShareRefusal.fileType;
 const _big = ShareRefusal.tooBig;
 const _gone = ShareRefusal.unreadable;
 
+/// MainActivity's refused item whose path ends in [rest], the part after
+/// its folder: 'too_big', or 'file_type/cr3' for an item refused for its
+/// type with its name's extension (IntakeRules.refusedSharePath).
+SharedMediaFile _refusedItem(String rest) => SharedMediaFile(
+    path: '$androidRefusedSharePath/$rest',
+    type: SharedMediaType.file,
+    mimeType: androidRefusedShareType);
+
+/// A copy MainActivity made at [path], as the plugin reports it.
+SharedMediaFile _copied(String path) => SharedMediaFile(
+    path: path, type: SharedMediaType.image, mimeType: 'image/jpeg');
+
 void main() {
   final files = <String, Uint8List>{};
   final cleaned = <String>[];
@@ -161,6 +173,74 @@ void main() {
       ]);
       expect(batch.paths, isEmpty);
       expect(batch.refused, [_big]);
+    });
+
+    // Device QA (2026-11-22, PR81-QA-3): Android has no type for a CR3,
+    // 3FR, RWL, SR2, SRF or X3F, so MainActivity refuses one in a share of
+    // several (no listed types) for its type, before any copy, and the
+    // line called it a kind of file Chopstats can't read. Its refused item
+    // now carries its name's extension, which names it as a copy of that
+    // name is named; nothing else of a name is ever named.
+    test('a refused item\'s extension names an image format share intake '
+        'does not read, as a copy\'s name does; any other leaves it a kind '
+        'of file, and the path without one reads as before', () {
+      final batch = sharedBatchOf([
+        _copied('/cache/shared_photos/1/IMG_1.jpg'),
+        _refusedItem('file_type/cr3'),
+        _refusedItem('file_type/3fr'),
+        _refusedItem('file_type/rwl'),
+        _refusedItem('file_type/sr2'),
+        _refusedItem('file_type/srf'),
+        _refusedItem('file_type/x3f'),
+        _refusedItem('file_type/avif'),
+        // No image format share intake names: a kind of file, as before.
+        _refusedItem('file_type/txt'),
+        _refusedItem('file_type/pdf'),
+        _refusedItem('file_type/jpg'), // read when copied: never named
+        _refusedItem('file_type/mom'), // 'Dinner.Mom': part of a name
+        _refusedItem('file_type'), // the path before PR81-QA-3
+        // Not as MainActivity sends an extension: never named.
+        _refusedItem('file_type/CR3'),
+        _refusedItem('file_type/x.cr3'),
+        _refusedItem('file_type/'),
+        // Only a type refusal's extension is read.
+        _refusedItem('video/cr3'),
+        _refusedItem('too_big/cr3'),
+        // An unknown reason, or more than a reason and an extension.
+        _refusedItem('something_new/cr3'),
+        _refusedItem('file_type/cr3/x'),
+      ]);
+      expect(batch.paths, ['/cache/shared_photos/1/IMG_1.jpg']);
+      expect(batch.refused, [
+        ...List.filled(7, _type),
+        ...List.filled(8, _file),
+        _video,
+        _big,
+        _gone,
+        _gone,
+      ]);
+      expect(batch.photoTypes,
+          ['CR3', '3FR', 'RWL', 'SR2', 'SRF', 'X3F', 'AVIF']);
+      // As the plugin's JSON reads (its Dart side parses every event so).
+      final json = sharedBatchOf([
+        SharedMediaFile.fromMap({
+          'path': '/chopstats-refused/file_type/cr3',
+          'type': 'file',
+          'mimeType': 'application/x-chopstats-refused',
+        }),
+      ]);
+      expect(json.paths, isEmpty);
+      expect(json.refused, [_type]);
+      expect(json.photoTypes, ['CR3']);
+      // The same refusal a copy of that name gives (ShareIntake._fromPath
+      // names the type from the name: sharedPhotoTypeOf).
+      for (final ext in refusedPhotoExtensions) {
+        final item =
+            sharedBatchOf([_refusedItem('file_type/${ext.substring(1)}')]);
+        expect(item.refused, [_type], reason: ext);
+        expect(item.photoTypes, [sharedPhotoTypeOf('IMG_0001$ext')],
+            reason: ext);
+      }
     });
 
     test('the type a refused file\'s name gives: only an image format share '
@@ -336,6 +416,54 @@ void main() {
       expect(intake.photosPending.value, isFalse);
       expect(pending, isNot(contains(true)),
           reason: 'nothing waits on disk for it');
+      expect(read, isEmpty);
+      await sub.cancel();
+    });
+
+    // PR81-QA-3: MainActivity's refused CR3 is the photo type a copy of it
+    // would be, named in its share's note, and still no photo: never
+    // counted (ShareDeliveries.photoCountOf), never read.
+    test('Android: a CR3 MainActivity refused is named in the note, ahead of '
+        'the copies\' refusals, and never counted or read', () async {
+      final source = _Source();
+      final intake = intakeOf(source, android: true);
+      files['/shared/1/a.jpg'] = Uint8List.fromList([1]);
+      files['/shared/2/b.dng'] = Uint8List.fromList([2]);
+      final got = <IntakePhoto>[];
+      final counts = <int>[];
+      final sub = intake.photos().listen((p) {
+        got.add(p);
+        counts.add(intake.photoCountOf(p.shareDelivery!));
+        p.onSettled?.call();
+      });
+      source.controller.add(sharedBatchOf([
+        _copied('/shared/1/a.jpg'),
+        _copied('/shared/2/b.dng'),
+        _refusedItem('file_type/cr3'),
+        _refusedItem('file_type/pdf'),
+      ]));
+      await pumpEventQueue();
+      expect(got.map((p) => p.fileName), ['a.jpg', '']);
+      expect(got.last.refused!.reasons, [_type, _file, _type]);
+      expect(got.last.refused!.photoTypes, ['CR3', 'DNG']);
+      expect(counts, [1, 1], reason: 'the JPEG only');
+      expect(read, ['/shared/1/a.jpg']);
+      await sub.cancel();
+    });
+
+    test('Android, cold start: a launch share of RAW files MainActivity '
+        'refused whole names them, with no photo to count', () async {
+      final source = _Source()
+        ..initial = sharedBatchOf(
+            [_refusedItem('file_type/cr3'), _refusedItem('file_type/x3f')]);
+      final intake = intakeOf(source, android: true);
+      final got = <IntakePhoto>[];
+      final sub = intake.photos().listen(got.add);
+      await pumpEventQueue();
+      expect(got.single.refused!.reasons, [_type, _type]);
+      expect(got.single.refused!.photoTypes, ['CR3', 'X3F']);
+      expect(intake.photoCountOf(1), 0, reason: 'no photo to count');
+      expect(intake.photosPending.value, isFalse);
       expect(read, isEmpty);
       await sub.cancel();
     });
@@ -709,6 +837,31 @@ void main() {
           'files.');
       await sub.cancel();
     });
+
+    // PR81-QA-3: MainActivity sends any short extension of letters and
+    // digits with an item refused for its type; share intake names only an
+    // image format it does not read.
+    test('a refused item\'s extension that is no such image format never '
+        'reaches the line', () async {
+      final source = _Source();
+      final got = <IntakePhoto>[];
+      final sub = intakeOf(source, android: true).photos().listen(got.add);
+      const parts = ['mom', 'copy', 'txt', 'jpg', 'heic'];
+      source.controller.add(sharedBatchOf([
+        for (final part in parts) _refusedItem('file_type/$part'),
+      ]));
+      await pumpEventQueue();
+      for (final l in [en, zh]) {
+        final said = line(l, got.single.refused!).toLowerCase();
+        for (final part in parts) {
+          expect(said, isNot(contains(part)), reason: part);
+        }
+      }
+      expect(line(en, got.single.refused!),
+          "5 shared files were skipped: Chopstats can't read those kinds of "
+          'files.');
+      await sub.cancel();
+    });
   });
 
   // di.dart's share path: share intake → consent gate (told the
@@ -921,6 +1074,97 @@ void main() {
       expect(lines, isEmpty);
       expect(cleaned,
           containsAll(['/shared/2/IMG_2.jpg', '/shared/3/IMG_3.avif']));
+    });
+
+    // Device QA (2026-11-22, PR81-QA-3): a CR3 among several reached the
+    // line as a kind of file; shared alone as an image, it was named.
+    test('Android: a share of a photo and a CR3 MainActivity refused for its '
+        'type: the photo logged, then the CR3 named as a copy of it is',
+        () async {
+      answers = [true];
+      await start();
+      files['/shared/1/IMG_1.jpg'] = Uint8List.fromList([1, 1]);
+      source.controller.add(sharedBatchOf(
+          [_copied('/shared/1/IMG_1.jpg'), _refusedItem('file_type/cr3')]));
+      await pumpEventQueue(times: 100);
+      expect(asked, 1);
+      expect(analyses, 1);
+      expect(lines, [
+        'Meal logged: Beef noodles — ~620 kcal',
+        "One shared file was skipped: Chopstats can't read CR3 photos yet.",
+      ]);
+      expect(read, ['/shared/1/IMG_1.jpg'], reason: 'nothing read for it');
+      // A CR3 shared alone as an image is copied, and its copy's name
+      // gives the same line.
+      files['/shared/2/IMG_2.cr3'] = Uint8List.fromList([2]);
+      source.controller.add(const SharedBatch(['/shared/2/IMG_2.cr3']));
+      await pumpEventQueue(times: 100);
+      expect(lines, hasLength(3));
+      expect(lines.last,
+          "One shared file was skipped: Chopstats can't read CR3 photos yet.");
+      expect(read, ['/shared/1/IMG_1.jpg']);
+      // With a text file too: the CR3 named, the text file a kind of file.
+      files['/shared/3/IMG_3.jpg'] = Uint8List.fromList([3, 3]);
+      source.controller.add(sharedBatchOf([
+        _copied('/shared/3/IMG_3.jpg'),
+        _refusedItem('file_type/x3f'),
+        _refusedItem('file_type/txt'),
+      ]));
+      await pumpEventQueue(times: 100);
+      expect(analyses, 2);
+      expect(lines.sublist(3), [
+        'Meal logged: Beef noodles — ~620 kcal',
+        '2 shared files were skipped, one of them because Chopstats can\'t '
+            'read X3F photos yet.',
+      ]);
+    });
+
+    test('Android: a share of RAW files MainActivity refused while another '
+        'share\'s question is open: not counted as photos, and its line, '
+        'naming them, comes after that share\'s Not now', () async {
+      answers = [];
+      await start();
+      final answer = Completer<bool>();
+      final notSent = <int>[];
+      askUntil(answer, notSent);
+      files['/shared/1/IMG_1.jpg'] = Uint8List.fromList([1, 1]);
+      source.controller.add(const SharedBatch(['/shared/1/IMG_1.jpg']));
+      await pumpEventQueue(times: 100);
+      expect(asked, 1, reason: 'the question is open');
+      source.controller.add(sharedBatchOf(
+          [_refusedItem('file_type/cr3'), _refusedItem('file_type/rwl')]));
+      await pumpEventQueue(times: 100);
+      expect(lines, isEmpty, reason: 'it waits behind the open question');
+      answer.complete(false);
+      await pumpEventQueue(times: 100);
+      expect(notSent, [1], reason: 'the photo asked about, not the RAW files');
+      expect(asked, 1);
+      expect(analyses, 0, reason: 'nothing sent');
+      expect(lines,
+          ["2 shared files were skipped: Chopstats can't read CR3/RWL photos "
+              'yet.']);
+    });
+
+    test('Android: a share of a photo and a CR3 made while the question is '
+        'open goes with its Not now, which counts the photos only', () async {
+      answers = [];
+      await start();
+      final answer = Completer<bool>();
+      final notSent = <int>[];
+      askUntil(answer, notSent);
+      files['/shared/1/IMG_1.jpg'] = Uint8List.fromList([1, 1]);
+      files['/shared/2/IMG_2.jpg'] = Uint8List.fromList([2, 2]);
+      source.controller.add(const SharedBatch(['/shared/1/IMG_1.jpg']));
+      await pumpEventQueue(times: 100);
+      source.controller.add(sharedBatchOf(
+          [_copied('/shared/2/IMG_2.jpg'), _refusedItem('file_type/cr3')]));
+      await pumpEventQueue(times: 100);
+      answer.complete(false);
+      await pumpEventQueue(times: 100);
+      expect(notSent, [2], reason: 'IMG_1 and IMG_2');
+      expect(asked, 1, reason: 'the second share was answered too');
+      expect(analyses, 0);
+      expect(lines, isEmpty);
     });
 
     test('iOS: a share of one AVIF while another share\'s question is open '

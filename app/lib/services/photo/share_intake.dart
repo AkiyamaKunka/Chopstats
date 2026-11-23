@@ -115,10 +115,15 @@ String? sharedPhotoTypeOf(String name) {
 /// the files refused before any copy was made ([refused]: on Android,
 /// MainActivity's, see [androidRefusedShareType]).
 class SharedBatch {
-  const SharedBatch(this.paths, {this.refused = const []});
+  const SharedBatch(this.paths,
+      {this.refused = const [], this.photoTypes = const []});
 
   final List<String> paths;
   final List<ShareRefusal> refused;
+
+  /// The type of each [ShareRefusal.photoType] file of [refused] ('CR3'),
+  /// in the same order (RefusedShareFiles.photoTypes).
+  final List<String> photoTypes;
 }
 
 /// receive_sharing_intent seam so tests can fake the platform stream.
@@ -134,18 +139,21 @@ abstract class SharedMediaSource {
 /// before any copy (MainActivity.kt withSafeShares,
 /// IntakeRules.REFUSED_SHARE_TYPE). Such an item reaches the plugin as a
 /// file:// URI that names no file, [androidRefusedSharePath] and the
-/// reason, which the plugin hands on as the item's path without opening
-/// it; it is no image, so nothing reads it. It lets the share's refusals
-/// travel in the share's own event, the launch share's and a held one's
-/// included, and a share whose every item was refused still arrives.
+/// reason (and, for one refused for its type, its name's extension),
+/// which the plugin hands on as the item's path without opening it; it is
+/// no image, so nothing reads it. It lets the share's refusals travel in
+/// the share's own event, the launch share's and a held one's included,
+/// and a share whose every item was refused still arrives.
 const String androidRefusedShareType = 'application/x-chopstats-refused';
 
 /// The folder part of a refused item's path (IntakeRules.REFUSED_SHARE_PATH):
-/// `/chopstats-refused/<reason>`, a path no file has.
+/// `/chopstats-refused/<reason>`, or `/chopstats-refused/file_type/cr3`
+/// for an item refused for its type whose name gives an extension
+/// (IntakeRules.refusedSharePath); a path no file has.
 const String androidRefusedSharePath = '/chopstats-refused';
 
-/// The reasons MainActivity gives a refused item, the last part of its
-/// path (IntakeRules.ShareRefusal's tokens).
+/// The reasons MainActivity gives a refused item, the part of its path
+/// after [androidRefusedSharePath] (IntakeRules.ShareRefusal's tokens).
 const Map<String, ShareRefusal> androidRefusalTokens = {
   'video': ShareRefusal.video,
   'file_type': ShareRefusal.fileType,
@@ -153,18 +161,56 @@ const Map<String, ShareRefusal> androidRefusalTokens = {
   'unreadable': ShareRefusal.unreadable,
 };
 
+/// An extension as MainActivity sends it with a refused item
+/// (IntakeRules.refusedExtension): letters a-z and digits only.
+final RegExp _refusedItemExtension = RegExp(r'^[a-z0-9]+$');
+
+/// What MainActivity's refused item at [path] says
+/// (IntakeRules.refusedSharePath): its reason, the part after
+/// [androidRefusedSharePath], and, for an item refused for its type
+/// (file_type), the extension of its name that may follow:
+/// `/chopstats-refused/file_type/cr3`. Android has no type for a CR3, 3FR,
+/// RWL, SR2, SRF or X3F, so in a share of several with no listed types
+/// such an image is refused before any copy, and the line called it a
+/// kind of file Chopstats can't read. Now it is the refusal a copy of
+/// that name gives (ShareIntake._fromPath): a photo type, named (device
+/// QA 2026-11-22, PR81-QA-3). As there, only an extension in
+/// [refusedPhotoExtensions] is named ([sharedPhotoTypeOf]), so no other
+/// part of a sender's name reaches the line: with any other extension
+/// the item stays a kind of file, and another reason's extension is not
+/// read. A path with no extension reads as before; an unknown reason, or
+/// more parts than a reason and an extension, as unreadable.
+(ShareRefusal, String?) _androidRefusalOf(String path) {
+  const folder = '$androidRefusedSharePath/';
+  final parts = path.startsWith(folder)
+      ? path.substring(folder.length).split('/')
+      : [fileBaseName(path)];
+  final why = parts.length <= 2 ? androidRefusalTokens[parts.first] : null;
+  if (why == null) return (ShareRefusal.unreadable, null);
+  final extension = parts.length == 2 ? parts.last : '';
+  final type = why == ShareRefusal.fileType &&
+          _refusedItemExtension.hasMatch(extension)
+      ? sharedPhotoTypeOf('.$extension')
+      : null;
+  return type == null ? (why, null) : (ShareRefusal.photoType, type);
+}
+
 /// The plugin's [files] for one share as a [SharedBatch]: the images'
 /// paths, and a refusal for each item that is no image. MainActivity's
 /// refused items say why ([androidRefusedShareType]; an unknown reason
-/// reads as unreadable); a video or another file the plugin reports as it
-/// is counts by its kind. Text and links are no file: left out.
+/// reads as unreadable), and one refused for its type whose extension
+/// gives a photo type is that type, named ([_androidRefusalOf]); a video
+/// or another file the plugin reports as it is counts by its kind. Text
+/// and links are no file: left out.
 SharedBatch sharedBatchOf(List<SharedMediaFile> files) {
   final paths = <String>[];
   final refused = <ShareRefusal>[];
+  final photoTypes = <String>[];
   for (final f in files) {
     if (f.mimeType == androidRefusedShareType) {
-      refused.add(
-          androidRefusalTokens[fileBaseName(f.path)] ?? ShareRefusal.unreadable);
+      final (why, type) = _androidRefusalOf(f.path);
+      refused.add(why);
+      if (type != null) photoTypes.add(type);
       continue;
     }
     switch (f.type) {
@@ -178,7 +224,7 @@ SharedBatch sharedBatchOf(List<SharedMediaFile> files) {
         break;
     }
   }
-  return SharedBatch(paths, refused: refused);
+  return SharedBatch(paths, refused: refused, photoTypes: photoTypes);
 }
 
 class ReceiveSharingIntentSource implements SharedMediaSource {
@@ -520,11 +566,13 @@ class ShareIntake implements ShareDeliveries {
     }
 
     Future<void> emitPaths(List<String> paths, int delivery,
-        {List<ShareRefusal> refusedBefore = const []}) async {
+        {List<ShareRefusal> refusedBefore = const [],
+        List<String> typesBefore = const []}) async {
       // The share's files that gave no photo: those refused before any
-      // copy (MainActivity), then the copies refused here.
+      // copy (MainActivity), then the copies refused here; the types of
+      // those refused for a photo type, in the same order.
       final refused = [...refusedBefore];
-      final photoTypes = <String>[];
+      final photoTypes = [...typesBefore];
       // [counted]: the copy was one of the delivery's photos as far as was
       // known ([_namedNoPhoto] never was).
       void gaveNoPhoto(ShareRefusal why, {String? type, bool counted = true}) {
@@ -616,8 +664,8 @@ class ShareIntake implements ShareDeliveries {
       if (_copiesWait && paths.isNotEmpty) _untaken[delivery] = [...paths];
       _notePending();
       reading = reading
-          .then((_) =>
-              emitPaths(paths, delivery, refusedBefore: batch.refused))
+          .then((_) => emitPaths(paths, delivery,
+              refusedBefore: batch.refused, typesBefore: batch.photoTypes))
           .catchError((Object _) {});
     }
 
