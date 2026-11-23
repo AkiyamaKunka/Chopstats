@@ -20,6 +20,7 @@ import '../services/photo/photo_library.dart';
 import '../services/usual/usual_foods.dart' show UsualFoods;
 import 'ai_consent.dart' show SharedPhotoConsentGate;
 import 'meal_in_use.dart';
+import 'meal_reveal.dart' show MealReveals;
 import 'meal_thumbs.dart';
 import 'photo_pipeline.dart';
 import 'restaurant_assist_controls.dart';
@@ -474,6 +475,12 @@ class UiServices {
   /// most tests.
   final Future<SaveFileStatus?> Function()? lateSaveResult;
 
+  /// Android: "show me that meal", from the View on a shared photo's
+  /// snackbar and a tap on a Logged meals card. The shell attaches and goes
+  /// to the meal, only over itself (meal_reveal.dart). Null on iPhone and
+  /// in most tests.
+  final MealReveals? mealReveals;
+
   const UiServices({
     required this.dao,
     required this.analyzer,
@@ -510,5 +517,6 @@ class UiServices {
     this.cloudBackup,
     this.watchRetiredNotice,
     this.lateSaveResult,
+    this.mealReveals,
   });
 }

@@ -48,7 +48,10 @@ class ReportNotifier {
     int? mealCardIdSeed,
     Future<Map<int, String?>> Function()? pendingPayloads,
     bool mealCards = true,
+    void Function(String? payload)? onTap,
   })  : _plugin = plugin ?? FlutterLocalNotificationsPlugin(),
+        // ignore: prefer_initializing_formals
+        _onTap = onTap,
         // ignore: prefer_initializing_formals
         _mealCards = mealCards,
         _clock = clock ?? DateTime.now,
@@ -171,6 +174,12 @@ class ReportNotifier {
   /// deleted ([_syncChannel]); anything posted as a meal card would go on
   /// the summary's channel.
   final bool _mealCards;
+
+  /// A card of this app tapped while the app runs: its payload (a Logged
+  /// meals card names its meal, ui/meal_reveal.dart). Null: a tap only
+  /// opens the app, as it always did (iPhone, the background engines,
+  /// tests). A cold start from a tap is read by [launchPayload] instead.
+  final void Function(String? payload)? _onTap;
 
   /// Set when Android would not create the meal-card channel (or could not
   /// say whether the summary's is blocked): meal cards then go on the
@@ -328,9 +337,45 @@ class ReportNotifier {
       iOS: DarwinInitializationSettings(),
       macOS: DarwinInitializationSettings(),
     );
-    await _plugin.initialize(settings: settings);
+    final onTap = _onTap;
+    await _plugin.initialize(
+        settings: settings,
+        onDidReceiveNotificationResponse: onTap == null
+            ? null
+            : (response) {
+                // The card itself, not one of its action buttons (none
+                // has any).
+                if (response.notificationResponseType !=
+                    NotificationResponseType.selectedNotification) {
+                  return;
+                }
+                try {
+                  onTap(response.payload);
+                } catch (_) {}
+              });
     await _syncChannel();
     _initialized = true;
+  }
+
+  /// The payload of the card whose tap started the app, if one did; null
+  /// otherwise, and when the platform cannot say. Android does not report
+  /// a start from Recents, or an activity it recreated, as a tap
+  /// (MainActivity empties a recreated activity's intent). Never throws.
+  Future<String?> launchPayload() async {
+    if (_presenter != null) return null; // tests: no platform plugin
+    try {
+      final details = await _plugin.getNotificationAppLaunchDetails();
+      if (details == null || !details.didNotificationLaunchApp) return null;
+      final response = details.notificationResponse;
+      if (response == null ||
+          response.notificationResponseType !=
+              NotificationResponseType.selectedNotification) {
+        return null;
+      }
+      return response.payload;
+    } catch (_) {
+      return null;
+    }
   }
 
   /// Parse a 24-hour "HH:mm" string. Throws [ArgumentError] on anything else.
@@ -648,9 +693,10 @@ class ReportNotifier {
   /// Meal card for watcher-logged meals (spec §6 auto intake surfaces its
   /// §5.4 result card as a notification), on the meal-card channel. Ids
   /// increment so multiple auto-logged meals stack instead of overwriting
-  /// each other.
-  Future<void> showMealCard(String title, String body) =>
-      _present(_nextMealCardId++, title, body, meal: true);
+  /// each other. [payload] comes back with a tap on the card (a meal
+  /// card's names its meal: ui/meal_reveal.dart MealReveal.payload).
+  Future<void> showMealCard(String title, String body, {String? payload}) =>
+      _present(_nextMealCardId++, title, body, meal: true, payload: payload);
 
   /// The daily coach summary. Shares the daily-report id so a re-post
   /// REPLACES rather than stacks — one summary per day, by construction
@@ -659,7 +705,7 @@ class ReportNotifier {
       _present(dailyReportNotificationId, title, body);
 
   Future<void> _present(int id, String title, String body,
-      {bool meal = false}) async {
+      {bool meal = false, String? payload}) async {
     final presenter = _presenter;
     if (presenter != null) return presenter(id, title, body);
     await _syncChannel();
@@ -667,6 +713,7 @@ class ReportNotifier {
         id: id,
         title: title,
         body: body,
-        notificationDetails: _details(meal: meal));
+        notificationDetails: _details(meal: meal),
+        payload: payload);
   }
 }

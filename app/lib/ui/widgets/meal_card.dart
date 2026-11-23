@@ -57,6 +57,10 @@ class MealCard extends StatelessWidget {
       this.assistUnseen = false,
       this.usualChip});
 
+  /// Around the card's cell (a reveal's ring follows the cell inside it:
+  /// widgets/reveal_highlight.dart).
+  static const EdgeInsets margin = EdgeInsets.fromLTRB(16, 8, 16, 0);
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -64,7 +68,7 @@ class MealCard extends StatelessWidget {
     final items = safeFoodItems(a); // spec §3.5: never iterate the raw field
     final assistChip = AssistView.of(a).chipText(context.l10n);
     return GroupedCard(
-      margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      margin: margin,
       onTap: onTap,
       child: Padding(
           padding: const EdgeInsets.all(12),
