@@ -6,8 +6,8 @@ PNGs live in `../screenshots-marketing/en-US/` and `../screenshots-marketing/zh-
 The plain screenshots in `../screenshots/` are untouched.
 
 Use this set only while the App Store build keeps the 1.6 look (1.6.0, 1.6.1).
-A release with a new look (1.7.1, the native iOS design; the iPhone skips 1.7.0)
-needs new captures first:
+A release with a new look (1.7.2, the native iOS design; the iPhone skips 1.7.0
+and 1.7.1) needs new captures first:
 App Review guideline 2.3 wants screenshots that match the current version.
 
 On the owner's OK (2026-11-12) the en-US set went to App Store version
