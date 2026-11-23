@@ -124,21 +124,14 @@ void main() {
     test('images are paths; MainActivity\'s refused items say why; a video '
         'or another file is refused by its kind; text and links are no '
         'file', () {
-      SharedMediaFile refusedItem(String reason) => SharedMediaFile(
-          path: '$androidRefusedSharePath/$reason',
-          type: SharedMediaType.file,
-          mimeType: androidRefusedShareType);
       final batch = sharedBatchOf([
-        SharedMediaFile(
-            path: '/cache/shared_photos/1/IMG_1.jpg',
-            type: SharedMediaType.image,
-            mimeType: 'image/jpeg'),
-        refusedItem('too_big'),
-        refusedItem('video'),
-        refusedItem('file_type'),
-        refusedItem('unreadable'),
+        _copied('/cache/shared_photos/1/IMG_1.jpg'),
+        _refusedItem('too_big'),
+        _refusedItem('video'),
+        _refusedItem('file_type'),
+        _refusedItem('unreadable'),
         // A reason this build does not know reads as unreadable.
-        refusedItem('something_new'),
+        _refusedItem('something_new'),
         // Typed as an image by mistake: still a refusal, never a path.
         SharedMediaFile(
             path: '$androidRefusedSharePath/too_big',
@@ -1145,6 +1138,11 @@ void main() {
               'yet.']);
     });
 
+    // A regression guard, not a test that fails on the code before (review
+    // of PR81-QA-3, 2026-11-23): a refused item is never a copy, so it never
+    // counted as a photo. The CR3 is now the photo type an AVIF copy is, and
+    // like the AVIF above (PR81-QA-1) it must stay out of the Not now's
+    // count.
     test('Android: a share of a photo and a CR3 made while the question is '
         'open goes with its Not now, which counts the photos only', () async {
       answers = [];
