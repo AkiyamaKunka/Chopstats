@@ -2110,11 +2110,13 @@ void main() {
   // photos, and asks nothing for a share of refused items alone. One
   // refused once its name is known, for its type, its size or a failed
   // copy, carries its name's extension and nothing else of the name
-  // (/chopstats-refused/file_type/cr3, /chopstats-refused/too_big/cr3), so
-  // share intake names an image format it does not read as it names a
-  // copy: a CR3 among several, which Android has no type for (device QA
-  // 2026-11-22, PR81-QA-3), and a RAW file over 25 MB, which was said to be
-  // over 25 MB (device QA 2026-11-23, PR81-QA-4).
+  // (/chopstats-refused/file_type/cr3, /chopstats-refused/too_big/cr3; for
+  // its size or a failed copy, its copy's name's when its own gives none:
+  // the one its image type gives), so share intake names an image format
+  // it does not read as it names a copy: a CR3 among several, which
+  // Android has no type for (device QA 2026-11-22, PR81-QA-3), and a RAW
+  // file over 25 MB, which was said to be over 25 MB (device QA
+  // 2026-11-23, PR81-QA-4).
   test('a shared item that gives no copy goes on as a refused item, which '
       'the plugin hands Dart unread', () {
     final code = _kotlinCode(_mainActivity());
@@ -2128,30 +2130,36 @@ void main() {
       'if (itemType?.startsWith("image") != true) { refused.add('
           'IntakeRules.refusedSharePath(IntakeRules.typeRefusal(itemType), '
           'name)) return@forEachIndexed }',
-      'val (copy, copied) = copyShare(uri, copyName(uri, name, itemType)) '
-          'if (copy == null) { refused.add( IntakeRules.refusedSharePath( if '
-          '(copied == Copied.TOO_BIG) IntakeRules.ShareRefusal.TOO_BIG else '
-          'IntakeRules.ShareRefusal.UNREADABLE, name, ), ) '
+      'val copyAs = copyName(uri, name, itemType) named = '
+          'IntakeRules.failedCopyName(name, copyAs) val (copy, copied) = '
+          'copyShare(uri, copyAs) if (copy == null) { refused.add( '
+          'IntakeRules.refusedSharePath( if (copied == Copied.TOO_BIG) '
+          'IntakeRules.ShareRefusal.TOO_BIG else '
+          'IntakeRules.ShareRefusal.UNREADABLE, named, ), ) '
           'return@forEachIndexed }',
       '} catch (e: Exception) { refused.add(IntakeRules.refusedSharePath('
           'IntakeRules.ShareRefusal.UNREADABLE, named)) } }',
     ]) {
       expect(safe, contains(refused));
     }
-    // A failure once the name is known carries the name its provider
-    // showed (shareName), set once, before anything else can fail; never
-    // the copy's name, which may end in an extension the sender's name
-    // did not have (copyName).
+    // A failure once the name is known carries the extension of the name
+    // its provider showed (shareName), set right after the name check,
+    // before anything else can fail. Once the copy's name is known, it is
+    // a failed copy's (IntakeRules.failedCopyName): the provider's name
+    // when that gives an extension, else the copy's name, which has the
+    // one its image type gives. A DNG whose provider showed no extension
+    // was said to be over 25 MB, where a smaller one was named (review of
+    // PR81-QA-4). Nothing else sets it.
     expect(
         safe,
         contains('streams.forEachIndexed { i, uri -> var named: String? = '
             'null try { if (uri == null) {'));
-    expect(RegExp(r'\bnamed = ').allMatches(safe), hasLength(1));
+    expect(RegExp(r'\bnamed = ').allMatches(safe), hasLength(2));
     // A refused item's path is only ever IntakeRules.refusedSharePath's
     // (the five calls above: the two before the name is known given none,
-    // the type refusal and a failed copy given the name, the catch the
-    // name once known), so nothing of a sender's name travels but the
-    // extension its JVM tests allow.
+    // the type refusal given the name, a failed copy given
+    // failedCopyName's, the catch the one known by then), so nothing of a
+    // sender's name travels but the extension its JVM tests allow.
     expect(safe, contains('val refused = ArrayList<String>()'));
     final adds = RegExp(r'refused\.add\(').allMatches(safe).length;
     expect(adds, 5);
@@ -2194,6 +2202,12 @@ void main() {
             'ShareRefusal.TOO_BIG, ShareRefusal.UNREADABLE -> '
             'refusedExtension(name) ShareRefusal.VIDEO -> null } return if '
             '(ext == null) path else "\$path/\$ext" }'));
+    // A failed copy's name: the provider's when it gives an extension,
+    // else the copy's (review of PR81-QA-4).
+    expect(
+        rules,
+        contains('fun failedCopyName(name: String, copyName: String): String '
+            '= if (refusedExtension(name) != null) name else copyName'));
     final tokens = RegExp(r'enum class ShareRefusal\(val token: String\) '
             r'\{([^}]*)\}')
         .firstMatch(rules)
@@ -2223,7 +2237,9 @@ void main() {
       'nothingElseOfTheNameTravels',
       'anItemOverTheCapOrUnreadableCarriesItsNamesExtension',
       'everyRefusalButAVideosCarriesTheSameExtensionAndNothingElse',
+      'aFailedCopyCarriesItsNamesExtensionElseItsCopysName',
       'IntakeRules.refusedExtension(',
+      'IntakeRules.failedCopyName(',
     ]);
     // receive_sharing_intent, as the app builds it: a several-item share
     // gives each item its listed type, a type that is no image, video or
@@ -2277,11 +2293,13 @@ void main() {
             'types.getExtensionFromMimeType(it) } return '
             'IntakeRules.copyName(name, { types.hasExtension(it) }) { '
             'extensionOf(itemType) ?: extensionOf(providerType(uri)) }'));
-    // Only an image's copy: after the type check, before the copy.
+    // Only an image's copy: after the type check, before the copy, which
+    // is made under it.
     final safe = _kotlinFunction(code, 'private fun withSafeShares(');
     expect(
         safe.indexOf('if (itemType?.startsWith("image") != true)'),
-        lessThan(safe.indexOf('copyShare(uri, copyName(uri, name, itemType))')));
+        lessThan(safe.indexOf('val copyAs = copyName(uri, name, itemType)')));
+    expect(safe, contains('copyShare(uri, copyAs)'));
     expect('copyName('.allMatches(safe), hasLength(1));
     // An item of a multi-file share with no listed type and a name Android
     // cannot type takes its provider's type (device QA 2026-11-22,

@@ -410,8 +410,10 @@ class MainActivity : FlutterActivity() {
     /// file:// URI that names no file (IntakeRules.refusedSharePath), which
     /// the plugin hands Dart as its path. One left out once its name is
     /// known, for its type, its size or a failed copy, carries its name's
-    /// extension and nothing else of the name, so share intake names an
-    /// image format it does not read as it names a copy's: a CR3 among
+    /// extension and nothing else of the name (for its size or a failed
+    /// copy, its copy's name's when its own gives none: the extension its
+    /// image type gives, IntakeRules.failedCopyName), so share intake names
+    /// an image format it does not read as it names a copy's: a CR3 among
     /// several, which Android has no type for (PR81-QA-3), and a RAW file
     /// over 25 MB (PR81-QA-4). A video carries none. Share intake says how
     /// many were skipped and why, after the share's photos (they used to
@@ -447,8 +449,10 @@ class MainActivity : FlutterActivity() {
         } catch (e: Exception) {
         }
         streams.forEachIndexed { i, uri ->
-            // The item's name once its provider has given it, for a
-            // failure after that (the catch below).
+            // The name whose extension a failure of this item carries (the
+            // catch below): its provider's once it has given one, then,
+            // once its copy's name is known, the one a failed copy carries
+            // (IntakeRules.failedCopyName).
             var named: String? = null
             try {
                 if (uri == null) {
@@ -482,21 +486,29 @@ class MainActivity : FlutterActivity() {
                     refused.add(IntakeRules.refusedSharePath(IntakeRules.typeRefusal(itemType), name))
                     return@forEachIndexed
                 }
-                // Over MAX_SHARE_BYTES, or a copy that failed: the copy
-                // has stopped and is gone (copyShare). The name's
-                // extension goes too, so an image format share intake does
-                // not read is named, as its copy would be, and not said to
-                // be over 25 MB or unreadable: Chopstats reads no file of
-                // that format, of any size (device QA 2026-11-23,
-                // PR81-QA-4). It is the name its provider shows, as for the
-                // type refusal above.
-                val (copy, copied) = copyShare(uri, copyName(uri, name, itemType))
+                // Over MAX_SHARE_BYTES, or a copy that failed: nothing of
+                // it is kept. A size its provider gives over the cap
+                // refuses it before it is opened; a copy that runs past
+                // the cap, or fails, is deleted with its folder
+                // (copyShare). Its refusal carries an extension too, so an
+                // image format share intake does not read is named, as its
+                // copy would be, and not said to be over 25 MB or
+                // unreadable: Chopstats reads no file of that format, of
+                // any size (device QA 2026-11-23, PR81-QA-4). It is the
+                // extension of the name its provider shows, as for the
+                // type refusal above, else of its copy's name, which has
+                // the one its image type gives: a DNG whose provider shows
+                // no extension was said to be over 25 MB, where a smaller
+                // one was named (IntakeRules.failedCopyName).
+                val copyAs = copyName(uri, name, itemType)
+                named = IntakeRules.failedCopyName(name, copyAs)
+                val (copy, copied) = copyShare(uri, copyAs)
                 if (copy == null) {
                     refused.add(
                         IntakeRules.refusedSharePath(
                             if (copied == Copied.TOO_BIG) IntakeRules.ShareRefusal.TOO_BIG
                             else IntakeRules.ShareRefusal.UNREADABLE,
-                            name,
+                            named,
                         ),
                     )
                     return@forEachIndexed
@@ -504,8 +516,9 @@ class MainActivity : FlutterActivity() {
                 copies.add(Uri.fromFile(copy))
                 copyTypes.add(itemType)
             } catch (e: Exception) {
-                // This item only: the others still go. With its name's
-                // extension once that is known, as for a failed copy.
+                // This item only: the others still go. With the extension
+                // its name gives once that is known, and a failed copy's
+                // once its copy's name is (named).
                 refused.add(IntakeRules.refusedSharePath(IntakeRules.ShareRefusal.UNREADABLE, named))
             }
         }

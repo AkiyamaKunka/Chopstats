@@ -842,6 +842,64 @@ class IntakeRulesTest {
         assertEquals(255, IntakeRules.MAX_NAME_BYTES)
     }
 
+    // --- An image that was not copied (over the share cap, or a copy that
+    // failed) carries the extension of the name its provider shows, else
+    // of its copy's name: a DNG whose provider showed no extension was
+    // said to be over 25 MB, where a smaller one was named by its copy's
+    // name (device QA 2026-11-23, review of PR81-QA-4).
+
+    /// The refused item's path for an image whose provider shows [name]
+    /// and whose type gives [typeExt], as withSafeShares builds it.
+    private fun failedCopy(refusal: IntakeRules.ShareRefusal, name: String, typeExt: String?): String =
+        IntakeRules.refusedSharePath(refusal, IntakeRules.failedCopyName(name, copyName(name, typeExt)))
+
+    @Test
+    fun aFailedCopyCarriesItsNamesExtensionElseItsCopysName() {
+        for (refusal in listOf(tooBig, unreadable)) {
+            val reason = "/chopstats-refused/${refusal.token}"
+            // No extension, or none refusedExtension takes: the copy's,
+            // which its image type gives.
+            assertEquals("$reason/dng", failedCopy(refusal, "IMG_1731500000000", "dng"))
+            assertEquals("$reason/dng", failedCopy(refusal, "Lunch with.Sarah", "dng"))
+            assertEquals("$reason/avif", failedCopy(refusal, "Dinner with J.Smith", "avif"))
+            assertEquals("$reason/nef", failedCopy(refusal, "IMG.", "nef"))
+            // A photo Chopstats reads is still over 25 MB or unreadable
+            // there: share intake names only a format it does not read.
+            assertEquals("$reason/jpg", failedCopy(refusal, "IMG_1731500000000", "jpg"))
+            // No plain extension from its type, or a name that would grow
+            // too long: the reason alone, as before.
+            assertEquals(reason, failedCopy(refusal, "IMG_1731500000000", null))
+            assertEquals(reason, failedCopy(refusal, "IMG_1731500000000", "j/pg"))
+            assertEquals(reason, failedCopy(refusal, "a".repeat(IntakeRules.MAX_NAME_BYTES - 3), "dng"))
+            // The provider's extension first, known to Android or not: a
+            // CR3 shared as a JPEG (copied as IMG_0001.CR3.jpg) is still
+            // named a CR3, and a JPEG shared as a DNG is still a JPEG.
+            assertEquals("$reason/cr3", failedCopy(refusal, "IMG_0001.CR3", "jpg"))
+            assertEquals("$reason/jpg", failedCopy(refusal, "IMG_0001.JPG", "dng"))
+            // So a short one share intake does not name stays too.
+            assertEquals("$reason/mom", failedCopy(refusal, "Dinner.Mom", "dng"))
+        }
+        assertEquals("IMG_0001.CR3", IntakeRules.failedCopyName("IMG_0001.CR3", "IMG_0001.CR3.jpg"))
+        assertEquals("IMG_1.dng", IntakeRules.failedCopyName("IMG_1", "IMG_1.dng"))
+        // Nothing else of the name travels: the extension carried is the
+        // one its own name gives (refusedExtension), or its type's.
+        for (name in listOf(
+            "IMG_0001.CR3", "B0000001.3FR", "a.b.AVIF", ".cr3", "notes.TXT", "x.ABCD", "",
+            "IMG_1731500000000", "IMG.", ".", "Dinner with J.Smith", "Lunch with.Sarah",
+            "photo.jpeg2000", "a.cr 3", "a.c-3", "a.c_3", "a.cr3 ", "a.\u00e9tc", "a.K", "a.\uff23\uff32\uff13", "x.abcde",
+        )) {
+            for (typeExt in listOf("dng", "jpg", "abcde", null)) {
+                val own = IntakeRules.refusedExtension(name)
+                val carried = IntakeRules.refusedExtension(IntakeRules.failedCopyName(name, copyName(name, typeExt)))
+                if (own != null) {
+                    assertEquals("$name $typeExt", own, carried)
+                } else {
+                    assertTrue("$name $typeExt -> $carried", carried == null || carried == typeExt)
+                }
+            }
+        }
+    }
+
     // --- Only a regular file in the cache is ever saved out.
 
     private fun layout(): Triple<File, File, File> {

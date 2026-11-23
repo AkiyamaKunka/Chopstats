@@ -265,12 +265,14 @@ internal object IntakeRules {
     ///   any copy, and the line called it a kind of file Chopstats can't
     ///   read, where a copy of it is named ("Chopstats can't read CR3
     ///   photos yet") (device QA 2026-11-22, PR81-QA-3).
-    /// - TOO_BIG and UNREADABLE: an image format share intake does not
-    ///   read is copied when it is shared alone, or when it is typed as an
-    ///   image among several (a DNG, NEF or AVIF). A copy of it over 25 MB,
-    ///   or one that failed, was said to be over 25 MB or unreadable,
-    ///   although Chopstats reads no file of that format, of any size. RAW
-    ///   files are often over 25 MB (device QA 2026-11-23, PR81-QA-4).
+    /// - TOO_BIG and UNREADABLE: MainActivity copies an image format share
+    ///   intake does not read, up to 25 MB, when it is shared alone, or
+    ///   when it is typed as an image among several (a DNG, NEF or AVIF).
+    ///   One over 25 MB (by the size its provider gives, before it is
+    ///   opened, or counted while copying), or whose copy failed, was said
+    ///   to be over 25 MB or unreadable, although Chopstats reads no file
+    ///   of that format, of any size. RAW files are often over 25 MB
+    ///   (device QA 2026-11-23, PR81-QA-4). Its [name] is failedCopyName's.
     /// A video carries none: its line says it is a video. A name with no
     /// such extension gives the reason alone, as before.
     fun refusedSharePath(refusal: ShareRefusal, name: String? = null): String {
@@ -305,6 +307,20 @@ internal object IntakeRules {
         val named = if (name.endsWith('.')) name + ext else "$name.$ext"
         return if (named.toByteArray(Charsets.UTF_8).size > MAX_NAME_BYTES) name else named
     }
+
+    /// The name whose extension a shared image's refused item carries when
+    /// it was not copied: over MAX_SHARE_BYTES, or a copy that failed
+    /// (refusedSharePath). It is [name] as its provider shows it when that
+    /// gives an extension (refusedExtension), else [copyName], the name it
+    /// was to be copied under (copyName), which has the extension its image
+    /// type gives. A provider may show a name without one
+    /// (IMG_1731500000000, "Lunch with.Sarah"): such a DNG under 25 MB was
+    /// named by its copy's name, and one over 25 MB was said to be over
+    /// 25 MB (device QA 2026-11-23, review of PR81-QA-4). The provider's
+    /// extension comes first, so a CR3 shared as image/jpeg, copied as
+    /// IMG_0001.CR3.jpg, is still named a CR3 when it is over 25 MB.
+    fun failedCopyName(name: String, copyName: String): String =
+        if (refusedExtension(name) != null) name else copyName
 
     /// Whether [path] is [dir] or lies inside it once both are resolved
     /// (symbolic links included). True when that cannot be told: callers

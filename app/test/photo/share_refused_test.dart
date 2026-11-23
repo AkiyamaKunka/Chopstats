@@ -585,11 +585,16 @@ void main() {
       await sub.cancel();
     });
 
-    // What a copy of a name over 25 MB gives (ShareIntake._fromPath looks
-    // at its name before its size), MainActivity's refused item of that
-    // name over 25 MB gives too (PR81-QA-4).
-    test('Android: an item MainActivity refused as over 25 MB gets the '
-        'refusal a copy of that name over 25 MB gets', () async {
+    // For an image format, one share intake reads or one it names
+    // (refusedPhotoExtensions), what a copy of a name over 25 MB gives
+    // (ShareIntake._fromPath looks at its name before its size),
+    // MainActivity's refused item of that name over 25 MB gives too
+    // (PR81-QA-4). Any other extension differs, as designed: a copy named
+    // IMG_1.txt is a kind of file, while MainActivity's too_big/txt is
+    // still over 25 MB (the regression guard further down).
+    test('Android: an image MainActivity refused as over 25 MB gets the '
+        'refusal a copy of that name over 25 MB gets, for a format share '
+        'intake reads or names', () async {
       final big = Uint8List(maxPhotoBytes + 1);
       for (final ext in ['cr3', 'dng', 'nef', 'avif', 'jpg', 'png', 'heic']) {
         final source = _Source();
@@ -1317,8 +1322,9 @@ void main() {
     });
 
     // Device QA (2026-11-23, PR81-QA-4): a 26 MB CR3 or DNG shared alone
-    // was copied, stopped at 25 MB, and said to be over 25 MB, although no
-    // smaller one would be read. It is named now, as its copy would be.
+    // was refused by the size its provider gave, before it was opened, and
+    // said to be over 25 MB, although no smaller one would be read. It is
+    // named now, as its copy would be.
     test('Android: a RAW file over 25 MB shared alone, which MainActivity '
         'refused whole: no question, and its line names it', () async {
       answers = [];

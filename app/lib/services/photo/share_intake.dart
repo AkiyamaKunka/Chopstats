@@ -186,11 +186,13 @@ const Set<ShareRefusal> _reasonsWithExtension = {
 ///   so in a share of several with no listed types such an image is
 ///   refused before any copy, and the line called it a kind of file
 ///   Chopstats can't read (device QA 2026-11-22, PR81-QA-3).
-/// - too_big, unreadable: such a format is copied when it is shared
-///   alone, or typed as an image among several (a DNG). A copy over 25 MB,
-///   or one that failed, was said to be over 25 MB or unreadable, although
-///   Chopstats reads no file of that format, of any size (device QA
-///   2026-11-23, PR81-QA-4).
+/// - too_big, unreadable: MainActivity copies such a format, up to 25 MB,
+///   when it is shared alone, or typed as an image among several (a DNG).
+///   One over 25 MB, or whose copy failed, was said to be over 25 MB or
+///   unreadable, although Chopstats reads no file of that format, of any
+///   size (device QA 2026-11-23, PR81-QA-4). Its extension is the one its
+///   name gives, else its copy's name's, which its image type gives
+///   (IntakeRules.failedCopyName).
 /// As there, only an extension in [refusedPhotoExtensions] is named
 /// ([sharedPhotoTypeOf]), so no other part of a sender's name reaches the
 /// line: with any other extension (a .jpg over 25 MB, a .txt) the item
