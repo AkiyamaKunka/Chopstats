@@ -121,6 +121,20 @@
               android:name="io.flutter.embedding.android.NormalTheme"
               android:resource="@style/NormalTheme"
               />
+            <!-- The bitewise://setup link reaches the app through app_links
+                 only (its README and example manifest). Flutter's own deep
+                 linking, on by default since Flutter 3.27, also pushed each
+                 link that arrived while the app was open as a named route
+                 (RCREL-V-1, 2026-11-21): a link with a query failed to find a
+                 route and logged an error, and a bare bitewise://setup became
+                 "/", which opened a second main screen. That screen brought
+                 back the first setup link of the run, and when it closed it
+                 took the sharing-consent question with it, so shared photos
+                 waited until the next start. -->
+            <meta-data
+              android:name="flutter_deeplinking_enabled"
+              android:value="false"
+              />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>

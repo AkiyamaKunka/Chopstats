@@ -329,6 +329,57 @@ void main() {
     expect(families, isNotEmpty);
     expect(families, everyElement('1'));
   });
+
+  // RCREL-V-1 on the iPhone (review of #83, 2026-11-21): the
+  // bitewise://setup link reaches the app through app_links only (its
+  // example Info.plist sets this key). With the key missing, Flutter's own
+  // deep linking is on: a link that arrives while the app runs is offered
+  // to the plugins, none claims it (app_links returns NO by default), and
+  // the engine pushes it to the framework as a route. A bare link became
+  // "/" and pushed a second HomeShell, as on Android. A cold start is
+  // spared today only because receive_sharing_intent claims every scene
+  // connection.
+  test('Info.plist turns Flutter deep linking off, so only app_links sees '
+      'the setup link', () {
+    final plist = File('${_appRoot().path}/ios/Runner/Info.plist')
+        .readAsStringSync();
+    expect(plist, contains('<string>bitewise</string>'));
+    expect(
+        RegExp(r'<key>FlutterDeepLinkingEnabled</key>\s*<false/>')
+            .allMatches(plist),
+        hasLength(1));
+    expect('FlutterDeepLinkingEnabled'.allMatches(plist), hasLength(1),
+        reason: 'set once');
+    final extension = File(
+            '${_appRoot().path}/ios/ShareExtension/Info.plist')
+        .readAsStringSync();
+    expect(extension, isNot(contains('FlutterDeepLinkingEnabled')),
+        reason: 'the share extension runs no Flutter engine');
+
+    // Flutter 3.44, where the SDK carries its sources: the engine reads
+    // this key, treats a missing key as on, and checks it before it sends
+    // a link to the framework.
+    final source = Directory('${_pluginRoot('flutter')}/../../engine/src/'
+        'flutter/shell/platform/darwin/ios/framework/Source');
+    if (!source.existsSync()) {
+      markTestSkipped('this Flutter SDK carries no engine sources');
+      return;
+    }
+    String objc(String name) => File('${source.path}/$name')
+        .readAsStringSync()
+        .replaceAll(RegExp(r'//[^\n]*'), '')
+        .replaceAll(RegExp(r'\s+'), ' ');
+    expect(
+        objc('FlutterSharedApplication.mm'),
+        contains('NSNumber* isDeepLinkingEnabled = [[NSBundle mainBundle] '
+            'objectForInfoDictionaryKey:@"FlutterDeepLinkingEnabled"]; '
+            'return isDeepLinkingEnabled ? [isDeepLinkingEnabled boolValue] '
+            ': YES;'));
+    expect(
+        objc('FlutterSceneLifeCycle.mm'),
+        contains('if (!FlutterSharedApplication.isFlutterDeepLinkingEnabled) '
+            '{ return NO; } [engine sendDeepLinkToFramework:url'));
+  });
   // App Store Connect scans every executable in the IPA for "required
   // reason" APIs and emails ITMS-91053 for each bundle that uses one without
   // a PrivacyInfo.xcprivacy beside it. Both targets do: receive_sharing_intent
@@ -1130,6 +1181,93 @@ void main() {
     }
     expect(_kotlinCode(_mainActivity()),
         isNot(contains('requestedOrientation')));
+  });
+
+  // RCREL-V-1 (2026-11-21): the bitewise://setup link reaches the app
+  // through app_links only. Flutter's own deep linking, on unless the
+  // activity's meta-data turns it off, pushed each link that arrived while
+  // the app was open as a named route: a bare link became "/", which opened
+  // a second HomeShell that brought back the first setup link of the run
+  // and, when it closed, detached the sharing-consent asker.
+  test('Android: Flutter deep linking is off, so only app_links sees the '
+      'setup link', () {
+    final manifest = _uncommented(_manifest());
+    // MainActivity by name, up to its </activity>; meta-data inside an
+    // intent filter is not the activity's, so the filters are cut out.
+    final activity = RegExp(
+            r'<activity\b[^>]*android:name="\.MainActivity"[^>]*>.*?</activity>',
+            dotAll: true)
+        .firstMatch(manifest)
+        ?.group(0);
+    expect(activity, isNotNull, reason: 'MainActivity missing');
+    expect(activity, contains('android:scheme="bitewise"'));
+    final ownMetaData = activity!.replaceAll(
+        RegExp(r'<intent-filter\b.*?</intent-filter>', dotAll: true), '');
+    final flags = RegExp(r'<meta-data\b[^>]*>')
+        .allMatches(ownMetaData)
+        .map((m) => m.group(0)!.replaceAll(RegExp(r'\s+'), ' '))
+        .where((m) => m.contains('flutter_deeplinking_enabled'))
+        .toList();
+    expect(flags, hasLength(1));
+    expect(flags.single, contains('android:value="false"'));
+    expect('flutter_deeplinking_enabled'.allMatches(manifest), hasLength(1),
+        reason: 'set once, on MainActivity');
+
+    // Nothing turns it back on: not the debug, profile or Play manifests,
+    // and not the app's Kotlin (FlutterActivity.shouldHandleDeeplinking).
+    final src = '${_appRoot().path}/android/app/src';
+    for (final variant in ['debug', 'profile', 'playChannel']) {
+      final xml = _uncommented(
+          File('$src/$variant/AndroidManifest.xml').readAsStringSync());
+      expect(xml, isNot(contains('flutter_deeplinking_enabled')),
+          reason: variant);
+    }
+    for (final file in _appKotlin().entries) {
+      expect(_kotlinCode(file.value),
+          isNot(contains('shouldHandleDeeplinking')),
+          reason: file.key);
+    }
+
+    // Flutter 3.44, where the SDK carries its sources: the meta-data key is
+    // this one, deep linking is on when it is missing, and both ways a link
+    // becomes a route (the cold-start route and the push on onNewIntent) go
+    // through the activity's check of it.
+    final engine = Directory('${_pluginRoot('flutter')}/../../engine/src/'
+        'flutter/shell/platform/android/io/flutter/embedding/android');
+    if (!engine.existsSync()) {
+      markTestSkipped('this Flutter SDK carries no engine sources');
+      return;
+    }
+    String java(String name) => File('${engine.path}/$name')
+        .readAsStringSync()
+        .replaceAll(RegExp(r'//[^\n]*'), '')
+        .replaceAll(RegExp(r'\s+'), ' ');
+    final configs = java('FlutterActivityLaunchConfigs.java');
+    expect(
+        configs,
+        contains('HANDLE_DEEPLINKING_META_DATA_KEY = '
+            '"flutter_deeplinking_enabled";'));
+    expect(
+        configs,
+        contains('if (metaData != null && metaData.containsKey('
+            'HANDLE_DEEPLINKING_META_DATA_KEY)) { return '
+            'metaData.getBoolean(HANDLE_DEEPLINKING_META_DATA_KEY); } else '
+            '{ return true; }'));
+    expect(
+        java('FlutterActivity.java'),
+        contains('public boolean shouldHandleDeeplinking() { try { Bundle '
+            'metaData = getMetaData(); return deepLinkEnabled(metaData);'));
+    final delegate = java('FlutterActivityAndFragmentDelegate.java');
+    expect(
+        delegate,
+        contains('private String maybeGetInitialRouteFromIntent(Intent '
+            'intent) { if (host.shouldHandleDeeplinking()) {'));
+    expect(
+        delegate,
+        contains('String initialRoute = maybeGetInitialRouteFromIntent(intent); '
+            'if (initialRoute != null && !initialRoute.isEmpty()) { '
+            'flutterEngine.getNavigationChannel().pushRouteInformation('
+            'initialRoute);'));
   });
 
   // With enableOnBackInvokedCallback, Flutter unregisters its back
