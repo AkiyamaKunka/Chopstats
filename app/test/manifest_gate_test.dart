@@ -1270,6 +1270,242 @@ void main() {
             'initialRoute);'));
   });
 
+  // EXTRAS-1 (2026-11-22): FlutterActivity takes its launch settings from
+  // the launch intent (FlutterActivityLaunchConfigs' extras,
+  // FlutterShellArgs' engine flags, and an ACTION_RUN's data in a
+  // debuggable build), and MainActivity is exported, so any app could start
+  // it with them. A cold start with an engine id or engine group id the app
+  // never cached crashed in onCreate, as did a background_mode Flutter does
+  // not know or dart_entrypoint_args that are no list;
+  // background_mode=transparent turned the window see-through,
+  // dart_entrypoint left the launch screen up for good, and
+  // destroy_engine_with_activity=false kept the engine running after its
+  // activity. MainActivity overrides every FlutterActivity getter that reads
+  // the intent with what a launch with no extras gets; engine flags still
+  // pass in debug and profile builds, where `flutter run` sends them.
+  test("Android: MainActivity takes none of FlutterActivity's launch "
+      'settings from the launch intent', () {
+    final code = _kotlinCode(_mainActivity());
+    // By the FlutterActivity getter each one replaces.
+    const fixed = {
+      'getCachedEngineId': 'override fun getCachedEngineId(): String? = null',
+      'getCachedEngineGroupId':
+          'override fun getCachedEngineGroupId(): String? = null',
+      'shouldDestroyEngineWithHost':
+          'override fun shouldDestroyEngineWithHost(): Boolean = true',
+      'getBackgroundMode': 'override fun getBackgroundMode(): BackgroundMode '
+          '= BackgroundMode.opaque',
+      'getInitialRoute': 'override fun getInitialRoute(): String = "/"',
+      'getDartEntrypointFunctionName':
+          'override fun getDartEntrypointFunctionName(): String = "main"',
+      'getDartEntrypointArgs':
+          'override fun getDartEntrypointArgs(): List<String>? = null',
+      'shouldRestoreAndSaveState':
+          'override fun shouldRestoreAndSaveState(): Boolean = true',
+      'getAppBundlePath': 'override fun getAppBundlePath(): String = '
+          'FlutterInjector.instance().flutterLoader().findAppBundlePath()',
+      'getFlutterShellArgs': '@Suppress("DEPRECATION") override fun '
+          'getFlutterShellArgs(): io.flutter.embedding.engine.FlutterShellArgs '
+          '= if (IntakeRules.takesEngineFlagsFromIntent('
+          'io.flutter.BuildConfig.RELEASE)) { super.getFlutterShellArgs() } '
+          'else { io.flutter.embedding.engine.FlutterShellArgs('
+          'emptyArray<String>()) }',
+    };
+    for (final override in fixed.values) {
+      expect(code, contains(override));
+    }
+    // The root library, which no intent reads but the manifest could set.
+    expect(code,
+        contains('override fun getDartEntrypointLibraryUri(): String? = null'));
+    expect(
+        code,
+        contains('import io.flutter.embedding.android.'
+            'FlutterActivityLaunchConfigs.BackgroundMode'));
+    expect(code, contains('import io.flutter.FlutterInjector'));
+    // Each overridden once; nothing hands the activity an engine
+    // (provideFlutterEngine), and only the background mode picks its render
+    // mode and transparency.
+    for (final name in [...fixed.keys, 'getDartEntrypointLibraryUri']) {
+      expect('fun $name('.allMatches(code), hasLength(1), reason: name);
+    }
+    for (final name in [
+      'provideFlutterEngine',
+      'getRenderMode',
+      'getTransparencyMode',
+    ]) {
+      expect(code, isNot(contains('fun $name(')), reason: name);
+    }
+    expect(
+        _kotlinCode(_intakeRules()),
+        contains('fun takesEngineFlagsFromIntent(releaseBuild: Boolean): '
+            'Boolean = !releaseBuild'));
+    _expectJvmTests(['takesEngineFlagsFromIntent']);
+    // What the overrides give is what the manifest gave: no manifest names
+    // another entry point, library or first route.
+    final src = '${_appRoot().path}/android/app/src';
+    for (final variant in ['main', 'debug', 'profile', 'playChannel']) {
+      final xml = _uncommented(
+          File('$src/$variant/AndroidManifest.xml').readAsStringSync());
+      for (final key in [
+        'io.flutter.Entrypoint',
+        'io.flutter.EntrypointUri',
+        'io.flutter.InitialRoute',
+      ]) {
+        expect(xml, isNot(contains(key)), reason: '$variant: $key');
+      }
+    }
+
+    // Flutter 3.44, where the SDK carries its sources: the extras, the
+    // getters that read them and what each gives when the intent says
+    // nothing, and that FlutterActivity reads the intent nowhere else. A
+    // Flutter that reads it somewhere new fails here: decide whether
+    // MainActivity fixes that setting too.
+    final flutter = Directory('${_pluginRoot('flutter')}/../../engine/src/'
+        'flutter/shell/platform/android/io/flutter');
+    if (!flutter.existsSync()) {
+      markTestSkipped('this Flutter SDK carries no engine sources');
+      return;
+    }
+    String java(String path) => File('${flutter.path}/$path')
+        .readAsStringSync()
+        .replaceAll(RegExp(r'/\*.*?\*/', dotAll: true), '')
+        .replaceAll(RegExp(r'//[^\n]*'), '')
+        .replaceAll(RegExp(r'\s+'), ' ');
+    final configs = java('embedding/android/FlutterActivityLaunchConfigs.java');
+    for (final (name, value) in [
+      ('EXTRA_DART_ENTRYPOINT', 'dart_entrypoint'),
+      ('EXTRA_INITIAL_ROUTE', 'route'),
+      ('EXTRA_BACKGROUND_MODE', 'background_mode'),
+      ('EXTRA_CACHED_ENGINE_ID', 'cached_engine_id'),
+      ('EXTRA_DART_ENTRYPOINT_ARGS', 'dart_entrypoint_args'),
+      ('EXTRA_CACHED_ENGINE_GROUP_ID', 'cached_engine_group_id'),
+      ('EXTRA_DESTROY_ENGINE_WITH_ACTIVITY', 'destroy_engine_with_activity'),
+      ('EXTRA_ENABLE_STATE_RESTORATION', 'enable_state_restoration'),
+      ('DEFAULT_DART_ENTRYPOINT', 'main'),
+      ('DEFAULT_INITIAL_ROUTE', '/'),
+    ]) {
+      expect(configs, contains('static final String $name = "$value";'));
+    }
+    final activity = java('embedding/android/FlutterActivity.java');
+    for (final read in [
+      'public FlutterShellArgs getFlutterShellArgs() { return '
+          'FlutterShellArgs.fromIntent(getIntent()); }',
+      'public String getCachedEngineId() { return '
+          'getIntent().getStringExtra(EXTRA_CACHED_ENGINE_ID); }',
+      'public String getCachedEngineGroupId() { return '
+          'getIntent().getStringExtra(EXTRA_CACHED_ENGINE_GROUP_ID); }',
+      'public boolean shouldDestroyEngineWithHost() { boolean '
+          'explicitDestructionRequested = getIntent().getBooleanExtra('
+          'EXTRA_DESTROY_ENGINE_WITH_ACTIVITY, false); if (getCachedEngineId() '
+          '!= null || delegate.isFlutterEngineFromHost()) { return '
+          'explicitDestructionRequested; } else { return '
+          'getIntent().getBooleanExtra(EXTRA_DESTROY_ENGINE_WITH_ACTIVITY, '
+          'true); } }',
+      'public String getDartEntrypointFunctionName() { if '
+          '(getIntent().hasExtra(EXTRA_DART_ENTRYPOINT)) { return '
+          'getIntent().getStringExtra(EXTRA_DART_ENTRYPOINT); } try { Bundle '
+          'metaData = getMetaData(); String desiredDartEntrypoint = metaData '
+          '!= null ? metaData.getString(DART_ENTRYPOINT_META_DATA_KEY) : null; '
+          'return desiredDartEntrypoint != null ? desiredDartEntrypoint : '
+          'DEFAULT_DART_ENTRYPOINT; }',
+      'public List<String> getDartEntrypointArgs() { return (List<String>) '
+          'getIntent().getSerializableExtra(EXTRA_DART_ENTRYPOINT_ARGS); }',
+      'public String getDartEntrypointLibraryUri() { try { Bundle metaData = '
+          'getMetaData(); String desiredDartLibraryUri = metaData != null ? '
+          'metaData.getString(DART_ENTRYPOINT_URI_META_DATA_KEY) : null; '
+          'return desiredDartLibraryUri; }',
+      'public String getInitialRoute() { if '
+          '(getIntent().hasExtra(EXTRA_INITIAL_ROUTE)) { return '
+          'getIntent().getStringExtra(EXTRA_INITIAL_ROUTE); } try { Bundle '
+          'metaData = getMetaData(); String desiredInitialRoute = metaData != '
+          'null ? metaData.getString(INITIAL_ROUTE_META_DATA_KEY) : null; '
+          'return desiredInitialRoute; }',
+      'public String getAppBundlePath() { if (isDebuggable() && '
+          'Intent.ACTION_RUN.equals(getIntent().getAction())) { String '
+          'appBundlePath = getIntent().getDataString(); if (appBundlePath != '
+          'null) { return appBundlePath; } } return null; }',
+      'protected BackgroundMode getBackgroundMode() { if '
+          '(getIntent().hasExtra(EXTRA_BACKGROUND_MODE)) { return '
+          'BackgroundMode.valueOf(getIntent().getStringExtra('
+          'EXTRA_BACKGROUND_MODE)); } else { return BackgroundMode.opaque; } }',
+      'public boolean shouldRestoreAndSaveState() { if '
+          '(getIntent().hasExtra(EXTRA_ENABLE_STATE_RESTORATION)) { return '
+          'getIntent().getBooleanExtra(EXTRA_ENABLE_STATE_RESTORATION, false); '
+          '} if (getCachedEngineId() != null) { return false; } return true; }',
+      // The render mode, the view's transparency and the window's follow
+      // the background mode.
+      'public RenderMode getRenderMode() { return getBackgroundMode() == '
+          'BackgroundMode.opaque ? RenderMode.surface : RenderMode.texture; }',
+      'public TransparencyMode getTransparencyMode() { return '
+          'getBackgroundMode() == BackgroundMode.opaque ? '
+          'TransparencyMode.opaque : TransparencyMode.transparent; }',
+      'private void configureWindowForTransparency() { BackgroundMode '
+          'backgroundMode = getBackgroundMode();',
+    ]) {
+      expect(activity, contains(read));
+    }
+    // The method each read of the intent sits in (the nearest method
+    // declaration before it).
+    final declaration = RegExp(r'(?:(?:public|protected|private) )?'
+        r'(?:static |final )*[\w<>\[\]., ?]+ (\w+)\([^()]*\) '
+        r'(?:throws [\w., ]+ )?\{');
+    Set<String> readersOfIntent(String java) => {
+          for (final read in 'getIntent()'.allMatches(java))
+            declaration
+                .allMatches(java.substring(0, read.start))
+                .last
+                .group(1)!,
+        };
+    expect(readersOfIntent(activity), fixed.keys.toSet(),
+        reason: 'every FlutterActivity method that reads the launch intent '
+            'is one MainActivity overrides');
+    // The delegate takes every setting from those getters. It reads the
+    // intent itself only for a deep link when the host names no first
+    // route (never here: a route is always named, and deep linking is off)
+    // and to warn about engine flags in it.
+    final delegate =
+        java('embedding/android/FlutterActivityAndFragmentDelegate.java');
+    expect(readersOfIntent(delegate), {
+      'addEntrypointOptions',
+      'setUpFlutterEngine',
+      'doInitialFlutterViewRun',
+    });
+    expect(
+        'String initialRoute = host.getInitialRoute(); if (initialRoute == '
+                'null) { initialRoute = maybeGetInitialRouteFromIntent('
+                'host.getActivity().getIntent());'
+            .allMatches(delegate),
+        hasLength(2));
+    expect(
+        delegate,
+        contains('warnIfEngineFlagsSetViaIntent('
+            'host.getActivity().getIntent());'));
+    expect(
+        delegate,
+        contains('new FlutterEngineGroup(host.getContext(), '
+            'host.getFlutterShellArgs().toArray())'));
+    expect(
+        delegate,
+        contains('String cachedEngineId = host.getCachedEngineId(); if '
+            '(cachedEngineId != null) { flutterEngine = '
+            'FlutterEngineCache.getInstance().get(cachedEngineId);'));
+    expect(
+        delegate,
+        contains('String cachedEngineGroupId = host.getCachedEngineGroupId(); '
+            'if (cachedEngineGroupId != null) {'));
+    // In a release build Flutter itself drops most engine flags, but keeps
+    // enable-impeller (IntakeRules.takesEngineFlagsFromIntent).
+    expect(java('embedding/engine/FlutterShellArgs.java'),
+        contains('if (intent.hasExtra(ARG_KEY_TOGGLE_IMPELLER)) {'));
+    expect(
+        java('embedding/engine/FlutterEngineFlags.java'),
+        contains('ENABLE_IMPELLER = new Flag("--enable-impeller=", '
+            '"EnableImpeller", true);'));
+    expect(
+        java('embedding/engine/loader/FlutterLoader.java'),
+        contains('} else if (!flag.allowedInRelease && isRelease) {'));
+  });
+
   // With enableOnBackInvokedCallback, Flutter unregisters its back
   // callback at an idle root route and leaves Back there to Android.
   // Android 14 and later move the task to the back only after starts from

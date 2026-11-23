@@ -90,6 +90,17 @@ internal object IntakeRules {
     /// the colour as before, an opaque bar.
     fun colorsNavigationBar(sdk: Int): Boolean = sdk >= Build.VERSION_CODES.VANILLA_ICE_CREAM
 
+    /// Whether MainActivity's engine takes Flutter's engine flags from the
+    /// launch intent (MainActivity.getFlutterShellArgs; EXTRAS-1,
+    /// 2026-11-22): in a debug or profile build, where `flutter run` passes
+    /// its options as extras (start-paused, trace-startup, enable-impeller
+    /// and the rest), and never in a release build ([releaseBuild]). There
+    /// Flutter drops most of them itself (FlutterLoader, allowedInRelease),
+    /// but not enable-impeller or enable-hcpp-and-surface-control, so any
+    /// app that started the exported activity cold could pick the renderer
+    /// and the platform-view mode for that whole run of the process.
+    fun takesEngineFlagsFromIntent(releaseBuild: Boolean): Boolean = !releaseBuild
+
     /// share_plus's FileProvider authority after the package name (its
     /// AndroidManifest.xml: ${applicationId}.flutter.share_provider).
     const val SHARE_OUT_AUTHORITY_SUFFIX = ".flutter.share_provider"

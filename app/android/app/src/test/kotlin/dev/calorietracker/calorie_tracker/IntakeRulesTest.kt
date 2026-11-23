@@ -488,6 +488,17 @@ class IntakeRulesTest {
         }
     }
 
+    // --- Flutter's engine flags come from the launch intent in a debug or
+    // profile build only, where `flutter run` passes them; in a release
+    // build any app that starts MainActivity could pick the renderer
+    // (EXTRAS-1).
+
+    @Test
+    fun onlyDebugAndProfileBuildsTakeEngineFlagsFromTheLaunchIntent() {
+        assertFalse(IntakeRules.takesEngineFlagsFromIntent(releaseBuild = true))
+        assertTrue(IntakeRules.takesEngineFlagsFromIntent(releaseBuild = false))
+    }
+
     // --- A share that comes before share intake listens waits for it
     // (ShareHold): the plugin tells only a listener, and Android delivers
     // the share a stopped app was started again for before Dart runs.
