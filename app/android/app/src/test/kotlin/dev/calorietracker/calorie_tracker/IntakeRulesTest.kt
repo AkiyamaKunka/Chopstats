@@ -606,6 +606,94 @@ class IntakeRulesTest {
         assertFalse(IntakeRules.isOwnShareOut("content", "content", pkg))
     }
 
+    // --- A shared item that gives no copy goes on as a refused item, so
+    // share intake can say it was skipped and why.
+
+    @Test
+    fun aVideoIsRefusedAsAVideoAndAnyOtherTypeAsAFileType() {
+        assertEquals(IntakeRules.ShareRefusal.VIDEO, IntakeRules.typeRefusal("video/mp4"))
+        assertEquals(IntakeRules.ShareRefusal.VIDEO, IntakeRules.typeRefusal("video/*"))
+        for (type in listOf("application/pdf", "text/plain", "*/*", "audio/mpeg", "", null)) {
+            assertEquals(type, IntakeRules.ShareRefusal.FILE_TYPE, IntakeRules.typeRefusal(type))
+        }
+    }
+
+    @Test
+    fun aRefusedItemsPathNamesNoFileAndEndsInItsReason() {
+        assertEquals("/chopstats-refused/video", IntakeRules.refusedSharePath(IntakeRules.ShareRefusal.VIDEO))
+        assertEquals("/chopstats-refused/file_type", IntakeRules.refusedSharePath(IntakeRules.ShareRefusal.FILE_TYPE))
+        assertEquals("/chopstats-refused/too_big", IntakeRules.refusedSharePath(IntakeRules.ShareRefusal.TOO_BIG))
+        assertEquals("/chopstats-refused/unreadable", IntakeRules.refusedSharePath(IntakeRules.ShareRefusal.UNREADABLE))
+        val paths = IntakeRules.ShareRefusal.values().map { IntakeRules.refusedSharePath(it) }
+        assertEquals("one path per reason", paths.size, paths.toSet().size)
+        for (path in paths) {
+            // A folder at the root no app can write in: never a copy, and
+            // never in the share folder (MainActivity.SHARE_FOLDER).
+            assertTrue(path, path.startsWith(IntakeRules.REFUSED_SHARE_PATH + "/"))
+            assertFalse(path, File(path).exists())
+            assertFalse(path, path.contains("shared_photos"))
+        }
+        // No image type: the plugin reports such an item as a file, and
+        // share intake reads nothing at its path.
+        assertEquals("application/x-chopstats-refused", IntakeRules.REFUSED_SHARE_TYPE)
+        assertFalse(IntakeRules.REFUSED_SHARE_TYPE.startsWith("image"))
+        assertFalse(IntakeRules.REFUSED_SHARE_TYPE.startsWith("video"))
+        assertFalse(IntakeRules.REFUSED_SHARE_TYPE.startsWith("text"))
+    }
+
+    // --- A shared image whose name has no extension Android knows is
+    // copied under the one its type gives, so share intake reads it.
+
+    /// A few of the extensions MimeTypeMap knows, as copyName asks them.
+    private val known = setOf("jpg", "jpeg", "png", "heic", "dng", "txt", "pdf", "mp4")
+
+    private fun copyName(name: String, ext: String? = "jpg", asked: MutableList<String>? = null): String =
+        IntakeRules.copyName(name, { known.contains(it) }) {
+            asked?.add(name)
+            ext
+        }
+
+    @Test
+    fun aNameWithNoExtensionGetsTheOneItsTypeGives() {
+        assertEquals("IMG_1731500000000.jpg", copyName("IMG_1731500000000"))
+        assertEquals("Lunch with Sarah.png", copyName("Lunch with Sarah", "png"))
+        // A dot in the name that starts no extension Android knows.
+        assertEquals("Lunch with.Sarah.jpg", copyName("Lunch with.Sarah"))
+        assertEquals("Dinner with J.Smith.jpg", copyName("Dinner with J.Smith"))
+        assertEquals("Screenshot 2026-11-21 at 12.30.45.png", copyName("Screenshot 2026-11-21 at 12.30.45", "png"))
+        assertEquals("image.jpg_large.jpg", copyName("image.jpg_large"))
+        // Nothing after the dot.
+        assertEquals("IMG.jpg", copyName("IMG."))
+    }
+
+    @Test
+    fun aNameWithAKnownExtensionIsKeptAndItsTypeNotAskedFor() {
+        val asked = mutableListOf<String>()
+        for (name in listOf("IMG_1.jpg", "IMG_1.JPG", "scan.Dng", "PXL_1.heic", "notes.txt", "menu.pdf", ".jpg")) {
+            assertEquals(name, copyName(name, "png", asked))
+        }
+        assertEquals("the type is looked up only for a name without one", emptyList<String>(), asked)
+    }
+
+    @Test
+    fun aTypeThatGivesNoPlainExtensionLeavesTheNameAsItIs() {
+        for (ext in listOf(null, "", "j/pg", "jp g", ".jpg", "jpg\u0000", "\u00e9tc")) {
+            assertEquals("$ext", "IMG_1731500000000", copyName("IMG_1731500000000", ext))
+        }
+    }
+
+    @Test
+    fun aNameThatWouldGrowPastTheLongestFileNameIsKept() {
+        val fits = "a".repeat(IntakeRules.MAX_NAME_BYTES - 4)
+        assertEquals("$fits.jpg", copyName(fits))
+        val full = "a".repeat(IntakeRules.MAX_NAME_BYTES - 3)
+        assertEquals(full, copyName(full))
+        // Counted in bytes: each of these is three.
+        val wide = "\u98df".repeat((IntakeRules.MAX_NAME_BYTES - 3) / 3)
+        assertEquals(wide, copyName(wide))
+        assertEquals(255, IntakeRules.MAX_NAME_BYTES)
+    }
+
     // --- Only a regular file in the cache is ever saved out.
 
     private fun layout(): Triple<File, File, File> {

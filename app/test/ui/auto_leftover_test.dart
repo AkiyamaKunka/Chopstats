@@ -113,6 +113,31 @@ void main() {
         'Cafeteria tray 1');
   });
 
+  // Android, view-after-share lane: a shared photo's leftover deduction
+  // offers View on the meal it cut (meal_reveal.dart revealForShared).
+  test("a shared photo's deduction is flagged shared and names the meal it "
+      'cut; an automatic one is not', () async {
+    dao.put(_meal(1, '01:34 PM', 965));
+    analyzer.nextPhotoOutcome = AnalysisOutcome(
+        analysis: _leftoverReply(), isFood: true, wall: Duration.zero);
+    final out = await pipeline.process(IntakePhoto(
+        Uint8List.fromList([7]), '', 'IMG_7.jpg',
+        capturedAt: _lateToday(), deliberate: true, shareDelivery: 3));
+    expect(out.kind, PhotoOutcomeKind.leftoverApplied);
+    expect(out.shared, isTrue);
+    expect(out.mealId, 1);
+    expect(notifications.single.shared, isTrue);
+
+    // The same plate seen by the automatic scan: not shared.
+    final watched = await PhotoPipeline(
+            dao: FakeDao()..put(_meal(1, '01:34 PM', 965)),
+            analyzer: analyzer,
+            hasher: (_) async => 'leftover-hash-2')
+        .process(photo());
+    expect(watched.kind, PhotoOutcomeKind.leftoverApplied);
+    expect(watched.shared, isFalse);
+  });
+
   // Write safety (design R6a): the candidate list is as old as the model
   // call; the deduction is re-based on the meal as stored at write time and
   // written compare-and-set.

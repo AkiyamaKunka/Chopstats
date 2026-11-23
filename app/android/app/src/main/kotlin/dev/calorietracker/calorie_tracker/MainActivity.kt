@@ -31,6 +31,7 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
 import java.net.URLConnection
+import java.util.Locale
 import java.util.UUID
 
 class MainActivity : FlutterActivity() {
@@ -390,10 +391,22 @@ class MainActivity : FlutterActivity() {
     /// Dart as the path, which share intake then deleted. The plugin now
     /// sees only copies made here, of the items it would report as images:
     /// each in a folder of its own under SHARE_FOLDER, under the sender's
-    /// base name (its date stays readable), at most MAX_SHARE_BYTES. What
+    /// base name (its date stays readable; with the extension its image
+    /// type gives when it has none Android knows, copyName, as share
+    /// intake reads a copy by its name's type), at most MAX_SHARE_BYTES. What
     /// cannot be read is left out, and none of the sender's extras is
     /// passed on; a share with nothing left reaches no plugin. The plugin
     /// reports a file:// URI as it is, without opening it.
+    ///
+    /// An item left out for what it is (no image: a video, a PDF), for its
+    /// size (over MAX_SHARE_BYTES) or because it could not be read goes on
+    /// as a refused item after the copies, of type REFUSED_SHARE_TYPE: a
+    /// file:// URI that names no file (IntakeRules.refusedSharePath), which
+    /// the plugin hands Dart as its path. Share intake says how many were
+    /// skipped and why, after the share's photos (they used to go without
+    /// a word); a share whose every item was refused reaches the plugin
+    /// with those alone, and asks nothing. The app's own share-out files
+    /// are still left out without one.
     private fun withSafeShares(intent: Intent): Intent {
         val kind = intent.action
         val shareType = intent.type ?: return intent
@@ -415,36 +428,70 @@ class MainActivity : FlutterActivity() {
         }
         val copies = ArrayList<Uri>()
         val copyTypes = ArrayList<String>()
+        val refused = ArrayList<IntakeRules.ShareRefusal>()
         try {
             clearEmptyShareFolders()
         } catch (e: Exception) {
         }
         streams.forEachIndexed { i, uri ->
             try {
-                if (uri == null) return@forEachIndexed
+                if (uri == null) {
+                    refused.add(IntakeRules.ShareRefusal.UNREADABLE)
+                    return@forEachIndexed
+                }
                 if (IntakeRules.isOwnShareOut(uri.scheme, uri.authority, packageName)) return@forEachIndexed
-                val name = shareName(uri) ?: return@forEachIndexed
+                val name = shareName(uri)
+                if (name == null) {
+                    refused.add(IntakeRules.ShareRefusal.UNREADABLE)
+                    return@forEachIndexed
+                }
                 // The type the plugin gives it: the share's own, or for
-                // several, each one's listed type, else its name's.
+                // several, each one's listed type, else its name's, else
+                // its provider's. A name with no extension Android knows
+                // ("Dinner with J.Smith") gave none, and such an image was
+                // refused as a kind of file (device QA 2026-11-22,
+                // PR81-QA-2); one shared alone has the share's type.
                 val itemType = if (kind == Intent.ACTION_SEND_MULTIPLE)
                     listedTypes?.getOrNull(i) ?: URLConnection.guessContentTypeFromName(name)
+                        ?: providerType(uri)
                 else shareType
-                if (itemType?.startsWith("image") != true) return@forEachIndexed
-                val copy = copyShare(uri, name) ?: return@forEachIndexed
+                if (itemType?.startsWith("image") != true) {
+                    refused.add(IntakeRules.typeRefusal(itemType))
+                    return@forEachIndexed
+                }
+                val (copy, copied) = copyShare(uri, copyName(uri, name, itemType))
+                if (copy == null) {
+                    refused.add(
+                        if (copied == Copied.TOO_BIG) IntakeRules.ShareRefusal.TOO_BIG
+                        else IntakeRules.ShareRefusal.UNREADABLE,
+                    )
+                    return@forEachIndexed
+                }
                 copies.add(Uri.fromFile(copy))
                 copyTypes.add(itemType)
             } catch (e: Exception) {
                 // This item only: the others still go.
+                refused.add(IntakeRules.ShareRefusal.UNREADABLE)
             }
         }
-        if (copies.isEmpty()) return emptyShare(intent)
+        if (copies.isEmpty() && refused.isEmpty()) return emptyShare(intent)
         return try {
             Intent(intent).apply {
                 replaceExtras(Bundle())
-                if (kind == Intent.ACTION_SEND_MULTIPLE) {
+                if (kind == Intent.ACTION_SEND_MULTIPLE || refused.isNotEmpty()) {
+                    // The copies, then one item per refused one. A SEND or
+                    // VIEW whose one item was refused goes as a list of
+                    // that refused item, with no data left either.
+                    action = Intent.ACTION_SEND_MULTIPLE
                     setDataAndType(null, shareType)
-                    putParcelableArrayListExtra(Intent.EXTRA_STREAM, copies)
-                    putExtra(Intent.EXTRA_MIME_TYPES, copyTypes.toTypedArray())
+                    val items = ArrayList<Uri>(copies)
+                    val types = ArrayList<String>(copyTypes)
+                    for (refusal in refused) {
+                        items.add(Uri.fromFile(File(IntakeRules.refusedSharePath(refusal))))
+                        types.add(IntakeRules.REFUSED_SHARE_TYPE)
+                    }
+                    putParcelableArrayListExtra(Intent.EXTRA_STREAM, items)
+                    putExtra(Intent.EXTRA_MIME_TYPES, types.toTypedArray())
                 } else {
                     // A VIEW of an image reaches the plugin as the SEND it
                     // is to it, with no data left for a deep link to read.
@@ -505,13 +552,31 @@ class MainActivity : FlutterActivity() {
         return if (name.isEmpty() || name == "." || name == ".." || '\u0000' in name) null else name
     }
 
+    /// The type [uri]'s provider gives it; null when it gives none or
+    /// cannot be asked.
+    private fun providerType(uri: Uri): String? = try {
+        contentResolver.getType(uri)
+    } catch (e: Exception) {
+        null
+    }
+
+    /// The name a shared image of [itemType] at [uri] is copied under:
+    /// [name], or with the extension its image type gives when [name] has
+    /// none Android knows (IntakeRules.copyName). That type is the share's
+    /// own for it, else, for one such as image/*, its provider's.
+    private fun copyName(uri: Uri, name: String, itemType: String): String {
+        val types = MimeTypeMap.getSingleton()
+        fun extensionOf(type: String?): String? =
+            type?.lowercase(Locale.ROOT)?.takeIf { it.startsWith("image/") }
+                ?.let { types.getExtensionFromMimeType(it) }
+        return IntakeRules.copyName(name, { types.hasExtension(it) }) {
+            extensionOf(itemType) ?: extensionOf(providerType(uri))
+        }
+    }
+
     /// The plugin's name for a stream whose provider shows none.
     private fun fallbackShareName(uri: Uri): String {
-        val mime = try {
-            contentResolver.getType(uri)
-        } catch (e: Exception) {
-            null
-        }
+        val mime = providerType(uri)
         val prefix = when {
             mime?.startsWith("image") == true -> "IMG"
             mime?.startsWith("video") == true -> "VID"
@@ -521,18 +586,20 @@ class MainActivity : FlutterActivity() {
         return "${prefix}_${System.currentTimeMillis()}" + (ext?.let { ".$it" } ?: "")
     }
 
-    /// [uri] copied into a folder of its own under SHARE_FOLDER as [name];
-    /// null when it cannot be read or written, is over MAX_SHARE_BYTES, or
-    /// is one of the app's own files.
-    private fun copyShare(uri: Uri, name: String): File? {
-        if (isOwnFile(uri)) return null
+    /// [uri] copied into a folder of its own under SHARE_FOLDER as [name],
+    /// with how the copy went; no file when it is over MAX_SHARE_BYTES
+    /// (TOO_BIG), or cannot be read or written, or is one of the app's own
+    /// files (FAILED).
+    private fun copyShare(uri: Uri, name: String): Pair<File?, Copied> {
+        if (isOwnFile(uri)) return null to Copied.FAILED
         val dir = File(File(cacheDir, SHARE_FOLDER), UUID.randomUUID().toString())
-        if (!dir.mkdirs()) return null
+        if (!dir.mkdirs()) return null to Copied.FAILED
         val out = File(dir, name)
-        if (copyAtMost(uri, out, MAX_SHARE_BYTES) == Copied.OK) return out
+        val copied = copyAtMost(uri, out, MAX_SHARE_BYTES)
+        if (copied == Copied.OK) return out to copied
         out.delete()
         dir.delete()
-        return null
+        return null to copied
     }
 
     /// Whether [uri] is a file:// URI into the app's own data directory

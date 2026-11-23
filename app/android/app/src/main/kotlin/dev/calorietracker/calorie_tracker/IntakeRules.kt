@@ -178,6 +178,60 @@ internal object IntakeRules {
         "content".equals(scheme, ignoreCase = true) &&
             "$packageName$SHARE_OUT_AUTHORITY_SUFFIX".equals(authority, ignoreCase = true)
 
+    /// Why a shared item gave no copy (MainActivity.withSafeShares). Share
+    /// intake (Dart) reads it from the refused item's path, whose last
+    /// part is the token (share_intake.dart androidRefusalTokens), and
+    /// says how many items were skipped and why.
+    enum class ShareRefusal(val token: String) {
+        VIDEO("video"),
+        FILE_TYPE("file_type"),
+        TOO_BIG("too_big"),
+        UNREADABLE("unreadable"),
+    }
+
+    /// The type a refused item goes to the plugin with
+    /// (share_intake.dart androidRefusedShareType). It is no image, so
+    /// share intake reads nothing at its path.
+    const val REFUSED_SHARE_TYPE = "application/x-chopstats-refused"
+
+    /// Where a refused item's path starts (share_intake.dart
+    /// androidRefusedSharePath): a folder no file is in.
+    const val REFUSED_SHARE_PATH = "/chopstats-refused"
+
+    /// The refusal for a shared item of [itemType] that is no image: a
+    /// video, or any other kind of file (a PDF, or no type at all).
+    fun typeRefusal(itemType: String?): ShareRefusal =
+        if (itemType?.startsWith("video") == true) ShareRefusal.VIDEO else ShareRefusal.FILE_TYPE
+
+    /// The path a refused item reaches the plugin with: a file:// URI of
+    /// it names no file, and the plugin hands a file:// URI's path on as it
+    /// is, without opening it.
+    fun refusedSharePath(refusal: ShareRefusal): String = "$REFUSED_SHARE_PATH/${refusal.token}"
+
+    /// The longest file name a copy may have, in bytes (ext4 and f2fs).
+    const val MAX_NAME_BYTES = 255
+
+    /// The name a shared image is copied under (MainActivity.withSafeShares):
+    /// [name] as its provider shows it, or, when that has no extension
+    /// Android knows ([isKnownExtension], asked about the part after the
+    /// last dot, lower-cased), with the one its image type gives
+    /// ([typeExtension], asked only then). A provider may show a name
+    /// without one (IMG_1731500000000, "Lunch with.Sarah"), and share
+    /// intake takes a copy by its name's type: such a JPEG was refused as a
+    /// kind of file Chopstats can't read. Unchanged when the type gives no
+    /// plain extension, or the name would grow past MAX_NAME_BYTES.
+    fun copyName(name: String, isKnownExtension: (String) -> Boolean, typeExtension: () -> String?): String {
+        val dot = name.lastIndexOf('.')
+        if (dot in 0 until name.length - 1 &&
+            isKnownExtension(name.substring(dot + 1).lowercase(Locale.ROOT))
+        ) return name
+        val ext = typeExtension()?.takeIf { e ->
+            e.isNotEmpty() && e.all { it in 'a'..'z' || it in 'A'..'Z' || it in '0'..'9' }
+        } ?: return name
+        val named = if (name.endsWith('.')) name + ext else "$name.$ext"
+        return if (named.toByteArray(Charsets.UTF_8).size > MAX_NAME_BYTES) name else named
+    }
+
     /// Whether [path] is [dir] or lies inside it once both are resolved
     /// (symbolic links included). True when that cannot be told: callers
     /// use it to refuse, so an unknown fails closed.

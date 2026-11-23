@@ -658,12 +658,22 @@ void main() {
     // reads the phone's own (format.dart PhoneClockScope).
     test("the app's MaterialApp tells time by the phone's own clock", () {
       final app = _source('lib/ui/app.dart');
+      // Over every screen, with or without the View-after-share listener
+      // (#80) around it.
       expect(
         app,
         _wired(
-          r'builder: \(context, child\) => PhoneClockScope\( child: '
-          r'_SystemNavBarStyle\( dimming: _dimming, child: child \?\? '
-          r'const SizedBox\.shrink\(\)\)\),',
+          r'builder: \(context, child\) \{ final styled = PhoneClockScope\( '
+          r'child: _SystemNavBarStyle\( dimming: _dimming, child: child \?\? '
+          r'const SizedBox\.shrink\(\)\)\); if \(!reveals\) return styled;',
+        ),
+      );
+      expect(
+        app,
+        _wired(
+          r'return NotificationListener<NavigationNotification>\( '
+          r'onNotification: \(_\) \{ _routes\.popChanged\(\); return false; '
+          r'\}, child: styled\); \},',
         ),
       );
       expect('PhoneClockScope('.allMatches(app), hasLength(1));
@@ -1389,11 +1399,12 @@ void main() {
           r'if \(_leftApp\) \{[^}]*_tellWatchRetiredWhenIdle\(\);[^}]*\}',
         ),
       );
+      // Other calls may follow it (the meal a reveal waits to show).
       expect(
         app,
         _wired(
           r'_OnRouteReturn\( onReturn: \(\) \{ _onBackupPrompt\(\); '
-          r'_tellWatchRetiredWhenIdle\(\); \}',
+          r'_tellWatchRetiredWhenIdle\(\); [^}]*\}',
         ),
       );
     });
@@ -1433,6 +1444,81 @@ void main() {
         _source('lib/ui/screens/settings/provider_page.dart'),
         _wired(r'channel: Platform\.isAndroid \? appChannel : null,'),
       );
+    });
+  });
+
+  // Android, view-after-share lane: the View on a shared photo's snackbar
+  // and a tap on a Logged meals card go to the meal (ui/meal_reveal.dart;
+  // test/ui/view_after_share_test.dart and meal_reveal_test.dart build
+  // their own). Without one of these lines View or the tap does nothing on
+  // the phone, with every behavioural test still green; and iOS keeps both
+  // as they were.
+  group('the meal a View or a card tap asks for (Android)', () {
+    String init() => _body(
+      _source('lib/ui/di.dart'),
+      'static Future<AppServices> init(',
+      indent: '  ',
+    );
+
+    test('one MealReveals, on Android only, handed to the shell', () {
+      final source = init();
+      expect(
+        source,
+        _wired(
+          r'\n\s*final mealReveals = Platform\.isAndroid \? '
+          r'MealReveals\(\) : null;',
+        ),
+      );
+      expect(RegExp(r'MealReveals\(').allMatches(source), hasLength(1));
+      expect(source, _wired(r'\n\s*mealReveals: mealReveals,'));
+    });
+
+    test("a shared photo's snackbar is worded by outcomeAnnouncer, with "
+        "main.dart's View sink", () {
+      expect(
+        init(),
+        _wired(
+          r'outcomeAnnouncer\( l10n: \(\) => '
+          r'localizationsFor\(settings\.appLanguage\), notify: notify, '
+          r'reveals: mealReveals, notifyView: notifyView\)',
+        ),
+      );
+      expect(
+        _source('lib/main.dart'),
+        _wired(r'notifyView: showAppSnackbarWithView,'),
+      );
+    });
+
+    test('a card tapped while the app runs, and one that started it, ask '
+        'for its meal', () {
+      final source = init();
+      expect(
+        source,
+        _wired(
+          r'\n\s*final cardTaps = mealReveals == null \? null : '
+          r'MealCardTaps\(mealReveals\);',
+        ),
+      );
+      expect(source, _wired(r'\n\s*onTap: cardTaps\?\.onTap,'));
+      expect(
+        source,
+        _wired(
+          r'await notifier\.init\(\); '
+          r'await cardTaps\.launch\(notifier\.launchPayload\);',
+        ),
+      );
+    });
+
+    test("the background run's cards carry their meal to the plugin", () {
+      final glue = _source('lib/ui/background_glue.dart');
+      expect(
+        glue,
+        _wired(
+          r'showMealCard: \(title, body, \{payload\}\) async \{[^}]*'
+          r'await notifier\.showMealCard\(title, body, payload: payload\);',
+        ),
+      );
+      expect(glue, _wired(r'payload: revealForMeal\(o\)\?\.payload\)'));
     });
   });
 
