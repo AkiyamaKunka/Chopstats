@@ -201,9 +201,9 @@ internal object IntakeRules {
             "$packageName$SHARE_OUT_AUTHORITY_SUFFIX".equals(authority, ignoreCase = true)
 
     /// Why a shared item gave no copy (MainActivity.withSafeShares). Share
-    /// intake (Dart) reads it from the refused item's path, whose last
-    /// part is the token (share_intake.dart androidRefusalTokens), and
-    /// says how many items were skipped and why.
+    /// intake (Dart) reads it from the refused item's path, whose part
+    /// after REFUSED_SHARE_PATH is the token (share_intake.dart
+    /// androidRefusalTokens), and says how many items were skipped and why.
     enum class ShareRefusal(val token: String) {
         VIDEO("video"),
         FILE_TYPE("file_type"),
@@ -225,10 +225,51 @@ internal object IntakeRules {
     fun typeRefusal(itemType: String?): ShareRefusal =
         if (itemType?.startsWith("video") == true) ShareRefusal.VIDEO else ShareRefusal.FILE_TYPE
 
+    /// The longest extension a refused item carries (refusedExtension):
+    /// enough for every image format share intake names by type
+    /// (share_intake.dart refusedPhotoExtensions, 'avif' the longest), and
+    /// no more of a sender's name. manifest_gate_test checks that every one
+    /// of them fits.
+    const val MAX_REFUSED_EXTENSION = 4
+
+    /// The extension an item refused for its type carries to share intake
+    /// (refusedSharePath): the part of its [name] after the last dot,
+    /// lower-cased, when that is 1 to MAX_REFUSED_EXTENSION letters a-z
+    /// (either case) or digits: "cr3" for "IMG_0001.CR3". Null for any
+    /// other name: none, no dot, nothing after it, a longer part ("Smith"
+    /// in "Dinner with J.Smith"), or a space, a dash or any other
+    /// character in it. Nothing else of the name travels.
+    fun refusedExtension(name: String?): String? {
+        if (name == null) return null
+        val dot = name.lastIndexOf('.')
+        if (dot < 0) return null
+        val ext = name.substring(dot + 1)
+        if (ext.length !in 1..MAX_REFUSED_EXTENSION ||
+            !ext.all { it in 'a'..'z' || it in 'A'..'Z' || it in '0'..'9' }
+        ) return null
+        return ext.lowercase(Locale.ROOT)
+    }
+
     /// The path a refused item reaches the plugin with: a file:// URI of
     /// it names no file, and the plugin hands a file:// URI's path on as it
-    /// is, without opening it.
-    fun refusedSharePath(refusal: ShareRefusal): String = "$REFUSED_SHARE_PATH/${refusal.token}"
+    /// is, without opening it. An item refused for its type (FILE_TYPE)
+    /// whose [name] gives an extension (refusedExtension) carries it as a
+    /// last part: /chopstats-refused/file_type/cr3. Android has no type for
+    /// a CR3, 3FR, RWL, SR2, SRF or X3F (they are not in its MIME table), so
+    /// in a share of several with no listed types such an image is refused
+    /// for its type before any copy, and the line called it a kind of file
+    /// Chopstats can't read, where a copy of it is named ("Chopstats can't
+    /// read CR3 photos yet"). Share intake names the type from the
+    /// extension as it does from a copy's name, only for an image format
+    /// it does not read (share_intake.dart sharedPhotoTypeOf), and nothing
+    /// is copied or read for it (device QA 2026-11-22, PR81-QA-3). Any
+    /// other refusal, and a name with no such extension, gives the reason
+    /// alone, as before.
+    fun refusedSharePath(refusal: ShareRefusal, name: String? = null): String {
+        val path = "$REFUSED_SHARE_PATH/${refusal.token}"
+        val ext = if (refusal == ShareRefusal.FILE_TYPE) refusedExtension(name) else null
+        return if (ext == null) path else "$path/$ext"
+    }
 
     /// The longest file name a copy may have, in bytes (ext4 and f2fs).
     const val MAX_NAME_BYTES = 255

@@ -408,11 +408,14 @@ class MainActivity : FlutterActivity() {
     /// size (over MAX_SHARE_BYTES) or because it could not be read goes on
     /// as a refused item after the copies, of type REFUSED_SHARE_TYPE: a
     /// file:// URI that names no file (IntakeRules.refusedSharePath), which
-    /// the plugin hands Dart as its path. Share intake says how many were
-    /// skipped and why, after the share's photos (they used to go without
-    /// a word); a share whose every item was refused reaches the plugin
-    /// with those alone, and asks nothing. The app's own share-out files
-    /// are still left out without one.
+    /// the plugin hands Dart as its path. One left out for its type
+    /// carries its name's extension and nothing else of the name, so share
+    /// intake names an image format Android has no type for (a CR3 among
+    /// several) as it names a copy's (PR81-QA-3). Share intake says how
+    /// many were skipped and why, after the share's photos (they used to
+    /// go without a word); a share whose every item was refused reaches
+    /// the plugin with those alone, and asks nothing. The app's own
+    /// share-out files are still left out without one.
     private fun withSafeShares(intent: Intent): Intent {
         val kind = intent.action
         val shareType = intent.type ?: return intent
@@ -434,7 +437,9 @@ class MainActivity : FlutterActivity() {
         }
         val copies = ArrayList<Uri>()
         val copyTypes = ArrayList<String>()
-        val refused = ArrayList<IntakeRules.ShareRefusal>()
+        // Each item left out, as its refused item's path
+        // (IntakeRules.refusedSharePath).
+        val refused = ArrayList<String>()
         try {
             clearEmptyShareFolders()
         } catch (e: Exception) {
@@ -442,13 +447,13 @@ class MainActivity : FlutterActivity() {
         streams.forEachIndexed { i, uri ->
             try {
                 if (uri == null) {
-                    refused.add(IntakeRules.ShareRefusal.UNREADABLE)
+                    refused.add(IntakeRules.refusedSharePath(IntakeRules.ShareRefusal.UNREADABLE))
                     return@forEachIndexed
                 }
                 if (IntakeRules.isOwnShareOut(uri.scheme, uri.authority, packageName)) return@forEachIndexed
                 val name = shareName(uri)
                 if (name == null) {
-                    refused.add(IntakeRules.ShareRefusal.UNREADABLE)
+                    refused.add(IntakeRules.refusedSharePath(IntakeRules.ShareRefusal.UNREADABLE))
                     return@forEachIndexed
                 }
                 // The type the plugin gives it: the share's own, or for
@@ -461,15 +466,23 @@ class MainActivity : FlutterActivity() {
                     listedTypes?.getOrNull(i) ?: URLConnection.guessContentTypeFromName(name)
                         ?: providerType(uri)
                 else shareType
+                // No image: refused before any copy, nothing read. One
+                // refused for its type keeps its name's extension, so an
+                // image format Android has no type for (a CR3 or an X3F:
+                // no guess from its name, octet-stream from its provider)
+                // is named, not called a kind of file (device QA
+                // 2026-11-22, PR81-QA-3).
                 if (itemType?.startsWith("image") != true) {
-                    refused.add(IntakeRules.typeRefusal(itemType))
+                    refused.add(IntakeRules.refusedSharePath(IntakeRules.typeRefusal(itemType), name))
                     return@forEachIndexed
                 }
                 val (copy, copied) = copyShare(uri, copyName(uri, name, itemType))
                 if (copy == null) {
                     refused.add(
-                        if (copied == Copied.TOO_BIG) IntakeRules.ShareRefusal.TOO_BIG
-                        else IntakeRules.ShareRefusal.UNREADABLE,
+                        IntakeRules.refusedSharePath(
+                            if (copied == Copied.TOO_BIG) IntakeRules.ShareRefusal.TOO_BIG
+                            else IntakeRules.ShareRefusal.UNREADABLE,
+                        ),
                     )
                     return@forEachIndexed
                 }
@@ -477,7 +490,7 @@ class MainActivity : FlutterActivity() {
                 copyTypes.add(itemType)
             } catch (e: Exception) {
                 // This item only: the others still go.
-                refused.add(IntakeRules.ShareRefusal.UNREADABLE)
+                refused.add(IntakeRules.refusedSharePath(IntakeRules.ShareRefusal.UNREADABLE))
             }
         }
         if (copies.isEmpty() && refused.isEmpty()) return emptyShare(intent)
@@ -492,8 +505,8 @@ class MainActivity : FlutterActivity() {
                     setDataAndType(null, shareType)
                     val items = ArrayList<Uri>(copies)
                     val types = ArrayList<String>(copyTypes)
-                    for (refusal in refused) {
-                        items.add(Uri.fromFile(File(IntakeRules.refusedSharePath(refusal))))
+                    for (path in refused) {
+                        items.add(Uri.fromFile(File(path)))
                         types.add(IntakeRules.REFUSED_SHARE_TYPE)
                     }
                     putParcelableArrayListExtra(Intent.EXTRA_STREAM, items)

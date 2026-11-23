@@ -12,7 +12,11 @@ import 'package:calorie_tracker/services/photo/background_time.dart'
 import 'package:calorie_tracker/services/photo/photo_changes.dart'
     show photoChangesChannelName;
 import 'package:calorie_tracker/services/photo/share_intake.dart'
-    show androidRefusalTokens, androidRefusedSharePath, androidRefusedShareType;
+    show
+        androidRefusalTokens,
+        androidRefusedSharePath,
+        androidRefusedShareType,
+        refusedPhotoExtensions;
 import 'package:calorie_tracker/services/places/places.dart'
     show placesChannelName;
 import 'package:calorie_tracker/services/report/notifications.dart';
@@ -2103,35 +2107,53 @@ void main() {
   // The plugin hands a file:// URI's path to Dart as it is, without
   // opening it, and share intake reads it as the reason, never as a
   // file: it says how many were skipped and why, after the share's
-  // photos, and asks nothing for a share of refused items alone.
+  // photos, and asks nothing for a share of refused items alone. One
+  // refused for its type carries its name's extension and nothing else of
+  // the name (/chopstats-refused/file_type/cr3), so share intake names an
+  // image format Android has no type for, a CR3 among several, as it
+  // names a copy (device QA 2026-11-22, PR81-QA-3).
   test('a shared item that gives no copy goes on as a refused item, which '
       'the plugin hands Dart unread', () {
     final code = _kotlinCode(_mainActivity());
     final safe = _kotlinFunction(code, 'private fun withSafeShares(');
     for (final refused in [
-      'if (uri == null) { refused.add(IntakeRules.ShareRefusal.UNREADABLE) '
-          'return@forEachIndexed }',
+      'if (uri == null) { refused.add(IntakeRules.refusedSharePath('
+          'IntakeRules.ShareRefusal.UNREADABLE)) return@forEachIndexed }',
       'val name = shareName(uri) if (name == null) { refused.add('
-          'IntakeRules.ShareRefusal.UNREADABLE) return@forEachIndexed }',
+          'IntakeRules.refusedSharePath(IntakeRules.ShareRefusal.UNREADABLE)) '
+          'return@forEachIndexed }',
       'if (itemType?.startsWith("image") != true) { refused.add('
-          'IntakeRules.typeRefusal(itemType)) return@forEachIndexed }',
+          'IntakeRules.refusedSharePath(IntakeRules.typeRefusal(itemType), '
+          'name)) return@forEachIndexed }',
       'val (copy, copied) = copyShare(uri, copyName(uri, name, itemType)) '
-          'if (copy == null) { refused.add( if (copied == Copied.TOO_BIG) '
-          'IntakeRules.ShareRefusal.TOO_BIG else '
-          'IntakeRules.ShareRefusal.UNREADABLE, ) return@forEachIndexed }',
-      '} catch (e: Exception) { refused.add('
-          'IntakeRules.ShareRefusal.UNREADABLE) } }',
+          'if (copy == null) { refused.add( IntakeRules.refusedSharePath( if '
+          '(copied == Copied.TOO_BIG) IntakeRules.ShareRefusal.TOO_BIG else '
+          'IntakeRules.ShareRefusal.UNREADABLE, ), ) return@forEachIndexed }',
+      '} catch (e: Exception) { refused.add(IntakeRules.refusedSharePath('
+          'IntakeRules.ShareRefusal.UNREADABLE)) } }',
     ]) {
       expect(safe, contains(refused));
     }
+    // A refused item's path is only ever IntakeRules.refusedSharePath's
+    // (the five calls above, the type refusal's alone given the name), so
+    // nothing of a sender's name travels but the extension its JVM tests
+    // allow.
+    expect(safe, contains('val refused = ArrayList<String>()'));
+    final adds = RegExp(r'refused\.add\(').allMatches(safe).length;
+    expect(adds, 5);
+    expect(
+        RegExp(r'refused\.add\( ?IntakeRules\.refusedSharePath\(')
+            .allMatches(safe)
+            .length,
+        adds);
+    expect('IntakeRules.refusedSharePath('.allMatches(safe), hasLength(5));
     expect(
         safe,
         contains('if (kind == Intent.ACTION_SEND_MULTIPLE || '
             'refused.isNotEmpty()) { action = Intent.ACTION_SEND_MULTIPLE '
             'setDataAndType(null, shareType) val items = ArrayList<Uri>('
-            'copies) val types = ArrayList<String>(copyTypes) for (refusal '
-            'in refused) { items.add(Uri.fromFile(File('
-            'IntakeRules.refusedSharePath(refusal)))) types.add('
+            'copies) val types = ArrayList<String>(copyTypes) for (path in '
+            'refused) { items.add(Uri.fromFile(File(path))) types.add('
             'IntakeRules.REFUSED_SHARE_TYPE) } putParcelableArrayListExtra('
             'Intent.EXTRA_STREAM, items) putExtra(Intent.EXTRA_MIME_TYPES, '
             'types.toTypedArray()) }'),
@@ -2150,8 +2172,11 @@ void main() {
         contains('const val REFUSED_SHARE_PATH = "$androidRefusedSharePath"'));
     expect(
         rules,
-        contains('fun refusedSharePath(refusal: ShareRefusal): String = '
-            '"\$REFUSED_SHARE_PATH/\${refusal.token}"'));
+        contains('fun refusedSharePath(refusal: ShareRefusal, name: String? = '
+            'null): String { val path = "\$REFUSED_SHARE_PATH/\${refusal.token}" '
+            'val ext = if (refusal == ShareRefusal.FILE_TYPE) '
+            'refusedExtension(name) else null return if (ext == null) path '
+            'else "\$path/\$ext" }'));
     final tokens = RegExp(r'enum class ShareRefusal\(val token: String\) '
             r'\{([^}]*)\}')
         .firstMatch(rules)
@@ -2163,7 +2188,24 @@ void main() {
             .map((m) => m.group(1))
             .toSet(),
         androidRefusalTokens.keys.toSet());
-    _expectJvmTests(['typeRefusal', 'refusedSharePath', 'REFUSED_SHARE_TYPE']);
+    // Every image format share intake names by type fits in the
+    // extension a refused item may carry: letters a-z and digits, at most
+    // MAX_REFUSED_EXTENSION of them (PR81-QA-3).
+    final longest = RegExp(r'const val MAX_REFUSED_EXTENSION = (\d+)')
+        .firstMatch(rules)
+        ?.group(1);
+    expect(longest, isNotNull);
+    for (final ext in refusedPhotoExtensions) {
+      expect(ext, matches(RegExp('^\\.[a-z0-9]{1,$longest}\$')), reason: ext);
+    }
+    _expectJvmTests([
+      'typeRefusal',
+      'refusedSharePath',
+      'REFUSED_SHARE_TYPE',
+      'anItemRefusedForItsTypeCarriesItsNamesExtension',
+      'nothingElseOfTheNameTravels',
+      'IntakeRules.refusedExtension(',
+    ]);
     // receive_sharing_intent, as the app builds it: a several-item share
     // gives each item its listed type, a type that is no image, video or
     // text is a file (no thumbnail: that is for a video only), and a
