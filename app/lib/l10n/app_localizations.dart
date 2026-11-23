@@ -5902,6 +5902,66 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'View'**
   String get mealViewAction;
+
+  /// Snackbar after a share into the app, once every shared file has been looked at, when some gave no photo and every one of those is an image of a type Chopstats does not read (AVIF, DNG and other RAW files, BMP). One line per share, after the lines for its photos, which are logged as usual; nothing was sent for the skipped files. count is how many files of that share were skipped. type is the file type as the file names give it, upper-case (AVIF), or up to three joined by '/' (AVIF/DNG); never a file name.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{One shared file was skipped} other{{count} shared files were skipped}}: Chopstats can\'t read {type} photos yet.'**
+  String shareSkippedPhotoType(int count, String type);
+
+  /// Like shareSkippedPhotoType, when every skipped file is a video (a share that mixes photos and videos). count is how many files of that share were skipped.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{One shared file was skipped} other{{count} shared files were skipped}}: Chopstats logs photos, not videos.'**
+  String shareSkippedVideo(int count);
+
+  /// Like shareSkippedPhotoType, when every skipped file is not a photo (a PDF, a document) or has a name that gives no photo type. count is how many files of that share were skipped; more than one can be of different kinds.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{One shared file was skipped: Chopstats can\'t read that kind of file.} other{{count} shared files were skipped: Chopstats can\'t read those kinds of files.}}'**
+  String shareSkippedFileType(int count);
+
+  /// Snackbar after a share into the app when every file of it that gave no photo was over 25 MB, the most a photo may be. count is how many. One line per share, after the lines for its photos.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{One shared file was skipped because it is over 25 MB.} other{{count} shared files were skipped because they are over 25 MB.}}'**
+  String shareSkippedTooBig(int count);
+
+  /// Snackbar after a share into the app when every file of it that gave no photo could not be read (empty, or the app sharing it would not hand it over). count is how many. One line per share, after the lines for its photos.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{One shared file was skipped because it could not be read.} other{{count} shared files were skipped because they could not be read.}}'**
+  String shareSkippedUnreadable(int count);
+
+  /// Like shareSkippedTooBig, when the files were skipped for more than one reason and being over 25 MB is the reason that covers the most files. count (2 or more) is how many files of that share were skipped; some (fewer than count) is how many of them were over 25 MB.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} shared files were skipped, {some, plural, =1{one of them because it is over 25 MB} other{{some} of them because they are over 25 MB}}.'**
+  String shareSkippedSomeTooBig(int count, int some);
+
+  /// Like shareSkippedUnreadable, when the files were skipped for more than one reason and not being readable is the reason that covers the most files. count (2 or more) is how many files of that share were skipped; some (fewer than count) is how many of them could not be read.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} shared files were skipped, {some, plural, =1{one of them because it could not be read} other{{some} of them because they could not be read}}.'**
+  String shareSkippedSomeUnreadable(int count, int some);
+
+  /// Like shareSkippedPhotoType, when the files were skipped for more than one reason and being an image of a type Chopstats does not read is the reason that covers the most files. count (2 or more) is how many files of that share were skipped; some (fewer than count) is how many of them are such images; type as in shareSkippedPhotoType.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} shared files were skipped, {some, plural, =1{one of them because Chopstats can\'t read {type} photos yet} other{{some} of them because Chopstats can\'t read {type} photos yet}}.'**
+  String shareSkippedSomePhotoType(int count, int some, String type);
+
+  /// Like shareSkippedVideo, when the files were skipped for more than one reason and being a video is the reason that covers the most files. count (2 or more) is how many files of that share were skipped; some (fewer than count) is how many of them are videos.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} shared files were skipped, {some, plural, =1{one of them a video} other{{some} of them videos}}: Chopstats logs photos, not videos.'**
+  String shareSkippedSomeVideo(int count, int some);
+
+  /// Like shareSkippedFileType, when the files were skipped for more than one reason and not being a photo (or having a name that gives no photo type) is the reason that covers the most files. count (2 or more) is how many files of that share were skipped; some (fewer than count) is how many of them are such files.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} shared files were skipped, {some, plural, =1{one of them because Chopstats can\'t read that kind of file} other{{some} of them because Chopstats can\'t read those kinds of files}}.'**
+  String shareSkippedSomeFileType(int count, int some);
 }
 
 class _AppLocalizationsDelegate

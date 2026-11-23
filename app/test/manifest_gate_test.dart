@@ -11,6 +11,8 @@ import 'package:calorie_tracker/services/photo/background_time.dart'
     show backgroundTimeChannelName;
 import 'package:calorie_tracker/services/photo/photo_changes.dart'
     show photoChangesChannelName;
+import 'package:calorie_tracker/services/photo/share_intake.dart'
+    show androidRefusalTokens, androidRefusedSharePath, androidRefusedShareType;
 import 'package:calorie_tracker/services/places/places.dart'
     show placesChannelName;
 import 'package:calorie_tracker/services/report/notifications.dart';
@@ -1718,19 +1720,22 @@ void main() {
   // Chopstats is a target in its own sharesheet: Today's day image and the
   // Export file go out through share_plus's FileProvider. Picked there,
   // the report image would come back in as a meal photo and go to the AI.
-  // Share intake leaves out every stream from that provider; with nothing
-  // left, the share reaches no plugin.
+  // Share intake leaves out every stream from that provider, without a
+  // word (it is no refused file: the next test); with nothing left, the
+  // share reaches no plugin.
   test("share intake leaves out the app's own share-out files", () {
     final code = _kotlinCode(_mainActivity());
     final safe = _kotlinFunction(code, 'private fun withSafeShares(');
     expect(
         safe,
-        contains('if (uri == null) return@forEachIndexed if '
+        contains('return@forEachIndexed } if '
             '(IntakeRules.isOwnShareOut(uri.scheme, uri.authority, '
-            'packageName)) return@forEachIndexed val name = shareName(uri) '
-            '?: return@forEachIndexed'),
-        reason: 'skipped before anything is read or copied');
-    expect(safe, contains('if (copies.isEmpty()) return emptyShare(intent)'));
+            'packageName)) return@forEachIndexed val name = shareName(uri) '),
+        reason: 'skipped before anything is read or copied, and not '
+            'counted as refused');
+    expect(safe,
+        contains('if (copies.isEmpty() && refused.isEmpty()) return '
+            'emptyShare(intent)'));
     final rules = _kotlinCode(_intakeRules());
     expect(rules,
         contains('const val SHARE_OUT_AUTHORITY_SUFFIX = ".flutter.share_provider"'));
@@ -1742,6 +1747,153 @@ void main() {
             .readAsStringSync();
     expect(pluginManifest,
         contains(r'android:authorities="${applicationId}.flutter.share_provider"'));
+  });
+
+  // A shared item that gives no copy (a video or a PDF in a mixed share, a
+  // file over 25 MB, a stream that cannot be read) was dropped without a
+  // word, and a share of nothing else never reached Dart at all. Each now
+  // goes on after the copies as a refused item: a file:// URI that names
+  // no file (/chopstats-refused/<reason>), of a type that is no image.
+  // The plugin hands a file:// URI's path to Dart as it is, without
+  // opening it, and share intake reads it as the reason, never as a
+  // file: it says how many were skipped and why, after the share's
+  // photos, and asks nothing for a share of refused items alone.
+  test('a shared item that gives no copy goes on as a refused item, which '
+      'the plugin hands Dart unread', () {
+    final code = _kotlinCode(_mainActivity());
+    final safe = _kotlinFunction(code, 'private fun withSafeShares(');
+    for (final refused in [
+      'if (uri == null) { refused.add(IntakeRules.ShareRefusal.UNREADABLE) '
+          'return@forEachIndexed }',
+      'val name = shareName(uri) if (name == null) { refused.add('
+          'IntakeRules.ShareRefusal.UNREADABLE) return@forEachIndexed }',
+      'if (itemType?.startsWith("image") != true) { refused.add('
+          'IntakeRules.typeRefusal(itemType)) return@forEachIndexed }',
+      'val (copy, copied) = copyShare(uri, copyName(uri, name, itemType)) '
+          'if (copy == null) { refused.add( if (copied == Copied.TOO_BIG) '
+          'IntakeRules.ShareRefusal.TOO_BIG else '
+          'IntakeRules.ShareRefusal.UNREADABLE, ) return@forEachIndexed }',
+      '} catch (e: Exception) { refused.add('
+          'IntakeRules.ShareRefusal.UNREADABLE) } }',
+    ]) {
+      expect(safe, contains(refused));
+    }
+    expect(
+        safe,
+        contains('if (kind == Intent.ACTION_SEND_MULTIPLE || '
+            'refused.isNotEmpty()) { action = Intent.ACTION_SEND_MULTIPLE '
+            'setDataAndType(null, shareType) val items = ArrayList<Uri>('
+            'copies) val types = ArrayList<String>(copyTypes) for (refusal '
+            'in refused) { items.add(Uri.fromFile(File('
+            'IntakeRules.refusedSharePath(refusal)))) types.add('
+            'IntakeRules.REFUSED_SHARE_TYPE) } putParcelableArrayListExtra('
+            'Intent.EXTRA_STREAM, items) putExtra(Intent.EXTRA_MIME_TYPES, '
+            'types.toTypedArray()) }'),
+        reason: 'the copies first, then each refused item with its type');
+    expect(
+        _kotlinFunction(code, 'private fun copyShare('),
+        contains('val copied = copyAtMost(uri, out, MAX_SHARE_BYTES) if '
+            '(copied == Copied.OK) return out to copied out.delete() '
+            'dir.delete() return null to copied }'),
+        reason: 'over 25 MB (TOO_BIG) is told from a failed copy');
+    // The same reasons, type and path as share_intake.dart reads.
+    final rules = _kotlinCode(_intakeRules());
+    expect(rules,
+        contains('const val REFUSED_SHARE_TYPE = "$androidRefusedShareType"'));
+    expect(rules,
+        contains('const val REFUSED_SHARE_PATH = "$androidRefusedSharePath"'));
+    expect(
+        rules,
+        contains('fun refusedSharePath(refusal: ShareRefusal): String = '
+            '"\$REFUSED_SHARE_PATH/\${refusal.token}"'));
+    final tokens = RegExp(r'enum class ShareRefusal\(val token: String\) '
+            r'\{([^}]*)\}')
+        .firstMatch(rules)
+        ?.group(1);
+    expect(tokens, isNotNull);
+    expect(
+        RegExp(r'[A-Z_]+\("([a-z_]+)"\)')
+            .allMatches(tokens!)
+            .map((m) => m.group(1))
+            .toSet(),
+        androidRefusalTokens.keys.toSet());
+    _expectJvmTests(['typeRefusal', 'refusedSharePath', 'REFUSED_SHARE_TYPE']);
+    // receive_sharing_intent, as the app builds it: a several-item share
+    // gives each item its listed type, a type that is no image, video or
+    // text is a file (no thumbnail: that is for a video only), and a
+    // file:// URI's path is handed on as it is, nothing opened or copied.
+    final plugin = '${_pluginRoot('receive_sharing_intent')}/android/src/'
+        'main/kotlin/com/kasem/receive_sharing_intent';
+    final share = _kotlinCode(
+        File('$plugin/ReceiveSharingIntentPlugin.kt').readAsStringSync());
+    expect(
+        share,
+        contains('uris?.mapIndexedNotNull { index, uri -> toJsonObject(uri, '
+            'null, mimeTypes?.getOrNull(index)) }'));
+    expect(
+        share,
+        contains('mimeType?.startsWith("image") == true -> IMAGE '
+            'mimeType?.startsWith("video") == true -> VIDEO '
+            'mimeType?.startsWith("text") == true -> TEXT else -> FILE'));
+    expect(share,
+        contains('if (type != MediaType.VIDEO) return Pair(null, null)'));
+    final paths = _kotlinCode(
+        File('$plugin/FileDirectory.kt').readAsStringSync());
+    final absolute =
+        _kotlinFunction(paths, 'fun getAbsolutePath(context: Context, uri: Uri)');
+    expect(absolute,
+        startsWith('{ if (DocumentsContract.isDocumentUri(context, uri)) {'));
+    expect(
+        absolute,
+        endsWith('} else if ("content".equals(uri.scheme, ignoreCase = '
+            'true)) { return getDataColumn(context, uri, null, null) } '
+            'return uri.path }'));
+  });
+
+  // Share intake (Dart) takes a copy by its name's type. A provider can
+  // show an image's name without an extension (IMG_1731500000000, "Lunch
+  // with.Sarah"), and MainActivity copied it under that name, so a JPEG
+  // shared as image/jpeg was refused as a kind of file Chopstats can't
+  // read. Such a name gets the extension its image type gives (the
+  // share's own type for it, else its provider's), from Android's MIME
+  // table, as the plugin's own name for a nameless stream did.
+  test('a shared image whose name has no extension Android knows is copied '
+      'under the one its type gives', () {
+    final code = _kotlinCode(_mainActivity());
+    final copyName = _kotlinFunction(
+        code, 'private fun copyName(uri: Uri, name: String, itemType: String)');
+    expect(
+        copyName,
+        contains('val types = MimeTypeMap.getSingleton() fun extensionOf('
+            'type: String?): String? = type?.lowercase(Locale.ROOT)?.takeIf '
+            '{ it.startsWith("image/") } ?.let { '
+            'types.getExtensionFromMimeType(it) } return '
+            'IntakeRules.copyName(name, { types.hasExtension(it) }) { '
+            'extensionOf(itemType) ?: extensionOf(providerType(uri)) }'));
+    // Only an image's copy: after the type check, before the copy.
+    final safe = _kotlinFunction(code, 'private fun withSafeShares(');
+    expect(
+        safe.indexOf('if (itemType?.startsWith("image") != true)'),
+        lessThan(safe.indexOf('copyShare(uri, copyName(uri, name, itemType))')));
+    expect('copyName('.allMatches(safe), hasLength(1));
+    // An item of a multi-file share with no listed type and a name Android
+    // cannot type takes its provider's type (device QA 2026-11-22,
+    // PR81-QA-2): it was refused as a kind of file before copyName ran.
+    expect(
+        safe,
+        contains('val itemType = if (kind == Intent.ACTION_SEND_MULTIPLE) '
+            'listedTypes?.getOrNull(i) ?: '
+            'URLConnection.guessContentTypeFromName(name) ?: '
+            'providerType(uri) else shareType'));
+    final rules = _kotlinCode(_intakeRules());
+    expect(rules, contains('const val MAX_NAME_BYTES = 255'));
+    _expectJvmTests([
+      'aNameWithNoExtensionGetsTheOneItsTypeGives',
+      'aNameWithAKnownExtensionIsKeptAndItsTypeNotAskedFor',
+      'aTypeThatGivesNoPlainExtensionLeavesTheNameAsItIs',
+      'aNameThatWouldGrowPastTheLongestFileNameIsKept',
+      'IntakeRules.copyName(',
+    ]);
   });
 
   // A file:// URI into the app's own data is never copied, shared or

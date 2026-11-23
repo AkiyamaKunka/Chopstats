@@ -19,9 +19,9 @@ class Src implements SharedMediaSource {
       StreamController<List<String>>();
   List<String> initial = [];
   @override
-  Stream<List<String>> imagePathBatches() => controller.stream;
+  Stream<SharedBatch> batches() => controller.stream.map(SharedBatch.new);
   @override
-  Future<List<String>> initialImagePaths() async => initial;
+  Future<SharedBatch> initialBatch() async => SharedBatch(initial);
 }
 
 void main() {

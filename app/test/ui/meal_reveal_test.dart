@@ -4,6 +4,8 @@
 /// (ui/meal_reveal.dart). The shell's side is in view_after_share_test.
 library;
 
+import 'package:calorie_tracker/core/contracts.dart'
+    show RefusedShareFiles, ShareRefusal;
 import 'package:calorie_tracker/core/outcome_kind.dart';
 import 'package:calorie_tracker/l10n/app_localizations_en.dart';
 import 'package:calorie_tracker/l10n/app_localizations_zh.dart';
@@ -94,6 +96,9 @@ void main() {
             shared: true),
         const PhotoOutcome(PhotoOutcomeKind.saved, 'Meal logged',
             shared: true),
+        // A share's line on its files that gave no photo (#81): no meal.
+        refusedFilesOutcome(const RefusedShareFiles([ShareRefusal.photoType],
+            photoTypes: ['AVIF'])),
       ]) {
         expect(revealForShared(o), isNull, reason: o.kind.name);
         expect(revealForMeal(o), isNull, reason: o.kind.name);
@@ -285,8 +290,15 @@ void main() {
       announce(_notShared(_saved)); // a picked photo, an automatic one
       announce(const PhotoOutcome(PhotoOutcomeKind.skipped, 'No food',
           shared: true));
+      announce(refusedFilesOutcome(const RefusedShareFiles(
+          [ShareRefusal.photoType],
+          photoTypes: ['AVIF'])));
       expect(views, 0);
-      expect(plain, ['Meal logged: Ramen — ~600 kcal', isNotEmpty]);
+      expect(plain, [
+        'Meal logged: Ramen — ~600 kcal',
+        isNotEmpty,
+        "One shared file was skipped: Chopstats can't read AVIF photos yet.",
+      ]);
     });
 
     test('iPhone (no reveals): no View, a shared save included', () {
