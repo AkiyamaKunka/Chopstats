@@ -1292,7 +1292,7 @@ void main() {
 
     // Decision 4 (2026-11-13): an Android-only version ships with a
     // hand-made GitHub Release under an android-v* tag (android-v1.7.0 on
-    // 2026-11-19, android-v1.7.1 on 2026-11-21; the iPhone's next tag from
+    // 2026-11-19, android-v1.7.1 on 2026-11-22; the iPhone's next tag from
     // main is v1.7.1). That tag must start no run: the only push trigger
     // is tags v*.
     test('only v* tags start a run, so android-v* tags start none', () {
@@ -1409,7 +1409,7 @@ void main() {
     // and § 6.8 sent the APK out as android-v1.7.0 again. What they tell
     // the next run to expect is pubspec's version, and so is the tag the
     // cheat sheet pushes (release.yml refuses any other). android-v1.7.1
-    // is out (run 9, build 209, 2026-11-21): the first Play upload is that
+    // is out (run 9, build 209, 2026-11-22): the first Play upload is that
     // run's bundle, under the version it was built as, and § 6.6's steps
     // call the next Android-only version X.Y.Z, pubspec's version bumped
     // first, so they name no version that is already out.
@@ -1536,15 +1536,16 @@ void main() {
     // repo's local time (run 7 at 22:09 CST, published 23:31 CST), not
     // 2026-11-20 (UTC), and main's pubspec is 1.7.1 from the merge of PR
     // #77 on, not from the day it was decided. android-v1.7.1 (run 9)
-    // went out on 2026-11-21. Every dated mention of a published Android
-    // tag names its build, and nothing still calls android-v1.7.1 next.
-    test('android-v1.7.0 is dated 2026-11-19 and android-v1.7.1 2026-11-21, '
+    // went out on 2026-11-22 (published 20:13 CST, which is 02:13Z on the
+    // 23rd). Every dated mention of a published Android tag names its
+    // build, and nothing still calls android-v1.7.1 next.
+    test('android-v1.7.0 is dated 2026-11-19 and android-v1.7.1 2026-11-22, '
         'each with its build, and the bump by its PR', () {
       final flat = releasing.replaceAll(RegExp(r'\s+'), ' ');
       final sentences = flat.split(RegExp(r'(?<=[.;])\s+'));
       for (final (tag, day, build) in [
         ('android-v1.7.0', '2026-11-19', 'build 207'),
-        ('android-v1.7.1', '2026-11-21', 'build 209'),
+        ('android-v1.7.1', '2026-11-22', 'build 209'),
       ]) {
         final dated = [
           for (final sentence in sentences)

@@ -1162,7 +1162,7 @@ wording, not the position. The paste-ready answers live next to the app in
    under the tag `android-v1.7.0` (§ 6.6), so `v1.7.0` stays free for the
    iPhone 1.7.0. Done on 2026-11-19 for GitHub (`android-v1.7.0`, build
    207); no bundle reached Play. Android 1.7.1 went out the same way on
-   2026-11-21 (`android-v1.7.1`, build 209), on GitHub only too: that
+   2026-11-22 (`android-v1.7.1`, build 209), on GitHub only too: that
    run's bundle is the first Play upload, still to come (§ 6.3).
    The iPhone 1.7.0 never shipped (1.6.0 is live), and pubspec is 1.7.1
    since PR #77, so the iPhone's next tag from `main` is `v1.7.1`:
@@ -1724,7 +1724,7 @@ read 2026-11-13):
 any `v*` tag, and the iOS lane stops until the iCloud container exists
 (§ 11.1). So Android goes first without a `v*` tag. Android 1.7.0 went
 out this way on 2026-11-19 (`android-v1.7.0`, build 207, GitHub only).
-Android 1.7.1 followed on 2026-11-21 (`android-v1.7.1`, build 209 from
+Android 1.7.1 followed on 2026-11-22 (`android-v1.7.1`, build 209 from
 run 9, GitHub only). The next one is pubspec's version at that time,
 bumped first (`X.Y.Z` in the steps): `android-v1.7.1` already holds
 1.7.1, so, with the owner's OK, raise `version:` in `app/pubspec.yaml`
@@ -1938,7 +1938,7 @@ the screenshots:
     picker, a share, Describe a meal and the daily summary.
 12. Create the closed track, add at least 12 testers outside mainland
     China, roll out, share the opt-in link, and start the 14-day log.
-13. Done on 2026-11-21: the same run's GitHub APK went out by hand as
+13. Done on 2026-11-22: the same run's GitHub APK went out by hand as
     `android-v1.7.1` (build 209), before any Play upload, and the README's
     Android section names it (§ 6.6, steps 3 to 5). `android-v1.7.0`
     (build 207) is already out, since 2026-11-19.
