@@ -5,6 +5,7 @@ import android.os.Build
 import java.io.File
 import java.io.IOException
 import java.nio.file.Files
+import java.util.Locale
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -500,6 +501,82 @@ class IntakeRulesTest {
         assertTrue(IntakeRules.takesEngineFlagsFromIntent(releaseBuild = false))
     }
 
+    // --- The app's own language on Android 13 and later
+    // (MainActivity.setAppLanguage): one of the app's languages
+    // (res/xml/locales_config.xml) or none, nothing else.
+
+    @Test
+    fun theAppSetsOnlyItsOwnLanguagesOrNone() {
+        assertEquals(setOf("en", "zh"), IntakeRules.APP_LANGUAGES)
+        assertEquals("en", IntakeRules.appLanguageTags("en"))
+        assertEquals("zh", IntakeRules.appLanguageTags("zh"))
+        // None: the app follows the system's language again.
+        assertEquals("", IntakeRules.appLanguageTags(""))
+        for (tags in listOf(null, "fr", "EN", " en", "en,zh", "zh-Hant", "zh-CN", "und", "system")) {
+            assertNull(tags, IntakeRules.appLanguageTags(tags))
+        }
+    }
+
+    // --- The language goes to Android with the region of the phone's own
+    // locale in it (MainActivity.setAppLanguage): a bare "en" became the
+    // app's main locale, and English times went 12-hour on a phone whose
+    // own language is 24-hour (review of PR 79, F1).
+
+    @Test
+    fun theAppsLanguageKeepsThePhonesRegion() {
+        assertEquals("en-GB", IntakeRules.appLanguageTag("en", "en-GB"))
+        assertEquals("zh-Hans-CN", IntakeRules.appLanguageTag("zh", "zh-Hans-CN,en-US"))
+        // The first in the language, wherever it is in the phone's list.
+        assertEquals("en-US", IntakeRules.appLanguageTag("en", "zh-Hans-CN,en-US,en-GB"))
+        assertEquals("zh-CN", IntakeRules.appLanguageTag("zh", "en-US,zh-CN"))
+        assertEquals("zh-Hans-SG", IntakeRules.appLanguageTag("zh", "zh-Hans-SG"))
+        assertEquals("zh-Hans-HK", IntakeRules.appLanguageTag("zh", "zh-Hans-HK"))
+        // Language, script and region only: Android 14's regional
+        // preferences (Unicode extensions) stay the phone's.
+        assertEquals("en-GB", IntakeRules.appLanguageTag("en", "en-GB-u-mu-celsius-fw-mon"))
+        // The app's Chinese is Simplified: Traditional Chinese never counts,
+        // with its script or by its region.
+        assertEquals("zh", IntakeRules.appLanguageTag("zh", "zh-Hant-TW,en-US"))
+        assertEquals("zh", IntakeRules.appLanguageTag("zh", "zh-TW"))
+        assertEquals("zh", IntakeRules.appLanguageTag("zh", "zh-HK,zh-MO"))
+        assertEquals("zh-CN", IntakeRules.appLanguageTag("zh", "zh-Hant-HK,zh-CN"))
+        // None in the language: the bare tag.
+        assertEquals("en", IntakeRules.appLanguageTag("en", "de-DE"))
+        assertEquals("en", IntakeRules.appLanguageTag("en", ""))
+        assertEquals("zh", IntakeRules.appLanguageTag("zh", "en-US"))
+        // Follow system clears the app's language, whatever the phone's.
+        assertEquals("", IntakeRules.appLanguageTag("", "en-GB"))
+    }
+
+    // --- The phone's own 12/24-hour clock (MainActivity.phone), which the
+    // FlutterView no longer reports once the app has a language of its own.
+
+    @Test
+    fun thePhonesOwnClockIsItsSwitchElseItsFirstLanguages() {
+        // 'Use 24-hour format' set: that, whatever the language.
+        assertEquals(true, IntakeRules.usesTwentyFourHourClock("24", "h:mm:ss a z"))
+        assertEquals(false, IntakeRules.usesTwentyFourHourClock("12", "HH:mm:ss z"))
+        assertEquals(true, IntakeRules.usesTwentyFourHourClock("24", null))
+        // 'Use locale default': the first language's long time format.
+        assertEquals(true, IntakeRules.usesTwentyFourHourClock(null, "HH:mm:ss z"))
+        assertEquals(true, IntakeRules.usesTwentyFourHourClock(null, "z HH:mm:ss"))
+        assertEquals(true, IntakeRules.usesTwentyFourHourClock(null, "H:mm:ss z"))
+        assertEquals(false, IntakeRules.usesTwentyFourHourClock(null, "h:mm:ss a z"))
+        assertEquals(false, IntakeRules.usesTwentyFourHourClock(null, "z ah:mm:ss"))
+        assertEquals(false, IntakeRules.usesTwentyFourHourClock(null, "Bh:mm:ss [z]"))
+        // Quoted text is no hour (DateFormat.hasDesignator).
+        assertEquals(false, IntakeRules.usesTwentyFourHourClock(null, "h 'H' mm a"))
+        assertEquals(true, IntakeRules.usesTwentyFourHourClock(null, "'h' HH:mm"))
+        assertNull(IntakeRules.usesTwentyFourHourClock(null, null))
+        // The patterns themselves, from the locale data (the JDK's here,
+        // ICU's on the phone): British English is 24-hour, bare English
+        // 12-hour, as on the phone.
+        assertEquals(true, IntakeRules.usesTwentyFourHourClock(null, IntakeRules.longTimePattern(Locale.UK)))
+        assertEquals(true, IntakeRules.usesTwentyFourHourClock(null, IntakeRules.longTimePattern(Locale.GERMANY)))
+        assertEquals(false, IntakeRules.usesTwentyFourHourClock(null, IntakeRules.longTimePattern(Locale.ENGLISH)))
+        assertEquals(false, IntakeRules.usesTwentyFourHourClock(null, IntakeRules.longTimePattern(Locale.US)))
+    }
+
     // --- A share that comes before share intake listens waits for it
     // (ShareHold): the plugin tells only a listener, and Android delivers
     // the share a stopped app was started again for before Dart runs.
@@ -539,6 +616,94 @@ class IntakeRulesTest {
         assertFalse(IntakeRules.isOwnShareOut("file", "$pkg.flutter.share_provider", pkg))
         assertFalse(IntakeRules.isOwnShareOut(null, "$pkg.flutter.share_provider", pkg))
         assertFalse(IntakeRules.isOwnShareOut("content", "content", pkg))
+    }
+
+    // --- A shared item that gives no copy goes on as a refused item, so
+    // share intake can say it was skipped and why.
+
+    @Test
+    fun aVideoIsRefusedAsAVideoAndAnyOtherTypeAsAFileType() {
+        assertEquals(IntakeRules.ShareRefusal.VIDEO, IntakeRules.typeRefusal("video/mp4"))
+        assertEquals(IntakeRules.ShareRefusal.VIDEO, IntakeRules.typeRefusal("video/*"))
+        for (type in listOf("application/pdf", "text/plain", "*/*", "audio/mpeg", "", null)) {
+            assertEquals(type, IntakeRules.ShareRefusal.FILE_TYPE, IntakeRules.typeRefusal(type))
+        }
+    }
+
+    @Test
+    fun aRefusedItemsPathNamesNoFileAndEndsInItsReason() {
+        assertEquals("/chopstats-refused/video", IntakeRules.refusedSharePath(IntakeRules.ShareRefusal.VIDEO))
+        assertEquals("/chopstats-refused/file_type", IntakeRules.refusedSharePath(IntakeRules.ShareRefusal.FILE_TYPE))
+        assertEquals("/chopstats-refused/too_big", IntakeRules.refusedSharePath(IntakeRules.ShareRefusal.TOO_BIG))
+        assertEquals("/chopstats-refused/unreadable", IntakeRules.refusedSharePath(IntakeRules.ShareRefusal.UNREADABLE))
+        val paths = IntakeRules.ShareRefusal.values().map { IntakeRules.refusedSharePath(it) }
+        assertEquals("one path per reason", paths.size, paths.toSet().size)
+        for (path in paths) {
+            // A folder at the root no app can write in: never a copy, and
+            // never in the share folder (MainActivity.SHARE_FOLDER).
+            assertTrue(path, path.startsWith(IntakeRules.REFUSED_SHARE_PATH + "/"))
+            assertFalse(path, File(path).exists())
+            assertFalse(path, path.contains("shared_photos"))
+        }
+        // No image type: the plugin reports such an item as a file, and
+        // share intake reads nothing at its path.
+        assertEquals("application/x-chopstats-refused", IntakeRules.REFUSED_SHARE_TYPE)
+        assertFalse(IntakeRules.REFUSED_SHARE_TYPE.startsWith("image"))
+        assertFalse(IntakeRules.REFUSED_SHARE_TYPE.startsWith("video"))
+        assertFalse(IntakeRules.REFUSED_SHARE_TYPE.startsWith("text"))
+    }
+
+    // --- A shared image whose name has no extension Android knows is
+    // copied under the one its type gives, so share intake reads it.
+
+    /// A few of the extensions MimeTypeMap knows, as copyName asks them.
+    private val known = setOf("jpg", "jpeg", "png", "heic", "dng", "txt", "pdf", "mp4")
+
+    private fun copyName(name: String, ext: String? = "jpg", asked: MutableList<String>? = null): String =
+        IntakeRules.copyName(name, { known.contains(it) }) {
+            asked?.add(name)
+            ext
+        }
+
+    @Test
+    fun aNameWithNoExtensionGetsTheOneItsTypeGives() {
+        assertEquals("IMG_1731500000000.jpg", copyName("IMG_1731500000000"))
+        assertEquals("Lunch with Sarah.png", copyName("Lunch with Sarah", "png"))
+        // A dot in the name that starts no extension Android knows.
+        assertEquals("Lunch with.Sarah.jpg", copyName("Lunch with.Sarah"))
+        assertEquals("Dinner with J.Smith.jpg", copyName("Dinner with J.Smith"))
+        assertEquals("Screenshot 2026-11-21 at 12.30.45.png", copyName("Screenshot 2026-11-21 at 12.30.45", "png"))
+        assertEquals("image.jpg_large.jpg", copyName("image.jpg_large"))
+        // Nothing after the dot.
+        assertEquals("IMG.jpg", copyName("IMG."))
+    }
+
+    @Test
+    fun aNameWithAKnownExtensionIsKeptAndItsTypeNotAskedFor() {
+        val asked = mutableListOf<String>()
+        for (name in listOf("IMG_1.jpg", "IMG_1.JPG", "scan.Dng", "PXL_1.heic", "notes.txt", "menu.pdf", ".jpg")) {
+            assertEquals(name, copyName(name, "png", asked))
+        }
+        assertEquals("the type is looked up only for a name without one", emptyList<String>(), asked)
+    }
+
+    @Test
+    fun aTypeThatGivesNoPlainExtensionLeavesTheNameAsItIs() {
+        for (ext in listOf(null, "", "j/pg", "jp g", ".jpg", "jpg\u0000", "\u00e9tc")) {
+            assertEquals("$ext", "IMG_1731500000000", copyName("IMG_1731500000000", ext))
+        }
+    }
+
+    @Test
+    fun aNameThatWouldGrowPastTheLongestFileNameIsKept() {
+        val fits = "a".repeat(IntakeRules.MAX_NAME_BYTES - 4)
+        assertEquals("$fits.jpg", copyName(fits))
+        val full = "a".repeat(IntakeRules.MAX_NAME_BYTES - 3)
+        assertEquals(full, copyName(full))
+        // Counted in bytes: each of these is three.
+        val wide = "\u98df".repeat((IntakeRules.MAX_NAME_BYTES - 3) / 3)
+        assertEquals(wide, copyName(wide))
+        assertEquals(255, IntakeRules.MAX_NAME_BYTES)
     }
 
     // --- Only a regular file in the cache is ever saved out.

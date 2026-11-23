@@ -27,9 +27,9 @@ class _Source implements SharedMediaSource {
   final StreamController<List<String>> controller =
       StreamController<List<String>>();
   @override
-  Stream<List<String>> imagePathBatches() => controller.stream;
+  Stream<SharedBatch> batches() => controller.stream.map(SharedBatch.new);
   @override
-  Future<List<String>> initialImagePaths() async => [];
+  Future<SharedBatch> initialBatch() async => const SharedBatch([]);
 }
 
 void main() {

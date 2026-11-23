@@ -246,6 +246,34 @@ void main() {
         ),
       );
     });
+
+    // Android 13 and later's per-app language and the app's Language row
+    // are one setting (app_language_sync_test covers what it decides):
+    // agreed at every launch, on Android only, before the first frame. It
+    // writes preferences, so after the notification ask's settling, which
+    // must see those an earlier version left; and before the services that
+    // start at launch. The background engine never runs it.
+    test('Android agrees the app language with Android at launch', () {
+      final body = init();
+      const start =
+          'if (Platform.isAndroid) await AppLanguageSync.startForApp(settings);';
+      expect(start.allMatches(body), hasLength(1));
+      expect('AppLanguageSync'.allMatches(body), hasLength(1));
+      expect(body.indexOf(start),
+          greaterThan(body.indexOf('await settleNotificationAskAtLaunch();')));
+      expect(body.indexOf(start),
+          greaterThan(body.indexOf('retireWatchCameraRoll(')));
+      for (final later in [
+        'if (Platform.isIOS) {',
+        'final analyzer =',
+        'await syncBackgroundScan(settings);',
+      ]) {
+        expect(body.indexOf(later), greaterThan(body.indexOf(start)),
+            reason: later);
+      }
+      expect(_source('lib/ui/background_glue.dart'),
+          isNot(contains('AppLanguageSync')));
+    });
   });
 
   // R6b: the restaurant assist lives in the app engine, reads the real
@@ -290,10 +318,14 @@ void main() {
         r'onMealsChanged: signalMealsChanged,',
         r'inForeground: appEngineInForeground,',
         // The region: the locale name's, else the preferred languages'
-        // (review 2026-10-25: a region-less 'zh_Hans' read as not the US).
-        r'country: \(\) => deviceRegion\( Platform\.localeName, '
-            r'PlatformDispatcher\.instance\.locales\.map\(\(l\) => '
-            r'l\.countryCode\) \),',
+        // (review 2026-10-25: a region-less 'zh_Hans' read as not the US);
+        // on Android 13 and later from the phone's own languages, which a
+        // language picked for the app never changes (review of PR 79:
+        // 中文 (中国) picked in Android's settings read as CN).
+        r'country: \(\) => phoneRegion\( phoneLocales: '
+            r'PhoneSettings\.locales, localeName: Platform\.localeName, '
+            r'countryCodes: PlatformDispatcher\.instance\.locales\.map\(\(l\) '
+            r'=> l\.countryCode\) \),',
         r'repliesInChinese: \(\) => settings\.repliesInChinese,',
         // R6c: the location path is iOS only; Android is brand-only.
         r'location: Platform\.isIOS \? PhotoLocationReader\(photoLibrary\) '
@@ -619,6 +651,33 @@ void main() {
       );
       expect(resume, isNot(contains('.backfillScan(')));
     });
+
+    // Review of PR 79 (F1, F3): Android 13 and later take the FlutterView's
+    // 12/24-hour clock from the app's own language once it has one. Every
+    // time under the app's MaterialApp, Report Time's picker included,
+    // reads the phone's own (format.dart PhoneClockScope).
+    test("the app's MaterialApp tells time by the phone's own clock", () {
+      final app = _source('lib/ui/app.dart');
+      // Over every screen, with or without the View-after-share listener
+      // (#80) around it.
+      expect(
+        app,
+        _wired(
+          r'builder: \(context, child\) \{ final styled = PhoneClockScope\( '
+          r'child: _SystemNavBarStyle\( dimming: _dimming, child: child \?\? '
+          r'const SizedBox\.shrink\(\)\)\); if \(!reveals\) return styled;',
+        ),
+      );
+      expect(
+        app,
+        _wired(
+          r'return NotificationListener<NavigationNotification>\( '
+          r'onNotification: \(_\) \{ _routes\.popChanged\(\); return false; '
+          r'\}, child: styled\); \},',
+        ),
+      );
+      expect('PhoneClockScope('.allMatches(app), hasLength(1));
+    });
   });
 
   // App Store 5.1.2(i), review run 7: a shared photo waits for the AI
@@ -923,12 +982,14 @@ void main() {
       // The re-arm itself (fresh settings, both platforms) is behaviour-
       // tested through rearmSummaryAfterRun; here, that the run uses it,
       // after the scan, and hands it to Android's deadline.
+      // On Android in the run's language while the app and Android agree
+      // as they did when the run began (review of PR 79, below).
       expect(
         after,
         _wired(
           r'inFlight\.rearm = \(\) => rearmSummaryAfterRun\( prefs: prefs, '
           r'settings: settings, notifier: notifier, openDao: createMealsDao, '
-          r'ios: ios\);',
+          r'ios: ios, languageAgreedAtStart: languageAgreed\);',
         ),
       );
       expect(after, _wired(r'\n  await inFlight\.rearm!\(\);'));
@@ -965,6 +1026,60 @@ void main() {
         ),
       );
       expect('readOnlyKeys: false'.allMatches(glue()), isEmpty);
+    });
+
+    // Review of PR 79 (F2): a language picked for the app in Android 13+'s
+    // settings reached only the app engine, at its next launch, and the
+    // run's cards, channels and meal names stayed in the one turned off
+    // there. The run takes it as soon as its settings are loaded, before
+    // anything builds a card, a channel or an analyzer, and on Android
+    // only; the summary it re-arms keeps it while nothing was agreed
+    // since. Nothing here writes the language: the app engine's sync is
+    // the only writer.
+    test("the run takes a language picked in Android's settings, read only",
+        () {
+      final body = after();
+      const take = 'final languageAgreed = '
+          'takeAndroidLanguageForRun(settings, prefs, android: !ios);';
+      final at = body.replaceAll(RegExp(r'\s+'), ' ').indexOf(take);
+      expect(at, isNot(-1));
+      final flat = body.replaceAll(RegExp(r'\s+'), ' ');
+      expect(flat.indexOf('settings = await (loadSettings ??'),
+          lessThan(at));
+      for (final later in [
+        'final notifier = ReportNotifier(',
+        'ok = await headlessBackfillWith(',
+        'createMultiProviderAnalyzer(settings)',
+      ]) {
+        expect(flat.indexOf(later), greaterThan(at), reason: later);
+      }
+      expect(body, _wired(r'languageAgreedAtStart: languageAgreed\)'));
+      expect(
+        _body(glue(), 'Future<AppSettings> summarySettingsNow('),
+        _wired(
+          r'if \(agreedAtStart != null && '
+          r'prefs\.getString\(appLanguageAndroidPrefsKey\) == agreedAtStart\) '
+          r'\{ takeAndroidLanguageForRun\(now, prefs, android: true\); \}',
+        ),
+      );
+      expect(glue(), isNot(contains('setAppLanguage(')));
+      expect(glue(), isNot(contains('AppLanguageSync')));
+      // The language for a run is the background engine's alone.
+      for (final f in Directory('${_appRoot().path}/lib')
+          .listSync(recursive: true)
+          .whereType<File>()
+          .where((f) => f.path.endsWith('.dart'))) {
+        final path = f.path.substring(_appRoot().path.length + 1);
+        if (path == 'lib/ui/background_glue.dart' ||
+            path == 'lib/services/settings/app_settings.dart') {
+          continue;
+        }
+        expect(f.readAsStringSync(), isNot(contains('takeLanguageForRun(')),
+            reason: path);
+        expect(f.readAsStringSync(),
+            isNot(contains('takeAndroidLanguageForRun(')),
+            reason: path);
+      }
     });
 
     test('the intake passes over what the run deferred too often, and the '
@@ -1284,11 +1399,12 @@ void main() {
           r'if \(_leftApp\) \{[^}]*_tellWatchRetiredWhenIdle\(\);[^}]*\}',
         ),
       );
+      // Other calls may follow it (the meal a reveal waits to show).
       expect(
         app,
         _wired(
           r'_OnRouteReturn\( onReturn: \(\) \{ _onBackupPrompt\(\); '
-          r'_tellWatchRetiredWhenIdle\(\); \}',
+          r'_tellWatchRetiredWhenIdle\(\); [^}]*\}',
         ),
       );
     });
@@ -1328,6 +1444,81 @@ void main() {
         _source('lib/ui/screens/settings/provider_page.dart'),
         _wired(r'channel: Platform\.isAndroid \? appChannel : null,'),
       );
+    });
+  });
+
+  // Android, view-after-share lane: the View on a shared photo's snackbar
+  // and a tap on a Logged meals card go to the meal (ui/meal_reveal.dart;
+  // test/ui/view_after_share_test.dart and meal_reveal_test.dart build
+  // their own). Without one of these lines View or the tap does nothing on
+  // the phone, with every behavioural test still green; and iOS keeps both
+  // as they were.
+  group('the meal a View or a card tap asks for (Android)', () {
+    String init() => _body(
+      _source('lib/ui/di.dart'),
+      'static Future<AppServices> init(',
+      indent: '  ',
+    );
+
+    test('one MealReveals, on Android only, handed to the shell', () {
+      final source = init();
+      expect(
+        source,
+        _wired(
+          r'\n\s*final mealReveals = Platform\.isAndroid \? '
+          r'MealReveals\(\) : null;',
+        ),
+      );
+      expect(RegExp(r'MealReveals\(').allMatches(source), hasLength(1));
+      expect(source, _wired(r'\n\s*mealReveals: mealReveals,'));
+    });
+
+    test("a shared photo's snackbar is worded by outcomeAnnouncer, with "
+        "main.dart's View sink", () {
+      expect(
+        init(),
+        _wired(
+          r'outcomeAnnouncer\( l10n: \(\) => '
+          r'localizationsFor\(settings\.appLanguage\), notify: notify, '
+          r'reveals: mealReveals, notifyView: notifyView\)',
+        ),
+      );
+      expect(
+        _source('lib/main.dart'),
+        _wired(r'notifyView: showAppSnackbarWithView,'),
+      );
+    });
+
+    test('a card tapped while the app runs, and one that started it, ask '
+        'for its meal', () {
+      final source = init();
+      expect(
+        source,
+        _wired(
+          r'\n\s*final cardTaps = mealReveals == null \? null : '
+          r'MealCardTaps\(mealReveals\);',
+        ),
+      );
+      expect(source, _wired(r'\n\s*onTap: cardTaps\?\.onTap,'));
+      expect(
+        source,
+        _wired(
+          r'await notifier\.init\(\); '
+          r'await cardTaps\.launch\(notifier\.launchPayload\);',
+        ),
+      );
+    });
+
+    test("the background run's cards carry their meal to the plugin", () {
+      final glue = _source('lib/ui/background_glue.dart');
+      expect(
+        glue,
+        _wired(
+          r'showMealCard: \(title, body, \{payload\}\) async \{[^}]*'
+          r'await notifier\.showMealCard\(title, body, payload: payload\);',
+        ),
+      );
+      expect(glue, _wired(r'payload: revealForMeal\(o\)\?\.payload\)'));
     });
   });
 

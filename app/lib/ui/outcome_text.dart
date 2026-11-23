@@ -3,14 +3,17 @@
 /// Used by the add-flow dialog AND the headless meal card (which has no
 /// BuildContext — pass `localizationsFor(appLanguage)`). English values are
 /// byte-identical to the pipeline's own [PhotoOutcome.message] (except an
-/// undescribed meal, named like the meal cards — see [_shownName]), so every
-/// test that pins that prose keeps holding; anything the classifier does
-/// not recognise falls back to the raw message rather than a wrong guess.
+/// undescribed meal, named like the meal cards — see [_shownName] — and a
+/// share's files that gave no photo, whose line adds why: see
+/// [refusedFilesLine]), so every test that pins that prose keeps holding;
+/// anything the classifier does not recognise falls back to the raw message
+/// rather than a wrong guess.
 library;
 
 import '../core/app_channel.dart' show photoLibraryInBuild;
 import '../core/chain_match.dart' show chainByKey;
 import '../core/coerce.dart' show calendarDaysBetween;
+import '../core/contracts.dart' show RefusedShareFiles, ShareRefusal;
 import '../core/outcome_kind.dart';
 import '../core/server_transport.dart'
     show isServerKeyOtherHostMessage, isServerNeedsHttpsMessage;
@@ -87,6 +90,11 @@ String outcomeBody(AppLocalizations l, PhotoOutcome o,
       return l.outcomeAlreadyTrackedMsg;
     case PhotoOutcomeKind.inFlight:
       return l.outcomeInFlightMsg;
+    case PhotoOutcomeKind.refusedFiles:
+      final refused = o.refused;
+      return refused == null || refused.count == 0
+          ? o.message
+          : refusedFilesLine(l, refused);
     case PhotoOutcomeKind.failed:
       return switch (o.errorKind) {
         AnalysisErrorKind.noApiKey => l.errNoApiKey,
@@ -145,6 +153,9 @@ String outcomeBody(AppLocalizations l, PhotoOutcome o,
 /// "share it again later": a later share fails the same way until the
 /// address is changed (Android QA Q5). It says what to change, then to
 /// share again, as the add flow's dialog offers no Retry for it.
+///
+/// A share's files that gave no photo get one line after its photos'
+/// ([refusedFilesLine]).
 String outcomeSnackbar(AppLocalizations l, PhotoOutcome o) {
   if (o.shared && o.kind == PhotoOutcomeKind.failed && o.retryable) {
     if (o.errorKind == AnalysisErrorKind.noServerKey &&
@@ -171,6 +182,44 @@ String outcomeSnackbar(AppLocalizations l, PhotoOutcome o) {
   return photoLibraryInBuild
       ? l.outcomeFailedKeptMsg(body)
       : l.outcomeFailedKeptMsgPlay(body);
+}
+
+/// The most photo types [refusedFilesLine] names ('AVIF/DNG/CR2').
+const int refusedTypesNamed = 3;
+
+/// The one line for a share's files that gave no photo (2026-11-21): how
+/// many, and the reason that covers the most files
+/// ([RefusedShareFiles.mainReason]). "2 shared files were skipped:
+/// Chopstats can't read AVIF photos yet." / "One shared file was skipped
+/// because it is over 25 MB." A reason that covers only some of the files
+/// says how many it covers, whichever it is ("3 shared files were skipped,
+/// 2 of them because they are over 25 MB." / "5 shared files were
+/// skipped, 2 of them because Chopstats can't read AVIF/DNG photos yet."),
+/// so a big photo is never called a video. Never a file's name or path: a
+/// photo type is the extension its name gives, when that is an image
+/// format Chopstats does not read (sharedPhotoTypeOf), up to
+/// [refusedTypesNamed] of them.
+String refusedFilesLine(AppLocalizations l, RefusedShareFiles r) {
+  final n = r.count;
+  final main = r.mainReason;
+  final some = r.countOf(main);
+  final all = some >= n;
+  final types = r.typesNamed.take(refusedTypesNamed).join('/');
+  return switch (main) {
+    ShareRefusal.photoType when types.isNotEmpty => all
+        ? l.shareSkippedPhotoType(n, types)
+        : l.shareSkippedSomePhotoType(n, some, types),
+    ShareRefusal.photoType || ShareRefusal.fileType => all
+        ? l.shareSkippedFileType(n)
+        : l.shareSkippedSomeFileType(n, some),
+    ShareRefusal.video =>
+      all ? l.shareSkippedVideo(n) : l.shareSkippedSomeVideo(n, some),
+    ShareRefusal.tooBig =>
+      all ? l.shareSkippedTooBig(n) : l.shareSkippedSomeTooBig(n, some),
+    ShareRefusal.unreadable => all
+        ? l.shareSkippedUnreadable(n)
+        : l.shareSkippedSomeUnreadable(n, some),
+  };
 }
 
 /// A chain's name as the app language shows it: the Chinese name our chain

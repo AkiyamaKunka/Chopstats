@@ -34,7 +34,8 @@ import 'package:calorie_tracker/services/settings/app_settings.dart';
 import 'package:calorie_tracker/ui/app.dart';
 import 'package:calorie_tracker/ui/refresh_signal.dart';
 import 'package:calorie_tracker/ui/background_glue.dart';
-import 'package:calorie_tracker/ui/coach_strings.dart' show localizationsFor;
+import 'package:calorie_tracker/ui/coach_strings.dart'
+    show localizationsFor, notificationChannelFor;
 import 'package:calorie_tracker/ui/outcome_text.dart' show autoScanPausedLine;
 import 'package:calorie_tracker/ui/photo_pipeline.dart';
 import 'package:calorie_tracker/ui/play_channel.dart'
@@ -544,7 +545,7 @@ void main() {
         prefs: prefs,
         intake: intake,
         pipeline: () async => PhotoPipeline(dao: FakeDao(), analyzer: food()),
-        showMealCard: (_, _) async {},
+        showMealCard: (_, _, {payload}) async {},
         clock: () => t0,
         recorder: recorder,
         photoAccess: () async => true,
@@ -571,7 +572,7 @@ void main() {
             dao: FakeDao(),
             analyzer: analyzer,
             hasher: (b) async => md5.convert(b).toString()),
-        showMealCard: (_, _) async {},
+        showMealCard: (_, _, {payload}) async {},
         clock: () => t0,
         recorder: recorder,
       ));
@@ -596,7 +597,7 @@ void main() {
         prefs: prefs,
         intake: intake,
         pipeline: () async => PhotoPipeline(dao: FakeDao(), analyzer: food()),
-        showMealCard: (_, _) async =>
+        showMealCard: (_, _, {payload}) async =>
             now = now.add(const Duration(seconds: 20)),
         clock: () => now,
         budget: const Duration(seconds: 15),
@@ -619,7 +620,7 @@ void main() {
         prefs: prefs,
         intake: intake,
         pipeline: () async => PhotoPipeline(dao: FakeDao(), analyzer: analyzer),
-        showMealCard: (_, _) async {},
+        showMealCard: (_, _, {payload}) async {},
         clock: () => t0,
         recorder: recorder,
       );
@@ -635,7 +636,7 @@ void main() {
           prefs: prefs,
           intake: EmittingIntake()..batch = [photo(1)],
           pipeline: () async => fail('no pipeline past a guard'),
-          showMealCard: (_, _) async {},
+          showMealCard: (_, _, {payload}) async {},
           clock: () => t0,
           recorder: recorder,
         );
@@ -663,7 +664,7 @@ void main() {
           prefs: prefs,
           intake: EmittingIntake(),
           pipeline: () async => PhotoPipeline(dao: FakeDao(), analyzer: food()),
-          showMealCard: (_, _) async {},
+          showMealCard: (_, _, {payload}) async {},
           clock: () => t0,
           recorder: recorder,
           photoAccess: () async => access,
@@ -685,7 +686,7 @@ void main() {
         prefs: prefs,
         intake: EmittingIntake()..throwAfterEmit = true,
         pipeline: () async => PhotoPipeline(dao: FakeDao(), analyzer: food()),
-        showMealCard: (_, _) async {},
+        showMealCard: (_, _, {payload}) async {},
         clock: () => t0,
         recorder: recorder,
         photoAccess: () async => true,
@@ -712,7 +713,7 @@ void main() {
           prefs: prefs,
           intake: EmittingIntake()..batch = [photo(1), photo(2)],
           pipeline: () async => pipeline,
-          showMealCard: (_, _) async {},
+          showMealCard: (_, _, {payload}) async {},
           clock: () => t0,
           recorder: recorder,
         );
@@ -893,7 +894,7 @@ void main() {
                   dao: dao,
                   analyzer: analyzer,
                   hasher: (b) async => md5.convert(b).toString()),
-              showMealCard: (_, _) async {},
+              showMealCard: (_, _, {payload}) async {},
               clock: () => t0,
               budget: iosBackgroundBudget,
               startedAt: t0,
@@ -964,7 +965,7 @@ void main() {
                   dao: dao,
                   analyzer: analyzer,
                   hasher: (b) async => md5.convert(b).toString()),
-              showMealCard: (_, _) async {},
+              showMealCard: (_, _, {payload}) async {},
               clock: () => now,
               budget: iosBackgroundBudget,
               startedAt: t0,
@@ -1106,7 +1107,7 @@ void main() {
               dao: dao,
               analyzer: analyzer,
               hasher: (b) async => md5.convert(b).toString()),
-          showMealCard: (_, _) async {},
+          showMealCard: (_, _, {payload}) async {},
           clock: () => now,
           budget: androidBackgroundBudget,
           startedAt: t0,
@@ -1394,7 +1395,7 @@ void main() {
         prefs: prefs,
         intake: intake,
         pipeline: () async => PhotoPipeline(dao: FakeDao(), analyzer: analyzer),
-        showMealCard: (title, body) async => cards.add(body),
+        showMealCard: (title, body, {payload}) async => cards.add(body),
         clock: () => scanStart,
       );
       expect(ok, isTrue);
@@ -1422,7 +1423,7 @@ void main() {
         prefs: prefs,
         intake: intake,
         pipeline: () async => PhotoPipeline(dao: FakeDao(), analyzer: analyzer),
-        showMealCard: (title, body) async {
+        showMealCard: (title, body, {payload}) async {
           cards.add(body);
           now = now.add(const Duration(seconds: 20)); // one card blows it
         },
@@ -1455,7 +1456,7 @@ void main() {
                     isFood: true,
                     wall: Duration.zero));
         },
-        showMealCard: (_, _) async {},
+        showMealCard: (_, _, {payload}) async {},
         clock: () => now,
         budget: const Duration(seconds: 15),
         startedAt: entry,
@@ -1479,7 +1480,7 @@ void main() {
             intake: EmittingIntake()..batch = [photo(1)],
             pipeline: () async => PhotoPipeline(
                 dao: FakeDao(), analyzer: analyzer, deferUndecodable: true),
-            showMealCard: (_, _) async {},
+            showMealCard: (_, _, {payload}) async {},
             deferred: await DeferredAssets.load(prefs),
           );
       await runWith(undecodable);
@@ -1528,7 +1529,7 @@ void main() {
                 includeGlasses: () => include,
                 foodCheck: (_) async => check,
                 deferUndecodable: true),
-            showMealCard: (_, _) async {},
+            showMealCard: (_, _, {payload}) async {},
             deferred: await DeferredAssets.load(prefs),
           );
       await runWith([shot(1)],
@@ -1559,7 +1560,7 @@ void main() {
               ..nextPhotoOutcome = const AnalysisOutcome(
                   error: 'rate limit', retryable: true, wall: Duration.zero),
             deferUndecodable: true),
-        showMealCard: (_, _) async {},
+        showMealCard: (_, _, {payload}) async {},
         deferred: await DeferredAssets.load(prefs),
       );
       expect(prefs.getString(deferredAssetsPrefsKey), isNull);
@@ -1577,7 +1578,7 @@ void main() {
         prefs: prefs,
         intake: intake,
         pipeline: () async => PhotoPipeline(dao: FakeDao(), analyzer: FakeAnalyzer()),
-        showMealCard: (_, _) async {},
+        showMealCard: (_, _, {payload}) async {},
       );
       expect(intake.sinceArgs.single, mark.subtract(backgroundScanOverlap));
       expect(intake.newestDayFirstArgs.single, isFalse,
@@ -1604,7 +1605,7 @@ void main() {
         prefs: prefs,
         intake: first,
         pipeline: () async => PhotoPipeline(dao: FakeDao(), analyzer: analyzer),
-        showMealCard: (_, _) async {},
+        showMealCard: (_, _, {payload}) async {},
         clock: () => DateTime(2026, 10, 20, 12, 0),
       );
       final stored = prefs.getString(backgroundWatermarkPrefsKey)!;
@@ -1617,7 +1618,7 @@ void main() {
         prefs: prefs,
         intake: second,
         pipeline: () async => PhotoPipeline(dao: FakeDao(), analyzer: analyzer),
-        showMealCard: (_, _) async {},
+        showMealCard: (_, _, {payload}) async {},
         clock: () => DateTime(2026, 10, 20, 13, 0),
       );
       // Same instant AND local, so the intake's date maths is unchanged.
@@ -1645,7 +1646,7 @@ void main() {
         prefs: prefs,
         intake: intake,
         pipeline: () async => PhotoPipeline(dao: FakeDao(), analyzer: FakeAnalyzer()),
-        showMealCard: (_, _) async {},
+        showMealCard: (_, _, {payload}) async {},
         clock: () => launched,
       );
       expect(ok, isTrue); // success — never a WorkManager retry storm
@@ -1667,7 +1668,7 @@ void main() {
         intake: EmittingIntake(),
         pipeline: () async =>
             PhotoPipeline(dao: FakeDao(), analyzer: FakeAnalyzer()),
-        showMealCard: (_, _) async {},
+        showMealCard: (_, _, {payload}) async {},
         clock: () => launched.add(const Duration(milliseconds: 40)),
         launchRecorded: true,
       );
@@ -1765,7 +1766,7 @@ void main() {
         prefs: prefs,
         intake: intake,
         pipeline: () async => PhotoPipeline(dao: FakeDao(), analyzer: FakeAnalyzer()),
-        showMealCard: (_, _) async {},
+        showMealCard: (_, _, {payload}) async {},
       );
       expect(ok, isTrue);
       expect(intake.scans, 0);
@@ -1781,7 +1782,7 @@ void main() {
         prefs: prefs,
         intake: intake,
         pipeline: () async => PhotoPipeline(dao: FakeDao(), analyzer: FakeAnalyzer()),
-        showMealCard: (_, _) async {},
+        showMealCard: (_, _, {payload}) async {},
       );
       expect(ok, isTrue);
       expect(intake.scans, 0);
@@ -1803,7 +1804,7 @@ void main() {
         prefs: prefs,
         intake: intake,
         pipeline: () async => PhotoPipeline(dao: FakeDao(), analyzer: analyzer),
-        showMealCard: (_, _) async {},
+        showMealCard: (_, _, {payload}) async {},
         clock: () => DateTime(2026, 7, 24, 5, 0),
       );
       // NOT scanStart: released photos must stay ahead of the watermark.
@@ -1833,7 +1834,7 @@ void main() {
             prefs: prefs,
             intake: intake,
             pipeline: () async => PhotoPipeline(dao: dao, analyzer: analyzer),
-            showMealCard: (_, _) async {},
+            showMealCard: (_, _, {payload}) async {},
             clock: () => DateTime(2026, 7, 24, 5, 0),
           );
       await run();
@@ -1874,7 +1875,7 @@ void main() {
                 dao: dao,
                 analyzer: analyzer,
                 latch: autoScanLatchFor(settings)),
-            showMealCard: (_, _) async {},
+            showMealCard: (_, _, {payload}) async {},
             clock: () => DateTime(2026, 7, 24, 5, 0),
           );
       await run();
@@ -1918,7 +1919,7 @@ void main() {
                 dao: FakeDao(),
                 analyzer: analyzer,
                 latch: autoScanLatchFor(settings)),
-            showMealCard: (t, b) async => cards.add((t, b)),
+            showMealCard: (t, b, {payload}) async => cards.add((t, b)),
             clock: () => DateTime(2026, 7, 24, 5, 0),
           );
       await run();
@@ -1980,7 +1981,7 @@ void main() {
         intake: intake,
         pipeline: () async => PhotoPipeline(
             dao: FakeDao(), analyzer: analyzer, latch: latch),
-        showMealCard: (t, b) async => cards.add((t, b)),
+        showMealCard: (t, b, {payload}) async => cards.add((t, b)),
         clock: () => DateTime(2026, 7, 24, 5, 0),
       );
       expect(cards, isEmpty);
@@ -1997,7 +1998,7 @@ void main() {
         intake: intake,
         pipeline: () async =>
             PhotoPipeline(dao: FakeDao(), analyzer: FakeAnalyzer()),
-        showMealCard: (_, _) async {},
+        showMealCard: (_, _, {payload}) async {},
       );
       expect(ok, isTrue);
       expect(intake.scans, 0);
@@ -2031,7 +2032,7 @@ void main() {
         prefs: prefs,
         intake: intake,
         pipeline: () async => PhotoPipeline(dao: dao, analyzer: analyzer),
-        showMealCard: (_, _) async {},
+        showMealCard: (_, _, {payload}) async {},
         clock: () => DateTime(2026, 7, 24, 5, 0),
       );
       // Photo 1 landed and checkpointed; photo 2's per-photo checkpoint
@@ -2068,7 +2069,7 @@ void main() {
                 () => seenMarks.add(
                     prefs.getString(backgroundWatermarkPrefsKey))),
             analyzer: analyzer),
-        showMealCard: (_, _) async {},
+        showMealCard: (_, _, {payload}) async {},
         clock: () => DateTime(2026, 7, 24, 5, 0),
       );
       // The SECOND photo's save observed the FIRST photo's checkpoint —
@@ -2086,7 +2087,7 @@ void main() {
         prefs: prefs,
         intake: intake,
         pipeline: () async => PhotoPipeline(dao: FakeDao(), analyzer: FakeAnalyzer()),
-        showMealCard: (_, _) async {},
+        showMealCard: (_, _, {payload}) async {},
       );
       expect(ok, isTrue); // still WorkManager success — no retry storm
       expect(prefs.getString(backgroundWatermarkPrefsKey), isNull);
@@ -2101,7 +2102,7 @@ void main() {
         prefs: prefs,
         intake: intake,
         pipeline: () async => PhotoPipeline(dao: FakeDao(), analyzer: FakeAnalyzer()),
-        showMealCard: (_, body) async => cards.add(body),
+        showMealCard: (_, body, {payload}) async => cards.add(body),
       );
       expect(cards, isEmpty);
     });
@@ -2139,11 +2140,68 @@ void main() {
             const PhotoOutcome(PhotoOutcomeKind.failed, 'bad photo',
                 errorKind: AnalysisErrorKind.badPhoto),
           ]),
-          showMealCard: (title, body) async => cards.add((title, body)),
+          showMealCard: (title, body, {payload}) async =>
+              cards.add((title, body)),
         );
         expect(cards, [(title, body)]);
       });
     }
+
+    // Android, view-after-share lane: a tap on a Logged meals card goes to
+    // its meal (ui/meal_reveal.dart), which the card names.
+    test('each meal card names its meal, a leftover card the meal it cut',
+        () async {
+      final settings = await settingsWith(key: 'k');
+      final intake = EmittingIntake()..batch = [photo(1), photo(2), photo(3)];
+      final payloads = <String?>[];
+      await headlessBackfillWith(
+        settings: settings,
+        prefs: prefs,
+        intake: intake,
+        pipeline: () async => _ScriptedPipeline([
+          const PhotoOutcome(PhotoOutcomeKind.saved, 'Meal logged: Toast',
+              detail: 'Toast — ~200 kcal',
+              mealName: 'Toast',
+              kcal: '200',
+              mealId: 41,
+              mealDate: '2026-10-12'),
+          const PhotoOutcome(PhotoOutcomeKind.leftoverApplied,
+              'Leftovers deducted: Noodles — −300 kcal, now ~300 kcal',
+              detail: 'Noodles — −300 kcal, now ~300 kcal',
+              mealName: 'Noodles',
+              kcal: '300',
+              deductedKcal: 300,
+              mealId: 7,
+              mealDate: '2026-10-12',
+              previousAnalysis: {'is_food': true}),
+          const PhotoOutcome(PhotoOutcomeKind.skipped, 'not food'),
+        ]),
+        showMealCard: (_, _, {payload}) async => payloads.add(payload),
+      );
+      expect(payloads, ['meal:41', 'meal:7']);
+    });
+
+    test('the paused notice names no meal', () async {
+      final settings = await settingsWith(key: 'k');
+      final intake = EmittingIntake()..batch = [photo(1)];
+      final cards = <(String, String?)>[];
+      await headlessBackfillWith(
+        settings: settings,
+        prefs: prefs,
+        intake: intake,
+        pipeline: () async => PhotoPipeline(
+            dao: FakeDao(),
+            analyzer: FakeAnalyzer()
+              ..nextPhotoOutcome = const AnalysisOutcome(
+                  error: 'The provider rejected the API key. Check Settings.',
+                  wall: Duration.zero),
+            latch: autoScanLatchFor(settings)),
+        showMealCard: (t, _, {payload}) async => cards.add((t, payload)),
+        clock: () => DateTime(2026, 7, 24, 5, 0),
+      );
+      final l = localizationsFor(settings.appLanguage);
+      expect(cards, [(l.autoScanPausedTitle, null)]);
+    });
   });
 
   // The Play push (UX screenshot 06): 'Meal logged: Pasta — ~650 kcal'
@@ -2248,7 +2306,7 @@ void main() {
                     ios: true)),
             hasher: (b) async => md5.convert(b).toString(),
             deferUndecodable: true),
-        showMealCard: (_, _) async {},
+        showMealCard: (_, _, {payload}) async {},
         clock: now,
         budget: iosBackgroundBudget,
       ).then((_) => finished = true));
@@ -2448,6 +2506,128 @@ void main() {
       expect(now.serverBaseUrl, 'https://a.example');
       expect(now.serverApiKey, isNull);
       expect({for (final k in prefs.getKeys()) k: prefs.get(k)}, before);
+    });
+  });
+
+  // Review of PR 79 (F2): a language picked for the app in Android 13+'s
+  // settings reached only the app engine, at its next launch. The
+  // background engine kept the explicit setting it last read: its meal
+  // cards, the pause notice, the channel names and the model's meal names
+  // (saved to the log) came out in the language just turned off there.
+  // Android puts the app's language first in the engine's locales; the run
+  // takes it, and writes nothing.
+  group("Android 13 and later: the run takes a language picked in Android's "
+      'settings since the app last ran', () {
+    const zhCN = Locale.fromSubtags(
+        languageCode: 'zh', scriptCode: 'Hans', countryCode: 'CN');
+    final dispatcher = TestWidgetsFlutterBinding.instance.platformDispatcher;
+    tearDown(dispatcher.clearLocalesTestValue);
+
+    Future<(AppSettings, SharedPreferences)> loaded(
+        Map<String, Object> values) async {
+      SharedPreferences.setMockInitialValues(values);
+      final prefs = await SharedPreferences.getInstance();
+      final keys = MemoryKeyStore()..data['gemini_api_key'] = 'k';
+      return (await AppSettings.load(prefs: prefs, keyStore: keys), prefs);
+    }
+
+    test('its cards, channels and meal names are in it; nothing is written',
+        () async {
+      final (s, prefs) = await loaded({
+        'settings.watcher_enabled': true,
+        'settings.app_language': 'en',
+        'app_language.android_agreed': 'en@1@2@3',
+      });
+      // 中文 picked for the app in Android's settings, the app not opened.
+      dispatcher.localesTestValue = const [zhCN, Locale('en', 'US')];
+      expect(takeAndroidLanguageForRun(s, prefs, android: true), 'en@1@2@3');
+      expect(s.appLanguage, 'zh');
+      expect(s.repliesInChinese, isTrue, reason: "the model's meal names");
+      expect(notificationChannelFor(s.appLanguage).name,
+          localizationsFor('zh').notificationChannelName);
+      expect(prefs.getString('settings.app_language'), 'en',
+          reason: "only the app engine's sync writes it");
+      expect(prefs.getString('app_language.android_agreed'), 'en@1@2@3');
+
+      final titles = <String>[];
+      await headlessBackfillWith(
+        settings: s,
+        prefs: prefs,
+        intake: EmittingIntake()..batch = [photo(1)],
+        pipeline: () async => PhotoPipeline(
+            dao: FakeDao(),
+            analyzer: FakeAnalyzer()
+              ..nextPhotoOutcome = const AnalysisOutcome(
+                  analysis: {'is_food': true, 'food_items': []},
+                  isFood: true,
+                  wall: Duration.zero)),
+        showMealCard: (title, _, {payload}) async => titles.add(title),
+        clock: () => DateTime(2026, 11, 21, 12),
+      );
+      expect(titles, [localizationsFor('zh').mealCardAutoTitle]);
+    });
+
+    test('iOS, no agreement, or a pick in the app since: the stored language',
+        () async {
+      dispatcher.localesTestValue = const [zhCN];
+      final (ios, iosPrefs) = await loaded({
+        'settings.app_language': 'en',
+        'app_language.android_agreed': 'en@1@2@3',
+      });
+      expect(takeAndroidLanguageForRun(ios, iosPrefs, android: false), isNull);
+      expect(ios.appLanguage, 'en');
+
+      // Android 12 and lower, or this version never ran in the app.
+      final (none, nonePrefs) = await loaded({'settings.app_language': 'en'});
+      expect(takeAndroidLanguageForRun(none, nonePrefs, android: true), isNull);
+      expect(none.appLanguage, 'en');
+
+      // English picked in the app after the agreement on 中文.
+      final (app, appPrefs) = await loaded({
+        'settings.app_language': 'en',
+        'app_language.android_agreed': 'zh@1@2@3',
+      });
+      takeAndroidLanguageForRun(app, appPrefs, android: true);
+      expect(app.appLanguage, 'en');
+    });
+
+    test("the summary it re-arms is in it, unless the app has agreed with "
+        'Android since the run began', () async {
+      final at = DateTime(2026, 11, 13, 19, 0); // a Friday
+      final armed = <String>[];
+      final notifier = ReportNotifier(
+        presenter: (_, _, _) async {},
+        scheduler: (id, title, _, when, _) async => armed.add(title),
+        canceller: (_) async {},
+        pendingIds: () async => const [],
+        pendingPayloads: () async => const {},
+      );
+      final values = <String, Object>{
+        'settings.app_language': 'en',
+        'app_language.android_agreed': 'en@1@2@3',
+      };
+      final (s, prefs) = await loaded(values);
+      dispatcher.localesTestValue = const [zhCN];
+      final agreedAtStart = takeAndroidLanguageForRun(s, prefs, android: true);
+      Future<void> rearm() => rearmSummaryAfterRun(
+          prefs: prefs,
+          settings: s,
+          notifier: notifier,
+          openDao: () async => FakeDao(),
+          ios: false,
+          now: () => at,
+          languageAgreedAtStart: agreedAtStart);
+      await rearm();
+      expect(armed.first, '周五：0 千卡');
+
+      // The app opened during the run and agreed with Android again: the
+      // stored language is the newer word (this engine's locales are as
+      // they were when it started).
+      armed.clear();
+      SharedPreferences.setMockInitialValues(
+          {...values, 'app_language.android_agreed': 'en@1@2@4'});
+      await rearm();
+      expect(armed.first, 'Fri: 0 kcal');
     });
   });
 
@@ -2701,7 +2881,7 @@ void main() {
         prefs: prefs,
         intake: intake,
         pipeline: () async => PhotoPipeline(dao: dao, analyzer: food()),
-        showMealCard: (_, body) async => cards.add(body),
+        showMealCard: (_, body, {payload}) async => cards.add(body),
         clock: () => noon,
       );
       expect(intake.calls, ['scan', 'late']);
@@ -2733,7 +2913,7 @@ void main() {
           prefs: p,
           intake: intake,
           pipeline: () async => PhotoPipeline(dao: FakeDao(), analyzer: food()),
-          showMealCard: (_, _) async =>
+          showMealCard: (_, _, {payload}) async =>
               marks.add(p.getString(backgroundWatermarkPrefsKey)),
           clock: () => noon,
         );
@@ -2768,7 +2948,7 @@ void main() {
         prefs: prefs,
         intake: intake,
         pipeline: () async => PhotoPipeline(dao: dao, analyzer: food()),
-        showMealCard: (_, _) async {
+        showMealCard: (_, _, {payload}) async {
           now = now.add(const Duration(seconds: 16));
         },
         clock: () => now,
@@ -2792,7 +2972,7 @@ void main() {
         prefs: prefs,
         intake: intake,
         pipeline: () async => PhotoPipeline(dao: dao, analyzer: food()),
-        showMealCard: (_, _) async {
+        showMealCard: (_, _, {payload}) async {
           now = now.add(const Duration(seconds: 16));
         },
         clock: () => now,
@@ -2812,7 +2992,7 @@ void main() {
         prefs: prefs,
         intake: intake,
         pipeline: () async => PhotoPipeline(dao: FakeDao(), analyzer: food()),
-        showMealCard: (_, _) async {},
+        showMealCard: (_, _, {payload}) async {},
         clock: () => noon,
       );
       expect(intake.calls, ['scan']);
@@ -2863,7 +3043,7 @@ void main() {
             prefs: p,
             intake: intake(),
             pipeline: () async => _ScriptedPipeline([outcome]),
-            showMealCard: (_, _) async {},
+            showMealCard: (_, _, {payload}) async {},
             clock: () => noon,
           );
       await run(const PhotoOutcome(PhotoOutcomeKind.failed, 'network',
@@ -2914,7 +3094,7 @@ void main() {
         prefs: p,
         intake: intake(deferred),
         pipeline: () async => _ScriptedPipeline([undecodable, undecodable]),
-        showMealCard: (_, _) async {},
+        showMealCard: (_, _, {payload}) async {},
         clock: () => noon,
         deferred: deferred,
       );
