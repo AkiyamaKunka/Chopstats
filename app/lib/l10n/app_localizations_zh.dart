@@ -3536,6 +3536,9 @@ class AppLocalizationsZh extends AppLocalizations {
       '在设置 ›「AI 服务」›「你自己的服务器」里粘贴这台服务器的上传密钥，或把已保存的密钥用于它。';
 
   @override
+  String get mealViewAction => '查看';
+
+  @override
   String shareSkippedPhotoType(int count, String type) {
     return '有 $count 个分享的文件被跳过：筷拍暂时无法读取 $type 格式的照片。';
   }

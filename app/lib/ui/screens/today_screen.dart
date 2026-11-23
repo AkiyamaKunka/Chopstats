@@ -31,6 +31,7 @@ import '../widgets/usual_chip.dart';
 import '../widgets/usual_offer_card.dart'
     show showUsualSnack, showUsualUsedSnack;
 import '../widgets/meal_card.dart';
+import '../widgets/reveal_highlight.dart';
 import '../widgets/small_spinner.dart';
 import 'meal_editor_screen.dart';
 import '../large_text.dart';
@@ -81,7 +82,8 @@ class TodayScreen extends StatefulWidget {
   State<TodayScreen> createState() => TodayScreenState();
 }
 
-class TodayScreenState extends State<TodayScreen> {
+class TodayScreenState extends State<TodayScreen>
+    with RevealsCards<TodayScreen> {
   bool _loading = true;
   String? _error;
   List<Meal> _todayMeals = const [];
@@ -103,6 +105,26 @@ class TodayScreenState extends State<TodayScreen> {
   void initState() {
     super.initState();
     reload();
+  }
+
+  /// The meal list's sliver: always built while the list is, so [reveal]
+  /// finds the scroll view however far it is scrolled.
+  final GlobalKey _listKey = GlobalKey(debugLabel: 'todayList');
+
+  @override
+  BuildContext? get revealAnchor => _listKey.currentContext;
+
+  /// Shows the meal [mealId] (the shared photo's View, a tap on a Logged
+  /// meals card: ui/meal_reveal.dart): the list re-read, the meal's card
+  /// brought on screen and briefly ringed. Nothing more when it is not on
+  /// today's list.
+  Future<void> reveal(int mealId) async {
+    await reload();
+    if (!mounted || _error != null) return;
+    await revealCard(mealId, [
+      for (final m in _todayMeals)
+        if (isFoodMeal(m)) m.id,
+    ]);
   }
 
   DateTime _now() => (widget.now ?? DateTime.now)();
@@ -134,6 +156,7 @@ class TodayScreenState extends State<TodayScreen> {
         isoDate(DateTime(now.year, now.month, now.day - 1)),
       );
       if (!mounted) return;
+      keepCardKeys(todayMeals.map((m) => m.id));
       setState(() {
         _todayMeals = todayMeals;
         _assistUnseen = unseen;
@@ -410,6 +433,7 @@ class TodayScreenState extends State<TodayScreen> {
       child: _withTitle(context, [
         // Room under the last meal for the shell's + 记录 button.
         SliverPadding(
+          key: _listKey,
           padding: const EdgeInsets.only(bottom: AppSpace.fabClearance),
           sliver: SliverList.list(children: [
           _totalsHeader(context, foodMeals),
@@ -429,13 +453,23 @@ class TodayScreenState extends State<TodayScreen> {
             )
           else
             for (final meal in foodMeals)
-              MealCard(
-                key: ValueKey('meal${meal.id}'),
-                meal: meal,
-                onTap: () => _editMeal(meal),
-                thumb: widget.thumbs?.thumbFor(meal),
-                assistUnseen: _assistUnseen.contains(meal.id),
-                usualChip: _usualChip(meal),
+              // Under its reveal key (RevealsCards): the card's identity
+              // in the list, and how a reveal finds it.
+              RevealHighlight(
+                key: cardKey(meal.id),
+                trigger: revealTrigger(meal.id),
+                announcement: revealAnnounces(meal.id)
+                    ? mealRevealLine(context.l10n, meal)
+                    : null,
+                inset: MealCard.margin,
+                child: MealCard(
+                  key: ValueKey('meal${meal.id}'),
+                  meal: meal,
+                  onTap: () => _editMeal(meal),
+                  thumb: widget.thumbs?.thumbFor(meal),
+                  assistUnseen: _assistUnseen.contains(meal.id),
+                  usualChip: _usualChip(meal),
+                ),
               ),
           ]),
         ),

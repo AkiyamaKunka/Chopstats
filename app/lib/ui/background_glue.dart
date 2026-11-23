@@ -43,6 +43,7 @@ import '../services/report/notifications.dart';
 import '../l10n/app_localizations.dart';
 import 'coach_strings.dart';
 import 'format.dart' show mealDescription;
+import 'meal_reveal.dart' show revealForMeal;
 import '../services/settings/app_settings.dart';
 import 'photo_pipeline.dart';
 import 'play_channel.dart' show retireWatchCameraRoll;
@@ -449,13 +450,18 @@ Future<void> recordBackgroundLaunch(
 ///
 /// [photoOffered] hears each photo handed to the pipeline, just before it
 /// is processed (RunInFlight.offered).
+///
+/// [showMealCard] posts a Logged meals card; a meal's card carries its
+/// meal ([payload], MealReveal.payload), so a tap on it goes to that meal
+/// (Android: meal_reveal.dart). A notice carries none.
 @visibleForTesting
 Future<bool> headlessBackfillWith({
   required AppSettings settings,
   required SharedPreferences prefs,
   required PhotoIntake intake,
   required Future<PhotoPipeline> Function() pipeline,
-  required Future<void> Function(String title, String body) showMealCard,
+  required Future<void> Function(String title, String body, {String? payload})
+      showMealCard,
   DateTime Function() clock = DateTime.now,
   Duration? budget,
   DateTime? startedAt,
@@ -556,7 +562,10 @@ Future<bool> headlessBackfillWith({
             o.kind == PhotoOutcomeKind.saved
                 ? l.mealCardAutoTitle
                 : l.mealCardLeftoverTitle,
-            mealCardBody(l, o));
+            mealCardBody(l, o),
+            // The meal logged, or the one the leftovers were deducted
+            // from: a tap on the card goes to it.
+            payload: revealForMeal(o)?.payload);
       }
       // The intake's safeFrontier is the ONLY persistable value: it is
       // createDate-based (the watermark's timebase), halts at transient
@@ -916,9 +925,9 @@ Future<bool> _runAfterLaunch({
           glassesCheckLog: recordGlassesCheckLocally,
           // iOS only: there dart:ui cannot decode (platform_decode.dart).
           deferUndecodable: ios),
-      showMealCard: (title, body) async {
+      showMealCard: (title, body, {payload}) async {
         await notifier.init(); // idempotent; deferred until a card exists
-        await notifier.showMealCard(title, body);
+        await notifier.showMealCard(title, body, payload: payload);
       },
       budget: ios ? iosBackgroundBudget : androidBackgroundBudget,
       startedAt: startedAt,

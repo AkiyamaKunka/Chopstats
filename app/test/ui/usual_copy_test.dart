@@ -193,13 +193,15 @@ final _placeholderRe = RegExp(r'\{(\w+)\}');
 /// diagServerKeyOtherHost, diagFixServerKeyOtherHost); and the legacy
 /// upload key lane's line for a key saved without its server address
 /// (serverKeyUnknownHostField) and, after its review, the row that removes
-/// that key (serverKeyRemoveKept); and the refused-share lane's ten lines
+/// that key (serverKeyRemoveKept); the refused-share lane's ten lines
 /// for a share's files that gave no photo (shareSkippedPhotoType,
 /// shareSkippedVideo, shareSkippedFileType, shareSkippedTooBig,
 /// shareSkippedUnreadable, shareSkippedSomeTooBig,
 /// shareSkippedSomeUnreadable, shareSkippedSomePhotoType,
-/// shareSkippedSomeVideo, shareSkippedSomeFileType).
-const _keyCount = 973;
+/// shareSkippedSomeVideo, shareSkippedSomeFileType); and the Android
+/// View-after-share lane's action on a shared photo's snackbar
+/// (mealViewAction).
+const _keyCount = 974;
 
 Directory _appRoot() {
   var dir = Directory.current;

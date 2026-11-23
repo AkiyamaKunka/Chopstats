@@ -3928,6 +3928,9 @@ class AppLocalizationsEn extends AppLocalizations {
       'In Settings › AI Provider › Your own server, paste this server\'s upload key, or use the saved key for it.';
 
   @override
+  String get mealViewAction => 'View';
+
+  @override
   String shareSkippedPhotoType(int count, String type) {
     String _temp0 = intl.Intl.pluralLogic(
       count,

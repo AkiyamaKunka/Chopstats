@@ -102,9 +102,12 @@ class PhotoOutcome {
   final String? mealDate;
   final Map<String, dynamic>? previousAnalysis;
 
-  /// Set by [PhotoPipeline.bindStream] on the share-sheet announcement of
-  /// a TRANSIENT failure, so the snackbar can ask for a re-share instead
-  /// of claiming the photo was kept (outcomeSnackbar).
+  /// A shared photo's verdict (IntakePhoto.shareDelivery). Set by
+  /// [PhotoPipeline.bindStream] on the share-sheet announcement of a
+  /// TRANSIENT failure, so the snackbar can ask for a re-share instead of
+  /// claiming the photo was kept (outcomeSnackbar), and by process() on a
+  /// shared photo's save and leftover deduction, whose snackbar offers
+  /// View on Android (meal_reveal.dart revealForShared).
   final bool shared;
 
   /// [shared]'s twin for a photo PICKED in the add flow whose screen was
@@ -1263,7 +1266,7 @@ class PhotoPipeline {
           autoLeftoverIndex(analysis, candidateCount: recent.length);
       if (autoIdx != null) {
         final applied = await _applyAutoLeftover(recent[autoIdx], analysis,
-            hash: hash, stamp: stamp);
+            hash: hash, stamp: stamp, shared: photo.shareDelivery != null);
         if (applied != null) return applied;
       }
       // A leftover-shaped reply nothing was applied from (unsure, a meal
@@ -1415,12 +1418,14 @@ class PhotoPipeline {
   /// verdict for [candidate] applied in place, under the photo's
   /// reservation. The leftover outcome once it is applied, the released
   /// photo's outcome once the meal kept changing, or null when the verdict
-  /// is unusable (the caller saves the reply as a meal instead).
+  /// is unusable (the caller saves the reply as a meal instead). [shared]:
+  /// the photo was shared (PhotoOutcome.shared).
   Future<PhotoOutcome?> _applyAutoLeftover(
     Meal candidate,
     Map<String, dynamic> analysis, {
     required String hash,
     required String? stamp,
+    required bool shared,
   }) async {
     // Design R6a: [recent] is as old as the model call (10–60 s). The
     // deduction is re-based on the meal as stored NOW — same model
@@ -1477,7 +1482,8 @@ class PhotoPipeline {
           // The row as THIS application found it, not
           // leftover.original: undoing a wrong second deduction
           // must keep an earlier, correct one.
-          previousAnalysis: original.analysis);
+          previousAnalysis: original.analysis,
+          shared: shared);
       try {
         notify?.call(leftover);
         onMealSaved?.call();
@@ -1553,7 +1559,8 @@ class PhotoPipeline {
         mealName: name,
         kcal: kcal,
         mealId: id,
-        mealDate: isoDate(when));
+        mealDate: isoDate(when),
+        shared: photo.shareDelivery != null);
     // Same shield as the thumbnail: these run AFTER the commit, so a
     // throwing callback must not fall into the outer catch — that
     // flipped the committed ledger row saved→failed and told the user

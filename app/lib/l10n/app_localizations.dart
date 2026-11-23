@@ -2712,7 +2712,7 @@ abstract class AppLocalizations {
   /// **'Leftovers deducted: {summary}'**
   String outcomeLeftoverMsg(String summary);
 
-  /// The {summary} of outcomeSavedMsg: the meal and its calories.
+  /// The {summary} of outcomeSavedMsg: the meal and its calories. Android: also what a screen reader is told when View (mealViewAction) or a tap on a Logged meals card brings that meal on screen.
   ///
   /// In en, this message translates to:
   /// **'{name} — ~{kcal} kcal'**
@@ -5896,6 +5896,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'In Settings › AI Provider › Your own server, paste this server\'s upload key, or use the saved key for it.'**
   String get diagFixServerKeyOtherHost;
+
+  /// Android: the action on the snackbar that says a shared photo was logged (outcomeSavedMsg) or that its leftovers were deducted (outcomeLeftoverMsg). Goes to that meal: any screen open over the app's tabs with nothing unsaved closes, then Today scrolls to the meal and briefly outlines it, or the meal's day opens in History when it was logged for another day. Offered only while the app can go there at once (no screen holding unsaved changes, no dialog or sheet open, nobody typing), and taken away when that stops.
+  ///
+  /// In en, this message translates to:
+  /// **'View'**
+  String get mealViewAction;
 
   /// Snackbar after a share into the app, once every shared file has been looked at, when some gave no photo and every one of those is an image of a type Chopstats does not read (AVIF, DNG and other RAW files, BMP). One line per share, after the lines for its photos, which are logged as usual; nothing was sent for the skipped files. count is how many files of that share were skipped. type is the file type as the file names give it, upper-case (AVIF), or up to three joined by '/' (AVIF/DNG); never a file name.
   ///

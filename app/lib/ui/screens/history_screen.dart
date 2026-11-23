@@ -98,8 +98,10 @@ class HistoryScreenState extends State<HistoryScreen> {
 
   /// Day drill-down. Always reloads on return: edits, adds and deletes all
   /// change this list, and a local query is far cheaper than plumbing a
-  /// result back through a system back-gesture.
-  Future<void> _openDay(String date) async {
+  /// result back through a system back-gesture. [revealMealId]: a meal of
+  /// that day the user asked to see (the shell's reveal,
+  /// ui/meal_reveal.dart), brought on screen and briefly ringed there.
+  Future<void> openDay(String date, {int? revealMealId}) async {
     await Navigator.of(context).push(MaterialPageRoute(
       builder: (_) =>
           DayDetailScreen(
@@ -109,7 +111,8 @@ class HistoryScreenState extends State<HistoryScreen> {
               thumbs: widget.thumbs,
               mealInUse: widget.mealInUse,
               restaurantAssist: widget.restaurantAssist,
-              settings: widget.settings),
+              settings: widget.settings,
+              revealMealId: revealMealId),
     ));
     // Same reason for the signal: today's meals edited from here must
     // reach Today and the iOS OS card, not only this list.
@@ -219,7 +222,7 @@ class HistoryScreenState extends State<HistoryScreen> {
     return GroupedRow.custom(
       key: Key('historyDay$date'),
       // Gap rows open the day too — its + FAB is the remedy.
-      onTap: () => _openDay(date),
+      onTap: () => openDay(date),
       showChevron: true,
       trailing: stacked ? null : value,
       child: Column(
@@ -361,7 +364,7 @@ class HistoryScreenState extends State<HistoryScreen> {
                 CalorieTrendChart(
                   dayTotals: {for (final d in dates) d: _perDay[d] ?? 0},
                   average: sum / _perDay.length,
-                  onDayTap: (date) => _openDay(date),
+                  onDayTap: (date) => openDay(date),
                 ),
               ],
             ),
