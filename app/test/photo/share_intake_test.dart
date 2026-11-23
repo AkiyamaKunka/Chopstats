@@ -932,6 +932,33 @@ void main() {
       expect(intake.photoCountOf(1), 2);
       await sub.cancel();
     });
+
+    // Device QA of the skipped-files line (2026-11-22, PR81-QA-1): a copy
+    // waits unread while the stream is paused (another share's question
+    // open), and counted as a photo until then, that share's Not now
+    // covered a share of one AVIF and dropped its line.
+    test('a copy whose name gives no photo type is never counted as a photo, '
+        'read or not', () async {
+      final source = FakeShareSource();
+      final intake = counting(source);
+      final got = <String>[];
+      final sub = intake.photos().listen((p) =>
+          got.add(p.refused == null ? p.fileName : 'note${p.shareDelivery}'))
+        ..pause();
+      source.controller.add([...share(1), '/shared/IMG_9.avif', '/shared/a.pdf']);
+      await pumpEventQueue(times: 50);
+      source.controller.add(['/shared/IMG_10.avif']);
+      await pumpEventQueue(times: 50);
+      expect(reads, isEmpty, reason: 'paused from the start');
+      expect(intake.photoCountOf(1), 1);
+      expect(intake.photoCountOf(2), 0, reason: 'nothing to ask about');
+      sub.resume();
+      await pumpEventQueue(times: 50);
+      expect(got, ['IMG_0.jpg', 'note1', 'note2']);
+      expect(intake.photoCountOf(1), 1, reason: 'not taken off again');
+      expect(intake.photoCountOf(2), 0);
+      await sub.cancel();
+    });
   });
 
   // Q1, Q9 (2026-11-20): on Android a photo's copy waits on disk until the

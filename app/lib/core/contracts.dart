@@ -790,13 +790,14 @@ abstract interface class ShareDeliveries {
   /// The latest delivery whose batch event has arrived (0: none yet).
   int get arrivedDelivery;
 
-  /// How many photos [delivery] holds as far as is known now: all its
-  /// copies, less those already found unreadable. A copy not read yet
-  /// counts, even when it will turn out unusable (an unsupported type,
-  /// over 25 MB, a read that fails), so this can be high, never low. 0:
-  /// it has no photo left to send (every file refused), and another
-  /// share's Not now leaves it out, so its line on those files still
-  /// comes.
+  /// How many photos [delivery] holds as far as is known now: its copies
+  /// whose names give a photo type, less those already found unreadable.
+  /// A copy whose name gives none (an AVIF, a DNG, a PDF) never counts. One
+  /// not read yet whose name does counts, even when it will turn out
+  /// unusable (empty, over 25 MB, a read that fails), so this can be high,
+  /// never low. 0: it has no photo left to send (every file refused), and
+  /// another share's Not now leaves it out, so its line on those files
+  /// still comes.
   int photoCountOf(int delivery);
 
   /// Every copy of [deliveries] not read yet is deleted unread (at once,

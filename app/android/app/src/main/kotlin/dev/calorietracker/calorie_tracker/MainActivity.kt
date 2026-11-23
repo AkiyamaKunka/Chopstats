@@ -444,9 +444,14 @@ class MainActivity : FlutterActivity() {
                     return@forEachIndexed
                 }
                 // The type the plugin gives it: the share's own, or for
-                // several, each one's listed type, else its name's.
+                // several, each one's listed type, else its name's, else
+                // its provider's. A name with no extension Android knows
+                // ("Dinner with J.Smith") gave none, and such an image was
+                // refused as a kind of file (device QA 2026-11-22,
+                // PR81-QA-2); one shared alone has the share's type.
                 val itemType = if (kind == Intent.ACTION_SEND_MULTIPLE)
                     listedTypes?.getOrNull(i) ?: URLConnection.guessContentTypeFromName(name)
+                        ?: providerType(uri)
                 else shareType
                 if (itemType?.startsWith("image") != true) {
                     refused.add(IntakeRules.typeRefusal(itemType))

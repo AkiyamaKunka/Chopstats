@@ -375,8 +375,9 @@ class SharedPhotoConsentGate {
   /// delivery, or when no question is open.
   ///
   /// The count can be a little high, never low: a copy not read yet that
-  /// turns out unusable (an unsupported type, over 25 MB, a failing read)
-  /// is counted too (ShareDeliveries.photoCountOf).
+  /// turns out unusable (empty, over 25 MB, a failing read) is counted too;
+  /// one whose name gives no photo type (an AVIF) is not
+  /// (ShareDeliveries.photoCountOf).
   int declineOpenQuestion() {
     final asking = _asking;
     if (asking == null) return 1;
@@ -391,9 +392,9 @@ class SharedPhotoConsentGate {
         // The start-up batch of copies left unread is no share being made
         // now: it gets its own question, whenever its sweep finished. Nor
         // is a share with no photo left to send (its files all refused:
-        // on Android before any copy, on iOS as each was read): nothing of
-        // it is ever asked about, and the line on its refused files is all
-        // it gets, which this answer would drop.
+        // on Android before any copy or by their names, on iOS as each was
+        // read): nothing of it is ever asked about, and the line on its
+        // refused files is all it gets, which this answer would drop.
         if (!(deliveries?.asksAlone(d) ?? false) &&
             (deliveries?.photoCountOf(d) ?? 1) > 0)
           d,

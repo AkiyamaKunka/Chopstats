@@ -868,6 +868,61 @@ void main() {
       expect(lines, ['One shared file was skipped because it is over 25 MB.']);
     });
 
+    // Device QA (2026-11-22, PR81-QA-1): on Android the AVIF's copy waits
+    // unread while the question is open; counted as a photo, the Not now
+    // covered its share, dropped its line and said "2 shared photos".
+    test('Android: a share of one AVIF while another share\'s question is '
+        'open gets its line after that share\'s Not now, which counts the '
+        'photo asked about only', () async {
+      answers = [];
+      await start();
+      final answer = Completer<bool>();
+      final notSent = <int>[];
+      askUntil(answer, notSent);
+      files['/shared/1/IMG_1.jpg'] = Uint8List.fromList([1, 1]);
+      files['/shared/2/IMG_2.avif'] = Uint8List.fromList([2, 2]);
+      source.controller.add(const SharedBatch(['/shared/1/IMG_1.jpg']));
+      await pumpEventQueue(times: 100);
+      expect(asked, 1, reason: 'the question is open');
+      source.controller.add(const SharedBatch(['/shared/2/IMG_2.avif']));
+      await pumpEventQueue(times: 100);
+      expect(lines, isEmpty, reason: 'it waits behind the open question');
+      answer.complete(false);
+      await pumpEventQueue(times: 100);
+      expect(notSent, [1], reason: 'the photo asked about, not the AVIF');
+      expect(asked, 1);
+      expect(analyses, 0, reason: 'nothing sent');
+      expect(lines, [
+        "One shared file was skipped: Chopstats can't read AVIF photos yet."
+      ]);
+      expect(cleaned, contains('/shared/2/IMG_2.avif'));
+    });
+
+    test('Android: a share of a photo and an AVIF made while the question is '
+        'open goes with its Not now, which counts the photos only', () async {
+      answers = [];
+      await start();
+      final answer = Completer<bool>();
+      final notSent = <int>[];
+      askUntil(answer, notSent);
+      files['/shared/1/IMG_1.jpg'] = Uint8List.fromList([1, 1]);
+      files['/shared/2/IMG_2.jpg'] = Uint8List.fromList([2, 2]);
+      files['/shared/3/IMG_3.avif'] = Uint8List.fromList([3, 3]);
+      source.controller.add(const SharedBatch(['/shared/1/IMG_1.jpg']));
+      await pumpEventQueue(times: 100);
+      source.controller.add(const SharedBatch(
+          ['/shared/2/IMG_2.jpg', '/shared/3/IMG_3.avif']));
+      await pumpEventQueue(times: 100);
+      answer.complete(false);
+      await pumpEventQueue(times: 100);
+      expect(notSent, [2], reason: 'IMG_1 and IMG_2');
+      expect(asked, 1, reason: 'the second share was answered too');
+      expect(analyses, 0);
+      expect(lines, isEmpty);
+      expect(cleaned,
+          containsAll(['/shared/2/IMG_2.jpg', '/shared/3/IMG_3.avif']));
+    });
+
     test('iOS: a share of one AVIF while another share\'s question is open '
         '(read at once, so nothing left to send) still gets its line', () async {
       answers = [];

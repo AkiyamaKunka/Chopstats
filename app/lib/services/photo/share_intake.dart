@@ -352,10 +352,22 @@ class ShareIntake implements ShareDeliveries {
   final int _capturedAtMaxAgeDays;
 
   /// Deliveries (IntakePhoto.shareDelivery): one per batch event, numbered
-  /// as it arrives, before any of its copies is read.
+  /// as it arrives, before any of its copies is read. Its size counts only
+  /// the copies whose names give a photo type ([_namedNoPhoto]), and
+  /// unreadable those of them found to give no photo when read.
   int _deliveries = 0;
   final Map<int, int> _deliverySize = {};
   final Map<int, int> _deliveryUnreadable = {};
+
+  /// Whether the copy at [path] gives no photo by its name alone (an AVIF,
+  /// a DNG, a PDF: [_fromPath] refuses it before reading a byte), so it is
+  /// never counted as one of its delivery's photos. On Android a copy
+  /// waits to be read while the consent gate asks about another share, and
+  /// counted until then it made that share's Not now cover a share of one
+  /// AVIF and drop its line, and count it as a photo not sent (device QA
+  /// of the skipped-files line, 2026-11-22, PR81-QA-1).
+  static bool _namedNoPhoto(String path) =>
+      !hasSupportedPhotoExtension(fileBaseName(path));
 
   /// Deliveries the consent gate declined: their copies not read yet are
   /// deleted unread.
@@ -481,10 +493,11 @@ class ShareIntake implements ShareDeliveries {
   /// at, one note ([IntakePhoto.refusedNote]) follows its photos: how many
   /// gave none, and why. None for a share answered Not now, or once the
   /// stream is cancelled. A share whose every file was refused is still a
-  /// delivery, with no photo to ask about: its [photoCountOf] is 0 once
-  /// each of its copies is read and refused (at once for a share
-  /// MainActivity refused whole), so another share's Not now does not
-  /// cover it, and its note still comes.
+  /// delivery, with no photo to ask about: its [photoCountOf] is 0 at once
+  /// when MainActivity refused it whole or its copies' names give no photo
+  /// type (an AVIF, a DNG), and once each is read for an empty or
+  /// unreadable copy. Another share's Not now does not cover it then, and
+  /// its note still comes.
   ///
   /// iOS reads each copy the moment it arrives, as before: the share
   /// extension writes `<appGroup>/<file name>` and replaces a file of the
@@ -512,9 +525,13 @@ class ShareIntake implements ShareDeliveries {
       // copy (MainActivity), then the copies refused here.
       final refused = [...refusedBefore];
       final photoTypes = <String>[];
-      void gaveNoPhoto(ShareRefusal why, {String? type}) {
-        _deliveryUnreadable[delivery] =
-            (_deliveryUnreadable[delivery] ?? 0) + 1;
+      // [counted]: the copy was one of the delivery's photos as far as was
+      // known ([_namedNoPhoto] never was).
+      void gaveNoPhoto(ShareRefusal why, {String? type, bool counted = true}) {
+        if (counted) {
+          _deliveryUnreadable[delivery] =
+              (_deliveryUnreadable[delivery] ?? 0) + 1;
+        }
         refused.add(why);
         if (type != null) photoTypes.add(type);
       }
@@ -539,12 +556,13 @@ class ShareIntake implements ShareDeliveries {
           continue;
         }
         final _Read read;
+        final counted = !_namedNoPhoto(path);
         // Pending while it is read, too: in hand once it gives a photo.
         _reading++;
         try {
           read = await _fromPath(path, delivery);
         } catch (_) {
-          gaveNoPhoto(ShareRefusal.unreadable);
+          gaveNoPhoto(ShareRefusal.unreadable, counted: counted);
           continue; // one bad copy (already deleted) never stops the rest
         } finally {
           _reading--;
@@ -553,7 +571,7 @@ class ShareIntake implements ShareDeliveries {
         final photo = read.photo;
         if (photo == null) {
           gaveNoPhoto(read.refusal ?? ShareRefusal.unreadable,
-              type: read.type);
+              type: read.type, counted: counted);
         } else if (!cancelled && !controller.isClosed && !declined()) {
           controller.add(photo);
         } else {
@@ -594,7 +612,7 @@ class ShareIntake implements ShareDeliveries {
       if (paths.isEmpty && batch.refused.isEmpty) return;
       final delivery = ++_deliveries;
       if (leftOver) _startupBatches.add(delivery);
-      _deliverySize[delivery] = paths.length;
+      _deliverySize[delivery] = paths.where((p) => !_namedNoPhoto(p)).length;
       if (_copiesWait && paths.isNotEmpty) _untaken[delivery] = [...paths];
       _notePending();
       reading = reading

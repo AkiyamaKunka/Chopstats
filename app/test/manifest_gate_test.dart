@@ -1876,6 +1876,15 @@ void main() {
         safe.indexOf('if (itemType?.startsWith("image") != true)'),
         lessThan(safe.indexOf('copyShare(uri, copyName(uri, name, itemType))')));
     expect('copyName('.allMatches(safe), hasLength(1));
+    // An item of a multi-file share with no listed type and a name Android
+    // cannot type takes its provider's type (device QA 2026-11-22,
+    // PR81-QA-2): it was refused as a kind of file before copyName ran.
+    expect(
+        safe,
+        contains('val itemType = if (kind == Intent.ACTION_SEND_MULTIPLE) '
+            'listedTypes?.getOrNull(i) ?: '
+            'URLConnection.guessContentTypeFromName(name) ?: '
+            'providerType(uri) else shareType'));
     final rules = _kotlinCode(_intakeRules());
     expect(rules, contains('const val MAX_NAME_BYTES = 255'));
     _expectJvmTests([
