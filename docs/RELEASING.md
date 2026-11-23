@@ -40,7 +40,7 @@ Identifiers that must match everywhere:
 | Apple team in `Runner.xcodeproj` today | `WLQB3YB22M` — the paid Apple Developer Program (Individual) since 2026-10-29; the Team ID did not change on enrolment (§ 1.2), so the keychain and the dev build carry over |
 | Android package / application id | `dev.calorietracker.calorie_tracker` (permanent once the Play app record exists: Create app asks for it, § 6.1) |
 | Display name | `Chopstats` (Info.plist `CFBundleDisplayName` and en `InfoPlist.strings`, both targets; 筷拍 under zh-Hans); store name `Chopstats · 筷拍` (owner decision R-F9, 2026-10-29; formerly BiteWise) |
-| Version | `app/pubspec.yaml` `version: 1.7.1+10` → `CFBundleShortVersionString` / `versionName` = `1.7.1`; the build number is stamped by CI (§ 5) |
+| Version | `app/pubspec.yaml` `version: 1.7.2+11` → `CFBundleShortVersionString` / `versionName` = `1.7.2`; the build number is stamped by CI (§ 5) |
 
 ---
 
@@ -553,7 +553,7 @@ All done; this is what each one is and where it lives.
 - `ITSAppUsesNonExemptEncryption = false` in `app/ios/Runner/Info.plist`
   (the app only uses OS TLS, the keychain and SHA hashing, which are exempt;
   without the key every build sits in "Missing Compliance" until answered).
-- `app/pubspec.yaml` is `1.7.1+10`; the ShareExtension takes its version from
+- `app/pubspec.yaml` is `1.7.2+11`; the ShareExtension takes its version from
   `$(FLUTTER_BUILD_NAME)` / `$(FLUTTER_BUILD_NUMBER)`.
 
 1. **Privacy manifests — done.** Both targets ship a
@@ -1048,7 +1048,7 @@ step. Revisit if the app is ever published with a developer-run service.
   offset keeps CI above the hand-built era. It was `+100` up to 1.6.0
   (build 106) and is `+200` from 1.7.0, so the iCloud device tests can use
   107–199 (§ 11). Never lower `BUILD_NUMBER_OFFSET` in `release.yml`. Hand
-  builds on the Mac use the `+N` from pubspec (currently 10; it goes up by
+  builds on the Mac use the `+N` from pubspec (currently 11; it goes up by
   one with each version bump, so a hand build installs over the last one);
   keep those below 200.
 - A tag may be pushed again only after deleting it on both sides; prefer a
@@ -1139,10 +1139,12 @@ step. Revisit if the app is ever published with a developer-run service.
 ## 6. Google Play
 
 Rewritten 2026-11-13 for the first Google Play release (planned then as
-Android 1.7.0, which went out on GitHub only; the first Play upload is
-1.7.1, § 6.3), from Google's pages as they read that day; each source
-below carries its read date. The console moves things around: match the
-wording, not the position. The paste-ready answers live next to the app in
+Android 1.7.0, which went out on GitHub only, as 1.7.1 did after it; the
+first Play upload is the newest Android release's bundle on the day the
+Play account exists, § 6.3), from Google's pages as they read that day;
+each source below carries its read date. The console moves things
+around: match the wording, not the position. The paste-ready answers
+live next to the app in
 [`app/android/store/`](../app/android/store/): `app_content.md`,
 `data_safety.md`, `metadata/`, `graphics/` and `screenshots/SHOTS.md`.
 
@@ -1167,12 +1169,15 @@ wording, not the position. The paste-ready answers live next to the app in
    under the tag `android-v1.7.0` (§ 6.6), so `v1.7.0` stays free for the
    iPhone 1.7.0. Done on 2026-11-19 for GitHub (`android-v1.7.0`, build
    207); no bundle reached Play. Android 1.7.1 went out the same way on
-   2026-11-22 (`android-v1.7.1`, build 209), on GitHub only too: that
-   run's bundle is the first Play upload, still to come (§ 6.3).
-   The iPhone 1.7.0 never shipped (1.6.0 is live), and pubspec is 1.7.1
-   since PR #77, so the iPhone's next tag from `main` is `v1.7.1`:
-   `v1.7.0` stays unused (§ 6.6). A 1.6.x hotfix is tagged on its own
-   branch instead (§ 6.6, *A 1.6.x hotfix*).
+   2026-11-22 (`android-v1.7.1`, build 209), on GitHub only too. Android
+   1.7.2 goes out the same way, as `android-v1.7.2`, on GitHub only while
+   there is no Play account (§ 6.6). The first Play upload, still to come,
+   is the bundle of the newest Android release on the day the Play
+   account exists (§ 6.3). The iPhone 1.7.0 and 1.7.1 never shipped (1.6.0
+   is live), and pubspec is 1.7.2 since the 1.7.2 prep PR, so the
+   iPhone's next tag from `main` is `v1.7.2`: `v1.7.0` and `v1.7.1` stay
+   unused (§ 6.6). A 1.6.x hotfix is tagged on its own branch instead
+   (§ 6.6, *A 1.6.x hotfix*).
 
 **The owner's decisions (2026-11-20):**
 
@@ -1523,23 +1528,36 @@ the bundle's own manifest, both forms) must list no `READ_MEDIA_*` and no
 `READ_EXTERNAL_STORAGE`; `bundletool dump manifest --bundle
 app-release.aab` says the same.
 
-**The first upload** is still to come, and it is 1.7.1: the bundle of
-Release run 9 (lane `play`, from `main` at `189f34c6`, where the tag
-`android-v1.7.1` is), build 209, the same build number as the GitHub APK
-`android-v1.7.1` (same run, same signer; the bundle is the Play build,
-without Watch Camera Roll). `android-v1.7.0` (build 207) and
-`android-v1.7.1` went out on GitHub only, before the Play account existed
-(§ 6.6).
+**The first upload** is still to come. It is the bundle of the newest
+Android release on the day the Play account exists (decided on
+2026-11-23 by Claude on the owner's delegation), so that Play starts at
+the build GitHub users already have: an older bundle would be a
+downgrade for a phone moving from the GitHub APK (§ 6.6, *The friends
+and the GitHub APK*). Which bundle that is:
+
+- Until `android-v1.7.2` is published, 1.7.1: the bundle of Release run 9
+  (lane `play`, from `main` at `189f34c6`, where the tag `android-v1.7.1`
+  is), build 209, the same build number as the GitHub APK
+  `android-v1.7.1` (same run, same signer; the bundle is the Play build,
+  without Watch Camera Roll), in the artifact `android-1.7.1-209`, which
+  GitHub keeps 90 days.
+- From then on, 1.7.2: the bundle of the run that `android-v1.7.2` comes
+  from (§ 6.6), in that run's artifact `android-1.7.2-2xx`.
+
+`android-v1.7.0` (build 207) and `android-v1.7.1` went out on GitHub only,
+before the Play account existed, and 1.7.2 goes out the same way
+(§ 6.6). The steps name run 9; for 1.7.2, take its run, artifact, build
+number and name instead.
 
 1. Actions › Release › run 9. Its plan summary says build name `1.7.1`
    and build number 209 (`BUILD_NUMBER_OFFSET` 200 + run 9), the build
    number GitHub `android-v1.7.1` users have, above `android-v1.7.0`'s 207.
-   Never upload a Mac hand build: it gets pubspec's `+10`, below 207.
-   The run page keeps the artifact 90 days (§ 8). If it is gone, Run
-   workflow › branch `main` › lane `play` (leave *play_track* at
-   `internal`; a dispatch creates no tag and no GitHub Release) builds
-   pubspec's version with a higher number: upload that run's bundle
-   instead, and name the release after it.
+   Never upload a Mac hand build: it gets pubspec's `+11`, below 207.
+   The run page keeps the artifact 90 days (§ 8). If it is gone before
+   `android-v1.7.2` is out, no run can make it again: Run workflow ›
+   branch `main` › lane `play` now builds pubspec's version, 1.7.2, with
+   a higher number. Make that run 1.7.2's release (§ 6.6) and upload its
+   bundle.
 2. Download the artifact `android-1.7.1-209` and take `app-release.aab`.
 3. Play Console › *Test and release* › *Testing* › *Internal testing* ›
    *Create new release* › upload it. **Do not roll it out yet.** First
@@ -1742,23 +1760,26 @@ any `v*` tag, and the iOS lane stops until the iCloud container exists
 (§ 11.1). So Android goes first without a `v*` tag. Android 1.7.0 went
 out this way on 2026-11-19 (`android-v1.7.0`, build 207, GitHub only).
 Android 1.7.1 followed on 2026-11-22 (`android-v1.7.1`, build 209 from
-run 9, GitHub only). The next one is pubspec's version at that time,
-bumped first (`X.Y.Z` in the steps): `android-v1.7.1` already holds
-1.7.1, so, with the owner's OK, raise `version:` in `app/pubspec.yaml`
-and `kAppVersion` (`lib/services/backup/backup_files.dart`) before the
-run. The bump also names `main`'s next iPhone version (*Pubspec and the
-versions the policy names*, below).
+run 9, GitHub only). The next one is 1.7.2, which the steps name:
+pubspec's version since the 1.7.2 prep PR (*Pubspec and the versions
+the policy names*, below). It goes out on GitHub only while there is no
+Play account. After it, bump pubspec first for the next one, with the
+owner's OK, as for 1.7.2: a version that a GitHub release already holds
+is not built again under its name, and the bump also names `main`'s next
+iPhone version.
 
 1. Actions › Release › Run workflow › `main` › lane **`play`**. The plan
-   summary says build name `X.Y.Z`, and the artifact `android-X.Y.Z-2xx`
-   holds the bundle and the arm64 APK, with one build number and one
-   signer (the verify step checks both).
-2. The bundle goes to Play by hand (§ 6.3).
+   summary says build name `1.7.2`, and the artifact `android-1.7.2-2xx`
+   holds the bundle and the arm64 APK, with one build number
+   (`BUILD_NUMBER_OFFSET` 200 + the run's number, above
+   `android-v1.7.1`'s 209) and one signer (the verify step checks both).
+2. The bundle goes to Play by hand (§ 6.3). While there is no Play
+   account, § 6.3 says which release's bundle is the first upload.
 3. The APK goes on a GitHub Release made by hand: tag the run's commit
-   `android-vX.Y.Z` and push the tag (`git tag android-vX.Y.Z <sha> &&
-   git push origin android-vX.Y.Z`), then GitHub › Releases › *Draft a new
-   release* › tag `android-vX.Y.Z` › title `Chopstats Android X.Y.Z` ›
-   attach the APK renamed `Chopstats-vX.Y.Z-b2xx-arm64-v8a.apk` (the name
+   `android-v1.7.2` and push the tag (`git tag android-v1.7.2 <sha> &&
+   git push origin android-v1.7.2`), then GitHub › Releases › *Draft a new
+   release* › tag `android-v1.7.2` › title `Chopstats Android 1.7.2` ›
+   attach the APK renamed `Chopstats-v1.7.2-b2xx-arm64-v8a.apk` (the name
    release.yml's own releases use) › notes (below) › *Publish*.
    release.yml triggers only on tags matching `v*`, and an `android-v*`
    tag such as `android-v1.7.0` does not match it (pinned by
@@ -1767,7 +1788,7 @@ versions the policy names*, below).
    is harmless.
 4. Notes: what changed for Android since the previous GitHub release (for
    1.7.0 that was 1.6.0, with PR #60's fix to shared photos; for 1.7.1 it
-   was `android-v1.7.0`; for the next one it is `android-v1.7.1`);
+   was `android-v1.7.0`; for 1.7.2 it is `android-v1.7.1`, build 209);
    installing over a GitHub build from 1.5.0 or later keeps the data. Say
    that the GitHub APK and the Play build can replace each other **only
    after** § 6.3's step 2 check has passed, and say that the Play build
@@ -1778,13 +1799,14 @@ versions the policy names*, below).
    and its tag, and the APK's name and size.
 
 Later, when the iPhone version is ready, tag `main` as usual with
-pubspec's version, `v1.7.1` (but read the next paragraph first): the
-iPhone 1.7.0 never shipped (1.6.0 is live), so `main`'s next iPhone
-version is 1.7.1 (a 1.6.x hotfix is tagged on its own branch, below),
-and `v1.7.0` stays unused. That run also builds Android again, with a
-higher build number: it puts that APK on the `v1.7.1` release and, with
-`PLAY_SERVICE_ACCOUNT_JSON` set, sends the bundle to the internal track.
-Both are harmless (an upgrade for anyone who installs them).
+pubspec's version, `v1.7.2` (but read the next paragraph first): the
+iPhone 1.7.0 and 1.7.1 never shipped (1.6.0 is live), so `main`'s next
+iPhone version is 1.7.2 (a 1.6.x hotfix is tagged on its own branch,
+below), and `v1.7.0` and `v1.7.1` stay unused. That run also builds
+Android again, with a higher build number: it puts that APK on the
+`v1.7.2` release and, with `PLAY_SERVICE_ACCOUNT_JSON` set, sends the
+bundle to the internal track. Both are harmless (an upgrade for anyone
+who installs them).
 
 **Pubspec and the versions the policy names.** The privacy policy dates
 changes by version ("From version X.Y.Z"), and every build opens it from
@@ -1794,11 +1816,18 @@ would not do what the policy says 1.7.0 does. `android-v1.7.0` (b207)
 went out as 1.7.0, and the policy dates two Android changes from 1.7.1:
 Meta glasses photos off until turned on, and the Google backup only
 end-to-end encrypted (owner decisions 8 and 5). So `version:` in
-`app/pubspec.yaml` is `1.7.1+10` and `kAppVersion`
-(`lib/services/backup/backup_files.dart`) `1.7.1` since PR #77, decided
+`app/pubspec.yaml` was `1.7.1+10` and `kAppVersion`
+(`lib/services/backup/backup_files.dart`) `1.7.1` from PR #77 on, decided
 on 2026-11-20 by Claude on the owner's delegation. The tag must match
 pubspec, so this also made the next iPhone release from `main` 1.7.1,
-not the 1.7.0 decision 4 kept free for it. The rule stays for later
+not the 1.7.0 decision 4 kept free for it. Then `android-v1.7.1` (build
+209) went out as 1.7.1 on 2026-11-22, and a version that a GitHub release
+already holds is not built again under its name (*An Android-only
+version*, above). So `version:` is `1.7.2+11` and `kAppVersion` `1.7.2`
+since the 1.7.2 prep PR, decided on 2026-11-23 by Claude on the owner's
+delegation: the 1.7.2 bump is done, and it makes `main`'s next iPhone
+release 1.7.2 too. The policy did not change for it: its newest *From
+version* is still 1.7.1, below pubspec. The rule stays for later
 versions: when the policy dates a change from a version above pubspec's,
 set `version:` in `app/pubspec.yaml` and `kAppVersion`
 (`lib/services/backup/backup_files.dart`) to that version or later
@@ -1937,14 +1966,16 @@ the screenshots:
 7. Upload the screenshots (at least 4 per language) from
    `app/android/store/screenshots/en-US/` and `zh-CN/`, in file order.
 8. Before the run: `version:` in `app/pubspec.yaml` must not be below the
-   newest *From version X.Y.Z* in `docs/PRIVACY.md` (both are 1.7.1
-   since PR #77). If it is, bump it and `kAppVersion` first, with the
-   owner's OK (§ 6.6); release.yml's plan step refuses the Android lane
-   until then.
-9. Run workflow › `main` › lane `play` (for the first upload: run 9,
-   build 209, § 6.3); check the plan summary's build name (pubspec's
-   version, 1.7.1 for the first upload) and number, the bundle's
-   permissions (§ 6.3), and that
+   newest *From version X.Y.Z* in `docs/PRIVACY.md` (pubspec is 1.7.2
+   since the 1.7.2 prep PR; the policy's newest is 1.7.1). If it is, bump
+   it and `kAppVersion` first, with the owner's OK (§ 6.6); release.yml's
+   plan step refuses the Android lane until then.
+9. Run workflow › `main` › lane `play` (for the first upload, the run of
+   the newest Android release instead, § 6.3: run 9, build 209, until
+   `android-v1.7.2` is published, then 1.7.2's run); check the plan
+   summary's build name (pubspec's version at the run's commit: 1.7.1 for
+   run 9, 1.7.2 for 1.7.2's run) and number, the bundle's permissions
+   (§ 6.3), and that
    `app/lib/core/server_transport.dart` says `kRequireHttpsServer = true`
    at the run's commit (the Android job's *Check the app refuses plain-http
    servers* step stops the run otherwise).
@@ -1955,10 +1986,13 @@ the screenshots:
     picker, a share, Describe a meal and the daily summary.
 12. Create the closed track, add at least 12 testers outside mainland
     China, roll out, share the opt-in link, and start the 14-day log.
-13. Done on 2026-11-22: the same run's GitHub APK went out by hand as
-    `android-v1.7.1` (build 209), before any Play upload, and the README's
-    Android section names it (§ 6.6, steps 3 to 5). `android-v1.7.0`
-    (build 207) is already out, since 2026-11-19.
+13. Publish 1.7.2's GitHub APK as `android-v1.7.2` by hand, then update
+    the README's Android section (§ 6.6, steps 1 to 5). It does not wait
+    for Play (decision 4); when the first upload is 1.7.2, its run is
+    step 9's. Before it, run 9's GitHub APK went out by hand as
+    `android-v1.7.1` (build 209) on 2026-11-22, before any Play upload,
+    and the README's Android section names it. `android-v1.7.0` (build
+    207) is already out, since 2026-11-19.
 
 Optional, only after the first manual rollout:
 
@@ -2038,20 +2072,20 @@ the README, not this page.
 
 ## 8. Running a release (cheat sheet)
 
-(Before the first tag from `main` since 1.6.0, `v1.7.1` (the iPhone
-skips 1.7.0, § 6.6): § 11, the iCloud container, or the iOS lane stops
-at "Check the Runner profile allows the iCloud container". Once that
-version is in the App Store: § 12, the support page, whose "1.7.0" means
-it. A 1.6.x hotfix is tagged on its own branch and needs neither: § 6.6,
-*A 1.6.x hotfix*. An Android-only version goes first without a `v*` tag:
-§ 6.6.)
+(Before the first tag from `main` since 1.6.0, `v1.7.2` (the iPhone
+skips 1.7.0 and 1.7.1, § 6.6): § 11, the iCloud container, or the iOS
+lane stops at "Check the Runner profile allows the iCloud container".
+Once that version is in the App Store: § 12, the support page, whose
+"1.7.0" means it. A 1.6.x hotfix is tagged on its own branch and needs
+neither: § 6.6, *A 1.6.x hotfix*. An Android-only version goes first
+without a `v*` tag: § 6.6.)
 
 ```bash
-# 1. in the shipping PR: app/pubspec.yaml  version: 1.7.1+10   (the +N is for hand builds only;
+# 1. in the shipping PR: app/pubspec.yaml  version: 1.7.2+11   (the +N is for hand builds only;
 #    x.y.z not below the newest "From version" in docs/PRIVACY.md, § 6.6)
 # 2. edit app/android/whatsnew/whatsnew-*.{en-US,zh-CN}
 # 3. merge to main, then
-git tag v1.7.1 && git push origin v1.7.1     # iOS + Android lanes, external-eligible TestFlight build, GitHub Release
+git tag v1.7.2 && git push origin v1.7.2     # iOS + Android lanes, external-eligible TestFlight build, GitHub Release
 # or: Actions → Release → Run workflow → lane testflight | play | both (internal-only TestFlight build;
 #     play_track internal | alpha picks the Play track when PLAY_SERVICE_ACCOUNT_JSON is set)
 # Android only (decision 4): Run workflow → lane play, then a hand-made GitHub Release
@@ -2361,10 +2395,10 @@ phone, with Part B and § 11.1 done:
 `docs/SUPPORT.md` is the support URL of both store listings, so, like the
 README, it describes the version in the App Store (1.6.0 today). What only
 `main` has is written here instead and goes onto the page in a PR once
-1.7.0 is in the App Store. (The iPhone skips 1.7.0, § 6.6: "1.7.0" in
-this section and in the test named below means the first App Store
-version built from `main` after 1.6.0, now 1.7.1, not a 1.6.x hotfix
-such as 1.6.1, which has none of this.) The labels are the app's on
+1.7.0 is in the App Store. (The iPhone skips 1.7.0 and 1.7.1, § 6.6:
+"1.7.0" in this section and in the test named below means the first App
+Store version built from `main` after 1.6.0, now 1.7.2, not a 1.6.x
+hotfix such as 1.6.1, which has none of this.) The labels are the app's on
 `main`: `app/test/ui/copy_consistency_test.dart` checks them against
 `app_en.arb`, and checks that `SUPPORT.md` does not name them yet; drop
 that check ("names no 1.7.0 control …") in the same PR. If 1.7.0 ships

@@ -3,7 +3,9 @@
 Paste-ready answers for **Play Console › Monitor and improve › Policy and
 programs › App content**, written
 2026-11-13 for the first Google Play release (planned then as 1.7.0; it
-is 1.7.1, `docs/RELEASING.md` § 6.3), with the owner's
+is the newest Android release on the day the Play account exists: 1.7.1
+until `android-v1.7.2` is published, then 1.7.2, `docs/RELEASING.md`
+§ 6.3), with the owner's
 decisions of that day: no broad photo access on Play (decision 1),
 `http://` servers refused (decision 2), one signing key for Play and the
 GitHub APK (decision 3), and an Android-only 1.7.0 (decision 4). Match the
