@@ -1272,57 +1272,167 @@ void main() {
 
   // With enableOnBackInvokedCallback, Flutter unregisters its back
   // callback at an idle root route and leaves Back there to Android.
-  // Android 14 and later move the task to the back only when the home
-  // screen started it with the launcher's own intent
-  // (ActivityClientController.shouldMoveTaskToBack,
-  // ActivityRecord.isMainIntent) and finish any other root: a task a share
-  // created was finished on Back, with the engine that was still analyzing
-  // its photo (review of #72). Such a task keeps Flutter's callback, so
-  // Back at its root goes through Flutter's SystemNavigator.pop to
-  // popSystemNavigator, which moves the task to the back (the test of
-  // decision 6.1 below), as on Android 12 and lower.
-  // Decided once per activity: from the intent that created it (Android's
-  // own check) at its first create, before the replay rewrite empties it,
-  // then from the saved state. Android re-sends that intent only after
-  // process death; a relaunch in the same process (theme colours, Bold
-  // text, grammatical gender) hands the new instance whatever intent the
-  // last one set (the replay rewrite's, a notification tap's), which read
-  // a launcher task as any other (review of #72).
-  test('Back at the root of a task the launcher did not start stays with '
-      'Flutter on Android 14 and later', () {
+  // Android 14 and later move the task to the back only after starts from
+  // the home screen (ActivityClientController.shouldMoveTaskToBack: the
+  // root's creating intent is the launcher's, ActivityRecord.isMainIntent,
+  // and its launch source is the home app's process) and finish any other
+  // root: a task a share created was finished on Back, with the engine
+  // that was still analyzing its photo (review of #72). Android 14 and the
+  // first release of Android 15 keep the launch source of the start that
+  // created the activity; Android 15 QPR1 and later, and Android 16, give
+  // the task's top activity each start's own (RC171A-1: one `am start` of
+  // the launcher intent, or one photo shared into a task the home screen
+  // started, and the next idle Back finished it). So unless the home
+  // screen made both the first start and the latest (HomeStarts),
+  // MainActivity keeps Flutter's callback, and Back at its root goes
+  // through Flutter's SystemNavigator.pop to popSystemNavigator, which
+  // moves the task to the back (the test of decision 6.1 below), as on
+  // Android 12 and lower.
+  // A home start is the launcher's intent from the caller Android recorded
+  // for it (getReferrer), when that is the default home app, which the
+  // manifest's <queries> lets the app see. The first is decided once per
+  // activity: at its first create, from its creating start, before the
+  // replay rewrite empties the intent, then from the saved state, since a
+  // relaunch in the same process (theme colours, Bold text, grammatical
+  // gender) hands the new instance whatever intent the last one set (the
+  // replay rewrite's, a notification tap's; review of #72). The latest
+  // moves with each start onNewIntent delivers, read there before anything
+  // calls setIntent, and with the starts that deliver no intent but that
+  // the activity can tell: an activity the app opens in its task (a
+  // picker, a permission dialog), and the window shell's in multi-window
+  // mode. The callback follows at once.
+  test('Back at the root stays with Flutter on Android 14 and later unless '
+      'the home screen made the first and the latest start', () {
     final code = _kotlinCode(_mainActivity());
     final create = _kotlinFunction(code, 'override fun onCreate(');
-    const decide = 'launcherTask = IntakeRules.launcherTask( saved = '
-        'savedInstanceState?.takeIf { it.containsKey(STATE_LAUNCHER_TASK) } '
-        '?.getBoolean(STATE_LAUNCHER_TASK), fromIntent = intent?.let { '
-        'IntakeRules.isLauncherIntent(it.action, it.categories, '
-        'it.data != null, it.type) } ?: false, ) backCallbackAtRoot = '
-        'IntakeRules.keepsBackCallbackAtRoot(Build.VERSION.SDK_INT, '
-        'launcherTask)';
+    const decide = 'homeStarts = HomeStarts.restore( first = '
+        'savedInstanceState?.savedBoolean(STATE_FIRST_HOME_START), latest = '
+        'savedInstanceState?.savedBoolean(STATE_LATEST_HOME_START), ) { '
+        'intent?.let { isHomeStart(it) } ?: false } coveredInTask = '
+        'savedInstanceState?.getBoolean(STATE_COVERED_IN_TASK) ?: false '
+        'backCallbackAtRoot = IntakeRules.keepsBackCallbackAtRoot('
+        'Build.VERSION.SDK_INT, homeStarts.systemMovesTaskBack)';
     expect(create, contains(decide));
     expect(create.indexOf(decide), lessThan(create.indexOf('val replay =')),
         reason: 'read before the replay rewrite empties the intent');
-    expect(
-        create,
-        contains('super.onCreate(savedInstanceState) if (backCallbackAtRoot) '
-            'setFrameworkHandlesBack(true)'),
+    expect(create,
+        contains('super.onCreate(savedInstanceState) applyBackCallback()'),
         reason: 'registered at once: the root route never asks for it');
-    expect(code, contains('private var launcherTask = false'));
-    expect(code, contains('private var backCallbackAtRoot = false'));
-    for (final field in ['launcherTask', 'backCallbackAtRoot']) {
-      expect(RegExp('\\b$field = (?!=)').allMatches(code), hasLength(2),
-          reason: '$field: declared false, then set once per create, in '
-              'onCreate');
+    expect(
+        code,
+        contains('private var homeStarts = HomeStarts(first = false, latest = '
+            'false) private var backCallbackAtRoot = false private var '
+            'flutterHandlesBack = false private var coveredInTask = false'));
+    for (final (field, sets) in [
+      ('homeStarts', 3),
+      ('backCallbackAtRoot', 3),
+      ('flutterHandlesBack', 2),
+      ('coveredInTask', 4),
+    ]) {
+      expect(RegExp('\\b$field = (?!=)').allMatches(code), hasLength(sets),
+          reason: '$field: declared, then set only where this test pins it');
     }
-    // The decision outlives a relaunch: the activity's saved state keeps
-    // it, under its own key.
-    expect(_kotlinFunction(code, 'override fun onSaveInstanceState('),
-        contains(' outState.putBoolean(STATE_LAUNCHER_TASK, launcherTask) '));
-    expect(code,
-        contains('const val STATE_LAUNCHER_TASK = "chopstats.back.launcherTask"'));
+    // Each start into the running activity, first thing in onNewIntent
+    // (pinned whole with the share hold below): getReferrer() names its
+    // caller only during that call, and reads a referrer extra on the
+    // activity's intent first, which a plugin's setIntent there can change.
+    expect(_kotlinFunction(code, 'private fun noteStart('),
+        '{ noteStarts(homeStarts.after(isHomeStart(start), coveredInTask)) }');
+    expect(_kotlinFunction(code, 'override fun onNewIntent('),
+        startsWith('{ noteStart(intent) '));
+    // Every move of the answers goes through noteStarts, and the callback
+    // follows it at once.
+    expect(
+        _kotlinFunction(code, 'private fun noteStarts('),
+        '{ homeStarts = starts val keep = IntakeRules.keepsBackCallbackAtRoot('
+        'Build.VERSION.SDK_INT, starts.systemMovesTaskBack) if (keep == '
+        'backCallbackAtRoot) return backCallbackAtRoot = keep '
+        'applyBackCallback() }');
+    expect(RegExp(r'\bnoteStarts\(').allMatches(code), hasLength(5),
+        reason: 'declared, then called from noteStart, onPause, onResume '
+            'and onMultiWindowModeChanged only');
+    expect(
+        code,
+        contains('private fun isHomeStart(start: Intent): Boolean = try { val '
+            'claimed = start.namesReferrer() || intent?.namesReferrer() == '
+            'true val from = referrer IntakeRules.homeStart( launcherIntent = '
+            'IntakeRules.isLauncherIntent(start.action, start.categories, '
+            'start.data != null, start.type), referrerPackage = '
+            'IntakeRules.callerPackage(from?.scheme, from?.host, claimed, '
+            'start.flags), homePackage = defaultHomePackage(), ) } catch (e: '
+            'Exception) { false }'));
+    expect(
+        code,
+        contains('private fun Intent.namesReferrer(): Boolean = '
+            'hasExtra(Intent.EXTRA_REFERRER) || '
+            'hasExtra(Intent.EXTRA_REFERRER_NAME)'));
+    expect(
+        _kotlinFunction(code, 'private fun defaultHomePackage('),
+        '{ val home = Intent(Intent.ACTION_MAIN).addCategory('
+        'Intent.CATEGORY_HOME) val found = if (Build.VERSION.SDK_INT >= 33) { '
+        'packageManager.resolveActivity( home, '
+        'PackageManager.ResolveInfoFlags.of('
+        'PackageManager.MATCH_DEFAULT_ONLY.toLong()), ) } else { '
+        'packageManager.resolveActivity(home, '
+        'PackageManager.MATCH_DEFAULT_ONLY) } return '
+        'found?.activityInfo?.packageName }');
+    // Android 15 QPR1 and later give a start to the task's top activity.
+    // The app's own start of a picker, a permission dialog or the share
+    // sheet finds MainActivity there, so it is a latest start that was not
+    // the home screen's, seen as MainActivity pauses below the new activity
+    // (HomeStarts.afterOtherStart; review of #82, F1). A start that
+    // comes while that activity is still open goes to it, which the start
+    // then closes, and is not counted (HomeStarts.after); whether one is
+    // open is read as MainActivity pauses and kept until it resumes. In
+    // multi-window mode the window shell starts the task from Recents with
+    // no intent (SystemUI's launch source, F2): no start counts as a home
+    // start there, nor after it until the next home start.
+    expect(_kotlinFunction(code, 'override fun onPause('),
+        '{ super.onPause() coveredInTask = !isTopOfItsTask() if '
+        '(coveredInTask) noteStarts(homeStarts.afterOtherStart()) }');
+    expect(_kotlinFunction(code, 'override fun onResume('),
+        '{ super.onResume() coveredInTask = false if (isInMultiWindowMode) '
+        'noteStarts(homeStarts.afterOtherStart()) }');
+    expect(
+        code,
+        contains('@RequiresApi(Build.VERSION_CODES.O) override fun '
+            'onMultiWindowModeChanged(isInMultiWindowMode: Boolean, newConfig: '
+            'Configuration) { super.onMultiWindowModeChanged('
+            'isInMultiWindowMode, newConfig) if (isInMultiWindowMode) '
+            'noteStarts(homeStarts.afterOtherStart()) }'));
+    expect(
+        _kotlinFunction(code, 'private fun isTopOfItsTask('),
+        endsWith('am.appTasks.asSequence().mapNotNull { it.taskInfo } '
+            '.firstOrNull { it.taskId == task }?.topActivity == componentName '
+            '} catch (e: Exception) { false } }'));
+    // The answers outlive a relaunch: the activity's saved state keeps
+    // them, under keys of their own.
+    expect(
+        _kotlinFunction(code, 'override fun onSaveInstanceState('),
+        contains(' outState.putBoolean(STATE_FIRST_HOME_START, '
+            'homeStarts.first) outState.putBoolean(STATE_LATEST_HOME_START, '
+            'homeStarts.latest) outState.putBoolean(STATE_COVERED_IN_TASK, '
+            'coveredInTask) '));
+    for (final (name, key) in [
+      ('STATE_FIRST_HOME_START', 'firstHomeStart'),
+      ('STATE_LATEST_HOME_START', 'latestHomeStart'),
+      ('STATE_COVERED_IN_TASK', 'coveredInTask'),
+    ]) {
+      expect(code, contains('const val $name = "chopstats.back.$key"'));
+    }
+    expect(
+        code,
+        contains('private fun Bundle.savedBoolean(key: String): Boolean? = '
+            'if (containsKey(key)) getBoolean(key) else null'));
+    // What Flutter asks for is kept, so a start can register or drop the
+    // callback while the activity runs.
     expect(_kotlinFunction(code, 'override fun setFrameworkHandlesBack('),
-        '{ super.setFrameworkHandlesBack(frameworkHandlesBack || '
+        '{ flutterHandlesBack = frameworkHandlesBack applyBackCallback() }');
+    expect(_kotlinFunction(code, 'private fun applyBackCallback('),
+        '{ super.setFrameworkHandlesBack(flutterHandlesBack || '
         'backCallbackAtRoot) }');
+    expect('super.setFrameworkHandlesBack('.allMatches(code), hasLength(1),
+        reason: 'registered and dropped in applyBackCallback only');
     expect(code, isNot(contains('registerOnBackInvokedCallback')),
         reason: "Flutter's own callback, not a second one in front of it");
     final rules = _kotlinCode(_intakeRules());
@@ -1333,17 +1443,59 @@ void main() {
             'action == Intent.ACTION_MAIN && categories != null && '
             'categories.size == 1 && Intent.CATEGORY_LAUNCHER in categories '
             '&& !hasData && type == null'));
+    expect(rules, contains('const val REFERRER_SCHEME = "android-app"'));
     expect(
         rules,
-        contains('fun keepsBackCallbackAtRoot(sdk: Int, launcherTask: '
+        contains('fun callerPackage(scheme: String?, host: String?, claimed: '
+            'Boolean, flags: Int): String? = if (claimed || (flags and '
+            'Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0 || scheme != '
+            'REFERRER_SCHEME ) null else host?.takeIf { it.isNotEmpty() }'));
+    expect(
+        rules,
+        contains('fun homeStart(launcherIntent: Boolean, referrerPackage: '
+            'String?, homePackage: String?): Boolean = launcherIntent && '
+            'referrerPackage != null && homePackage != null && homePackage != '
+            '"android" && referrerPackage == homePackage'));
+    expect(
+        rules,
+        contains('fun keepsBackCallbackAtRoot(sdk: Int, systemMovesTaskBack: '
             'Boolean): Boolean = sdk >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE '
-            '&& !launcherTask'));
+            '&& !systemMovesTaskBack'));
     expect(
         rules,
-        contains('fun launcherTask(saved: Boolean?, fromIntent: Boolean): '
-            'Boolean = saved ?: fromIntent'));
-    _expectJvmTests(['isLauncherIntent', 'keepsBackCallbackAtRoot',
-        'IntakeRules.launcherTask(']);
+        contains('internal data class HomeStarts(val first: Boolean, val '
+            'latest: Boolean) { fun after(home: Boolean, covered: Boolean): '
+            'HomeStarts = copy(latest = home && !covered) fun '
+            'afterOtherStart(): HomeStarts = copy(latest = false) val '
+            'systemMovesTaskBack: Boolean get() = first && latest companion '
+            'object { fun restore(first: Boolean?, latest: Boolean?, created: '
+            '() -> Boolean): HomeStarts = if (first != null && latest != null) '
+            'HomeStarts(first, latest) else created().let { HomeStarts(it, it) '
+            '} } }'));
+    _expectJvmTests([
+      'isLauncherIntent',
+      'IntakeRules.callerPackage(',
+      'IntakeRules.homeStart(',
+      'HomeStarts.restore(',
+      '.after(',
+      '.afterOtherStart(',
+      'keepsBackCallbackAtRoot',
+      'androidMovesTaskBack',
+    ]);
+    // The home apps are visible to the app (package visibility, Android 11
+    // and later): otherwise the home intent resolves to none of them and
+    // the referrer drops the home app, so no start would count as one from
+    // the home screen. No permission comes with it.
+    final queries = RegExp(r'<queries>(.*?)</queries>', dotAll: true)
+        .firstMatch(_uncommented(_manifest()))
+        ?.group(1)
+        ?.replaceAll(RegExp(r'\s+'), ' ');
+    expect(
+        queries,
+        contains('<intent> <action android:name="android.intent.action.MAIN"/> '
+            '<category android:name="android.intent.category.HOME"/> '
+            '</intent>'));
+    expect(_uncommented(_manifest()), isNot(contains('QUERY_ALL_PACKAGES')));
     expect(_uncommented(_manifest()),
         contains('android:enableOnBackInvokedCallback="true"'));
 
@@ -1497,9 +1649,9 @@ void main() {
             'before the plugins read it in super.onCreate');
     expect(
         _kotlinFunction(code, 'override fun onNewIntent('),
-        '{ val safe = withSafeShares(intent) val copied = safe !== intent && '
-        'safe.action != null if (copied && !heldShares.pass(safe)) return '
-        'super.onNewIntent(safe) }');
+        '{ noteStart(intent) val safe = withSafeShares(intent) val copied = '
+        'safe !== intent && safe.action != null if (copied && '
+        '!heldShares.pass(safe)) return super.onNewIntent(safe) }');
     expect(code, contains('private val heldShares = ShareHold<Intent>()'));
     expect(
         _kotlinFunction(code, 'private fun releaseHeldShares('),
@@ -1522,15 +1674,17 @@ void main() {
   // never saved. Flutter's PlatformPlugin runs its default (finish(), or
   // the OnBackPressedDispatcher) only when popSystemNavigator returns
   // false. Only a Back Flutter handles reaches it: every Back on Android
-  // 12 and lower; with enableOnBackInvokedCallback, a Back at the root of
-  // a task that keeps Flutter's callback there (on Android 14 and later,
-  // any task the launcher's own intent did not start: the test above). At
-  // an idle root Android answers Back itself: Android 13 moves a task
-  // whose root is a launcher activity (MainActivity is one) to the back,
-  // and Android 14 and later move back one the home screen started and
-  // finish a launcher-intent start from anywhere else (Play's Open
-  // button). While a shared photo is pending the shell's guard keeps that
-  // Back in Flutter in every task (test/ui/shared_photos_back_test.dart).
+  // 12 and lower; with enableOnBackInvokedCallback, a Back at the root
+  // while MainActivity keeps Flutter's callback there (on Android 14 and
+  // later, unless the home screen made its first start and its latest:
+  // the test above). At an idle root Android answers Back itself: Android
+  // 13 moves a task whose root is a launcher activity (MainActivity is
+  // one) to the back, and Android 14 and later move back an activity the
+  // home screen started, and finish it after a start the app cannot see
+  // (a return from Recents on Android 15 QPR1 and later, with a
+  // third-party home app as the default). While a shared photo is pending
+  // the shell's guard keeps that Back in Flutter in every task
+  // (test/ui/shared_photos_back_test.dart).
   // The launch mode stays singleTask (decision 6.4), and nothing else
   // finishes the activity by hand.
   test('SystemNavigator.pop moves the task to the back, never finishes it',
@@ -1812,12 +1966,14 @@ void main() {
         reason: 'plain "w" may leave stale bytes; SAVE_MODES only');
     expect(_kotlinFunction(code, 'private fun discardDocument('),
         contains('DocumentsContract.deleteDocument(contentResolver, uri)'));
-    // The pending source outlives a recreated activity (with the launcher
-    // task decision, pinned with Back at the root).
+    // The pending source outlives a recreated activity (with the home-start
+    // answers, pinned with Back at the root).
     expect(_kotlinFunction(code, 'override fun onSaveInstanceState('),
         '{ super.onSaveInstanceState(outState) pendingSaveSource?.let { '
         'outState.putString(STATE_SAVE_SOURCE, it.path) } '
-        'outState.putBoolean(STATE_LAUNCHER_TASK, launcherTask) }');
+        'outState.putBoolean(STATE_FIRST_HOME_START, homeStarts.first) '
+        'outState.putBoolean(STATE_LATEST_HOME_START, homeStarts.latest) '
+        'outState.putBoolean(STATE_COVERED_IN_TASK, coveredInTask) }');
     final create = _kotlinFunction(code, 'override fun onCreate(');
     expect(
         create,

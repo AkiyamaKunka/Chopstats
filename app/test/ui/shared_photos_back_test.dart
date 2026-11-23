@@ -2,14 +2,17 @@
 // popSystemNavigator moves the task to the back, but Flutter calls it only
 // for a Back it handles. At an idle root Flutter hands Back to Android
 // (setFrameworkHandlesBack(false)), and with predictive back on
-// (enableOnBackInvokedCallback) Android 14 and later finish every task the
-// home screen did not start with the launcher intent. MainActivity keeps
-// Back in Flutter in all of them but one: a task the launcher intent
-// started from somewhere other than the home screen (Play's Open button),
-// which looks like the launcher's own to the app. A photo shared into such
-// a task would die with its engine mid-analysis, and come back only at the
-// next start, sent to the AI a second time, or never when that start was a
-// day later.
+// (enableOnBackInvokedCallback) Android 14 and later finish the activity
+// unless the home screen started it (the start that created it on Android
+// 14 and the first release of Android 15, the latest start into its task
+// on Android 15 QPR1 and later and Android 16). MainActivity keeps Back in
+// Flutter unless the home screen made both, but Android 15 QPR1 and later
+// also judge a start the app cannot see: a return from Recents, by the app
+// that shows Recents, which is not the home app with a third-party home
+// app as the default. A photo shared into an activity Android then
+// finishes would die with its engine mid-analysis, and come back only at
+// the next start, sent to the AI a second time, or never when that start
+// was a day later.
 //
 // While a shared photo is pending the shell's guard keeps the Back in
 // Flutter, in every task, and a Back at the root calls SystemNavigator.pop,
@@ -236,9 +239,9 @@ void main() {
   // the screen, one photo after another, and each photo is kept alive by
   // the pipeline for its own turn only. Between two of them, while the next
   // original was read, nothing was in flight: the shell handed root Back
-  // back to Android, which finished a task Play's Open button had started
-  // (and the rest of the batch with it), and the native job was cancelled
-  // mid-batch. The run is now one request from its first photo to its last.
+  // back to Android, which could finish the activity (and the rest of the
+  // batch with it), and the native job was cancelled mid-batch. The run is
+  // now one request from its first photo to its last.
   testWidgets('Android: a Photo Coverage bulk run holds Back at the root '
       'from the user leaving the screen until its last photo is done, '
       'between two photos too', (tester) async {

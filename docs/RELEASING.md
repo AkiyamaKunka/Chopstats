@@ -1187,15 +1187,27 @@ wording, not the position. The paste-ready answers live next to the app in
    `android:enableOnBackInvokedCallback="true"`), Material stretch
    overscroll and Roboto at its own spacing on Android; iOS keeps its
    slide, bounce and tracking. Back at the root moves the task to the back
-   instead of finishing it (`MainActivity.popSystemNavigator`). Android
-   14 and later finish a task the launcher did not start when Back at its
-   root reaches them, so such a task keeps Flutter's back callback there
-   (`MainActivity`). One start still looks like the launcher's and is
-   finished on Android 14 and later when nothing is pending: the launcher
-   intent sent from somewhere other than the home screen, such as Play's
-   Open button. While a shared photo is still pending, or an analysis the
-   user started is in flight (item 9), the app keeps Back at the root
-   itself in every task (`SharedPhotosBackGuard`). `singleTask` stays.
+   instead of finishing it (`MainActivity.popSystemNavigator`). When Back
+   at an idle root reaches Android 14 and later, they move the task to the
+   back only after starts from the home screen, and finish the app
+   otherwise: Android 14 and the first release of Android 15 judge the
+   start that created the activity; Android 15 QPR1 and later, and
+   Android 16, judge the latest start into its task (QA RC171A-1: one Play
+   Open, `am start` or shared photo into a task the home screen started),
+   and the app's own start of a picker, a permission dialog or the share
+   sheet in its task is one. From 1.7.2 the app tells a home start by the
+   caller Android records, which must be the default home app, and keeps
+   Flutter's back callback at the root unless the home screen made both
+   (`MainActivity`, the `<queries>` entry for home apps): Back after a
+   share, a notification, the setup link, Play's or the installer's Open
+   button, a picker or permission dialog, or split screen moves the task
+   back too, without Android's back-to-home preview. Android 15 QPR1 and
+   later still finish the app after a start it cannot see: a return from
+   Recents counts as a start by the app that shows Recents, which is not
+   the home app with a third-party home app as the default. While a shared
+   photo is still pending, or an analysis the user started is in flight
+   (item 9), the app keeps Back at the root itself in every task
+   (`SharedPhotosBackGuard`). `singleTask` stays.
    The navigation bar: from Android 15 the app draws edge to edge and
    Flutter no longer sets the bar's colour, so MainActivity sets the tab
    bar's colour on the window (`colorNavigationBar`). That ends the dark

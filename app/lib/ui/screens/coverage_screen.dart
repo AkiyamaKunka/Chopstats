@@ -71,15 +71,14 @@ class CoverageScreen extends StatefulWidget {
   /// analysis from its first photo to its last (owner decision 9). Each
   /// photo is kept alive by the pipeline for its own turn, but between two
   /// of them, while the next original is read, nothing else is in flight:
-  /// the shell handed root Back back to Android (a task Play's Open button
-  /// started was then finished, and the rest of the batch with it) and
-  /// the keep-alive job was cancelled mid-batch. The run holds one request
-  /// for the whole batch: Back stays held until the last photo is done,
-  /// and the job has a live request between photos for the batch's first
-  /// 3 minutes (the native cap; past it, the next photo's own request
-  /// starts a job again at once). Each photo's own requests still get
-  /// their full cap. Null on iPhone and in tests that are about something
-  /// else.
+  /// the shell handed root Back back to Android (where Android finished the
+  /// activity, the rest of the batch went with it) and the keep-alive job
+  /// was cancelled mid-batch. The run holds one request for the whole
+  /// batch: Back stays held until the last photo is done, and the job has a
+  /// live request between photos for the batch's first 3 minutes (the
+  /// native cap; past it, the next photo's own request starts a job again
+  /// at once). Each photo's own requests still get their full cap. Null on
+  /// iPhone and in tests that are about something else.
   final AnalysisKeepAlive? keepAlive;
 
   @override
