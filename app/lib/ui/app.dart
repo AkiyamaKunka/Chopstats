@@ -405,6 +405,8 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       widget.routes?.addListener(_onRevealConditions);
       FocusManager.instance.addListener(_onRevealConditions);
     }
+    // The initial link goes to the engine's first shell only: a second or
+    // rebuilt one gets null (UiServices.initialSetupLink, LINK-1).
     final initial = widget.services.initialSetupLink;
     if (initial != null) {
       unawaited(initial().then((uri) {
@@ -516,7 +518,9 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   /// The share gate's question: true = allowed (and saved). Not now says
   /// that the shared photo was not analyzed.
   /// Null: no dialog could be shown (this shell is going away), which is
-  /// no answer: the gate waits for the next shell (SharedPhotoConsentGate).
+  /// no answer: the gate waits for the next shell, or asks again through
+  /// one still attached once this one detaches (SharedPhotoConsentGate,
+  /// GATE-1).
   Future<bool?> _askShareConsent() async {
     if (!mounted) return null;
     final gate = widget.services.sharedPhotoConsent;

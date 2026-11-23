@@ -247,6 +247,42 @@ void main() {
       );
     });
 
+    // LINK-1 (2026-11-22): app_links answers every initial-link read with
+    // the first link it was given, for as long as the plugin lives, and each
+    // HomeShell reads it in initState: a second or rebuilt shell asked
+    // about that link again (RCREL-V-1). The wrapper and the shells are
+    // behaviour-tested on services the tests build themselves
+    // (test/ui/launch_link_once_test.dart, setup_link_flow_test): without
+    // this line every shell reads the plugin again, with all of them green.
+    test('the setup link that started the app is read once, through '
+        'launchLinkOnce; the warm links come from the plugin\'s stream', () {
+      final services = _call(init(), 'UiServices(');
+      expect(
+        services,
+        _wired(
+          r'\n\s*initialSetupLink: launchLinkOnce\(appLinks\.getInitialLink\),',
+        ),
+      );
+      expect(services, _wired(r'\n\s*setupLinks: appLinks\.uriLinkStream,'));
+      expect(init(), _wired(r'\n\s*final appLinks = AppLinks\(\);'));
+      // Nothing else reads the plugin's initial link: not the shell, and
+      // not another line of di.dart.
+      final lib = Directory('${_appRoot().path}/lib');
+      final readers = <String>[];
+      for (final file in lib.listSync(recursive: true).whereType<File>()) {
+        if (!file.path.endsWith('.dart')) continue;
+        final code = file
+            .readAsLinesSync()
+            .where((line) => !line.trimLeft().startsWith('//'))
+            .join('\n');
+        final found = 'getInitialLink'.allMatches(code).length;
+        for (var i = 0; i < found; i++) {
+          readers.add(file.path.substring(lib.parent.path.length + 1));
+        }
+      }
+      expect(readers, ['lib/ui/di.dart']);
+    });
+
     // Android 13 and later's per-app language and the app's Language row
     // are one setting (app_language_sync_test covers what it decides):
     // agreed at every launch, on Android only, before the first frame. It

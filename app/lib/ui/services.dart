@@ -282,6 +282,55 @@ class RecentAsset {
   final DateTime createdAt;
 }
 
+/// [read] for the first call only: every later call answers null without
+/// calling [read], also while the first is still pending and after it
+/// failed (LINK-1, 2026-11-22). di.dart reads app_links' initial link
+/// through it for [UiServices.initialSetupLink], which each HomeShell
+/// reads in initState. app_links 7.2.1 answers that read with the same
+/// link for as long as the plugin lives, so a second shell or a rebuilt
+/// one asked about that setup link again, as the second shell of
+/// RCREL-V-1 did.
+///
+/// That link need not be one that started the app. The plugin keeps the
+/// first link it is given, and nothing clears it: the launch link or,
+/// when there was none, the first one that came while the app ran, which
+/// its stream delivers too (Android AppLinksPlugin.handleIntent, for
+/// onNewIntent as well; iPhone AppLinksIosPlugin.handleLink, for every
+/// URL the app is opened with). The stream sends each link once: a
+/// listener that comes later is sent the initial link only if no link was
+/// sent yet. So the one read left in an engine is its first shell's, as
+/// the app starts.
+///
+/// The one the shells read is built once per app engine
+/// (AppServices.init), so it answers once per engine. On Android that is
+/// once per plugin: a new MainActivity starts a new engine, whose new
+/// plugin has seen only that activity's links. On the iPhone the plugin
+/// outlives an engine: AppLinks.shared is one object for every engine in
+/// the process. UIKit may disconnect the app's scene in the background
+/// and connect it again while the process lives. The scene then loads
+/// Main.storyboard again, and its new FlutterViewController starts a new
+/// engine (the app delegate hands out its launch engine once), so main
+/// runs again in a new isolate, with a new wrapper. Its first read gets
+/// the process's first link, whose sheet comes back: stopping that takes
+/// a guard that lives as long as the process, which this one does not.
+/// And when the process had a link before, a link that connects the
+/// scene this time reaches only the plugin's latest link: neither this
+/// read nor the stream hands it on. iPhone only, rare, and older than
+/// this wrapper, as every shell read the plugin before it (LINK-1
+/// review, 2026-11-23; read from app_links 7.2.1's and Flutter 3.44.2's
+/// sources, not seen on a device).
+///
+/// A throw from [read] fails the first call's future, which HomeShell
+/// handles, instead of escaping the call.
+Future<Uri?> Function() launchLinkOnce(Future<Uri?> Function() read) {
+  var asked = false;
+  return () async {
+    if (asked) return null;
+    asked = true;
+    return read();
+  };
+}
+
 /// Everything a screen may need, built once at startup (di.dart) or from
 /// fakes in widget tests.
 class UiServices {
@@ -355,6 +404,11 @@ class UiServices {
 
   /// One-click setup links (bitewise://setup?...) — a warm-app stream and
   /// the cold-start link. Null in tests / when the platform has no plugin.
+  /// Only an engine's first call gets the cold-start link: di.dart reads
+  /// it through [launchLinkOnce], so a second or rebuilt shell gets null
+  /// instead of that link's sheet again (LINK-1, 2026-11-22). On the
+  /// iPhone a later engine in the same process can get it again (see
+  /// there).
   final Stream<Uri>? setupLinks;
   final Future<Uri?> Function()? initialSetupLink;
 
