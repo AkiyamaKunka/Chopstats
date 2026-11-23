@@ -896,6 +896,9 @@ Future<bool> _runAfterLaunch({
       channelStrings: () => notificationChannelFor(settings.appLanguage),
       mealChannelStrings: () =>
           mealNotificationChannelFor(settings.appLanguage),
+      // Android: the summary over two or more of this run's and earlier
+      // runs' cards (PR80-B2), in the app language too.
+      mealGroupStrings: () => mealGroupSummaryFor(settings.appLanguage),
       mealCardIdSeed: 10000 +
           (DateTime.now().millisecondsSinceEpoch ~/ 10000) % 8640000);
   // After the scan (below) — or at Android's deadline, should the scan

@@ -74,6 +74,14 @@ SummaryDayNaming summaryDayNamingFor(String appLanguage) {
   );
 }
 
+/// The summary the app posts over two or more Logged meals cards on
+/// Android (ReportNotifier.mealGroupKey, PR80-B2), title and body, in the
+/// app language.
+({String title, String body}) mealGroupSummaryFor(String appLanguage) {
+  final l = localizationsFor(appLanguage);
+  return (title: l.mealGroupSummaryTitle, body: l.mealGroupSummaryBody);
+}
+
 AppLocalizations localizationsFor(String appLanguage) {
   if (appLanguage == 'zh') return AppLocalizationsZh();
   if (appLanguage == 'en') return AppLocalizationsEn();

@@ -4041,4 +4041,10 @@ class AppLocalizationsEn extends AppLocalizations {
     );
     return '$count shared files were skipped, $_temp0.';
   }
+
+  @override
+  String get mealGroupSummaryTitle => '🍽️ Meals logged automatically';
+
+  @override
+  String get mealGroupSummaryBody => 'See them on Today';
 }

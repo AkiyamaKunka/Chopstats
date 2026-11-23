@@ -720,14 +720,17 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   /// Goes to the meal [reveal] names: Today, scrolled to the meal and
   /// briefly ringed; History with the meal's day open on it, for a meal
   /// dated another day (a photo taken before midnight, say); Today alone
-  /// when the meal is gone. Where it is dated now, not when it was logged:
-  /// the editor may have moved it since. The screens open over the tabs
-  /// close first, as Back would close each (none holds its pop).
+  /// when the meal is gone, and for [MealReveal.today] (a tap on the
+  /// Logged meals cards' group summary). Where it is dated now, not when
+  /// it was logged: the editor may have moved it since. The screens open
+  /// over the tabs close first, as Back would close each (none holds its
+  /// pop).
   Future<void> _reveal(MealReveal reveal) async {
     final s = widget.services;
+    final id = reveal.mealId;
     Meal? meal;
     try {
-      meal = (await s.dao.mealSnapshot(reveal.mealId))?.meal;
+      if (id != null) meal = (await s.dao.mealSnapshot(id))?.meal;
     } catch (_) {
       // Unreadable now: Today, as for a meal that is gone.
     }

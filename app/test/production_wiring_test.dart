@@ -959,7 +959,8 @@ void main() {
     });
 
     // The Play push: meal cards have their own channel, named in the app
-    // language like the summary's, in both engines.
+    // language like the summary's, in both engines. PR80-B2: so is the
+    // summary over two or more Logged meals cards (Android).
     test('both engines name both channels in the app language', () {
       for (final path in ['lib/ui/di.dart', 'lib/ui/background_glue.dart']) {
         final source = _source(path);
@@ -969,6 +970,14 @@ void main() {
             r'channelStrings: \(\) => notificationChannelFor\(settings\.appLanguage\), '
             r'mealChannelStrings: \(\) => '
             r'mealNotificationChannelFor\(settings\.appLanguage\),',
+          ),
+          reason: path,
+        );
+        expect(
+          source,
+          _wired(
+            r'mealGroupStrings: \(\) => '
+            r'mealGroupSummaryFor\(settings\.appLanguage\),',
           ),
           reason: path,
         );

@@ -22,7 +22,13 @@ class _RecordingPlugin extends Fake implements FlutterLocalNotificationsPlugin {
   InitializationSettings? settings;
   final shown = <NotificationDetails?>[];
   final shownPayloads = <String?>[];
+  final shownIds = <int>[];
+  final shownTitles = <String?>[];
+  final shownBodies = <String?>[];
   final cancelled = <int>[];
+
+  /// A post of this id throws, as the platform side can.
+  int? failShowId;
 
   /// What a tap on a card calls while the app runs (initialize's).
   DidReceiveNotificationResponseCallback? onTap;
@@ -32,8 +38,10 @@ class _RecordingPlugin extends Fake implements FlutterLocalNotificationsPlugin {
   NotificationAppLaunchDetails? launchDetails;
 
   @override
-  Future<void> cancel({required int id, String? tag}) async =>
-      cancelled.add(id);
+  Future<void> cancel({required int id, String? tag}) async {
+    cancelled.add(id);
+    android?.active.remove(id);
+  }
 
   @override
   Future<bool?> initialize({
@@ -60,8 +68,19 @@ class _RecordingPlugin extends Fake implements FlutterLocalNotificationsPlugin {
     NotificationDetails? notificationDetails,
     String? payload,
   }) async {
+    if (id == failShowId) throw PlatformException(code: 'post failed');
     shown.add(notificationDetails);
     shownPayloads.add(payload);
+    shownIds.add(id);
+    shownTitles.add(title);
+    shownBodies.add(body);
+    // Android's shade: a post replaces the card on its id.
+    android?.active[id] = ActiveNotification(
+        id: id,
+        groupKey: notificationDetails?.android?.groupKey,
+        channelId: notificationDetails?.android?.channelId,
+        title: title,
+        body: body);
   }
 
   /// What zonedSchedule was handed, and the pending list it builds (the
@@ -153,6 +172,21 @@ class _FakeAndroid extends Fake
 
   @override
   Future<bool?> areNotificationsEnabled() async => appEnabled;
+
+  /// The app's notifications showing, by id, as Android lists them
+  /// (getActiveNotifications: no payloads). The recording plugin's posts
+  /// and cancels keep it; a test removes one to play a card the user
+  /// dismissed, or adds one another engine posted.
+  final active = <int, ActiveNotification>{};
+
+  /// getActiveNotifications throws, as the platform side can.
+  bool failActive = false;
+
+  @override
+  Future<List<ActiveNotification>> getActiveNotifications() async {
+    if (failActive) throw PlatformException(code: 'no list');
+    return active.values.toList();
+  }
 
   @override
   Future<bool?> requestNotificationsPermission() async {
@@ -448,6 +482,272 @@ void main() {
           await ReportNotifier(presenter: (_, _, _) async {}).launchPayload(),
           isNull,
           reason: 'presenter mode never asks the plugin');
+    });
+
+    test("a cold start from the cards' group summary hands back its payload",
+        () async {
+      final plugin = _RecordingPlugin();
+      plugin.launchDetails = NotificationAppLaunchDetails(true,
+          notificationResponse: response('meals:today'));
+      expect(await ReportNotifier(plugin: plugin).launchPayload(),
+          'meals:today');
+    });
+  });
+
+  // PR80-B2 (2026-11-23): Android groups an app's notifications by itself
+  // once four or more show, under a summary whose tap is the plain launcher
+  // intent: no payload, so no meal, and every auto-cancel card cleared. The
+  // Logged meals cards get a group of their own and, from the second card
+  // on, the app's own summary, whose tap opens Today.
+  group('the Logged meals group (Android)', () {
+    // Wire values: a card or summary an older build posted can be tapped
+    // after an update, so they stay as they are.
+    const group = 'chopstats_logged_meals';
+    const summaryId = 9100;
+    const summaryPayload = 'meals:today';
+    const title = '🍽️ Meal logged automatically';
+
+    test('one card looks and behaves as before: no summary, and the card as '
+        'it was but for its group key', () async {
+      final plugin = _RecordingPlugin(android: _FakeAndroid());
+      final notifier = ReportNotifier(plugin: plugin);
+      await notifier.init();
+      await notifier.showMealCard(title, 'Ramen — ~600 kcal',
+          payload: 'meal:42');
+      expect(plugin.shownIds, hasLength(1), reason: 'no summary for one');
+      expect(plugin.shownPayloads, ['meal:42'],
+          reason: 'its tap still goes to its meal');
+      final card = plugin.shown.single!.android!;
+      expect(card.groupKey, group);
+      // The rest as 1.7.1 posted it.
+      expect(card.channelId, ReportNotifier.mealChannelId);
+      expect(card.setAsGroupSummary, isFalse);
+      expect(card.groupAlertBehavior, GroupAlertBehavior.all,
+          reason: 'it alerts as it did alone');
+      expect(card.autoCancel, isTrue);
+      expect(card.onlyAlertOnce, isFalse);
+      expect(card.silent, isFalse);
+      expect(card.timeoutAfter, isNull);
+      expect(card.importance, Importance.defaultImportance);
+      expect(card.priority, Priority.defaultPriority);
+      expect(card.icon, ReportNotifier.androidSmallIcon);
+      expect(card.color, ReportNotifier.cardColor);
+      expect(plugin.shown.single!.iOS!.threadIdentifier, isNull,
+          reason: 'iOS unchanged');
+    });
+
+    test('from the second card on, the summary follows the card: silent, '
+        'auto-cancel, on the meal channel, and its tap opens Today',
+        () async {
+      final android = _FakeAndroid();
+      final plugin = _RecordingPlugin(android: android);
+      final notifier = ReportNotifier(plugin: plugin);
+      await notifier.init();
+      await notifier.showMealCard(title, 'Ramen', payload: 'meal:41');
+      await notifier.showMealCard(title, 'Pasta', payload: 'meal:42');
+      expect(plugin.shownIds, [100, 101, summaryId],
+          reason: 'after the card, as Android asks');
+      final summary = plugin.shown.last!.android!;
+      expect(summary.groupKey, group);
+      expect(summary.setAsGroupSummary, isTrue);
+      expect(summary.groupAlertBehavior, GroupAlertBehavior.children,
+          reason: 'only the cards alert');
+      expect(summary.onlyAlertOnce, isTrue);
+      expect(summary.silent, isTrue);
+      expect(summary.autoCancel, isTrue,
+          reason: 'a tap clears the group, as a tap clears one card');
+      expect(summary.channelId, ReportNotifier.mealChannelId,
+          reason: 'blocking the channel takes it with the cards');
+      expect(summary.timeoutAfter, isNull);
+      expect(summary.icon, ReportNotifier.androidSmallIcon);
+      expect(summary.color, ReportNotifier.cardColor);
+      expect(plugin.shownPayloads.last, summaryPayload,
+          reason: 'a tap on the collapsed group opens Today');
+      expect(plugin.shownTitles.last, '🍽️ Meals logged automatically');
+      expect(plugin.shownBodies.last, 'See them on Today');
+      expect(plugin.shown.last!.iOS, isNull, reason: 'Android only');
+      expect(plugin.shownPayloads.take(2), ['meal:41', 'meal:42'],
+          reason: 'each card keeps its own tap, to its meal');
+
+      // A third card: the one summary is posted again, on its id.
+      await notifier.showMealCard(title, 'Soup', payload: 'meal:43');
+      expect(plugin.shownIds.skip(3), [102, summaryId]);
+      expect(android.active.keys, unorderedEquals([100, 101, 102, summaryId]));
+    });
+
+    test("what Android shows is counted: an earlier run's card counts, a "
+        'dismissed one does not', () async {
+      final android = _FakeAndroid();
+      // A card an earlier background run posted, with its own notifier.
+      android.active[10001] = const ActiveNotification(
+          id: 10001, groupKey: group, channelId: ReportNotifier.mealChannelId);
+      final plugin = _RecordingPlugin(android: android);
+      final notifier = ReportNotifier(plugin: plugin, mealCardIdSeed: 10500);
+      await notifier.init();
+      await notifier.showMealCard(title, 'Ramen', payload: 'meal:41');
+      expect(plugin.shownIds, [10500, summaryId],
+          reason: "this run's card and the earlier one make two");
+
+      // The user swipes both away; Android takes the summary with the last.
+      android.active
+        ..remove(10001)
+        ..remove(10500)
+        ..remove(summaryId);
+      await notifier.showMealCard(title, 'Pasta', payload: 'meal:42');
+      expect(plugin.shownIds.skip(2), [10501],
+          reason: 'one card showing again: no summary');
+    });
+
+    test('a notice and the daily summary stay out: no group, never counted',
+        () async {
+      final plugin = _RecordingPlugin(android: _FakeAndroid());
+      final notifier = ReportNotifier(plugin: plugin);
+      await notifier.init();
+      await notifier.showMealCard(title, 'Ramen', payload: 'meal:41');
+      for (var i = 0; i < 2; i++) {
+        await notifier.showMealCard(
+            'Photos are not being logged automatically', 'Key rejected');
+      }
+      await notifier.showDailySummary('Today', '1800 kcal');
+      await notifier.scheduleDailyAt(
+          when: DateTime(2026, 11, 23, 21, 30), title: 't', body: 'b');
+      expect(plugin.shownIds, [100, 101, 102, 9001],
+          reason: 'one meal card showing: no summary');
+      for (final i in [1, 2, 3]) {
+        expect(plugin.shown[i]!.android!.groupKey, isNull, reason: '#$i');
+      }
+      expect(plugin.zonedDetails.single!.android!.groupKey, isNull,
+          reason: 'the daily card the OS posts');
+    });
+
+    test('cards on the summary channel (the fallback) stay as in 1.7.1: no '
+        'group, no summary', () async {
+      final plugin = _RecordingPlugin(
+          android: _FakeAndroid(refuse: ReportNotifier.mealChannelId));
+      final notifier = ReportNotifier(plugin: plugin);
+      await notifier.init();
+      await notifier.showMealCard(title, 'Ramen', payload: 'meal:41');
+      await notifier.showMealCard(title, 'Pasta', payload: 'meal:42');
+      expect(plugin.shownIds, [100, 101]);
+      for (final d in plugin.shown) {
+        final card = d!.android!;
+        expect(card.channelId, 'calorietracker_reports');
+        expect(card.groupKey, isNull);
+        expect(card.timeoutAfter,
+            ReportNotifier.dailyCardLifetime.inMilliseconds,
+            reason: 'the lifetime a summary there could outlive');
+      }
+      expect(plugin.shownPayloads, ['meal:41', 'meal:42'],
+          reason: 'each card still goes to its meal');
+    });
+
+    test('Android will not list its notifications: the cards show one by '
+        'one, and nothing throws', () async {
+      final plugin =
+          _RecordingPlugin(android: _FakeAndroid()..failActive = true);
+      final notifier = ReportNotifier(plugin: plugin);
+      await notifier.init();
+      await notifier.showMealCard(title, 'Ramen', payload: 'meal:41');
+      await notifier.showMealCard(title, 'Pasta', payload: 'meal:42');
+      expect(plugin.shownIds, [100, 101]);
+      expect(plugin.shown.map((d) => d!.android!.groupKey), [group, group]);
+    });
+
+    test('a summary that cannot be posted never fails the card', () async {
+      final plugin = _RecordingPlugin(android: _FakeAndroid())
+        ..failShowId = summaryId;
+      final notifier = ReportNotifier(plugin: plugin);
+      await notifier.init();
+      await notifier.showMealCard(title, 'Ramen', payload: 'meal:41');
+      await notifier.showMealCard(title, 'Pasta', payload: 'meal:42');
+      expect(plugin.shownIds, [100, 101]);
+    });
+
+    test('iPhone: no Android side, so no summary and no listing', () async {
+      final plugin = _RecordingPlugin();
+      final notifier = ReportNotifier(plugin: plugin);
+      await notifier.init();
+      await notifier.showMealCard(title, 'Ramen', payload: 'meal:41');
+      await notifier.showMealCard(title, 'Pasta', payload: 'meal:42');
+      expect(plugin.shownIds, [100, 101]);
+      for (final d in plugin.shown) {
+        expect(d!.iOS!.threadIdentifier, isNull, reason: 'iOS as before');
+      }
+    });
+
+    test('init withdraws a summary left with no card, and only that',
+        () async {
+      ActiveNotification summary() =>
+          const ActiveNotification(id: summaryId, groupKey: group);
+
+      final lone = _FakeAndroid();
+      lone.active[summaryId] = summary();
+      final alone = _RecordingPlugin(android: lone);
+      await ReportNotifier(plugin: alone).init();
+      expect(alone.cancelled, [summaryId]);
+      expect(lone.active, isEmpty);
+
+      final withCard = _FakeAndroid();
+      withCard.active[summaryId] = summary();
+      withCard.active[10001] =
+          const ActiveNotification(id: 10001, groupKey: group);
+      final kept = _RecordingPlugin(android: withCard);
+      await ReportNotifier(plugin: kept).init();
+      expect(kept.cancelled, isEmpty,
+          reason: 'Android draws one card alone and takes the summary with '
+              'it');
+
+      // Android's own group summary and the app's other cards: untouched.
+      final others = _FakeAndroid();
+      others.active[2147483647] = const ActiveNotification(
+          id: 2147483647, groupKey: 'ranker_group', tag: 'ranker_group');
+      others.active[9001] = const ActiveNotification(id: 9001);
+      final untouched = _RecordingPlugin(android: others);
+      await ReportNotifier(plugin: untouched).init();
+      expect(untouched.cancelled, isEmpty);
+
+      // Android will not say: nothing withdrawn, and init completes.
+      final mute = _FakeAndroid()..failActive = true;
+      mute.active[summaryId] = summary();
+      final unsure = _RecordingPlugin(android: mute);
+      await ReportNotifier(plugin: unsure).init();
+      expect(unsure.cancelled, isEmpty);
+    });
+
+    test('its wire values, and the summary in the app language', () async {
+      expect(ReportNotifier.mealGroupKey, group);
+      expect(ReportNotifier.mealGroupSummaryId, summaryId);
+      expect(ReportNotifier.mealGroupPayload, summaryPayload);
+      expect(ReportNotifier.dailySetIds, isNot(contains(summaryId)));
+
+      final plugin = _RecordingPlugin(android: _FakeAndroid());
+      var language = 'zh';
+      final notifier = ReportNotifier(
+        plugin: plugin,
+        mealChannelStrings: () => language == 'zh'
+            ? (name: '自动记录的餐食', description: '从相册自动记录每一餐时发送的卡片')
+            : (name: 'Logged meals', description: 'A card per meal'),
+        mealGroupStrings: () => language == 'zh'
+            ? (title: '🍽️ 已自动记录多餐', body: '在「今天」查看')
+            : (
+                title: '🍽️ Meals logged automatically',
+                body: 'See them on Today'
+              ),
+      );
+      await notifier.init();
+      await notifier.showMealCard('🍽️ 已自动记录一餐', '约 450 千卡',
+          payload: 'meal:41');
+      await notifier.showMealCard('🍽️ 已自动记录一餐', '约 620 千卡',
+          payload: 'meal:42');
+      expect(plugin.shownTitles.last, '🍽️ 已自动记录多餐');
+      expect(plugin.shownBodies.last, '在「今天」查看');
+      expect(plugin.shown.last!.android!.channelName, '自动记录的餐食');
+
+      // Read at post time: a language switch shows on the next post.
+      language = 'en';
+      await notifier.showMealCard(title, '~500 kcal', payload: 'meal:43');
+      expect(plugin.shownTitles.last, '🍽️ Meals logged automatically');
+      expect(plugin.shownBodies.last, 'See them on Today');
     });
   });
 

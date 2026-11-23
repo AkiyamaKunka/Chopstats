@@ -1,6 +1,7 @@
 /// "Show me that meal" (Android, view-after-share lane): the request a
 /// shared photo's View and a tap on a Logged meals card make, the card
-/// payload that names the meal, and the one-request channel to the shell
+/// payload that names the meal (and the cards' group summary's, which asks
+/// for Today), and the one-request channel to the shell
 /// (ui/meal_reveal.dart). The shell's side is in view_after_share_test.
 library;
 
@@ -9,6 +10,8 @@ import 'package:calorie_tracker/core/contracts.dart'
 import 'package:calorie_tracker/core/outcome_kind.dart';
 import 'package:calorie_tracker/l10n/app_localizations_en.dart';
 import 'package:calorie_tracker/l10n/app_localizations_zh.dart';
+import 'package:calorie_tracker/services/report/notifications.dart'
+    show ReportNotifier;
 import 'package:calorie_tracker/ui/di.dart' show outcomeAnnouncer;
 import 'package:calorie_tracker/ui/meal_reveal.dart';
 import 'package:calorie_tracker/ui/photo_pipeline.dart';
@@ -64,9 +67,28 @@ void main() {
         'MEAL:4',
         // The daily summary's own payload.
         'daily:2026-11-21T03:30:00.000Z@2026-11-20',
+        // Near the group summary's, but not it.
+        'meals:',
+        'meals:today ',
+        'MEALS:TODAY',
+        'meals:42',
       ]) {
         expect(MealReveal.fromPayload(payload), isNull, reason: '$payload');
       }
+    });
+
+    // PR80-B2: the Logged meals cards' group summary (Android) asks for
+    // Today, no meal: the shell goes there as for a meal that is gone.
+    test("the cards' group summary asks for Today itself", () {
+      final today = MealReveal.fromPayload('meals:today');
+      expect(today, isNotNull);
+      expect(today!.mealId, isNull, reason: 'no meal: Today itself');
+      expect(today, MealReveal.today);
+      expect(MealReveal.today.payload, 'meals:today');
+      expect(MealReveal.today.payload, ReportNotifier.mealGroupPayload,
+          reason: 'what the notifier posts is what reads back');
+      expect(MealReveal.today, isNot(const MealReveal(1)));
+      expect(MealReveal.today.toString(), 'MealReveal(today)');
     });
   });
 
@@ -240,6 +262,24 @@ void main() {
         return 'meal:7';
       });
       expect(reveals.waiting, const MealReveal(9));
+    });
+
+    // PR80-B2: a tap on the collapsed group is a tap on its summary, while
+    // the app runs or from a stopped app.
+    test('the group summary, tapped while the app runs, asks for Today',
+        () {
+      final reveals = MealReveals();
+      MealCardTaps(reveals).onTap('meals:today');
+      expect(reveals.waiting, isNotNull);
+      expect(reveals.waiting!.mealId, isNull, reason: 'Today, no meal');
+    });
+
+    test('the group summary that started the app asks for Today (cold '
+        'start)', () async {
+      final reveals = MealReveals();
+      await MealCardTaps(reveals).launch(() async => 'meals:today');
+      expect(reveals.waiting, isNotNull);
+      expect(reveals.waiting!.mealId, isNull, reason: 'Today, no meal');
     });
   });
 

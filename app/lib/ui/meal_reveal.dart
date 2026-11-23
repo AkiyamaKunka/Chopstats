@@ -1,7 +1,8 @@
 /// "Show me that meal" (Android): the View on the snackbar after a shared
 /// photo was logged, and a tap on a Logged meals card, ask the app shell
 /// to go to the meal (HomeShell): Today, scrolled to the meal and briefly
-/// ringed, or that day in History for a meal dated another day.
+/// ringed, or that day in History for a meal dated another day. A tap on
+/// the cards' group summary asks for Today itself ([MealReveal.today]).
 ///
 /// The shell goes there at once when it can: the screens open over the
 /// tabs that Back would close without asking (a History day, a Settings
@@ -17,25 +18,47 @@ library;
 import 'package:flutter/foundation.dart'
     show ChangeNotifier, Listenable, VoidCallback, immutable;
 
+import '../services/report/notifications.dart' show ReportNotifier;
 import 'photo_pipeline.dart' show PhotoOutcome, PhotoOutcomeKind;
 
-/// One meal to show, by its id in the meals table.
+/// One meal to show, by its id in the meals table, or Today itself
+/// ([today]).
 @immutable
 class MealReveal {
-  const MealReveal(this.mealId);
+  const MealReveal(int this.mealId);
 
-  final int mealId;
+  const MealReveal._today() : mealId = null;
+
+  /// Today, no meal: what a tap on the Logged meals cards' group summary
+  /// asks for (ReportNotifier.mealGroupPayload; PR80-B2, 2026-11-23). The
+  /// shell goes there as for a meal that is gone: Today, nothing ringed,
+  /// over the same screens and with the same wait. Today because that is
+  /// where the meals the cards announce are listed: the background scan
+  /// logs photos soon after they are taken. Not one of those meals: the
+  /// tap was on the group, and a tap on any line of the collapsed group
+  /// is the summary's. A card whose meal is dated another day (a photo
+  /// from before midnight) still goes to that day, from the expanded
+  /// group.
+  static const MealReveal today = MealReveal._today();
+
+  /// The meal's id; null for [today].
+  final int? mealId;
 
   static const String _prefix = 'meal:';
 
   /// The payload of a Logged meals card for this meal
   /// (ReportNotifier.showMealCard): handed back by Android when the card
-  /// is tapped.
-  String get payload => '$_prefix$mealId';
+  /// is tapped. For [today], the group summary's.
+  String get payload {
+    final id = mealId;
+    return id == null ? ReportNotifier.mealGroupPayload : '$_prefix$id';
+  }
 
-  /// The meal a card's [payload] names; null for any other payload (the
-  /// daily summary's, a notice's none, anything malformed).
+  /// The meal a card's [payload] names, or [today] for the group
+  /// summary's; null for any other payload (the daily summary's, a
+  /// notice's none, anything malformed).
   static MealReveal? fromPayload(String? payload) {
+    if (payload == ReportNotifier.mealGroupPayload) return today;
     if (payload == null || !payload.startsWith(_prefix)) return null;
     final digits = payload.substring(_prefix.length);
     if (!RegExp(r'^[0-9]{1,15}$').hasMatch(digits)) return null;
@@ -51,7 +74,7 @@ class MealReveal {
   int get hashCode => mealId.hashCode;
 
   @override
-  String toString() => 'MealReveal($mealId)';
+  String toString() => 'MealReveal(${mealId ?? 'today'})';
 }
 
 /// The meal a shared photo's verdict [o] logged or changed, for the View
@@ -79,8 +102,9 @@ MealReveal? revealForMeal(PhotoOutcome o) {
 /// Taps on this app's cards (Android), turned into [MealReveal] requests:
 /// [onTap] for one tapped while this engine runs (ReportNotifier's
 /// onTap), [launch] for the one that started it. A card's [MealReveal
-/// .payload] names its meal; any other card (the daily summary, a notice)
-/// asks for nothing and opens the app as before.
+/// .payload] names its meal, and the cards' group summary asks for
+/// [MealReveal.today]; any other card (the daily summary, a notice) asks
+/// for nothing and opens the app as before.
 ///
 /// One tap, one request: when Android recreates the activity for a tap
 /// (its process had been stopped), the tap arrives as a new intent before

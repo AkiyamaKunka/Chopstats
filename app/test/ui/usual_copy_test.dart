@@ -198,10 +198,12 @@ final _placeholderRe = RegExp(r'\{(\w+)\}');
 /// shareSkippedVideo, shareSkippedFileType, shareSkippedTooBig,
 /// shareSkippedUnreadable, shareSkippedSomeTooBig,
 /// shareSkippedSomeUnreadable, shareSkippedSomePhotoType,
-/// shareSkippedSomeVideo, shareSkippedSomeFileType); and the Android
+/// shareSkippedSomeVideo, shareSkippedSomeFileType); the Android
 /// View-after-share lane's action on a shared photo's snackbar
-/// (mealViewAction).
-const _keyCount = 974;
+/// (mealViewAction); and the Android meal-cards group lane's summary over
+/// two or more Logged meals cards (mealGroupSummaryTitle,
+/// mealGroupSummaryBody).
+const _keyCount = 976;
 
 Directory _appRoot() {
   var dir = Directory.current;

@@ -6,7 +6,8 @@
 /// that Back would close without asking are closed for it. An editor with
 /// unsaved changes is never closed or covered for it, nor is a dialog or
 /// sheet, and nothing moves while a text field has the focus: the request
-/// waits until that ends, for a minute at most.
+/// waits until that ends, for a minute at most. A tap on the cards' group
+/// summary asks for Today itself, under the same rules.
 library;
 
 import 'dart:async' show unawaited;
@@ -766,6 +767,78 @@ void main() {
     expect(_tab(tester), 0);
     expect(_onScreen(tester, 12), isTrue);
     expect(_lit(tester), {12});
+  });
+
+  // PR80-B2 (2026-11-23): a tap on the collapsed group of Logged meals
+  // cards is a tap on the app's own group summary, whose payload asks for
+  // Today: where those meals are listed, no one meal ringed.
+  group("the Logged meals cards' group summary", () {
+    testWidgets('tapped while the app runs: Today, nothing ringed, the '
+        'screens with nothing to lose closed', (tester) async {
+      final dao = _day(count: 3);
+      final reveals = MealReveals();
+      await _pumpApp(tester, dao, reveals);
+      await _openToday(tester);
+      expect(_tab(tester), 1);
+
+      MealCardTaps(reveals).onTap('meals:today');
+      await _frames(tester);
+      expect(find.byType(DayDetailScreen), findsNothing);
+      expect(_tab(tester), 0, reason: 'Today');
+      expect(_lit(tester), isEmpty, reason: 'no one meal');
+      expect(reveals.waiting, isNull, reason: 'taken');
+    });
+
+    testWidgets('a screen holding unsaved changes holds it, as it holds a '
+        "card's", (tester) async {
+      final dao = _day(count: 3);
+      final reveals = MealReveals();
+      await _pumpApp(tester, dao, reveals);
+      await tester.tap(_navTab('Settings'));
+      await tester.pumpAndSettle();
+      Navigator.of(_shell(tester)).push(MaterialPageRoute<void>(
+          builder: (_) => const _HeldPage()));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('change'));
+      await tester.pump();
+
+      MealCardTaps(reveals).onTap('meals:today');
+      await tester.pumpAndSettle();
+      expect(find.byType(_HeldPage), findsOneWidget, reason: 'never closed');
+      expect(_tab(tester), 3);
+
+      // The user lets go of the change and leaves; Today follows.
+      await tester.tap(find.text('change'));
+      await tester.pump();
+      await tester.binding.handlePopRoute();
+      await _frames(tester);
+      expect(find.byType(_HeldPage), findsNothing);
+      expect(_tab(tester), 0);
+      expect(_lit(tester), isEmpty);
+    });
+
+    testWidgets('one that started the app (a cold start): Today once the '
+        'shell is up, even where the app starts on Settings',
+        (tester) async {
+      final dao = _day(count: 3);
+      final reveals = MealReveals();
+      await MealCardTaps(reveals).launch(() async => 'meals:today');
+      // No key and no meal logged yet: the shell's first tab is Settings.
+      await tester.pumpWidget(CalorieTrackerApp(
+          services: UiServices(
+        dao: dao,
+        analyzer: FakeAnalyzer(),
+        executor: FakeExecutor(),
+        settings: FakeSettings(apiKey: ''),
+        picker: FakePicker(),
+        requestPhotoPermission: () async => true,
+        mealReveals: reveals,
+      )));
+      await _frames(tester);
+      expect(_tab(tester), 0, reason: 'Today, not the first tab Settings');
+      expect(_lit(tester), isEmpty);
+      expect(reveals.waiting, isNull);
+    });
   });
 }
 
