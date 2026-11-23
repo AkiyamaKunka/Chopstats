@@ -1,7 +1,9 @@
 /// "Show me that meal" (Android): the View on the snackbar after a shared
 /// photo was logged, and a tap on a Logged meals card, ask the app shell
 /// to go to the meal (HomeShell): Today, scrolled to the meal and briefly
-/// ringed, or that day in History for a meal dated another day.
+/// ringed, or that day in History for a meal dated another day. A tap on
+/// the cards' group summary asks for the day of the group's newest meal,
+/// with nothing ringed ([MealReveal.dayOf]).
 ///
 /// The shell goes there at once when it can: the screens open over the
 /// tabs that Back would close without asking (a History day, a Settings
@@ -17,26 +19,62 @@ library;
 import 'package:flutter/foundation.dart'
     show ChangeNotifier, Listenable, VoidCallback, immutable;
 
+import '../services/report/notifications.dart' show ReportNotifier;
 import 'photo_pipeline.dart' show PhotoOutcome, PhotoOutcomeKind;
 
-/// One meal to show, by its id in the meals table.
+/// One meal to show, by its id in the meals table: the meal itself,
+/// ringed, or only its day ([MealReveal.dayOf]).
 @immutable
 class MealReveal {
-  const MealReveal(this.mealId);
+  const MealReveal(this.mealId) : ring = true;
+
+  /// The day [mealId] is dated on now, nothing ringed: what a tap on the
+  /// Logged meals cards' group summary asks for, naming the group's newest
+  /// card (ReportNotifier.mealGroupPayloadFor; PR80-B2, 2026-11-23). The
+  /// shell goes there as for that meal, over the same screens and with
+  /// the same wait: Today for a meal of today, else that day in History,
+  /// and Today when the meal is gone. That day lists the meals the cards
+  /// announce, also for a group left in the shade past midnight; Today,
+  /// which the group first opened, lists none of them by then (PR80-B2
+  /// review). Not the one meal ringed: the tap was on the group, and a
+  /// tap on any line of the collapsed group is the summary's. A group
+  /// whose meals span two days opens only the newest card's day; each
+  /// card of the expanded group still goes to its own meal.
+  const MealReveal.dayOf(this.mealId) : ring = false;
 
   final int mealId;
+
+  /// Whether the meal itself is brought on screen and briefly ringed (a
+  /// card, the View on a message); false for [MealReveal.dayOf].
+  final bool ring;
 
   static const String _prefix = 'meal:';
 
   /// The payload of a Logged meals card for this meal
   /// (ReportNotifier.showMealCard): handed back by Android when the card
-  /// is tapped.
-  String get payload => '$_prefix$mealId';
+  /// is tapped. For [MealReveal.dayOf], the group summary's, as the
+  /// notifier posts it after the card of [mealId].
+  String get payload {
+    final card = '$_prefix$mealId';
+    return ring ? card : ReportNotifier.mealGroupPayloadFor(card);
+  }
 
-  /// The meal a card's [payload] names; null for any other payload (the
-  /// daily summary's, a notice's none, anything malformed).
+  /// The meal a card's [payload] names, or the day of the meal the group
+  /// summary's names ([MealReveal.dayOf]); null for any other payload
+  /// (the daily summary's, a notice's none, anything malformed).
   static MealReveal? fromPayload(String? payload) {
-    if (payload == null || !payload.startsWith(_prefix)) return null;
+    if (payload == null) return null;
+    const group = ReportNotifier.mealGroupPayloadPrefix;
+    if (payload.startsWith(group)) {
+      final card = _card(payload.substring(group.length));
+      return card == null ? null : MealReveal.dayOf(card.mealId);
+    }
+    return _card(payload);
+  }
+
+  /// The meal a card's own payload names.
+  static MealReveal? _card(String payload) {
+    if (!payload.startsWith(_prefix)) return null;
     final digits = payload.substring(_prefix.length);
     if (!RegExp(r'^[0-9]{1,15}$').hasMatch(digits)) return null;
     final id = int.parse(digits);
@@ -45,13 +83,14 @@ class MealReveal {
 
   @override
   bool operator ==(Object other) =>
-      other is MealReveal && other.mealId == mealId;
+      other is MealReveal && other.mealId == mealId && other.ring == ring;
 
   @override
-  int get hashCode => mealId.hashCode;
+  int get hashCode => Object.hash(mealId, ring);
 
   @override
-  String toString() => 'MealReveal($mealId)';
+  String toString() =>
+      ring ? 'MealReveal($mealId)' : 'MealReveal.dayOf($mealId)';
 }
 
 /// The meal a shared photo's verdict [o] logged or changed, for the View
@@ -79,8 +118,10 @@ MealReveal? revealForMeal(PhotoOutcome o) {
 /// Taps on this app's cards (Android), turned into [MealReveal] requests:
 /// [onTap] for one tapped while this engine runs (ReportNotifier's
 /// onTap), [launch] for the one that started it. A card's [MealReveal
-/// .payload] names its meal; any other card (the daily summary, a notice)
-/// asks for nothing and opens the app as before.
+/// .payload] names its meal, and the cards' group summary asks for the
+/// day of the group's newest meal ([MealReveal.dayOf]); any other card
+/// (the daily summary, a notice) asks for nothing and opens the app as
+/// before.
 ///
 /// One tap, one request: when Android recreates the activity for a tap
 /// (its process had been stopped), the tap arrives as a new intent before

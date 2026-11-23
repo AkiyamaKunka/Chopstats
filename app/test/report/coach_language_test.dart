@@ -176,6 +176,17 @@ void main() {
         'A card for each meal logged automatically from your camera roll');
   });
 
+  // PR80-B2: the summary Android shows over two or more Logged meals cards.
+  test("the meal cards' group summary follows the app language", () {
+    final zh = mealGroupSummaryFor('zh');
+    expect(zh.title, '🍽️ 已自动记录多餐');
+    expect(zh.body, '点按查看');
+    expect(RegExp(r'[a-zA-Z]').hasMatch(zh.title + zh.body), isFalse);
+    final en = mealGroupSummaryFor('en');
+    expect(en.title, '🍽️ Meals logged automatically');
+    expect(en.body, 'Tap to see them');
+  });
+
   test('an unknown/system language still produces a usable notification',
       () {
     for (final tag in ['system', '', 'fr']) {

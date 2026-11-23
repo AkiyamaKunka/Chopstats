@@ -1,7 +1,9 @@
 /// "Show me that meal" (Android, view-after-share lane): the request a
 /// shared photo's View and a tap on a Logged meals card make, the card
-/// payload that names the meal, and the one-request channel to the shell
-/// (ui/meal_reveal.dart). The shell's side is in view_after_share_test.
+/// payload that names the meal (and the cards' group summary's, which asks
+/// for the day of the group's newest meal), and the one-request channel to
+/// the shell (ui/meal_reveal.dart). The shell's side is in
+/// view_after_share_test.
 library;
 
 import 'package:calorie_tracker/core/contracts.dart'
@@ -9,6 +11,8 @@ import 'package:calorie_tracker/core/contracts.dart'
 import 'package:calorie_tracker/core/outcome_kind.dart';
 import 'package:calorie_tracker/l10n/app_localizations_en.dart';
 import 'package:calorie_tracker/l10n/app_localizations_zh.dart';
+import 'package:calorie_tracker/services/report/notifications.dart'
+    show ReportNotifier;
 import 'package:calorie_tracker/ui/di.dart' show outcomeAnnouncer;
 import 'package:calorie_tracker/ui/meal_reveal.dart';
 import 'package:calorie_tracker/ui/photo_pipeline.dart';
@@ -64,9 +68,42 @@ void main() {
         'MEAL:4',
         // The daily summary's own payload.
         'daily:2026-11-21T03:30:00.000Z@2026-11-20',
+        // Near the group summary's, but not it.
+        'meals:',
+        'meals:42',
+        'meals:meal:',
+        'meals:meal:0',
+        'meals:meal:4x',
+        'meals:meal:42 ',
+        'meals: meal:42',
+        'meals:meals:meal:42',
+        'MEALS:MEAL:42',
+        'meal:meals:42',
+        // What the group summary carried before the review (PR80-B2):
+        // never released.
+        'meals:today',
       ]) {
         expect(MealReveal.fromPayload(payload), isNull, reason: '$payload');
       }
+    });
+
+    // PR80-B2: the Logged meals cards' group summary (Android) names the
+    // group's newest card, and asks for that meal's day, nothing ringed:
+    // the day that lists the cards' meals, also past midnight.
+    test("the cards' group summary asks for the day of the newest card's "
+        'meal', () {
+      final day = MealReveal.fromPayload('meals:meal:42');
+      expect(day, const MealReveal.dayOf(42));
+      expect(day!.mealId, 42);
+      expect(day.ring, isFalse, reason: 'its day, no one meal ringed');
+      expect(const MealReveal(42).ring, isTrue, reason: "a card's own");
+      expect(day, isNot(const MealReveal(42)));
+      expect(const MealReveal.dayOf(42).payload, 'meals:meal:42');
+      expect(const MealReveal.dayOf(42).payload,
+          ReportNotifier.mealGroupPayloadFor(const MealReveal(42).payload),
+          reason: 'what the notifier posts after the card reads back');
+      expect(const MealReveal.dayOf(42).toString(), 'MealReveal.dayOf(42)');
+      expect(const MealReveal(42).toString(), 'MealReveal(42)');
     });
   });
 
@@ -240,6 +277,22 @@ void main() {
         return 'meal:7';
       });
       expect(reveals.waiting, const MealReveal(9));
+    });
+
+    // PR80-B2: a tap on the collapsed group is a tap on its summary, while
+    // the app runs or from a stopped app.
+    test("the group summary, tapped while the app runs, asks for its newest "
+        "card's day", () {
+      final reveals = MealReveals();
+      MealCardTaps(reveals).onTap('meals:meal:42');
+      expect(reveals.waiting, const MealReveal.dayOf(42));
+    });
+
+    test("the group summary that started the app asks for its newest card's "
+        'day (cold start)', () async {
+      final reveals = MealReveals();
+      await MealCardTaps(reveals).launch(() async => 'meals:meal:42');
+      expect(reveals.waiting, const MealReveal.dayOf(42));
     });
   });
 

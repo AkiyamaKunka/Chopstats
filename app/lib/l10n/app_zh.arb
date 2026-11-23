@@ -1091,5 +1091,7 @@
   "shareSkippedSomeUnreadable": "有 {count} 个分享的文件被跳过，其中 {some} 个无法读取。",
   "shareSkippedSomePhotoType": "有 {count} 个分享的文件被跳过，其中 {some} 个是筷拍暂时无法读取的 {type} 格式照片。",
   "shareSkippedSomeVideo": "有 {count} 个分享的文件被跳过，其中 {some} 个是视频：筷拍只记录照片，不记录视频。",
-  "shareSkippedSomeFileType": "有 {count} 个分享的文件被跳过，其中 {some} 个是筷拍无法读取的文件类型。"
+  "shareSkippedSomeFileType": "有 {count} 个分享的文件被跳过，其中 {some} 个是筷拍无法读取的文件类型。",
+  "mealGroupSummaryTitle": "🍽️ 已自动记录多餐",
+  "mealGroupSummaryBody": "点按查看"
 }

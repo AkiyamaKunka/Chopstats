@@ -3587,4 +3587,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String shareSkippedSomeFileType(int count, int some) {
     return '有 $count 个分享的文件被跳过，其中 $some 个是筷拍无法读取的文件类型。';
   }
+
+  @override
+  String get mealGroupSummaryTitle => '🍽️ 已自动记录多餐';
+
+  @override
+  String get mealGroupSummaryBody => '点按查看';
 }

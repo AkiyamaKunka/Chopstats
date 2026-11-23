@@ -5962,6 +5962,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'{count} shared files were skipped, {some, plural, =1{one of them because Chopstats can\'t read that kind of file} other{{some} of them because Chopstats can\'t read those kinds of files}}.'**
   String shareSkippedSomeFileType(int count, int some);
+
+  /// Android: the title of the summary the app posts for its Logged meals cards once two or more of them show, which groups them in the notification shade (the cards' own title is mealCardAutoTitle). The shade draws the group from the cards themselves, under a header with the app's name, so this line did not show there (Android 15); it shows only where the summary itself is shown instead. No count: a card the user dismisses would make it wrong.
+  ///
+  /// In en, this message translates to:
+  /// **'🍽️ Meals logged automatically'**
+  String get mealGroupSummaryTitle;
+
+  /// Android: the body of the Logged meals cards' group summary, under mealGroupSummaryTitle. A tap on the collapsed group opens the day of the group's newest card's meal, with nothing outlined: Today, or that day in History (for a group left in the notification shade past midnight, say), and clears the group's cards; a tap on one card of the expanded group still goes to its meal. It names no tab or day, since which one opens depends on the cards.
+  ///
+  /// In en, this message translates to:
+  /// **'Tap to see them'**
+  String get mealGroupSummaryBody;
 }
 
 class _AppLocalizationsDelegate
