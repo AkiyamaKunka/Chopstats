@@ -248,7 +248,7 @@ void main() {
     });
 
     // LINK-1 (2026-11-22): app_links answers every initial-link read with
-    // the run's first link, for as long as the plugin lives, and each
+    // the first link it was given, for as long as the plugin lives, and each
     // HomeShell reads it in initState: a second or rebuilt shell asked
     // about that link again (RCREL-V-1). The wrapper and the shells are
     // behaviour-tested on services the tests build themselves

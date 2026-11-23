@@ -227,8 +227,8 @@ void main() {
   });
 
   // LINK-1 (2026-11-22): app_links answers every initial-link read with the
-  // run's first link, for as long as the plugin lives, and each shell reads
-  // it in initState. The second shell that a bare link's route pushed
+  // first link it was given, for as long as the plugin lives, and each shell
+  // reads it in initState. The second shell that a bare link's route pushed
   // (RCREL-V-1), or a shell built again, asked about that link once more.
   // di.dart reads the plugin through launchLinkOnce (production_wiring_test
   // pins the line).

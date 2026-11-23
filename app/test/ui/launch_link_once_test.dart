@@ -1,9 +1,9 @@
 // LINK-1 (2026-11-22): app_links 7.2.1 answers every initial-link read with
 // the first link it was given, for as long as the plugin lives, and each
 // HomeShell reads it in initState: a second or rebuilt shell asked about
-// the run's first setup link again (RCREL-V-1). di.dart reads the plugin
-// through launchLinkOnce (production_wiring_test pins the line), so only
-// the first call gets the link.
+// that setup link again (RCREL-V-1). di.dart reads the plugin through
+// launchLinkOnce (production_wiring_test pins the line), so only the
+// engine's first call gets the link.
 import 'dart:async';
 
 import 'package:calorie_tracker/ui/services.dart' show launchLinkOnce;
