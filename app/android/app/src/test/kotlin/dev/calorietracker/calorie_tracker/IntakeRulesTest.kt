@@ -489,6 +489,18 @@ class IntakeRulesTest {
         }
     }
 
+    // --- Flutter's engine flags come from the launch intent in a debug or
+    // profile build only. A release build takes none, the software-rendering
+    // one the engine reads itself included, or any app that starts
+    // MainActivity could pick the renderer; `flutter run --release` loses
+    // its engine options with them (EXTRAS-1, EXTRAS-1 review).
+
+    @Test
+    fun onlyDebugAndProfileBuildsTakeEngineFlagsFromTheLaunchIntent() {
+        assertFalse(IntakeRules.takesEngineFlagsFromIntent(releaseBuild = true))
+        assertTrue(IntakeRules.takesEngineFlagsFromIntent(releaseBuild = false))
+    }
+
     // --- The app's own language on Android 13 and later
     // (MainActivity.setAppLanguage): one of the app's languages
     // (res/xml/locales_config.xml) or none, nothing else.

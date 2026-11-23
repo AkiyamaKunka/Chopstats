@@ -305,7 +305,16 @@ Future<bool> askAiConsentUpdate(
 /// The shell's question answers true (Allow), false (Not now) or null:
 /// no dialog could be shown (the shell is going away). Null is no answer,
 /// like a dialog that failed: nothing is declined, and the photo waits for
-/// the next shell to ask.
+/// the next shell to ask: one that attaches, or, once the shell that asked
+/// detaches, the latest one still attached.
+///
+/// Every shell attaches its own question, and the latest one attached
+/// asks (GATE-1, 2026-11-22). The gate used to hold one question only: a
+/// second shell that closed took it away while the first one still lived,
+/// and a shared photo then waited for a question that never came until
+/// another shell attached. The app opens one shell at a time since
+/// Flutter's own deep linking is off (RCREL-V-1, IOS-DL-1), so this is
+/// defence in depth.
 ///
 /// A share's note on its files that gave no photo
 /// (IntakePhoto.refusedNote) is no photo: it is never asked about, and a
@@ -318,11 +327,22 @@ class SharedPhotoConsentGate {
   SharedPhotoConsentGate(this._settings);
 
   final SettingsStore _settings;
-  Future<bool?> Function()? _ask;
+
+  /// Each attached shell's question, the latest attached last ([attach],
+  /// [detach]).
+  final List<Future<bool?> Function()> _askers = [];
+
+  /// The question a photo is asked through: the latest attached shell's;
+  /// null while no shell is attached.
+  Future<bool?> Function()? get _ask => _askers.isEmpty ? null : _askers.last;
+
+  /// Completed while a shell is attached: what a photo waits for while
+  /// none is.
   Completer<void> _attached = Completer<void>();
 
-  /// Completed by the next [attach]: what a photo whose question could not
-  /// be shown waits for.
+  /// Completed by the next [attach], and by a [detach] of the asking shell
+  /// that leaves the question to one still attached: what a photo whose
+  /// question could not be shown waits for.
   Completer<void> _reattached = Completer<void>();
 
   /// The share intake's deliveries; null when [gate] was given none (then
@@ -351,19 +371,43 @@ class SharedPhotoConsentGate {
   /// The app shell's dialog, once it has a navigator; true = allowed (and
   /// recorded). A cold-start share arrives before the first frame and
   /// waits here until then.
+  ///
+  /// Each shell attaches its own, and the latest one attached asks; a
+  /// shell that attaches again is the latest once more, and one [detach]
+  /// still takes it away (GATE-1, 2026-11-22).
   void attach(Future<bool?> Function() ask) {
-    _ask = ask;
+    // ==, not identical: two tear-offs of one method are equal only.
+    _askers
+      ..remove(ask)
+      ..add(ask);
     if (!_attached.isCompleted) _attached.complete();
+    _reattach();
+  }
+
+  /// The shell going away takes its question back, however often it
+  /// attached it; a question that is not attached changes nothing. The
+  /// latest shell still attached asks from then on (GATE-1, 2026-11-22).
+  /// When the one going away was the latest, the shell now asking counts
+  /// as attached just now: a photo whose question the one going away could
+  /// not show (null, answered before this or when its open question ends)
+  /// is asked again through it, without waiting for an [attach].
+  void detach(Future<bool?> Function() ask) {
+    // ==, not identical: two tear-offs of one method are equal only.
+    final wasAsking = _ask == ask;
+    if (!_askers.remove(ask)) return;
+    if (_askers.isEmpty) {
+      _attached = Completer<void>();
+    } else if (wasAsking) {
+      _reattach();
+    }
+  }
+
+  /// A photo whose question could not be shown is asked again, through the
+  /// latest shell attached ([_reattached]).
+  void _reattach() {
     final waiting = _reattached;
     _reattached = Completer<void>();
     waiting.complete();
-  }
-
-  void detach(Future<bool?> Function() ask) {
-    // ==, not identical: two tear-offs of one method are equal only.
-    if (_ask != ask) return;
-    _ask = null;
-    _attached = Completer<void>();
   }
 
   /// The open question was answered Not now: covers the asked photo's
@@ -475,7 +519,10 @@ class SharedPhotoConsentGate {
         return dropped();
       }
       // No dialog could be shown: no answer. Nothing is declined; the
-      // photo waits for the next shell's question.
+      // photo waits for the next shell's question: until a shell attaches,
+      // or the shell that asked detaches while another is still attached
+      // (GATE-1). Either one while the question was open counts too, and
+      // then it is asked again at once.
       _asking = null;
       await nextShell;
     }
