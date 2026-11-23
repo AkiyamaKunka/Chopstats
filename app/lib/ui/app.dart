@@ -31,7 +31,7 @@ import 'ai_consent.dart'
         ensureAiConsent;
 import 'background_glue.dart' show foregroundCatchUp;
 import 'backup_sheets.dart';
-import 'format.dart' show isoDate;
+import 'format.dart' show PhoneClockScope, isoDate;
 import 'meal_reveal.dart';
 import 'screens/add_flow.dart';
 import 'screens/body_screen.dart';
@@ -313,9 +313,14 @@ class _CalorieTrackerAppState extends State<CalorieTrackerApp> {
           ],
           supportedLocales: const [Locale('en'), Locale('zh')],
           navigatorObservers: [_dialogs, if (reveals) _routes],
+          // Times follow the phone's own 12/24-hour clock, which Android 13
+          // and later stop reporting once the app has a language of its
+          // own (format.dart PhoneClockScope).
           builder: (context, child) {
-            final styled = _SystemNavBarStyle(
-                dimming: _dimming, child: child ?? const SizedBox.shrink());
+            final styled = PhoneClockScope(
+                child: _SystemNavBarStyle(
+                    dimming: _dimming,
+                    child: child ?? const SizedBox.shrink()));
             if (!reveals) return styled;
             // A route on top held or let go of its pop (a screen took or
             // dropped unsaved changes): the shell asks again whether it

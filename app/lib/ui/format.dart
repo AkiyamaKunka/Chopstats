@@ -9,11 +9,18 @@ library;
 import 'dart:ui' as ui show PlatformDispatcher;
 
 import 'package:flutter/widgets.dart'
-    show BuildContext, MediaQuery, WidgetsBinding;
+    show
+        BuildContext,
+        MediaQuery,
+        StatelessWidget,
+        ValueListenableBuilder,
+        Widget,
+        WidgetsBinding;
 import 'package:intl/intl.dart';
 
 import '../core/coerce.dart';
 import '../core/contracts.dart';
+import '../services/settings/app_language_sync.dart' show PhoneSettings;
 import 'meal_edit_logic.dart' show isRealIsoDate;
 
 export '../core/coerce.dart' show isFoodTruthy, isoDate;
@@ -191,8 +198,15 @@ String friendlyHistoryDay(String date,
 
 /// The phone's own 12/24-hour setting (Android's 'Use 24-hour format',
 /// iOS's 24-Hour Time), as Flutter reports it: the same value
-/// MediaQuery.alwaysUse24HourFormat carries, read here for code without a
-/// BuildContext.
+/// MediaQuery.alwaysUse24HourFormat carries under [PhoneClockScope], read
+/// here for code without a BuildContext.
+///
+/// On Android 13 and later, once the app has a language of its own,
+/// Flutter's follows that language instead (Android asks the app's main
+/// locale): English on a phone in Chinese, or a bare 'en', read 12-hour
+/// beside a 24-hour status bar. There it is the phone's own, as
+/// MainActivity reads it (PhoneSettings.use24HourClock, the app engine's
+/// app_language_sync.dart).
 ///
 /// A headless engine (the background scan's) has no view on screen, and
 /// its reading is the platform default, not the phone's (Android reports
@@ -209,7 +223,34 @@ bool phoneUses24HourClock() {
   }
   final view = dispatcher.implicitView;
   if (view == null || view.physicalSize.isEmpty) return true;
-  return dispatcher.alwaysUse24HourFormat;
+  return PhoneSettings.use24HourClock.value ?? dispatcher.alwaysUse24HourFormat;
+}
+
+/// [child] with MediaQuery's alwaysUse24HourFormat set to the phone's own
+/// clock where Android reports it apart from Flutter's
+/// (PhoneSettings.use24HourClock, [phoneUses24HourClock]): Report Time,
+/// its picker's dial and every time under the app's MaterialApp follow the
+/// clock the status bar shows. Unchanged elsewhere (iOS, Android 12 and
+/// lower, before Android answers). Always one MediaQuery, so nothing below
+/// is rebuilt from scratch when the clock changes.
+class PhoneClockScope extends StatelessWidget {
+  const PhoneClockScope({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => ValueListenableBuilder<bool?>(
+        valueListenable: PhoneSettings.use24HourClock,
+        builder: (context, own, child) {
+          final data = MediaQuery.of(context);
+          return MediaQuery(
+              data: own == null
+                  ? data
+                  : data.copyWith(alwaysUse24HourFormat: own),
+              child: child!);
+        },
+        child: child,
+      );
 }
 
 /// [phoneUses24HourClock] for a widget building in [context], which then
