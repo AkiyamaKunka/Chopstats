@@ -556,6 +556,8 @@ class _AddPhotoScreenState extends State<AddPhotoScreen> {
               ? l.outcomeCheckServer
               : (notSetUp ? l.outcomeNotSetUp : l.outcomeFailed),
           PhotoOutcomeKind.leftoverApplied => l.outcomeLeftoverApplied,
+          // A share's note (share intake), never a picked photo's verdict.
+          PhotoOutcomeKind.refusedFiles => l.outcomeFailed,
         }),
         content: Text(hint == null ? body : '$body\n\n$hint'),
         actions: [

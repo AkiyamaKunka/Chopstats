@@ -2149,6 +2149,36 @@ void main() {
       expect(outcomeSnackbar(zh, o), isNot(contains('已保留')));
     });
 
+    // Android, view-after-share lane: a shared photo's save offers View
+    // (meal_reveal.dart revealForShared), which needs to know it was
+    // shared; a picked photo's save never does.
+    test("a shared photo's save is flagged shared, with its meal; a picked "
+        "one's is not", () async {
+      final food = AnalysisOutcome(
+          analysis: _foodAnalysis(), isFood: true, wall: Duration.zero);
+      final shared = await share(
+          FakeDao(),
+          FakeAnalyzer()..nextPhotoOutcome = food,
+          [
+            IntakePhoto(Uint8List.fromList([1, 2, 3]), '', 'IMG_1.jpg',
+                deliberate: true, shareDelivery: 1),
+          ],
+          (d) => d.ledger[_hash] == IngestionStatus.saved);
+      expect(shared.single.kind, PhotoOutcomeKind.saved);
+      expect(shared.single.shared, isTrue);
+      expect(shared.single.mealId, isNotNull);
+
+      final notes = <PhotoOutcome>[];
+      final picked = await PhotoPipeline(
+              dao: FakeDao(),
+              analyzer: FakeAnalyzer()..nextPhotoOutcome = food,
+              notify: notes.add)
+          .enqueue(_photo(deliberate: true));
+      expect(picked.kind, PhotoOutcomeKind.saved);
+      expect(picked.shared, isFalse);
+      expect(notes.single.shared, isFalse);
+    });
+
     test('enqueue() (the add flow) is NOT told — it renders its own dialog',
         () async {
       final notes = <PhotoOutcome>[];

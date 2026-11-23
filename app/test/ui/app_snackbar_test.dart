@@ -263,4 +263,254 @@ void main() {
     }
     expect(find.byType(SnackBar), findsNothing);
   });
+
+  // Android, view-after-share lane: a shared photo's "Meal logged" line
+  // offers View (di.dart notifyView), which goes to the meal, while the
+  // app could go there at once.
+  group('a View on a message (showAppSnackbarWithView)', () {
+    testWidgets('offered while the app could go there: a tap asks for the '
+        'meal', (tester) async {
+      await tester.pumpWidget(_app());
+      var viewed = 0;
+      showAppSnackbarWithView('Meal logged: Ramen — ~600 kcal', 'View',
+          () => viewed++, () => true, _Changes());
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      expect(find.text('View'), findsOneWidget);
+      await tester.tap(find.text('View'));
+      await tester.pump();
+      expect(viewed, 1);
+      await tester.pumpAndSettle();
+      expect(find.byType(SnackBar), findsNothing);
+    });
+
+    testWidgets('no screen reader: it leaves on its own after 8 s',
+        (tester) async {
+      await tester.pumpWidget(_app());
+      showAppSnackbarWithView(
+          'Meal logged: Ramen', 'View', () {}, () => true, _Changes());
+      await tester.pump();
+      for (var i = 0; i < 7; i++) {
+        await tester.pump(const Duration(seconds: 1));
+      }
+      expect(find.text('View'), findsOneWidget, reason: 'its full 8 s');
+      for (var i = 0; i < 3; i++) {
+        await tester.pump(const Duration(seconds: 1));
+      }
+      expect(find.byType(SnackBar), findsNothing);
+    });
+
+    // Review of PR 80: under TalkBack the View left after 8 s like any
+    // message, where every other action snackbar here (and Android's own)
+    // stays up: reaching View by swiping takes longer than that.
+    testWidgets('screen reader on: a View with nothing behind it stays up '
+        'until it is acted on', (tester) async {
+      tester.platformDispatcher.accessibilityFeaturesTestValue =
+          const FakeAccessibilityFeatures(accessibleNavigation: true);
+      addTearDown(
+          tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
+      await tester.pumpWidget(_app());
+      var viewed = 0;
+      showAppSnackbarWithView(
+          'Meal logged: Ramen', 'View', () => viewed++, () => true, _Changes());
+      await tester.pump();
+      for (var i = 0; i < 30; i++) {
+        await tester.pump(const Duration(seconds: 1));
+      }
+      expect(find.text('View'), findsOneWidget,
+          reason: 'a screen-reader user needs time to reach View');
+      await tester.tap(find.text('View'));
+      await tester.pump();
+      expect(viewed, 1);
+      await tester.pumpAndSettle();
+      expect(find.byType(SnackBar), findsNothing);
+    });
+
+    testWidgets('screen reader on: a message behind a View is not held '
+        'back; the View goes once it has had its 8 s', (tester) async {
+      tester.platformDispatcher.accessibilityFeaturesTestValue =
+          const FakeAccessibilityFeatures(accessibleNavigation: true);
+      addTearDown(
+          tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
+      await tester.pumpWidget(_app());
+      showAppSnackbarWithView(
+          'Meal logged: Ramen', 'View', () {}, () => true, _Changes());
+      showAppSnackbar('Meal logged: Tea');
+      await tester.pump();
+      for (var i = 0; i < 7; i++) {
+        await tester.pump(const Duration(seconds: 1));
+      }
+      expect(find.text('View'), findsOneWidget, reason: 'its full 8 s');
+      expect(await _seenWithin(tester, 'Meal logged: Tea', 3), isTrue,
+          reason: 'held only while nothing waits behind it, unlike an Undo');
+      expect(find.text('View'), findsNothing);
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(seconds: 1));
+      }
+      expect(find.byType(SnackBar), findsNothing);
+    });
+
+    testWidgets('screen reader on: a View held past its 8 s goes as soon as '
+        'a message arrives behind it', (tester) async {
+      tester.platformDispatcher.accessibilityFeaturesTestValue =
+          const FakeAccessibilityFeatures(accessibleNavigation: true);
+      addTearDown(
+          tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
+      await tester.pumpWidget(_app());
+      showAppSnackbarWithView(
+          'Meal logged: Ramen', 'View', () {}, () => true, _Changes());
+      await tester.pump();
+      for (var i = 0; i < 20; i++) {
+        await tester.pump(const Duration(seconds: 1));
+      }
+      expect(find.text('View'), findsOneWidget);
+      showAppSnackbar('Meal logged: Tea');
+      expect(await _seenWithin(tester, 'Meal logged: Tea', 2), isTrue);
+      expect(find.text('View'), findsNothing);
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(seconds: 1));
+      }
+      expect(find.byType(SnackBar), findsNothing);
+    });
+
+    testWidgets('left off while the app could not go there: the plain '
+        'message, gone after 4 s', (tester) async {
+      await tester.pumpWidget(_app());
+      var viewed = 0;
+      showAppSnackbarWithView('Meal logged: Ramen', 'View', () => viewed++,
+          () => false, _Changes());
+      await tester.pump();
+      expect(find.text('Meal logged: Ramen'), findsOneWidget);
+      expect(find.text('View'), findsNothing);
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(seconds: 1));
+      }
+      expect(find.text('Meal logged: Ramen'), findsNothing);
+      expect(viewed, 0);
+    });
+
+    testWidgets('asked as the message shows, not when it was sent',
+        (tester) async {
+      await tester.pumpWidget(_app());
+      var open = false;
+      showAppSnackbar('Meal logged: Toast');
+      showAppSnackbarWithView(
+          'Meal logged: Ramen', 'View', () {}, () => open, _Changes());
+      await tester.pump();
+      expect(find.text('Meal logged: Toast'), findsOneWidget);
+      open = true; // the screen over the tabs was closed meanwhile
+      expect(await _seenWithin(tester, 'Meal logged: Ramen', 6), isTrue);
+      expect(find.text('View'), findsOneWidget);
+      // And the other way: a View sent while it could go there, shown once
+      // a screen is up over the tabs, is left off.
+      showAppSnackbarWithView(
+          'Meal logged: Soup', 'View', () {}, () => open, _Changes());
+      open = false;
+      expect(await _seenWithin(tester, 'Meal logged: Soup', 10), isTrue);
+      expect(find.text('View'), findsNothing);
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(seconds: 1));
+      }
+      expect(find.byType(SnackBar), findsNothing);
+    });
+
+    // Review of PR 80: View was asked once, as it showed, and then stayed
+    // tappable for its 8 s over whatever came up next. A tap there made a
+    // request nothing on screen spoke of, carried out minutes later.
+    testWidgets('taken away once the app can no longer go there: the '
+        'message goes, and nothing is asked for', (tester) async {
+      await tester.pumpWidget(_app());
+      final changes = _Changes();
+      var open = true;
+      var viewed = 0;
+      showAppSnackbarWithView(
+          'Meal logged: Ramen', 'View', () => viewed++, () => open, changes);
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 2));
+      // A change that leaves it offered leaves it up.
+      changes.ping();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+      expect(find.text('View'), findsOneWidget);
+      // The user starts typing, say.
+      open = false;
+      changes.ping();
+      await tester.pump();
+      await tester.pumpAndSettle();
+      expect(find.text('View'), findsNothing);
+      expect(find.byType(SnackBar), findsNothing, reason: 'it was seen');
+      expect(viewed, 0);
+      expect(changes.listening, isFalse, reason: 'stops listening once gone');
+    });
+
+    testWidgets('one taken away does not hold the next message back',
+        (tester) async {
+      await tester.pumpWidget(_app());
+      final changes = _Changes();
+      var open = true;
+      showAppSnackbarWithView(
+          'Meal logged: Ramen', 'View', () {}, () => open, changes);
+      showAppSnackbar('Meal logged: Tea');
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      open = false;
+      changes.ping();
+      expect(await _seenWithin(tester, 'Meal logged: Tea', 2), isTrue);
+      expect(find.text('View'), findsNothing);
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(seconds: 1));
+      }
+      expect(find.byType(SnackBar), findsNothing);
+    });
+
+    testWidgets("one queued behind a screen's own snackbar: that snackbar "
+        'is left alone, and the message shows plain if View is no longer '
+        'offered by then', (tester) async {
+      await tester.pumpWidget(_app());
+      final messenger = messengerKey.currentState!;
+      messenger.showSnackBar(const SnackBar(content: Text('Export saved.')));
+      final changes = _Changes();
+      var open = true;
+      showAppSnackbarWithView(
+          'Meal logged: Ramen', 'View', () {}, () => open, changes);
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      expect(find.text('Export saved.'), findsOneWidget);
+      open = false;
+      changes.ping();
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      expect(find.text('Export saved.'), findsOneWidget,
+          reason: "the screen's own snackbar is not the one taken away");
+      expect(await _seenWithin(tester, 'Meal logged: Ramen', 5), isTrue,
+          reason: 'not dropped: it was never seen');
+      await tester.pump(const Duration(milliseconds: 500));
+      expect(find.text('Meal logged: Ramen'), findsOneWidget);
+      expect(find.text('View'), findsNothing);
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(seconds: 1));
+      }
+      expect(find.byType(SnackBar), findsNothing);
+    });
+
+    testWidgets('a check that throws leaves View off', (tester) async {
+      await tester.pumpWidget(_app());
+      showAppSnackbarWithView('Meal logged: Ramen', 'View', () {},
+          () => throw StateError('the shell went'), _Changes());
+      await tester.pump();
+      expect(find.text('Meal logged: Ramen'), findsOneWidget);
+      expect(find.text('View'), findsNothing);
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(seconds: 1));
+      }
+      expect(find.byType(SnackBar), findsNothing);
+    });
+  });
+}
+
+/// The app's "View may no longer be offered" signal (MealReveals
+/// .availability), pinged by hand.
+class _Changes extends ChangeNotifier {
+  void ping() => notifyListeners();
+  bool get listening => hasListeners;
 }

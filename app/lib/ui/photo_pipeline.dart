@@ -53,6 +53,12 @@ enum PhotoOutcomeKind {
   /// row — the original meal's totals shrank and the photo's hash is
   /// tombstoned so no scan re-offers it.
   leftoverApplied,
+
+  /// Not one photo's verdict: a share's files that gave no photo
+  /// ([PhotoOutcome.refused], share_intake.dart), said in one line after
+  /// that share's photos ([PhotoPipeline.bindStream]). Nothing was read
+  /// into the ledger or sent for them.
+  refusedFiles,
 }
 
 class PhotoOutcome {
@@ -96,9 +102,12 @@ class PhotoOutcome {
   final String? mealDate;
   final Map<String, dynamic>? previousAnalysis;
 
-  /// Set by [PhotoPipeline.bindStream] on the share-sheet announcement of
-  /// a TRANSIENT failure, so the snackbar can ask for a re-share instead
-  /// of claiming the photo was kept (outcomeSnackbar).
+  /// A shared photo's verdict (IntakePhoto.shareDelivery). Set by
+  /// [PhotoPipeline.bindStream] on the share-sheet announcement of a
+  /// TRANSIENT failure, so the snackbar can ask for a re-share instead of
+  /// claiming the photo was kept (outcomeSnackbar), and by process() on a
+  /// shared photo's save and leftover deduction, whose snackbar offers
+  /// View on Android (meal_reveal.dart revealForShared).
   final bool shared;
 
   /// [shared]'s twin for a photo PICKED in the add flow whose screen was
@@ -112,6 +121,10 @@ class PhotoOutcome {
   /// those guards act on automatic photos only, whose skips and releases
   /// nobody announces.
   final String? reason;
+
+  /// [PhotoOutcomeKind.refusedFiles]: the files and why each gave no
+  /// photo, which the UI words (outcome_text.dart refusedFilesLine).
+  final RefusedShareFiles? refused;
   const PhotoOutcome(this.kind, this.message,
       {this.analysis,
       this.retryable = false,
@@ -125,8 +138,21 @@ class PhotoOutcome {
       this.previousAnalysis,
       this.shared = false,
       this.picked = false,
-      this.reason});
+      this.reason,
+      this.refused});
 }
+
+/// What is said for a share's files that gave no photo
+/// ([IntakePhoto.refusedNote]): [PhotoOutcomeKind.refusedFiles], with
+/// plain English for [PhotoOutcome.message]; the snackbar says it in the
+/// app language with the main reason (outcome_text.dart).
+PhotoOutcome refusedFilesOutcome(RefusedShareFiles refused) => PhotoOutcome(
+    PhotoOutcomeKind.refusedFiles,
+    refused.count == 1
+        ? 'One shared file was skipped.'
+        : '${refused.count} shared files were skipped.',
+    refused: refused,
+    shared: true);
 
 /// [PhotoOutcome.reason] of an automatic glasses photo skipped because
 /// another file of the same shutter press is already a meal (design G2b).
@@ -190,7 +216,8 @@ String? glassesCheckOutcome(PhotoOutcome o) => switch (o.kind) {
         },
       PhotoOutcomeKind.duplicate ||
       PhotoOutcomeKind.alreadyTracked ||
-      PhotoOutcomeKind.inFlight =>
+      PhotoOutcomeKind.inFlight ||
+      PhotoOutcomeKind.refusedFiles =>
         null,
     };
 
@@ -207,7 +234,8 @@ PhotoOutcome? unannouncedOutcome(PhotoOutcome o,
       PhotoOutcomeKind.skipped ||
       PhotoOutcomeKind.duplicate ||
       PhotoOutcomeKind.alreadyTracked ||
-      PhotoOutcomeKind.inFlight =>
+      PhotoOutcomeKind.inFlight ||
+      PhotoOutcomeKind.refusedFiles =>
         o,
       PhotoOutcomeKind.failed when o.retryable => PhotoOutcome(
           o.kind, o.message,
@@ -591,9 +619,25 @@ class PhotoPipeline {
   /// written, or it was let go — and the share intake deletes its copy
   /// only then. An engine stopped mid-analysis leaves the copy, and the
   /// next start offers the photo again.
+  ///
+  /// REFUSED FILES: the share intake's note on a share's files that gave
+  /// no photo ([IntakePhoto.refusedNote]) is said on the same tail, so
+  /// after the verdicts of the photos ahead of it ([refusedFilesOutcome]).
+  /// It is no photo: never hashed, reserved, kept alive or sent.
   void bindStream(Stream<IntakePhoto> photos) {
     late final StreamSubscription<IntakePhoto> sub;
     sub = photos.listen((p) {
+      final refused = p.refused;
+      if (refused != null) {
+        final say = refusedFilesOutcome(refused);
+        // Shielded as below: a throwing snackbar must not stall the tail.
+        _tail = _tail.then((_) {
+          try {
+            notify?.call(say);
+          } catch (_) {}
+        });
+        return;
+      }
       sub.pause();
       final slot = _chain(p);
       slot.whenComplete(() {
@@ -927,6 +971,10 @@ class PhotoPipeline {
   /// exactly one task per photo. A lost reservation's second settle
   /// ([_afterLost]) stays inside the same task.
   Future<PhotoOutcome> process(IntakePhoto photo) async {
+    // Not a photo: a share's files that gave none (bindStream says it). No
+    // bytes to hash, nothing to reserve, ask about or send.
+    final refused = photo.refused;
+    if (refused != null) return refusedFilesOutcome(refused);
     _running++;
     try {
       _foodChecked = null;
@@ -1218,7 +1266,7 @@ class PhotoPipeline {
           autoLeftoverIndex(analysis, candidateCount: recent.length);
       if (autoIdx != null) {
         final applied = await _applyAutoLeftover(recent[autoIdx], analysis,
-            hash: hash, stamp: stamp);
+            hash: hash, stamp: stamp, shared: photo.shareDelivery != null);
         if (applied != null) return applied;
       }
       // A leftover-shaped reply nothing was applied from (unsure, a meal
@@ -1370,12 +1418,14 @@ class PhotoPipeline {
   /// verdict for [candidate] applied in place, under the photo's
   /// reservation. The leftover outcome once it is applied, the released
   /// photo's outcome once the meal kept changing, or null when the verdict
-  /// is unusable (the caller saves the reply as a meal instead).
+  /// is unusable (the caller saves the reply as a meal instead). [shared]:
+  /// the photo was shared (PhotoOutcome.shared).
   Future<PhotoOutcome?> _applyAutoLeftover(
     Meal candidate,
     Map<String, dynamic> analysis, {
     required String hash,
     required String? stamp,
+    required bool shared,
   }) async {
     // Design R6a: [recent] is as old as the model call (10–60 s). The
     // deduction is re-based on the meal as stored NOW — same model
@@ -1432,7 +1482,8 @@ class PhotoPipeline {
           // The row as THIS application found it, not
           // leftover.original: undoing a wrong second deduction
           // must keep an earlier, correct one.
-          previousAnalysis: original.analysis);
+          previousAnalysis: original.analysis,
+          shared: shared);
       try {
         notify?.call(leftover);
         onMealSaved?.call();
@@ -1508,7 +1559,8 @@ class PhotoPipeline {
         mealName: name,
         kcal: kcal,
         mealId: id,
-        mealDate: isoDate(when));
+        mealDate: isoDate(when),
+        shared: photo.shareDelivery != null);
     // Same shield as the thumbnail: these run AFTER the commit, so a
     // throwing callback must not fall into the outer catch — that
     // flipped the committed ledger row saved→failed and told the user

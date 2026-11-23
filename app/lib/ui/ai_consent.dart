@@ -293,14 +293,14 @@ Future<bool> askAiConsentUpdate(
 /// five times. The intake numbers each share as its batch event arrives
 /// (IntakePhoto.shareDelivery, [ShareDeliveries]); a Not now covers the
 /// share asked about, however slowly its files are read, and every share
-/// that arrived while the question was open. Their photos are dropped
-/// without a question and never sent, even if the recipient is allowed
-/// some other way before their turn (the user's answer for them was no),
-/// and the intake deletes their copies not read yet, unread. A share
-/// already waiting when the question opened, the start-up batch of copies
-/// an earlier run left unread (ShareDeliveries.asksAlone, whenever its
-/// sweep finishes) and one that arrives after the answer get their own
-/// question.
+/// with a photo to send that arrived while the question was open. Their
+/// photos are dropped without a question and never sent, even if the
+/// recipient is allowed some other way before their turn (the user's
+/// answer for them was no), and the intake deletes their copies not read
+/// yet, unread. A share already waiting when the question opened, the
+/// start-up batch of copies an earlier run left unread
+/// (ShareDeliveries.asksAlone, whenever its sweep finishes) and one that
+/// arrives after the answer get their own question.
 ///
 /// The shell's question answers true (Allow), false (Not now) or null:
 /// no dialog could be shown (the shell is going away). Null is no answer,
@@ -315,6 +315,14 @@ Future<bool> askAiConsentUpdate(
 /// another shell attached. The app opens one shell at a time since
 /// Flutter's own deep linking is off (RCREL-V-1, IOS-DL-1), so this is
 /// defence in depth.
+///
+/// A share's note on its files that gave no photo
+/// (IntakePhoto.refusedNote) is no photo: it is never asked about, and a
+/// share whose every file was refused asks nothing. It passes in its
+/// place, after the share's photos, or goes with the share's Not now.
+/// Another share's Not now never covers a share with no photo left to
+/// send ([ShareDeliveries.photoCountOf] 0 at the answer), so its line
+/// still comes.
 class SharedPhotoConsentGate {
   SharedPhotoConsentGate(this._settings);
 
@@ -404,15 +412,16 @@ class SharedPhotoConsentGate {
 
   /// The open question was answered Not now: covers the asked photo's
   /// delivery and every one that arrived while the question was open (not
-  /// one already waiting when it opened), tells the intake to delete their
-  /// unread copies, and returns how many shared photos the answer leaves
-  /// unsent — those deliveries' photos not passed on, the asked one
-  /// included. 1 for a photo with no delivery, or when no question is
-  /// open.
+  /// one already waiting when it opened, nor one with no photo left to
+  /// send), tells the intake to delete their unread copies, and returns
+  /// how many shared photos the answer leaves unsent — those deliveries'
+  /// photos not passed on, the asked one included. 1 for a photo with no
+  /// delivery, or when no question is open.
   ///
   /// The count can be a little high, never low: a copy not read yet that
-  /// turns out unusable (an unsupported type, over 25 MB, a failing read)
-  /// is counted too (ShareDeliveries.photoCountOf).
+  /// turns out unusable (empty, over 25 MB, a failing read) is counted too;
+  /// one whose name gives no photo type (an AVIF) is not
+  /// (ShareDeliveries.photoCountOf).
   int declineOpenQuestion() {
     final asking = _asking;
     if (asking == null) return 1;
@@ -425,8 +434,14 @@ class SharedPhotoConsentGate {
       delivery,
       for (var d = math.max(_openedAt, delivery) + 1; d <= now; d++)
         // The start-up batch of copies left unread is no share being made
-        // now: it gets its own question, whenever its sweep finished.
-        if (!(deliveries?.asksAlone(d) ?? false)) d,
+        // now: it gets its own question, whenever its sweep finished. Nor
+        // is a share with no photo left to send (its files all refused:
+        // on Android before any copy or by their names, on iOS as each was
+        // read): nothing of it is ever asked about, and the line on its
+        // refused files is all it gets, which this answer would drop.
+        if (!(deliveries?.asksAlone(d) ?? false) &&
+            (deliveries?.photoCountOf(d) ?? 1) > 0)
+          d,
     }..removeAll(_declined);
     _declined.addAll(covered);
     if (covered.isNotEmpty) deliveries?.declineDeliveries(covered);
@@ -452,6 +467,14 @@ class SharedPhotoConsentGate {
   Future<IntakePhoto?> _admit(IntakePhoto photo) async {
     final delivery = photo.shareDelivery;
     if (delivery != null && delivery > _latestSeen) _latestSeen = delivery;
+    // A share's files that gave no photo (IntakePhoto.refusedNote): nothing
+    // to ask about or send, so no question, even when none of the share's
+    // files gave a photo. Passed on to be said, after the share's photos,
+    // unless the share was answered Not now: that line says nothing was
+    // sent.
+    if (photo.refused != null) {
+      return delivery != null && _declined.contains(delivery) ? null : photo;
+    }
     IntakePhoto passed() {
       if (delivery != null) _admitted[delivery] = (_admitted[delivery] ?? 0) + 1;
       return photo;

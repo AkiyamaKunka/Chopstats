@@ -18,8 +18,10 @@ library;
 
 import 'dart:async';
 import 'dart:io' show Platform;
+import 'dart:ui' show Locale, PlatformDispatcher;
 
 import 'package:flutter/foundation.dart' show visibleForTesting;
+import 'package:flutter/widgets.dart' show WidgetsBinding;
 import 'package:path_provider/path_provider.dart' show getTemporaryDirectory;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:workmanager/workmanager.dart';
@@ -43,6 +45,9 @@ import '../services/report/notifications.dart';
 import '../l10n/app_localizations.dart';
 import 'coach_strings.dart';
 import 'format.dart' show mealDescription;
+import 'meal_reveal.dart' show revealForMeal;
+import '../services/settings/app_language_sync.dart'
+    show appLanguageAndroidPrefsKey, backgroundAppLanguage;
 import '../services/settings/app_settings.dart';
 import 'photo_pipeline.dart';
 import 'play_channel.dart' show retireWatchCameraRoll;
@@ -449,13 +454,18 @@ Future<void> recordBackgroundLaunch(
 ///
 /// [photoOffered] hears each photo handed to the pipeline, just before it
 /// is processed (RunInFlight.offered).
+///
+/// [showMealCard] posts a Logged meals card; a meal's card carries its
+/// meal ([payload], MealReveal.payload), so a tap on it goes to that meal
+/// (Android: meal_reveal.dart). A notice carries none.
 @visibleForTesting
 Future<bool> headlessBackfillWith({
   required AppSettings settings,
   required SharedPreferences prefs,
   required PhotoIntake intake,
   required Future<PhotoPipeline> Function() pipeline,
-  required Future<void> Function(String title, String body) showMealCard,
+  required Future<void> Function(String title, String body, {String? payload})
+      showMealCard,
   DateTime Function() clock = DateTime.now,
   Duration? budget,
   DateTime? startedAt,
@@ -556,7 +566,10 @@ Future<bool> headlessBackfillWith({
             o.kind == PhotoOutcomeKind.saved
                 ? l.mealCardAutoTitle
                 : l.mealCardLeftoverTitle,
-            mealCardBody(l, o));
+            mealCardBody(l, o),
+            // The meal logged, or the one the leftovers were deducted
+            // from: a tap on the card goes to it.
+            payload: revealForMeal(o)?.payload);
       }
       // The intake's safeFrontier is the ONLY persistable value: it is
       // createDate-based (the watermark's timebase), halts at transient
@@ -850,6 +863,10 @@ Future<bool> _runAfterLaunch({
     // WorkManager retry storm helps nobody (background.dart's rule).
     return true;
   }
+  // Android 13 and later: a language picked for the app in Android's
+  // settings since the app last ran is this run's (read only).
+  final languageAgreed =
+      takeAndroidLanguageForRun(settings, prefs, android: !ios);
   await recorder.stage(BackgroundRunStage.settings);
   // The Google Play build (core/app_channel.dart): the job of a GitHub
   // install it was installed over, run before the app was opened. No scan
@@ -888,7 +905,8 @@ Future<bool> _runAfterLaunch({
       settings: settings,
       notifier: notifier,
       openDao: createMealsDao,
-      ios: ios);
+      ios: ios,
+      languageAgreedAtStart: languageAgreed);
   final bool ok;
   try {
     ok = await headlessBackfillWith(
@@ -916,9 +934,9 @@ Future<bool> _runAfterLaunch({
           glassesCheckLog: recordGlassesCheckLocally,
           // iOS only: there dart:ui cannot decode (platform_decode.dart).
           deferUndecodable: ios),
-      showMealCard: (title, body) async {
+      showMealCard: (title, body, {payload}) async {
         await notifier.init(); // idempotent; deferred until a card exists
-        await notifier.showMealCard(title, body);
+        await notifier.showMealCard(title, body, payload: payload);
       },
       budget: ios ? iosBackgroundBudget : androidBackgroundBudget,
       startedAt: startedAt,
@@ -978,22 +996,71 @@ class _NoKeys implements SecureKeyStore {
 /// engine's load records the address's host for one it may not have read
 /// (AppSettings._noteServerKeyUnread), which this load, with no key store
 /// at all, must never do. The run's own copy when the store cannot be read.
+///
+/// The language is the run's (takeAndroidLanguageForRun) while the app
+/// and Android still agree on the language they agreed on when the run
+/// began ([agreedAtStart]): this engine's locales are still those of then,
+/// and after a round of the app's sync since, the stored language is the
+/// newer word.
 @visibleForTesting
 Future<AppSettings> summarySettingsNow(
-    SharedPreferences prefs, AppSettings loaded) async {
+    SharedPreferences prefs, AppSettings loaded,
+    {String? agreedAtStart}) async {
   try {
     await prefs.reload();
-    return await AppSettings.load(
+    final now = await AppSettings.load(
         prefs: prefs, keyStore: const _NoKeys(), readOnlyKeys: true);
+    if (agreedAtStart != null &&
+        prefs.getString(appLanguageAndroidPrefsKey) == agreedAtStart) {
+      takeAndroidLanguageForRun(now, prefs, android: true);
+    }
+    return now;
   } catch (_) {
     return loaded;
   }
 }
 
+/// Android 13 and later: a language picked for the app in Android's
+/// settings since the app last ran becomes [settings]' language for this
+/// run (app_language_sync.dart backgroundAppLanguage, from the language
+/// the app and Android last agreed on and this engine's first locale,
+/// which Android takes from that setting): the meal cards, the pause
+/// notice, the notification channels' names and the meal names the model
+/// is asked for. Only the app engine's sync writes the language, at the
+/// app's next launch: nothing is written here. Returns the agreement read
+/// (null: none, or not Android). [android] defaults to the platform;
+/// [locales] to this engine's. Never throws.
+@visibleForTesting
+String? takeAndroidLanguageForRun(AppSettings settings, SharedPreferences prefs,
+    {bool? android, List<Locale>? locales}) {
+  if (!(android ?? Platform.isAndroid)) return null;
+  try {
+    final agreed = prefs.getString(appLanguageAndroidPrefsKey);
+    final engine = locales ?? _engineLocales();
+    settings.takeLanguageForRun(backgroundAppLanguage(settings.appLanguage,
+        agreed: agreed, first: engine.isEmpty ? null : engine.first));
+    return agreed;
+  } catch (_) {
+    return null;
+  }
+}
+
+/// This engine's locales, as the engine was handed them when it started.
+List<Locale> _engineLocales() {
+  try {
+    return WidgetsBinding.instance.platformDispatcher.locales;
+  } catch (_) {
+    // No binding (an early isolate).
+    return PlatformDispatcher.instance.locales;
+  }
+}
+
 /// The run's re-arm of the summary card, on both platforms, with the
-/// settings as they are now ([summarySettingsNow]); on Android the week
-/// ahead and a card still pending past its slot (os_summary.dart). Never
-/// throws: the scan's work is saved either way, and the next open re-arms.
+/// settings as they are now ([summarySettingsNow]; on Android in the run's
+/// language while [languageAgreedAtStart], the agreement read when the run
+/// began, still holds); on Android the week ahead and a card still pending
+/// past its slot (os_summary.dart). Never throws: the scan's work is saved
+/// either way, and the next open re-arms.
 @visibleForTesting
 Future<void> rearmSummaryAfterRun({
   required SharedPreferences prefs,
@@ -1002,11 +1069,13 @@ Future<void> rearmSummaryAfterRun({
   required Future<MealsDao> Function() openDao,
   required bool ios,
   DateTime Function() now = DateTime.now,
+  String? languageAgreedAtStart,
 }) async {
   try {
     await armOsDailySummary(
         dao: await openDao(),
-        settings: await summarySettingsNow(prefs, settings),
+        settings: await summarySettingsNow(prefs, settings,
+            agreedAtStart: languageAgreedAtStart),
         notifier: notifier,
         now: now,
         android: !ios,
