@@ -226,6 +226,62 @@ void main() {
     await links.close();
   });
 
+  // LINK-1 (2026-11-22): app_links answers every initial-link read with the
+  // run's first link, for as long as the plugin lives, and each shell reads
+  // it in initState. The second shell that a bare link's route pushed
+  // (RCREL-V-1), or a shell built again, asked about that link once more.
+  // di.dart reads the plugin through launchLinkOnce (production_wiring_test
+  // pins the line).
+  for (final pushed in [true, false]) {
+    testWidgets(
+        'two shells in a row ask about the launch link once '
+        '(${pushed ? 'the second pushed over the first' : 'the first gone'})',
+        (tester) async {
+      final settings = FakeSettings(apiKey: 'old', watcherEnabled: false);
+      var pluginReads = 0;
+      // As app_links: the same link, to every read.
+      final initial = launchLinkOnce(() async {
+        pluginReads++;
+        return good;
+      });
+      var shellReads = 0;
+      final services = UiServices(
+        dao: FakeDao(),
+        analyzer: FakeAnalyzer(),
+        executor: FakeExecutor(),
+        settings: settings,
+        picker: FakePicker(),
+        requestPhotoPermission: () async => true,
+        initialSetupLink: () {
+          shellReads++;
+          return initial();
+        },
+      );
+      await tester.pumpWidget(MaterialApp(home: HomeShell(services: services)));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('setupLinkConfirm')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('setupLinkConfirm')));
+      await tester.pumpAndSettle();
+      expect(settings.serverSetups, [('claude', 'https://10.0.0.7', key)]);
+
+      if (pushed) {
+        unawaited(Navigator.of(tester.element(find.byType(HomeShell))).push(
+            MaterialPageRoute<void>(
+                builder: (_) => HomeShell(services: services))));
+      } else {
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester
+            .pumpWidget(MaterialApp(home: HomeShell(services: services)));
+      }
+      await tester.pumpAndSettle();
+      expect(shellReads, 2, reason: 'the second shell read it too');
+      expect(find.byKey(const Key('setupLinkConfirm')), findsNothing,
+          reason: 'the launch link is asked about once');
+      expect(settings.serverSetups, hasLength(1));
+      expect(pluginReads, 1);
+    });
+  }
+
   testWidgets('the same link opened again later asks again', (tester) async {
     final (services, settings, links) = rig();
     await tester.pumpWidget(MaterialApp(home: HomeShell(services: services)));

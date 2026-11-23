@@ -281,6 +281,41 @@ class RecentAsset {
   final DateTime createdAt;
 }
 
+/// [read] for the first call only: every later call answers null without
+/// calling [read], also while the first is still pending and after it
+/// failed (LINK-1, 2026-11-22). di.dart reads app_links' initial link
+/// through it for [UiServices.initialSetupLink], which each HomeShell
+/// reads in initState. app_links 7.2.1 answers that read with the same
+/// link for as long as the plugin lives, so a second shell or a rebuilt
+/// one asked about the run's first setup link again, as the second shell
+/// of RCREL-V-1 did.
+///
+/// That link need not be one that started the app. The plugin keeps the
+/// first link it is given, and nothing clears it: the launch link or,
+/// when there was none, the first one that came while the app ran, which
+/// its stream delivers too (Android AppLinksPlugin.handleIntent, for
+/// onNewIntent as well; iPhone AppLinksIosPlugin.handleLink, for every
+/// URL the app is opened with). The stream sends each link once: a
+/// listener that comes later is sent the initial link only if no link was
+/// sent yet. So the one read left is the first shell's, as the app starts.
+///
+/// The one the shells read is built once per app engine
+/// (AppServices.init). On Android the plugin lives as long: a new
+/// MainActivity starts a new engine, whose new plugin has seen only that
+/// activity's links. On the iPhone the plugin is the process's
+/// (AppLinks.shared), and the app's one scene has one engine.
+///
+/// A throw from [read] fails the first call's future, which HomeShell
+/// handles, instead of escaping the call.
+Future<Uri?> Function() launchLinkOnce(Future<Uri?> Function() read) {
+  var asked = false;
+  return () async {
+    if (asked) return null;
+    asked = true;
+    return read();
+  };
+}
+
 /// Everything a screen may need, built once at startup (di.dart) or from
 /// fakes in widget tests.
 class UiServices {
@@ -354,6 +389,9 @@ class UiServices {
 
   /// One-click setup links (bitewise://setup?...) — a warm-app stream and
   /// the cold-start link. Null in tests / when the platform has no plugin.
+  /// Only the first call gets the cold-start link: di.dart reads it
+  /// through [launchLinkOnce], so a second or rebuilt shell gets null
+  /// instead of that link's sheet again (LINK-1, 2026-11-22).
   final Stream<Uri>? setupLinks;
   final Future<Uri?> Function()? initialSetupLink;
 

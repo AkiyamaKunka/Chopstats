@@ -355,6 +355,8 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     // A photo shared into the app waits for the AI consent (5.1.2(i)); the
     // question needs this navigator, so the gate holds photos until now.
     widget.services.sharedPhotoConsent?.attach(_askShareConsent);
+    // The run's initial link goes to its first shell only: a second or
+    // rebuilt one gets null (UiServices.initialSetupLink, LINK-1).
     final initial = widget.services.initialSetupLink;
     if (initial != null) {
       unawaited(initial().then((uri) {
