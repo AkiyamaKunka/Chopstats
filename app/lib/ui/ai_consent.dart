@@ -340,9 +340,9 @@ class SharedPhotoConsentGate {
   /// none is.
   Completer<void> _attached = Completer<void>();
 
-  /// Completed by the next [attach], and by a [detach] that leaves the
-  /// question to a shell still attached: what a photo whose question could
-  /// not be shown waits for.
+  /// Completed by the next [attach], and by a [detach] of the asking shell
+  /// that leaves the question to one still attached: what a photo whose
+  /// question could not be shown waits for.
   Completer<void> _reattached = Completer<void>();
 
   /// The share intake's deliveries; null when [gate] was given none (then

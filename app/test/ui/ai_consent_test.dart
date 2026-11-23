@@ -1350,6 +1350,27 @@ void main() {
       expect(passed, isEmpty);
     });
 
+    test("an older shell's detach wakes nothing: a photo the latest shell "
+        'could not ask about is not asked through it again', () async {
+      gate
+        ..attach(first.ask)
+        ..attach(second.ask);
+      second.answer = null; // no dialog could be shown
+      input.add(_photo('p'));
+      await pumpEventQueue();
+      expect(asked, ['second']);
+      gate.detach(first.ask);
+      await pumpEventQueue();
+      expect(asked, ['second'],
+          reason: 'the shell still asking is the one that gave no answer');
+      expect(passed, isEmpty);
+      first.answer = true;
+      gate.attach(first.ask);
+      await pumpEventQueue();
+      expect(asked, ['second', 'first'], reason: 'asked at the next attach');
+      expect(passed, ['p']);
+    });
+
     test('the same shell attached twice: one detach leaves none of it',
         () async {
       gate
