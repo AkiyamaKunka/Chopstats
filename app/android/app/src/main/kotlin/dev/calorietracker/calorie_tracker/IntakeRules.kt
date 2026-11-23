@@ -28,33 +28,58 @@ internal object IntakeRules {
             categories != null && categories.size == 1 && Intent.CATEGORY_LAUNCHER in categories &&
             !hasData && type == null
 
-    /// Whether the activity's task is a launcher task, decided once per
-    /// activity record: what its last instance saved ([saved], null when
-    /// nothing was), else what the intent it has now says ([fromIntent],
-    /// isLauncherIntent). Android checks the intent the record was created
-    /// with, which never changes. An activity recreated after its process
-    /// died gets that intent again, but one relaunched in the same process
-    /// (theme colours, Bold text, grammatical gender) gets whatever intent
-    /// its last instance set: the replay rewrite's, with no action, or a
-    /// notification tap's.
-    fun launcherTask(saved: Boolean?, fromIntent: Boolean): Boolean = saved ?: fromIntent
+    /// The scheme of the referrer Activity.getReferrer() builds from the
+    /// caller Android recorded: android-app://<package>.
+    const val REFERRER_SCHEME = "android-app"
+
+    /// The package Android recorded as the caller of a start, from
+    /// Activity.getReferrer() ([scheme] and [host] of
+    /// android-app://<package>), or null when it is not known: no referrer,
+    /// or another scheme; [claimed], a referrer the sender wrote into an
+    /// intent itself (EXTRA_REFERRER or EXTRA_REFERRER_NAME on the start's
+    /// intent or the activity's own), which getReferrer() reports in place
+    /// of Android's record; or a launch from history ([flags],
+    /// FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY): a task Android restores from
+    /// Recents is started under the caller that first started it, while
+    /// Android judges the one starting it now.
+    fun callerPackage(scheme: String?, host: String?, claimed: Boolean, flags: Int): String? =
+        if (claimed || (flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0 ||
+            scheme != REFERRER_SCHEME
+        ) null else host?.takeIf { it.isNotEmpty() }
+
+    /// Whether a start came from the home screen as Android 14 and later
+    /// count one on a Back at an idle root: the launcher's own intent
+    /// ([launcherIntent], isLauncherIntent; ActivityRecord.isMainIntent)
+    /// sent by the home app (LAUNCH_SOURCE_TYPE_HOME: the caller's process
+    /// is the home process), which here means the caller Android recorded
+    /// ([referrerPackage], callerPackage) is the default home app's package
+    /// ([homePackage], what the home intent resolves to). Play's Open
+    /// button, the package installer's, `am start` and any other app send
+    /// the same intent under their own package. No home app is known when
+    /// nothing resolved or the system's chooser stands in for one
+    /// (ResolverActivity, package "android": several home apps and no
+    /// default). An unknown caller or home is no home start, so the answer
+    /// errs toward keeping Flutter's back callback (keepsBackCallbackAtRoot).
+    fun homeStart(launcherIntent: Boolean, referrerPackage: String?, homePackage: String?): Boolean =
+        launcherIntent && referrerPackage != null && homePackage != null &&
+            homePackage != "android" && referrerPackage == homePackage
 
     /// Whether Flutter's back callback stays registered at the root route
-    /// on Android [sdk], for a task the launcher's own intent created
-    /// ([launcherTask]) or any other (MainActivity.setFrameworkHandlesBack).
-    /// With enableOnBackInvokedCallback, Flutter hands Back at the root to
-    /// Android. Android 14 and later move the task to the back only when
-    /// the home screen started it with the launcher intent, and finish any
-    /// other root (ActivityClientController.shouldMoveTaskToBack): a task a
-    /// share, the setup link or a notification created, its engine with
-    /// it. Android 13 moves every task whose root is a launcher activity
-    /// to the back (onBackPressedOnTaskRoot), and Android 12 and lower have
-    /// no back callback: Back reaches Flutter through onBackPressed. Where
-    /// the callback stays, as on Android 12 and lower, Back at the root
-    /// goes through Flutter's SystemNavigator.pop to
-    /// MainActivity.popSystemNavigator, which moves the task to the back.
-    fun keepsBackCallbackAtRoot(sdk: Int, launcherTask: Boolean): Boolean =
-        sdk >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE && !launcherTask
+    /// on Android [sdk] (MainActivity.setFrameworkHandlesBack): from
+    /// Android 14, unless Android moves the task to the back on a Back at
+    /// an idle root ([systemMovesTaskBack], HomeStarts). With
+    /// enableOnBackInvokedCallback, Flutter hands Back at the root to
+    /// Android, and Android 14 and later finish any root they do not move
+    /// back (ActivityClientController.shouldMoveTaskToBack), its engine
+    /// with it. Android 13 moves every task whose root is a launcher
+    /// activity to the back (onBackPressedOnTaskRoot), and Android 12 and
+    /// lower have no back callback: Back reaches Flutter through
+    /// onBackPressed. Where the callback stays, as on Android 12 and lower,
+    /// Back at the root goes through Flutter's SystemNavigator.pop to
+    /// MainActivity.popSystemNavigator, which moves the task to the back,
+    /// without Android's back-to-home preview.
+    fun keepsBackCallbackAtRoot(sdk: Int, systemMovesTaskBack: Boolean): Boolean =
+        sdk >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE && !systemMovesTaskBack
 
     /// Whether the app sets the navigation bar's colour itself on Android
     /// [sdk] (MainActivity.colorNavigationBar): from Android 15 (API 35),
@@ -295,6 +320,57 @@ internal object IntakeRules {
     }
 }
 
+/// Whether the home screen made MainActivity's first start, the one that
+/// created it, and its latest (IntakeRules.homeStart). On a Back at an
+/// idle root, Android 14 and the first release of Android 15 judge the
+/// first: the activity keeps the launch source it was created with.
+/// Android 15 QPR1 and later, and Android 16, judge the latest: each start
+/// into a task sets the launch source of the task's top activity to its
+/// own (ActivityStarter.startActivityInner), from the home screen or not,
+/// the app's own starts of other activities in its task included, and so
+/// does a start of the task from Recents (ActivityTaskSupervisor
+/// .startActivityFromRecents), by whoever asks for it: the app that shows
+/// Recents, or the system's window shell (SystemUI). Both rules run on
+/// API 35, so the SDK level never picks one: the answer holds for both.
+internal data class HomeStarts(val first: Boolean, val latest: Boolean) {
+    /// After a start Android delivers to the running activity
+    /// (onNewIntent): [home] whether it was a home start; [covered] whether
+    /// another activity of the task (a picker, the share sheet, a
+    /// permission dialog) sat above this one when it came. Android then
+    /// sets that activity's launch source, the start closes it, and this
+    /// one keeps its earlier source. The first stays. The latest is a home
+    /// start only when [home] and nothing covered the activity; a covered
+    /// start never makes it one.
+    fun after(home: Boolean, covered: Boolean): HomeStarts = copy(latest = home && !covered)
+
+    /// After a start into the task that Android does not deliver to this
+    /// activity and that did not come from the home screen: the app
+    /// opening another activity in its task above this one (the photo
+    /// picker, a document picker, a permission dialog, the share sheet, a
+    /// Settings page), which this one is the task's top for when it
+    /// starts, so it takes the app's own launch source; or the window
+    /// shell launching the task into split screen or a desktop window
+    /// (SystemUI's). The first stays; the latest is no home start until
+    /// the next home start Android delivers (after).
+    fun afterOtherStart(): HomeStarts = copy(latest = false)
+
+    /// Whether Android 14 and later move the task to the back on a Back at
+    /// an idle root (ActivityClientController.shouldMoveTaskToBack): where
+    /// the home screen made both the first start and the latest, both
+    /// rules move it; any other root counts as one Android may finish.
+    val systemMovesTaskBack: Boolean get() = first && latest
+
+    companion object {
+        /// Decided once per activity record: what its last instance saved
+        /// ([first], [latest], null when nothing was), else the answer for
+        /// the start that created it ([created], asked only then), which
+        /// is its latest too.
+        fun restore(first: Boolean?, latest: Boolean?, created: () -> Boolean): HomeStarts =
+            if (first != null && latest != null) HomeStarts(first, latest)
+            else created().let { HomeStarts(it, it) }
+    }
+}
+
 /// One method call at a time, answered exactly once: MethodChannel.Result
 /// throws on a second answer, and a call never answered leaves its Dart
 /// caller waiting for good (and, here, every later call busy). [open]
@@ -384,11 +460,11 @@ internal class LateSaveResult<V : Any> {
 /// a share waits here until Dart says it listens ("shareIntakeReady"),
 /// then goes to the plugin once. An activity that goes before then (a
 /// swipe from Recents during the cold start; a Back Android answers by
-/// finishing it, which Android 14 and later still do in a task the
-/// launcher intent started from somewhere other than the home screen:
-/// MainActivity.setFrameworkHandlesBack) takes what it holds with it;
-/// those copies stay in shared_photos, where share intake's sweep takes
-/// them (share_intake.dart, strandedRecheck). Main thread only.
+/// finishing it, which Android 14 and later still may after a start the
+/// activity cannot see: MainActivity.setFrameworkHandlesBack) takes what
+/// it holds with it; those copies stay in shared_photos, where share
+/// intake's sweep takes them (share_intake.dart, strandedRecheck). Main
+/// thread only.
 internal class ShareHold<T> {
     private val held = ArrayList<T>()
     private var listening = false

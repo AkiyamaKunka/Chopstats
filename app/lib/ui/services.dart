@@ -326,9 +326,9 @@ class UiServices {
   /// Android: true while a shared photo is not settled yet
   /// (ShareIntake.photosPending); the shell's Back at the root then moves
   /// the app to the back in every task instead of leaving that Back to
-  /// Android, which on Android 14 and later finishes a task the launcher
-  /// intent started from somewhere other than the home screen
-  /// (SharedPhotosBackGuard). Null on iPhone and in most tests.
+  /// Android, which on Android 15 QPR1 and later can still finish the
+  /// activity after a start MainActivity cannot see (SharedPhotosBackGuard).
+  /// Null on iPhone and in most tests.
   final ValueListenable<bool>? sharedPhotosPending;
 
   /// Android: keeps the app running while an analysis the user started is
