@@ -408,10 +408,12 @@ class MainActivity : FlutterActivity() {
     /// size (over MAX_SHARE_BYTES) or because it could not be read goes on
     /// as a refused item after the copies, of type REFUSED_SHARE_TYPE: a
     /// file:// URI that names no file (IntakeRules.refusedSharePath), which
-    /// the plugin hands Dart as its path. One left out for its type
-    /// carries its name's extension and nothing else of the name, so share
-    /// intake names an image format Android has no type for (a CR3 among
-    /// several) as it names a copy's (PR81-QA-3). Share intake says how
+    /// the plugin hands Dart as its path. One left out once its name is
+    /// known, for its type, its size or a failed copy, carries its name's
+    /// extension and nothing else of the name, so share intake names an
+    /// image format it does not read as it names a copy's: a CR3 among
+    /// several, which Android has no type for (PR81-QA-3), and a RAW file
+    /// over 25 MB (PR81-QA-4). A video carries none. Share intake says how
     /// many were skipped and why, after the share's photos (they used to
     /// go without a word); a share whose every item was refused reaches
     /// the plugin with those alone, and asks nothing. The app's own
@@ -445,6 +447,9 @@ class MainActivity : FlutterActivity() {
         } catch (e: Exception) {
         }
         streams.forEachIndexed { i, uri ->
+            // The item's name once its provider has given it, for a
+            // failure after that (the catch below).
+            var named: String? = null
             try {
                 if (uri == null) {
                     refused.add(IntakeRules.refusedSharePath(IntakeRules.ShareRefusal.UNREADABLE))
@@ -456,6 +461,7 @@ class MainActivity : FlutterActivity() {
                     refused.add(IntakeRules.refusedSharePath(IntakeRules.ShareRefusal.UNREADABLE))
                     return@forEachIndexed
                 }
+                named = name
                 // The type the plugin gives it: the share's own, or for
                 // several, each one's listed type, else its name's, else
                 // its provider's. A name with no extension Android knows
@@ -476,12 +482,21 @@ class MainActivity : FlutterActivity() {
                     refused.add(IntakeRules.refusedSharePath(IntakeRules.typeRefusal(itemType), name))
                     return@forEachIndexed
                 }
+                // Over MAX_SHARE_BYTES, or a copy that failed: the copy
+                // has stopped and is gone (copyShare). The name's
+                // extension goes too, so an image format share intake does
+                // not read is named, as its copy would be, and not said to
+                // be over 25 MB or unreadable: Chopstats reads no file of
+                // that format, of any size (device QA 2026-11-23,
+                // PR81-QA-4). It is the name its provider shows, as for the
+                // type refusal above.
                 val (copy, copied) = copyShare(uri, copyName(uri, name, itemType))
                 if (copy == null) {
                     refused.add(
                         IntakeRules.refusedSharePath(
                             if (copied == Copied.TOO_BIG) IntakeRules.ShareRefusal.TOO_BIG
                             else IntakeRules.ShareRefusal.UNREADABLE,
+                            name,
                         ),
                     )
                     return@forEachIndexed
@@ -489,8 +504,9 @@ class MainActivity : FlutterActivity() {
                 copies.add(Uri.fromFile(copy))
                 copyTypes.add(itemType)
             } catch (e: Exception) {
-                // This item only: the others still go.
-                refused.add(IntakeRules.refusedSharePath(IntakeRules.ShareRefusal.UNREADABLE))
+                // This item only: the others still go. With its name's
+                // extension once that is known, as for a failed copy.
+                refused.add(IntakeRules.refusedSharePath(IntakeRules.ShareRefusal.UNREADABLE, named))
             }
         }
         if (copies.isEmpty() && refused.isEmpty()) return emptyShare(intent)

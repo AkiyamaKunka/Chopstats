@@ -710,19 +710,83 @@ class IntakeRulesTest {
         assertEquals(4, IntakeRules.MAX_REFUSED_EXTENSION)
         assertEquals("abcd", IntakeRules.refusedExtension("x.ABCD"))
         assertNull(IntakeRules.refusedExtension("x.abcde"))
-        // Only a refusal for the item's type carries one.
-        for (refusal in listOf(
-            IntakeRules.ShareRefusal.VIDEO,
-            IntakeRules.ShareRefusal.TOO_BIG,
-            IntakeRules.ShareRefusal.UNREADABLE,
+        // A video carries none: its line says it is a video. (A refusal
+        // for its size or a failed copy carries one too since PR81-QA-4:
+        // the next tests.)
+        assertEquals(
+            "/chopstats-refused/video",
+            IntakeRules.refusedSharePath(IntakeRules.ShareRefusal.VIDEO, "IMG_0001.CR3"),
+        )
+        assertEquals("/chopstats-refused/file_type", IntakeRules.refusedSharePath(fileType))
+    }
+
+    // --- An item over the share cap, or whose copy failed, carries its
+    // name's extension too, so share intake can name an image format it
+    // does not read: a RAW file over 25 MB shared alone was said to be
+    // over 25 MB, although no smaller one would be read (device QA
+    // 2026-11-23, PR81-QA-4).
+
+    private val tooBig = IntakeRules.ShareRefusal.TOO_BIG
+    private val unreadable = IntakeRules.ShareRefusal.UNREADABLE
+
+    @Test
+    fun anItemOverTheCapOrUnreadableCarriesItsNamesExtension() {
+        assertEquals("/chopstats-refused/too_big/cr3", IntakeRules.refusedSharePath(tooBig, "IMG_0001.CR3"))
+        assertEquals("/chopstats-refused/too_big/dng", IntakeRules.refusedSharePath(tooBig, "PXL_20261123.RAW-01.dng"))
+        assertEquals("/chopstats-refused/too_big/nef", IntakeRules.refusedSharePath(tooBig, "DSC_0001.NEF"))
+        assertEquals("/chopstats-refused/unreadable/cr3", IntakeRules.refusedSharePath(unreadable, "IMG_0001.CR3"))
+        assertEquals("/chopstats-refused/unreadable/arw", IntakeRules.refusedSharePath(unreadable, "DSC00001.ARW"))
+        // Any other: share intake names only an image format it does not
+        // read, so a JPEG over 25 MB is still over 25 MB there.
+        assertEquals("/chopstats-refused/too_big/jpg", IntakeRules.refusedSharePath(tooBig, "IMG_0001.JPG"))
+        assertEquals("/chopstats-refused/unreadable/jpg", IntakeRules.refusedSharePath(unreadable, "IMG_0001.jpg"))
+        // Lower-cased as the root locale does it, whatever the phone's.
+        val phone = Locale.getDefault()
+        try {
+            Locale.setDefault(Locale.forLanguageTag("tr-TR"))
+            assertEquals("/chopstats-refused/too_big/ico", IntakeRules.refusedSharePath(tooBig, "FAVICON.ICO"))
+            assertEquals("/chopstats-refused/unreadable/ico", IntakeRules.refusedSharePath(unreadable, "FAVICON.ICO"))
+        } finally {
+            Locale.setDefault(phone)
+        }
+        // Still paths no file has, outside the share folder.
+        for (path in listOf(
+            IntakeRules.refusedSharePath(tooBig, "IMG_0001.CR3"),
+            IntakeRules.refusedSharePath(unreadable, "IMG_0001.CR3"),
         )) {
+            assertTrue(path, path.startsWith(IntakeRules.REFUSED_SHARE_PATH + "/"))
+            assertFalse(path, File(path).exists())
+            assertFalse(path, path.contains("shared_photos"))
+        }
+    }
+
+    @Test
+    fun everyRefusalButAVideosCarriesTheSameExtensionAndNothingElse() {
+        for (name in listOf(
+            "IMG_0001.CR3", "B0000001.3FR", "a.b.AVIF", ".cr3", "notes.TXT", "x.ABCD",
+            null, "", "IMG_1731500000000", "IMG.", ".", "Dinner with J.Smith", "Lunch with.Sarah",
+            "photo.jpeg2000", "a.cr 3", "a.c-3", "a.c_3", "a.cr3 ", "a.étc", "a.K", "a.ＣＲ３", "x.abcde",
+        )) {
+            // Exactly refusedExtension's output, or the reason alone.
+            val ext = IntakeRules.refusedExtension(name)
+            for (refusal in listOf(fileType, tooBig, unreadable)) {
+                val reason = "/chopstats-refused/${refusal.token}"
+                assertEquals(
+                    "${refusal.name} $name",
+                    if (ext == null) reason else "$reason/$ext",
+                    IntakeRules.refusedSharePath(refusal, name),
+                )
+            }
             assertEquals(
-                refusal.name,
-                "/chopstats-refused/${refusal.token}",
-                IntakeRules.refusedSharePath(refusal, "IMG_0001.CR3"),
+                "$name",
+                "/chopstats-refused/video",
+                IntakeRules.refusedSharePath(IntakeRules.ShareRefusal.VIDEO, name),
             )
         }
-        assertEquals("/chopstats-refused/file_type", IntakeRules.refusedSharePath(fileType))
+        // Without a name (no stream, or no name for it): the reason alone.
+        for (refusal in IntakeRules.ShareRefusal.values()) {
+            assertEquals("/chopstats-refused/${refusal.token}", IntakeRules.refusedSharePath(refusal))
+        }
     }
 
     // --- A shared image whose name has no extension Android knows is

@@ -2108,10 +2108,13 @@ void main() {
   // opening it, and share intake reads it as the reason, never as a
   // file: it says how many were skipped and why, after the share's
   // photos, and asks nothing for a share of refused items alone. One
-  // refused for its type carries its name's extension and nothing else of
-  // the name (/chopstats-refused/file_type/cr3), so share intake names an
-  // image format Android has no type for, a CR3 among several, as it
-  // names a copy (device QA 2026-11-22, PR81-QA-3).
+  // refused once its name is known, for its type, its size or a failed
+  // copy, carries its name's extension and nothing else of the name
+  // (/chopstats-refused/file_type/cr3, /chopstats-refused/too_big/cr3), so
+  // share intake names an image format it does not read as it names a
+  // copy: a CR3 among several, which Android has no type for (device QA
+  // 2026-11-22, PR81-QA-3), and a RAW file over 25 MB, which was said to be
+  // over 25 MB (device QA 2026-11-23, PR81-QA-4).
   test('a shared item that gives no copy goes on as a refused item, which '
       'the plugin hands Dart unread', () {
     final code = _kotlinCode(_mainActivity());
@@ -2121,23 +2124,34 @@ void main() {
           'IntakeRules.ShareRefusal.UNREADABLE)) return@forEachIndexed }',
       'val name = shareName(uri) if (name == null) { refused.add('
           'IntakeRules.refusedSharePath(IntakeRules.ShareRefusal.UNREADABLE)) '
-          'return@forEachIndexed }',
+          'return@forEachIndexed } named = name val itemType = ',
       'if (itemType?.startsWith("image") != true) { refused.add('
           'IntakeRules.refusedSharePath(IntakeRules.typeRefusal(itemType), '
           'name)) return@forEachIndexed }',
       'val (copy, copied) = copyShare(uri, copyName(uri, name, itemType)) '
           'if (copy == null) { refused.add( IntakeRules.refusedSharePath( if '
           '(copied == Copied.TOO_BIG) IntakeRules.ShareRefusal.TOO_BIG else '
-          'IntakeRules.ShareRefusal.UNREADABLE, ), ) return@forEachIndexed }',
+          'IntakeRules.ShareRefusal.UNREADABLE, name, ), ) '
+          'return@forEachIndexed }',
       '} catch (e: Exception) { refused.add(IntakeRules.refusedSharePath('
-          'IntakeRules.ShareRefusal.UNREADABLE)) } }',
+          'IntakeRules.ShareRefusal.UNREADABLE, named)) } }',
     ]) {
       expect(safe, contains(refused));
     }
+    // A failure once the name is known carries the name its provider
+    // showed (shareName), set once, before anything else can fail; never
+    // the copy's name, which may end in an extension the sender's name
+    // did not have (copyName).
+    expect(
+        safe,
+        contains('streams.forEachIndexed { i, uri -> var named: String? = '
+            'null try { if (uri == null) {'));
+    expect(RegExp(r'\bnamed = ').allMatches(safe), hasLength(1));
     // A refused item's path is only ever IntakeRules.refusedSharePath's
-    // (the five calls above, the type refusal's alone given the name), so
-    // nothing of a sender's name travels but the extension its JVM tests
-    // allow.
+    // (the five calls above: the two before the name is known given none,
+    // the type refusal and a failed copy given the name, the catch the
+    // name once known), so nothing of a sender's name travels but the
+    // extension its JVM tests allow.
     expect(safe, contains('val refused = ArrayList<String>()'));
     final adds = RegExp(r'refused\.add\(').allMatches(safe).length;
     expect(adds, 5);
@@ -2170,13 +2184,16 @@ void main() {
         contains('const val REFUSED_SHARE_TYPE = "$androidRefusedShareType"'));
     expect(rules,
         contains('const val REFUSED_SHARE_PATH = "$androidRefusedSharePath"'));
+    // Every reason but a video's carries the extension, decided for each
+    // reason by name (a reason added later must say whether it does).
     expect(
         rules,
         contains('fun refusedSharePath(refusal: ShareRefusal, name: String? = '
             'null): String { val path = "\$REFUSED_SHARE_PATH/\${refusal.token}" '
-            'val ext = if (refusal == ShareRefusal.FILE_TYPE) '
-            'refusedExtension(name) else null return if (ext == null) path '
-            'else "\$path/\$ext" }'));
+            'val ext = when (refusal) { ShareRefusal.FILE_TYPE, '
+            'ShareRefusal.TOO_BIG, ShareRefusal.UNREADABLE -> '
+            'refusedExtension(name) ShareRefusal.VIDEO -> null } return if '
+            '(ext == null) path else "\$path/\$ext" }'));
     final tokens = RegExp(r'enum class ShareRefusal\(val token: String\) '
             r'\{([^}]*)\}')
         .firstMatch(rules)
@@ -2204,6 +2221,8 @@ void main() {
       'REFUSED_SHARE_TYPE',
       'anItemRefusedForItsTypeCarriesItsNamesExtension',
       'nothingElseOfTheNameTravels',
+      'anItemOverTheCapOrUnreadableCarriesItsNamesExtension',
+      'everyRefusalButAVideosCarriesTheSameExtensionAndNothingElse',
       'IntakeRules.refusedExtension(',
     ]);
     // receive_sharing_intent, as the app builds it: a several-item share

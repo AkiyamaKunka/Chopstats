@@ -232,7 +232,7 @@ internal object IntakeRules {
     /// of them fits.
     const val MAX_REFUSED_EXTENSION = 4
 
-    /// The extension an item refused for its type carries to share intake
+    /// The extension a refused item carries to share intake
     /// (refusedSharePath): the part of its [name] after the last dot,
     /// lower-cased, when that is 1 to MAX_REFUSED_EXTENSION letters a-z
     /// (either case) or digits: "cr3" for "IMG_0001.CR3". Null for any
@@ -252,22 +252,33 @@ internal object IntakeRules {
 
     /// The path a refused item reaches the plugin with: a file:// URI of
     /// it names no file, and the plugin hands a file:// URI's path on as it
-    /// is, without opening it. An item refused for its type (FILE_TYPE)
+    /// is, without opening it. An item refused for its type (FILE_TYPE),
+    /// for its size (TOO_BIG) or because it could not be read (UNREADABLE)
     /// whose [name] gives an extension (refusedExtension) carries it as a
-    /// last part: /chopstats-refused/file_type/cr3. Android has no type for
-    /// a CR3, 3FR, RWL, SR2, SRF or X3F (they are not in its MIME table), so
-    /// in a share of several with no listed types such an image is refused
-    /// for its type before any copy, and the line called it a kind of file
-    /// Chopstats can't read, where a copy of it is named ("Chopstats can't
-    /// read CR3 photos yet"). Share intake names the type from the
-    /// extension as it does from a copy's name, only for an image format
-    /// it does not read (share_intake.dart sharedPhotoTypeOf), and nothing
-    /// is copied or read for it (device QA 2026-11-22, PR81-QA-3). Any
-    /// other refusal, and a name with no such extension, gives the reason
-    /// alone, as before.
+    /// last part: /chopstats-refused/file_type/cr3. Share intake names the
+    /// type from the extension as it does from a copy's name, only for an
+    /// image format it does not read (share_intake.dart sharedPhotoTypeOf),
+    /// and nothing more is copied or read for it.
+    /// - FILE_TYPE: Android has no type for a CR3, 3FR, RWL, SR2, SRF or
+    ///   X3F (they are not in its MIME table), so in a share of several
+    ///   with no listed types such an image is refused for its type before
+    ///   any copy, and the line called it a kind of file Chopstats can't
+    ///   read, where a copy of it is named ("Chopstats can't read CR3
+    ///   photos yet") (device QA 2026-11-22, PR81-QA-3).
+    /// - TOO_BIG and UNREADABLE: an image format share intake does not
+    ///   read is copied when it is shared alone, or when it is typed as an
+    ///   image among several (a DNG, NEF or AVIF). A copy of it over 25 MB,
+    ///   or one that failed, was said to be over 25 MB or unreadable,
+    ///   although Chopstats reads no file of that format, of any size. RAW
+    ///   files are often over 25 MB (device QA 2026-11-23, PR81-QA-4).
+    /// A video carries none: its line says it is a video. A name with no
+    /// such extension gives the reason alone, as before.
     fun refusedSharePath(refusal: ShareRefusal, name: String? = null): String {
         val path = "$REFUSED_SHARE_PATH/${refusal.token}"
-        val ext = if (refusal == ShareRefusal.FILE_TYPE) refusedExtension(name) else null
+        val ext = when (refusal) {
+            ShareRefusal.FILE_TYPE, ShareRefusal.TOO_BIG, ShareRefusal.UNREADABLE -> refusedExtension(name)
+            ShareRefusal.VIDEO -> null
+        }
         return if (ext == null) path else "$path/$ext"
     }
 
