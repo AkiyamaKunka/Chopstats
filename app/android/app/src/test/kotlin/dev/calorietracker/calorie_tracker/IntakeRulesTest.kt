@@ -489,9 +489,10 @@ class IntakeRulesTest {
     }
 
     // --- Flutter's engine flags come from the launch intent in a debug or
-    // profile build only, where `flutter run` passes them; in a release
-    // build any app that starts MainActivity could pick the renderer
-    // (EXTRAS-1).
+    // profile build only. A release build takes none, the software-rendering
+    // one the engine reads itself included, or any app that starts
+    // MainActivity could pick the renderer; `flutter run --release` loses
+    // its engine options with them (EXTRAS-1, EXTRAS-1 review).
 
     @Test
     fun onlyDebugAndProfileBuildsTakeEngineFlagsFromTheLaunchIntent() {

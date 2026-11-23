@@ -139,6 +139,10 @@ class MainActivity : FlutterActivity() {
         } else {
             intent?.let { setIntent(withSafeShares(it)) }
         }
+        // As super.onCreate attaches the engine to the activity, the engine
+        // reads one engine flag from the intent itself: a release build
+        // takes it off first (dropSoftwareRenderingFlag).
+        dropSoftwareRenderingFlag()
         super.onCreate(savedInstanceState)
         applyBackCallback()
         pendingSaveSource = cachedFile(savedInstanceState?.getString(STATE_SAVE_SOURCE))
@@ -564,12 +568,20 @@ class MainActivity : FlutterActivity() {
     /// a dart_entrypoint naming another function left the launch screen up
     /// for good, Dart never running; and with
     /// destroy_engine_with_activity=false the engine outlived its activity,
-    /// so the next start ran a second one beside it. Sent to the running
-    /// activity (onNewIntent), the same extras changed nothing. The app
-    /// uses no cached engine, engine group, transparent window, other
-    /// entry point or other route: each getter below gives what a launch
-    /// with no extras gets, whatever the intent carries. The intent itself
-    /// stays as onCreate sets it, for the plugins that read it.
+    /// so the next start ran a second one beside it. A running activity
+    /// took them too, from a start onNewIntent delivered, once a plugin
+    /// made that start's intent the activity's own, as
+    /// flutter_local_notifications does for a notification tap's action
+    /// (SELECT_NOTIFICATION): Flutter reads several of these getters again
+    /// later (FlutterActivityAndFragmentDelegate.onSaveInstanceState and
+    /// onDetach), and destroy_engine_with_activity=false sent that way left
+    /// the engine running past the activity's destroy as well (EXTRAS-1
+    /// review, 2026-11-23). The app uses no cached engine, engine group,
+    /// transparent window, other entry point or other route: each getter
+    /// below gives what a launch with no extras gets, whatever the intent
+    /// carries, then or later. The intent itself stays as onCreate sets it,
+    /// for the plugins that read it, less the one engine flag the engine
+    /// reads from it itself in a release build (dropSoftwareRenderingFlag).
 
     /// No cached engine: the activity makes its own at every create.
     override fun getCachedEngineId(): String? = null
@@ -609,11 +621,16 @@ class MainActivity : FlutterActivity() {
     override fun getAppBundlePath(): String = FlutterInjector.instance().flutterLoader().findAppBundlePath()
 
     /// Flutter's engine flags from the intent (FlutterShellArgs.fromIntent)
-    /// in a debug or profile build only, where `flutter run` passes its
-    /// options that way; none in a release build
-    /// (IntakeRules.takesEngineFlagsFromIntent). FlutterShellArgs is
-    /// deprecated: Flutter means to stop reading engine flags from the
-    /// intent (flutter/flutter#180686), and this override goes when it has.
+    /// in a debug or profile build only; none in a release build
+    /// (IntakeRules.takesEngineFlagsFromIntent, which says why). So the
+    /// engine options `flutter run --release` passes that way, such as
+    /// --no-enable-impeller and --enable-hcpp, do nothing on Android: a
+    /// release build takes them from the manifest's meta-data only
+    /// (io.flutter.embedding.android.EnableImpeller, EnableHcpp and the
+    /// rest of FlutterEngineFlags), which no other app can set (EXTRAS-1
+    /// review, 2026-11-23). FlutterShellArgs is deprecated: Flutter means
+    /// to stop reading engine flags from the intent
+    /// (flutter/flutter#180686), and this override goes when it has.
     @Suppress("DEPRECATION")
     override fun getFlutterShellArgs(): io.flutter.embedding.engine.FlutterShellArgs =
         if (IntakeRules.takesEngineFlagsFromIntent(io.flutter.BuildConfig.RELEASE)) {
@@ -621,6 +638,26 @@ class MainActivity : FlutterActivity() {
         } else {
             io.flutter.embedding.engine.FlutterShellArgs(emptyArray<String>())
         }
+
+    /// In a release build, Flutter's enable-software-rendering extra taken
+    /// off the activity's intent before super.onCreate attaches the engine
+    /// to the activity (onCreate). The engine reads that one engine flag
+    /// from the intent itself, past getFlutterShellArgs and in every build
+    /// (FlutterEngineConnectionRegistry.attachToActivityInternal): set, it
+    /// tells the platform views controller that the engine renders in
+    /// software, so a platform view in texture-layer mode gets no texture
+    /// to draw into, while the engine itself renders as before
+    /// (getFlutterShellArgs gives it no flags). The app has no platform
+    /// view yet. Without the extra the engine reads the manifest, which
+    /// sets no EnableSoftwareRendering (EXTRAS-1 review, 2026-11-23).
+    /// Debug and profile builds keep it, as they keep the engine flag
+    /// itself (IntakeRules.takesEngineFlagsFromIntent), for `flutter run
+    /// --enable-software-rendering`.
+    @Suppress("DEPRECATION")
+    private fun dropSoftwareRenderingFlag() {
+        if (IntakeRules.takesEngineFlagsFromIntent(io.flutter.BuildConfig.RELEASE)) return
+        intent?.removeExtra(io.flutter.embedding.engine.FlutterShellArgs.ARG_KEY_ENABLE_SOFTWARE_RENDERING)
+    }
 
     /// The phone's 12/24-hour switch (Settings.System.TIME_12_24). The
     /// Flutter embedding sends it to Dart (alwaysUse24HourFormat) when its

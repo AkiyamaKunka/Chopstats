@@ -91,14 +91,25 @@ internal object IntakeRules {
     fun colorsNavigationBar(sdk: Int): Boolean = sdk >= Build.VERSION_CODES.VANILLA_ICE_CREAM
 
     /// Whether MainActivity's engine takes Flutter's engine flags from the
-    /// launch intent (MainActivity.getFlutterShellArgs; EXTRAS-1,
-    /// 2026-11-22): in a debug or profile build, where `flutter run` passes
-    /// its options as extras (start-paused, trace-startup, enable-impeller
-    /// and the rest), and never in a release build ([releaseBuild]). There
-    /// Flutter drops most of them itself (FlutterLoader, allowedInRelease),
-    /// but not enable-impeller or enable-hcpp-and-surface-control, so any
-    /// app that started the exported activity cold could pick the renderer
-    /// and the platform-view mode for that whole run of the process.
+    /// launch intent (MainActivity.getFlutterShellArgs, and the one flag
+    /// the engine reads from the intent itself,
+    /// MainActivity.dropSoftwareRenderingFlag; EXTRAS-1, 2026-11-22): in a
+    /// debug or profile build, for `flutter run`'s options (start-paused,
+    /// enable-software-rendering and the rest), and never in a release
+    /// build ([releaseBuild]). There Flutter drops most of them itself
+    /// (FlutterLoader), but not those FlutterEngineFlags allows in a
+    /// release build (enable-impeller, enable-dart-profiling,
+    /// profile-startup, trace-startup), nor those FlutterEngineFlags does
+    /// not know as FlutterShellArgs writes them
+    /// (enable-hcpp-and-surface-control with its "=true" or "=false",
+    /// cache-sksl), which FlutterLoader passes on as they are. So any app
+    /// that started the exported activity cold could pick the renderer and
+    /// the platform-view mode for that whole run of the process. `flutter run
+    /// --release` passes some of these too (--no-enable-impeller,
+    /// --enable-hcpp), and a release build ignores them as well: it takes
+    /// them from the manifest's meta-data only
+    /// (io.flutter.embedding.android.EnableImpeller, EnableHcpp), which no
+    /// other app can set (EXTRAS-1 review, 2026-11-23).
     fun takesEngineFlagsFromIntent(releaseBuild: Boolean): Boolean = !releaseBuild
 
     /// share_plus's FileProvider authority after the package name (its

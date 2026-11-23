@@ -1280,9 +1280,15 @@ void main() {
   // background_mode=transparent turned the window see-through,
   // dart_entrypoint left the launch screen up for good, and
   // destroy_engine_with_activity=false kept the engine running after its
-  // activity. MainActivity overrides every FlutterActivity getter that reads
-  // the intent with what a launch with no extras gets; engine flags still
-  // pass in debug and profile builds, where `flutter run` sends them.
+  // activity, sent cold or to the running activity with a notification
+  // tap's action (flutter_local_notifications then makes it the activity's
+  // intent, and Flutter reads the getters again; EXTRAS-1 review,
+  // 2026-11-23). MainActivity overrides every FlutterActivity getter that
+  // reads the intent with what a launch with no extras gets, and a release
+  // build takes the one engine flag the engine reads from the intent itself
+  // off it before the engine attaches. Engine flags still pass in debug and
+  // profile builds, and none in a release build, `flutter run --release`'s
+  // included.
   test("Android: MainActivity takes none of FlutterActivity's launch "
       'settings from the launch intent', () {
     final code = _kotlinCode(_mainActivity());
@@ -1340,8 +1346,30 @@ void main() {
         contains('fun takesEngineFlagsFromIntent(releaseBuild: Boolean): '
             'Boolean = !releaseBuild'));
     _expectJvmTests(['takesEngineFlagsFromIntent']);
+    // The engine flag the engine reads from the intent itself, as
+    // super.onCreate attaches the engine to the activity (pinned below): a
+    // release build takes it off the intent first, whatever onCreate set.
+    expect(code, contains('class MainActivity : FlutterActivity() {'));
+    expect(
+        code,
+        contains('@Suppress("DEPRECATION") private fun '
+            'dropSoftwareRenderingFlag() {'));
+    expect(
+        _kotlinFunction(code, 'private fun dropSoftwareRenderingFlag('),
+        '{ if (IntakeRules.takesEngineFlagsFromIntent('
+        'io.flutter.BuildConfig.RELEASE)) return intent?.removeExtra('
+        'io.flutter.embedding.engine.FlutterShellArgs.'
+        'ARG_KEY_ENABLE_SOFTWARE_RENDERING) }');
+    expect(
+        _kotlinFunction(code, 'override fun onCreate('),
+        contains('setIntent(withSafeShares(it)) } } '
+            'dropSoftwareRenderingFlag() super.onCreate(savedInstanceState)'),
+        reason: 'after the intent rewrites, right before the engine attaches');
+    expect('dropSoftwareRenderingFlag()'.allMatches(code), hasLength(2),
+        reason: 'declared once, called once');
     // What the overrides give is what the manifest gave: no manifest names
-    // another entry point, library or first route.
+    // another entry point, library or first route, or turns software
+    // rendering on.
     final src = '${_appRoot().path}/android/app/src';
     for (final variant in ['main', 'debug', 'profile', 'playChannel']) {
       final xml = _uncommented(
@@ -1350,6 +1378,7 @@ void main() {
         'io.flutter.Entrypoint',
         'io.flutter.EntrypointUri',
         'io.flutter.InitialRoute',
+        'io.flutter.embedding.android.EnableSoftwareRendering',
       ]) {
         expect(xml, isNot(contains(key)), reason: '$variant: $key');
       }
@@ -1357,7 +1386,7 @@ void main() {
 
     // Flutter 3.44, where the SDK carries its sources: the extras, the
     // getters that read them and what each gives when the intent says
-    // nothing, and that FlutterActivity reads the intent nowhere else. A
+    // nothing, and that no engine source reads the intent anywhere else. A
     // Flutter that reads it somewhere new fails here: decide whether
     // MainActivity fixes that setting too.
     final flutter = Directory('${_pluginRoot('flutter')}/../../engine/src/'
@@ -1444,18 +1473,19 @@ void main() {
     ]) {
       expect(activity, contains(read));
     }
-    // The method each read of the intent sits in (the nearest method
-    // declaration before it).
+    // The methods [call] sits in (for each, the nearest method declaration
+    // before it), and those that read the intent.
     final declaration = RegExp(r'(?:(?:public|protected|private) )?'
         r'(?:static |final )*[\w<>\[\]., ?]+ (\w+)\([^()]*\) '
         r'(?:throws [\w., ]+ )?\{');
-    Set<String> readersOfIntent(String java) => {
-          for (final read in 'getIntent()'.allMatches(java))
+    Set<String> callers(String call, String java) => {
+          for (final at in call.allMatches(java))
             declaration
-                .allMatches(java.substring(0, read.start))
+                .allMatches(java.substring(0, at.start))
                 .last
                 .group(1)!,
         };
+    Set<String> readersOfIntent(String java) => callers('getIntent()', java);
     expect(readersOfIntent(activity), fixed.keys.toSet(),
         reason: 'every FlutterActivity method that reads the launch intent '
             'is one MainActivity overrides');
@@ -1493,17 +1523,94 @@ void main() {
         delegate,
         contains('String cachedEngineGroupId = host.getCachedEngineGroupId(); '
             'if (cachedEngineGroupId != null) {'));
-    // In a release build Flutter itself drops most engine flags, but keeps
-    // enable-impeller (IntakeRules.takesEngineFlagsFromIntent).
-    expect(java('embedding/engine/FlutterShellArgs.java'),
+    // Past the getters, the engine reads one engine flag from the
+    // activity's intent itself, in every build, as it attaches to the
+    // activity: the delegate's onAttach, which FlutterActivity.onCreate
+    // calls, so after MainActivity.dropSoftwareRenderingFlag. Set, it tells
+    // the platform views controller the engine renders in software.
+    final registry =
+        java('embedding/engine/FlutterEngineConnectionRegistry.java');
+    expect(readersOfIntent(registry), {'attachToActivityInternal'});
+    expect(
+        registry,
+        contains('final Intent intent = activity.getIntent(); boolean '
+            'useSoftwareRendering = intent != null ? intent.getBooleanExtra('
+            'FlutterShellArgs.ARG_KEY_ENABLE_SOFTWARE_RENDERING, false) : '
+            'false;'));
+    expect(RegExp(r'\.(?:get\w*Extras?|hasExtra)\(').allMatches(registry),
+        hasLength(1),
+        reason: 'that one extra only');
+    expect(
+        registry,
+        contains('} else { useSoftwareRendering = '
+            'flutterLoader.getSofwareRenderingEnabledViaManifest(); } '
+            'flutterEngine.getPlatformViewsController().setSoftwareRendering('
+            'useSoftwareRendering);'));
+    expect(callers('attachToActivity(', delegate), {'onAttach'});
+    expect(callers('delegate.onAttach(', activity), {'onCreate'});
+    // No other engine source reads an activity's intent (MainActivity is
+    // no FlutterFragmentActivity).
+    final inFlutter = flutter.path.length + 1;
+    expect(
+        {
+          for (final file in flutter.listSync(recursive: true))
+            if (file.path.endsWith('.java') &&
+                java(file.path.substring(inFlutter)).contains('getIntent()'))
+              file.path.substring(inFlutter),
+        },
+        {
+          'embedding/android/FlutterActivity.java',
+          'embedding/android/FlutterActivityAndFragmentDelegate.java',
+          'embedding/android/FlutterFragmentActivity.java',
+          'embedding/engine/FlutterEngineConnectionRegistry.java',
+        });
+    // In a release build Flutter itself drops most engine flags
+    // (FlutterLoader), but keeps those FlutterEngineFlags allows there and
+    // passes on, as they are, those it does not know as FlutterShellArgs
+    // writes them (IntakeRules.takesEngineFlagsFromIntent).
+    final shellArgs = java('embedding/engine/FlutterShellArgs.java');
+    final flags = java('embedding/engine/FlutterEngineFlags.java');
+    final loader = java('embedding/engine/loader/FlutterLoader.java');
+    expect(shellArgs,
         contains('if (intent.hasExtra(ARG_KEY_TOGGLE_IMPELLER)) {'));
-    expect(
-        java('embedding/engine/FlutterEngineFlags.java'),
-        contains('ENABLE_IMPELLER = new Flag("--enable-impeller=", '
-            '"EnableImpeller", true);'));
-    expect(
-        java('embedding/engine/loader/FlutterLoader.java'),
+    for (final allowed in [
+      'ENABLE_IMPELLER = new Flag("--enable-impeller=", "EnableImpeller", '
+          'true);',
+      'ENABLE_DART_PROFILING = new Flag("--enable-dart-profiling", '
+          '"EnableDartProfiling", true);',
+      'PROFILE_STARTUP = new Flag("--profile-startup", "ProfileStartup", '
+          'true);',
+      'TRACE_STARTUP = new Flag("--trace-startup", "TraceStartup", true);',
+    ]) {
+      expect(flags, contains(allowed));
+    }
+    expect(loader,
         contains('} else if (!flag.allowedInRelease && isRelease) {'));
+    expect(
+        loader,
+        contains('FlutterEngineFlags.Flag flag = '
+            'FlutterEngineFlags.getFlagByEngineArgument(arg); if (flag == '
+            'null) { shellArgs.add(arg); continue; }'));
+    // enable-hcpp-and-surface-control goes with "=true" (or "=false"), and
+    // the engine flag has no value, so the lookup by the part up to the "="
+    // finds none; cache-sksl is no FlutterEngineFlags flag at all.
+    expect(
+        shellArgs,
+        contains('ARG_ENABLE_HCPP_AND_SURFACE_CONTROL = '
+            '"--enable-hcpp-and-surface-control=true";'));
+    expect(
+        flags,
+        contains('ENABLE_HCPP = new Flag("--enable-hcpp-and-surface-control", '
+            '"EnableHcpp", true);'));
+    expect(
+        flags,
+        contains('FLAG_BY_COMMAND_LINE_ARG.get(equalsIndex == -1 ? arg : '
+            'arg.substring(0, equalsIndex + 1));'));
+    expect(
+        shellArgs,
+        contains('if (intent.getBooleanExtra(ARG_KEY_CACHE_SKSL, false)) { '
+            'args.add(ARG_CACHE_SKSL); }'));
+    expect(flags.toLowerCase(), isNot(contains('sksl')));
   });
 
   // With enableOnBackInvokedCallback, Flutter unregisters its back
@@ -1879,10 +1986,11 @@ void main() {
         contains('val replay = IntakeRules.isRedelivery(savedInstanceState '
             '!= null, intent?.flags ?: 0) if (replay) { intent?.let { '
             'setIntent(emptyShare(it)) } } else { intent?.let { '
-            'setIntent(withSafeShares(it)) } } super.onCreate('
-            'savedInstanceState)'),
+            'setIntent(withSafeShares(it)) } } dropSoftwareRenderingFlag() '
+            'super.onCreate(savedInstanceState)'),
         reason: 'replay → the empty intent, else the safe copies, both '
-            'before the plugins read it in super.onCreate');
+            'before the plugins read it in super.onCreate (with no more '
+            'than an engine flag taken off between: EXTRAS-1)');
     expect(
         _kotlinFunction(code, 'override fun onNewIntent('),
         '{ noteStart(intent) val safe = withSafeShares(intent) val copied = '
