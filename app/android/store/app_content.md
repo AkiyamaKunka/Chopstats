@@ -3,7 +3,7 @@
 Paste-ready answers for **Play Console › Monitor and improve › Policy and
 programs › App content**, written
 2026-11-13 for the first Google Play release (planned then as 1.7.0; it
-is the newest Android release on the day the Play account exists: 1.7.1
+is the newest Android release at the time of the first upload: 1.7.1
 until `android-v1.7.2` is published, then 1.7.2, `docs/RELEASING.md`
 § 6.3), with the owner's
 decisions of that day: no broad photo access on Play (decision 1),

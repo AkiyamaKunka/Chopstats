@@ -1087,18 +1087,18 @@ step. Revisit if the app is ever published with a developer-run service.
   finish a tag's run that failed after its plan passed, use *Re-run
   failed jobs* on that run: a re-run keeps its run number.
 - An earlier `+N` tag can carry a number above that floor, and a later
-  run would land on it or below it: after `v1.7.1+215` at run 9, a plain
-  tag at run 15 is numbered 215 too, and `v1.7.2+213` at run 12 clears
-  that run's floor (212) but sits below a build already out. So the plan
-  job also reads the repository's tags (`git ls-remote`; the checkout
-  fetches no tag but the one being built, and a failed read stops the
-  run) and takes the highest `N` of the other `vX.Y.Z+N` tags. A tag's
-  `+N` must be above it, and so must a run numbered
-  `BUILD_NUMBER_OFFSET` + its run number (a plain tag, or Run workflow on
-  a branch, lane `play` included): in the example, runs 10 to 15 are
-  refused until `BUILD_NUMBER_OFFSET` in `release.yml` is raised so that
-  it plus the next run's number is above 215 (never lower it). So take a
-  `+N` only a little above the floor.
+  run would land on it or below it. In a made-up case, after a tag
+  `vX.Y.Z+225` at run 19, a plain tag at run 25 is numbered 225 too, and
+  a `+223` tag at run 22 clears that run's floor (222) but sits below a
+  build already out. So the plan job also reads the repository's tags
+  (`git ls-remote`; the checkout fetches no tag but the one being built,
+  and a failed read stops the run) and takes the highest `N` of the
+  other `vX.Y.Z+N` tags. A tag's `+N` must be above it, and so must a
+  run numbered `BUILD_NUMBER_OFFSET` + its run number (a plain tag, or
+  Run workflow on a branch, lane `play` included): in the example, runs
+  20 to 25 are refused until `BUILD_NUMBER_OFFSET` in `release.yml` is
+  raised so that it plus the next run's number is above 225 (never lower
+  it). So take a `+N` only a little above the floor.
   Tags pushed close together are covered. Tags pushed in one push see
   each other, so of two `+N` tags the lower one is refused, and both when
   they are equal. A tag pushed after a run has read the tags is not
@@ -1140,8 +1140,8 @@ step. Revisit if the app is ever published with a developer-run service.
 
 Rewritten 2026-11-13 for the first Google Play release (planned then as
 Android 1.7.0, which went out on GitHub only, as 1.7.1 did after it; the
-first Play upload is the newest Android release's bundle on the day the
-Play account exists, § 6.3), from Google's pages as they read that day;
+first Play upload is the newest Android release's bundle at the time of
+that upload, § 6.3), from Google's pages as they read that day;
 each source below carries its read date. The console moves things
 around: match the wording, not the position. The paste-ready answers
 live next to the app in
@@ -1172,12 +1172,12 @@ live next to the app in
    2026-11-22 (`android-v1.7.1`, build 209), on GitHub only too. Android
    1.7.2 goes out the same way, as `android-v1.7.2`, on GitHub only while
    there is no Play account (§ 6.6). The first Play upload, still to come,
-   is the bundle of the newest Android release on the day the Play
-   account exists (§ 6.3). The iPhone 1.7.0 and 1.7.1 never shipped (1.6.0
-   is live), and pubspec is 1.7.2 since the 1.7.2 prep PR, so the
-   iPhone's next tag from `main` is `v1.7.2`: `v1.7.0` and `v1.7.1` stay
-   unused (§ 6.6). A 1.6.x hotfix is tagged on its own branch instead
-   (§ 6.6, *A 1.6.x hotfix*).
+   is the bundle of the newest Android release at the time of that upload
+   (§ 6.3). The iPhone 1.7.0 and 1.7.1 never shipped (1.6.0 is live),
+   and pubspec is 1.7.2 since the 1.7.2 prep PR, so the iPhone's next tag
+   from `main` is `v1.7.2`: `v1.7.0` and `v1.7.1` stay unused (§ 6.6). A
+   1.6.x hotfix is tagged on its own branch instead (§ 6.6, *A 1.6.x
+   hotfix*).
 
 **The owner's decisions (2026-11-20):**
 
@@ -1529,9 +1529,9 @@ the bundle's own manifest, both forms) must list no `READ_MEDIA_*` and no
 app-release.aab` says the same.
 
 **The first upload** is still to come. It is the bundle of the newest
-Android release on the day the Play account exists (decided on
-2026-11-23 by Claude on the owner's delegation), so that Play starts at
-the build GitHub users already have: an older bundle would be a
+Android release at the time of that upload (decided on 2026-11-23 by
+Claude on the owner's delegation), so that Play starts at the version
+and build number GitHub users already have: an older bundle would be a
 downgrade for a phone moving from the GitHub APK (§ 6.6, *The friends
 and the GitHub APK*). Which bundle that is:
 
@@ -1545,20 +1545,24 @@ and the GitHub APK*). Which bundle that is:
   from (§ 6.6), in that run's artifact `android-1.7.2-2xx`.
 
 `android-v1.7.0` (build 207) and `android-v1.7.1` went out on GitHub only,
-before the Play account existed, and 1.7.2 goes out the same way
-(§ 6.6). The steps name run 9; for 1.7.2, take its run, artifact, build
-number and name instead.
+before the Play account existed, and 1.7.2 goes out on GitHub the same
+way (§ 6.6). The steps name run 9; for a later release, take its run,
+artifact, build number and name instead.
 
 1. Actions › Release › run 9. Its plan summary says build name `1.7.1`
    and build number 209 (`BUILD_NUMBER_OFFSET` 200 + run 9), the build
    number GitHub `android-v1.7.1` users have, above `android-v1.7.0`'s 207.
    Never upload a Mac hand build: it gets pubspec's `+11`, below 207.
    The run page keeps the artifact 90 days (§ 8): GitHub deletes
-   `android-1.7.1-209` on 2027-02-19. If it is gone before
-   `android-v1.7.2` is out, no run can make it again: Run workflow ›
-   branch `main` › lane `play` now builds pubspec's version, 1.7.2, with
-   a higher number. Make that run 1.7.2's release (§ 6.6) and upload its
-   bundle.
+   `android-1.7.1-209` on 2027-02-19, and a later release's artifact 90
+   days after its run. If the artifact is gone, no run can make that
+   bundle again, so make a new Android release (§ 6.6, steps 1 to 5; a
+   dispatch alone creates no tag and no GitHub Release) and upload its
+   bundle: Run workflow › branch `main` › lane `play` builds pubspec's
+   version with a higher number. Until `android-v1.7.2` is out, that
+   version is 1.7.2. Once a GitHub release holds pubspec's version
+   (1.7.2, after `android-v1.7.2`), bump pubspec first, with the owner's
+   OK (§ 6.6).
 2. Download the artifact `android-1.7.1-209` and take `app-release.aab`.
 3. Play Console › *Test and release* › *Testing* › *Internal testing* ›
    *Create new release* › upload it. **Do not roll it out yet.** First
@@ -1774,8 +1778,8 @@ iPhone version.
    holds the bundle and the arm64 APK, with one build number
    (`BUILD_NUMBER_OFFSET` 200 + the run's number, above
    `android-v1.7.1`'s 209) and one signer (the verify step checks both).
-2. The bundle goes to Play by hand (§ 6.3). While there is no Play
-   account, § 6.3 says which release's bundle is the first upload.
+2. The bundle goes to Play by hand (§ 6.3). Until the first Play
+   upload, § 6.3 says which release's bundle that upload is.
 3. The APK goes on a GitHub Release made by hand: tag the run's commit
    `android-v1.7.2` and push the tag (`git tag android-v1.7.2 <sha> &&
    git push origin android-v1.7.2`), then GitHub › Releases › *Draft a new
@@ -1792,8 +1796,8 @@ iPhone version.
    was `android-v1.7.0`; for 1.7.2 it is `android-v1.7.1`, build 209);
    installing over a GitHub build from 1.5.0 or later keeps the data. Say
    that the GitHub APK and the Play build can replace each other **only
-   after** § 6.3's step 2 check has passed, and say that the Play build
-   has no Watch Camera Roll.
+   after** the signing-key check of § 6.3 (*Play App Signing*, step 3)
+   has passed, and say that the Play build has no Watch Camera Roll.
 5. README: once the release is out, update the Android section of
    `README.md` and `README.zh-CN.md` in one commit, as README.md's
    maintainer notes say (*Lines tied to a release*, item 5): the release
