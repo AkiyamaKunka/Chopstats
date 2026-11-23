@@ -71,6 +71,37 @@ class _Deliveries implements ShareDeliveries {
   bool asksAlone(int delivery) => alone.contains(delivery);
 }
 
+/// One app shell's side of the share gate (app.dart _askShareConsent):
+/// [ask] is torn off anew at each attach and detach, as the shell's
+/// initState and dispose do, so the gate has to find it by == (two
+/// tear-offs of one method are equal, not identical).
+class _Shell {
+  _Shell(this.name, this.asked, this.settings);
+
+  final String name;
+
+  /// Every shell's questions, by name, in the order they were asked.
+  final List<String> asked;
+  final FakeSettings settings;
+
+  /// What its questions answer: true = Allow (recorded), false = Not now,
+  /// null = no dialog could be shown.
+  bool? answer = false;
+
+  /// Set: the next question stays open until this completes, and answers
+  /// what it completes with.
+  Completer<bool?>? open;
+
+  Future<bool?> ask() async {
+    asked.add(name);
+    final held = open;
+    open = null;
+    final yes = held == null ? answer : await held.future;
+    if (yes == true) await settings.setAiConsent('gemini', granted: true);
+    return yes;
+  }
+}
+
 Finder get _dialog => find.byKey(const Key('aiConsentDialog'));
 
 Future<void> _notNow(WidgetTester tester) async {
@@ -1210,6 +1241,192 @@ void main() {
         unawaited(sub.cancel());
       });
     }
+  });
+
+  // Two shells at once (GATE-1, 2026-11-22): the gate held one question,
+  // so attach(A), attach(B), detach(B) left none while A's shell still
+  // lived, and a shared photo waited for a question that never came until
+  // the next attach. Each shell's question is kept now; the latest
+  // attached asks, and a detach leaves the question to the latest still
+  // attached. One shell at a time is all the app opens since Flutter's own
+  // deep linking is off (RCREL-V-1), so this is defence in depth.
+  group('two shells at once', () {
+    late FakeSettings settings;
+    late SharedPhotoConsentGate gate;
+    late StreamController<IntakePhoto> input;
+    late List<String> passed;
+    late List<String> asked;
+    late StreamSubscription<IntakePhoto> sub;
+    late _Shell first;
+    late _Shell second;
+
+    setUp(() {
+      settings = _unasked();
+      gate = SharedPhotoConsentGate(settings);
+      input = StreamController<IntakePhoto>();
+      passed = [];
+      asked = [];
+      sub = gate.gate(input.stream).listen((p) => passed.add(p.assetId));
+      first = _Shell('first', asked, settings);
+      second = _Shell('second', asked, settings);
+    });
+    tearDown(() async {
+      await sub.cancel();
+      await input.close();
+    });
+
+    test('the second shell closing leaves the first one asking: a new photo '
+        'is asked through it', () async {
+      gate
+        ..attach(first.ask)
+        ..attach(second.ask)
+        ..detach(second.ask);
+      first.answer = true;
+      input.add(_photo('p'));
+      await pumpEventQueue();
+      expect(asked, ['first']);
+      expect(passed, ['p']);
+    });
+
+    test("the closing shell's open question answers null: the photo is "
+        'asked again through the first shell, not at the next attach',
+        () async {
+      gate
+        ..attach(first.ask)
+        ..attach(second.ask);
+      final open = second.open = Completer<bool?>();
+      first.answer = true;
+      input.add(_photo('p'));
+      await pumpEventQueue();
+      expect(asked, ['second'], reason: 'the latest shell asks');
+      gate.detach(second.ask);
+      await pumpEventQueue();
+      expect(asked, ['second'], reason: 'its question is still open');
+      open.complete(null); // its dialog went with it: no answer
+      await pumpEventQueue();
+      expect(asked, ['second', 'first']);
+      expect(passed, ['p']);
+      expect(settings.hasAiConsent('gemini'), isTrue);
+    });
+
+    test('a null the closing shell gave before it closed: the photo is asked '
+        'again through the first shell at its detach', () async {
+      gate
+        ..attach(first.ask)
+        ..attach(second.ask);
+      second.answer = null; // no dialog could be shown
+      first.answer = true;
+      input.add(_photo('p'));
+      await pumpEventQueue();
+      expect(asked, ['second'], reason: 'asked once, then it waits');
+      expect(passed, isEmpty);
+      gate.detach(second.ask);
+      await pumpEventQueue();
+      expect(asked, ['second', 'first']);
+      expect(passed, ['p']);
+    });
+
+    test('a detach of a question not attached changes nothing', () async {
+      final stranger = _Shell('stranger', asked, settings);
+      gate
+        ..attach(first.ask)
+        ..attach(second.ask);
+      second.answer = null; // no dialog could be shown
+      input.add(_photo('p1'));
+      await pumpEventQueue();
+      expect(asked, ['second']);
+      gate.detach(stranger.ask);
+      await pumpEventQueue();
+      expect(asked, ['second'], reason: 'the waiting photo is not woken');
+      // Both shells are still attached, in order: the second one's detach
+      // leaves the question to the first one.
+      gate.detach(second.ask);
+      await pumpEventQueue();
+      expect(asked, ['second', 'first'], reason: 'p1 again, Not now');
+      gate.detach(second.ask); // detached already
+      input.add(_photo('p2'));
+      await pumpEventQueue();
+      expect(asked, ['second', 'first', 'first']);
+      expect(passed, isEmpty);
+    });
+
+    test('the same shell attached twice: one detach leaves none of it',
+        () async {
+      gate
+        ..attach(first.ask)
+        ..attach(second.ask)
+        ..attach(second.ask)
+        ..detach(second.ask);
+      input.add(_photo('p1'));
+      await pumpEventQueue();
+      expect(asked, ['first'], reason: 'none of the second shell is left');
+      gate.detach(first.ask);
+      input.add(_photo('p2'));
+      await pumpEventQueue();
+      expect(asked, ['first'], reason: 'no shell attached: p2 waits');
+      gate.attach(second.ask);
+      await pumpEventQueue();
+      expect(asked, ['first', 'second']);
+      expect(passed, isEmpty);
+    });
+
+    test('a shell that attaches again asks ahead of one attached after it, '
+        'and its detach leaves that one asking', () async {
+      gate
+        ..attach(first.ask)
+        ..attach(second.ask)
+        ..attach(first.ask);
+      input.add(_photo('p1'));
+      await pumpEventQueue();
+      expect(asked, ['first']);
+      gate.detach(first.ask);
+      input.add(_photo('p2'));
+      await pumpEventQueue();
+      expect(asked, ['first', 'second']);
+      expect(passed, isEmpty);
+    });
+
+    testWidgets('the app shell: a second shell opened over the first and '
+        'closed leaves the first one asking', (tester) async {
+      // Its own gate and stream, made inside the test's zone (the ones
+      // from setUp deliver outside it).
+      final settings = _unasked();
+      final gate = SharedPhotoConsentGate(settings);
+      final input = StreamController<IntakePhoto>();
+      final passed = <String>[];
+      final sub = gate.gate(input.stream).listen((p) => passed.add(p.assetId));
+      final services = UiServices(
+        dao: FakeDao(),
+        analyzer: FakeAnalyzer(),
+        executor: FakeExecutor(),
+        settings: settings,
+        picker: FakePicker(),
+        requestPhotoPermission: () async => true,
+        sharedPhotoConsent: gate,
+      );
+      await tester.pumpWidget(_app(HomeShell(services: services)));
+      await tester.pumpAndSettle();
+      // A second shell on top, as Flutter's own deep linking pushed one
+      // for a bare setup link (RCREL-V-1), and closed again.
+      final navigator = Navigator.of(tester.element(find.byType(HomeShell)));
+      unawaited(navigator.push(MaterialPageRoute<void>(
+          builder: (_) => HomeShell(services: services))));
+      await tester.pumpAndSettle();
+      expect(find.byType(HomeShell, skipOffstage: false), findsNWidgets(2));
+      navigator.pop();
+      await tester.pumpAndSettle();
+      expect(find.byType(HomeShell, skipOffstage: false), findsOneWidget);
+
+      input.add(_photo('shared'));
+      await tester.pumpAndSettle();
+      expect(_dialog, findsOneWidget, reason: 'the first shell asks');
+      await _allow(tester);
+      expect(passed, ['shared']);
+      expect(settings.hasAiConsent('gemini'), isTrue);
+      // Not awaited: a cancel future awaited inside the fake-async zone
+      // never lets the test finish.
+      unawaited(sub.cancel());
+    });
   });
 
   testWidgets('a setup link names the plan\'s company, and confirming is '
