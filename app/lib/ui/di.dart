@@ -590,8 +590,11 @@ class AppServices {
       completeClaudeAuth: serverAnalyzer.completeClaudeAuth,
       serverLoginState: serverAnalyzer.serverLoginState,
       // One-click setup links (bitewise://setup?...), see setup_link.dart.
+      // The plugin answers every initial-link read with the first link it
+      // was given: only this engine's first shell gets it (launchLinkOnce,
+      // LINK-1; on the iPhone a later engine can get it again, see there).
       setupLinks: appLinks.uriLinkStream,
-      initialSetupLink: appLinks.getInitialLink,
+      initialSetupLink: launchLinkOnce(appLinks.getInitialLink),
       // The app's notifications, and the summary's own channel (Android).
       notificationsEnabled: notifier.summaryNotificationsEnabled,
       nextSummaryAt: () async {
