@@ -1674,15 +1674,15 @@ void main() {
       expect(
           flat,
           contains('So `version:` is `1.7.2+11` and `kAppVersion` `1.7.2` '
-              'since the 1.7.2 prep PR, decided on 2026-11-23 by Claude on '
+              'since PR #93, decided on 2026-11-23 by Claude on '
               "the owner's delegation: the 1.7.2 bump is done"));
       expect(
           flat,
-          contains('(pubspec is 1.7.2 since the 1.7.2 prep PR; the '
+          contains('(pubspec is 1.7.2 since PR #93; the '
               "policy's newest is 1.7.1)"));
       expect(
           flat,
-          contains('pubspec is 1.7.2 since the 1.7.2 prep PR, so the '
+          contains('pubspec is 1.7.2 since PR #93, so the '
               "iPhone's next tag from `main` is `v1.7.2`"));
       for (final stale in [
         'Android 1.7.1 goes out the same way',
@@ -1697,6 +1697,8 @@ void main() {
         "that run's bundle is the first Play upload",
         'the first Play upload is 1.7.1',
         'and it is 1.7.1: the bundle of',
+        // The prep's own number, once the PR had one.
+        'the 1.7.2 prep PR',
       ]) {
         expect(flat, isNot(contains(stale)), reason: stale);
       }

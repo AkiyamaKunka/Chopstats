@@ -1174,7 +1174,7 @@ live next to the app in
    there is no Play account (§ 6.6). The first Play upload, still to come,
    is the bundle of the newest Android release at the time of that upload
    (§ 6.3). The iPhone 1.7.0 and 1.7.1 never shipped (1.6.0 is live),
-   and pubspec is 1.7.2 since the 1.7.2 prep PR, so the iPhone's next tag
+   and pubspec is 1.7.2 since PR #93, so the iPhone's next tag
    from `main` is `v1.7.2`: `v1.7.0` and `v1.7.1` stay unused (§ 6.6). A
    1.6.x hotfix is tagged on its own branch instead (§ 6.6, *A 1.6.x
    hotfix*).
@@ -1766,7 +1766,7 @@ any `v*` tag, and the iOS lane stops until the iCloud container exists
 out this way on 2026-11-19 (`android-v1.7.0`, build 207, GitHub only).
 Android 1.7.1 followed on 2026-11-22 (`android-v1.7.1`, build 209 from
 run 9, GitHub only). The next one is 1.7.2, which the steps name:
-pubspec's version since the 1.7.2 prep PR (*Pubspec and the versions
+pubspec's version since PR #93 (*Pubspec and the versions
 the policy names*, below). It goes out on GitHub only while there is no
 Play account. After it, bump pubspec first for the next one, with the
 owner's OK, as for 1.7.2: a version that a GitHub release already holds
@@ -1829,7 +1829,7 @@ not the 1.7.0 decision 4 kept free for it. Then `android-v1.7.1` (build
 209) went out as 1.7.1 on 2026-11-22, and a version that a GitHub release
 already holds is not built again under its name (*An Android-only
 version*, above). So `version:` is `1.7.2+11` and `kAppVersion` `1.7.2`
-since the 1.7.2 prep PR, decided on 2026-11-23 by Claude on the owner's
+since PR #93, decided on 2026-11-23 by Claude on the owner's
 delegation: the 1.7.2 bump is done, and it makes `main`'s next iPhone
 release 1.7.2 too. The policy did not change for it: its newest *From
 version* is still 1.7.1, below pubspec. The rule stays for later
@@ -1972,7 +1972,7 @@ the screenshots:
    `app/android/store/screenshots/en-US/` and `zh-CN/`, in file order.
 8. Before the run: `version:` in `app/pubspec.yaml` must not be below the
    newest *From version X.Y.Z* in `docs/PRIVACY.md` (pubspec is 1.7.2
-   since the 1.7.2 prep PR; the policy's newest is 1.7.1). If it is, bump
+   since PR #93; the policy's newest is 1.7.1). If it is, bump
    it and `kAppVersion` first, with the owner's OK (§ 6.6); release.yml's
    plan step refuses the Android lane until then.
 9. Run workflow › `main` › lane `play` (for the first upload, the run of
