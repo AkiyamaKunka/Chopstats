@@ -3941,8 +3941,8 @@
   "@mealGroupSummaryTitle": {
     "description": "Android: the title of the summary the app posts for its Logged meals cards once two or more of them show, which groups them in the notification shade (the cards' own title is mealCardAutoTitle). The shade draws the group from the cards themselves, under a header with the app's name, so this line did not show there (Android 15); it shows only where the summary itself is shown instead. No count: a card the user dismisses would make it wrong."
   },
-  "mealGroupSummaryBody": "See them on Today",
+  "mealGroupSummaryBody": "Tap to see them",
   "@mealGroupSummaryBody": {
-    "description": "Android: the body of the Logged meals cards' group summary, under mealGroupSummaryTitle. A tap on the collapsed group opens the app on Today (the tab, tabToday), where the day's meals are listed, and clears the group's cards; a tap on one card of the expanded group still goes to its meal."
+    "description": "Android: the body of the Logged meals cards' group summary, under mealGroupSummaryTitle. A tap on the collapsed group opens the day of the group's newest card's meal, with nothing outlined: Today, or that day in History (for a group left in the notification shade past midnight, say), and clears the group's cards; a tap on one card of the expanded group still goes to its meal. It names no tab or day, since which one opens depends on the cards."
   }
 }

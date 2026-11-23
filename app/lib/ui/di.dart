@@ -222,7 +222,8 @@ class AppServices {
       mealCards: photoLibraryInBuild,
       // Android: a tap on a Logged meals card while the app runs goes to
       // its meal (the background run names it in the card's payload), and
-      // one on the cards' group summary to Today (PR80-B2).
+      // one on the cards' group summary to the day of their newest meal
+      // (PR80-B2).
       onTap: cardTaps?.onTap,
       dailyBody: (slotDate) async {
         await postSummary();
@@ -262,8 +263,8 @@ class AppServices {
     // the probe instead of leaving it pending.
     final summaryArmed = Completer<void>();
     // Android: a tap on a Logged meals card that started the app goes to
-    // its meal too, and one on their group summary to Today (the shell
-    // takes the request once it is up).
+    // its meal too, and one on their group summary to the day of their
+    // newest meal (the shell takes the request once it is up).
     if (cardTaps != null) {
       unawaited(() async {
         try {

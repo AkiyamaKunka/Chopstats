@@ -4046,5 +4046,5 @@ class AppLocalizationsEn extends AppLocalizations {
   String get mealGroupSummaryTitle => '🍽️ Meals logged automatically';
 
   @override
-  String get mealGroupSummaryBody => 'See them on Today';
+  String get mealGroupSummaryBody => 'Tap to see them';
 }

@@ -120,10 +120,12 @@ class ReportNotifier {
   /// 2026-11-23). Android groups an app's notifications by itself once
   /// four or more show, under a summary of its own whose tap is the plain
   /// launcher intent: a tap on the collapsed group went to no meal and,
-  /// the cards being auto-cancel, cleared every card (PR80 QA, O6). Cards
-  /// in a group of the app's own are never put in Android's group, and
-  /// once two of them show the app posts its own summary
-  /// ([mealGroupSummaryId]), whose tap opens Today ([mealGroupPayload]).
+  /// the cards being auto-cancel, cleared every card (PR80 QA, O6).
+  /// Android 7 to 15 do not fold cards that are in a group of the app's
+  /// own into Android's group (seen on the API 35 emulator; Android 16,
+  /// whose own grouping changed, was not tried), and once two of them
+  /// show the app posts its own summary ([mealGroupSummaryId]), whose tap
+  /// opens the day of the group's newest meal ([mealGroupPayloadFor]).
   /// One card alone looks and behaves as before: Android draws a group
   /// with no summary, or with one card left, as that one card.
   ///
@@ -143,12 +145,27 @@ class ReportNotifier {
   static const int mealGroupSummaryId = 9100;
 
   /// The meal group summary's payload, handed back by a tap on the
-  /// collapsed group as a card's is (ui/meal_reveal.dart MealReveal.today):
-  /// the app opens on Today, where the day's meals are listed. Not one
-  /// meal: the group stands for several cards, and a tap on any line of
-  /// the collapsed group is a tap on the summary, so ringing one meal
-  /// would point at one the user did not pick.
-  static const String mealGroupPayload = 'meals:today';
+  /// collapsed group as a card's is: the payload of the card it was last
+  /// posted after (the group's newest), behind this prefix (meals:meal:42,
+  /// after the card of meal 42). The app opens that meal's day, where it
+  /// is dated now, with nothing ringed (ui/meal_reveal.dart
+  /// MealReveal.dayOf): Today for a meal of today, else that day in
+  /// History. It used to open Today alone, which lists none of the cards'
+  /// meals once the group is left in the shade past midnight (a card on
+  /// the meal channel stays until the user clears it), while the tap
+  /// cleared every card (PR80-B2 review, 2026-11-23). Not the one meal:
+  /// the group stands for several cards, and a tap on any line of the
+  /// collapsed group is a tap on the summary, so ringing one meal would
+  /// point at one the user did not pick. The newest card's day is the day
+  /// of all the group's meals unless they span two days (last night's
+  /// cards beside this morning's): then only the newest card's day opens,
+  /// and the other day's meals are in History.
+  static const String mealGroupPayloadPrefix = 'meals:';
+
+  /// The meal group summary's payload when [cardPayload]'s card is the
+  /// group's newest ([mealGroupPayloadPrefix]).
+  static String mealGroupPayloadFor(String cardPayload) =>
+      '$mealGroupPayloadPrefix$cardPayload';
 
   /// The cards' colour on Android (the small icon and app name in the
   /// shade): the app's terracotta accent, AppColors.light.accent
@@ -193,7 +210,8 @@ class ReportNotifier {
   /// themselves, under a header (the app's name, the time, how many), and
   /// showed neither line (API 35 emulator, 2026-11-23). They show only
   /// where the summary itself is shown instead: no count, which a
-  /// dismissed card would make wrong.
+  /// dismissed card would make wrong, and no tab or day, since which day
+  /// opens depends on the newest card's meal ([mealGroupPayloadFor]).
   final ({String title, String body}) Function()? _mealGroupStrings;
 
   static const ({String name, String description}) _englishChannel = (
@@ -209,7 +227,7 @@ class ReportNotifier {
 
   static const ({String title, String body}) _englishMealGroup = (
     title: '🍽️ Meals logged automatically',
-    body: 'See them on Today',
+    body: 'Tap to see them',
   );
 
   static const Importance _importance = Importance.defaultImportance;
@@ -286,7 +304,9 @@ class ReportNotifier {
   /// sounds as it did alone. Auto-cancel, as Android's own summary was: a
   /// tap on it clears the group's cards with it (Android cancels a tapped
   /// summary's children), as a tap on one card clears that card, and the
-  /// app is open on Today where they are listed.
+  /// app opens on the day of the newest card's meal, which lists the
+  /// group's meals ([mealGroupPayloadFor]). A group whose meals span two
+  /// days loses the other day's cards too; those meals are in History.
   NotificationDetails _mealGroupSummaryDetails() {
     final channel = _mealChannel();
     return NotificationDetails(
@@ -790,13 +810,14 @@ class ReportNotifier {
   ///
   /// Android: a card with a [payload] goes in the meal group
   /// ([mealGroupKey]), and once two of the group's cards show the group's
-  /// summary is posted, after the card, as Android asks (PR80-B2,
-  /// 2026-11-23). A notice (no payload) stays out of the group.
+  /// summary is posted, after the card, as Android asks, naming this card
+  /// as the group's newest (PR80-B2, 2026-11-23). A notice (no payload)
+  /// stays out of the group.
   Future<void> showMealCard(String title, String body,
       {String? payload}) async {
     final grouped = await _present(_nextMealCardId++, title, body,
         meal: true, payload: payload, group: payload != null);
-    if (grouped) await _showMealGroupSummary();
+    if (grouped && payload != null) await _showMealGroupSummary(payload);
   }
 
   /// The daily coach summary. Shares the daily-report id so a re-post
@@ -859,12 +880,13 @@ class ReportNotifier {
     }
   }
 
-  /// Right after a card of the meal group was posted: the group's summary,
-  /// posted (or posted again, silently) once two of its cards show. With
-  /// one card there is none, so that card looks and behaves as it always
-  /// did. Never throws: without a summary the cards show one by one, as
-  /// Android draws a group with none.
-  Future<void> _showMealGroupSummary() async {
+  /// Right after a card of the meal group was posted ([newestPayload], its
+  /// payload): the group's summary, posted (or posted again, silently)
+  /// once two of its cards show, with that card as the group's newest
+  /// ([mealGroupPayloadFor]). With one card there is none, so that card
+  /// looks and behaves as it always did. Never throws: without a summary
+  /// the cards show one by one, as Android draws a group with none.
+  Future<void> _showMealGroupSummary(String newestPayload) async {
     final showing = await _mealGroupShowing();
     if (showing == null || showing.cards < 2) return;
     final strings = _mealGroup();
@@ -874,7 +896,7 @@ class ReportNotifier {
           title: strings.title,
           body: strings.body,
           notificationDetails: _mealGroupSummaryDetails(),
-          payload: mealGroupPayload);
+          payload: mealGroupPayloadFor(newestPayload));
     } catch (_) {
       // The cards show one by one; the next card tries again.
     }

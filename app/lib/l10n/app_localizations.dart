@@ -5969,10 +5969,10 @@ abstract class AppLocalizations {
   /// **'🍽️ Meals logged automatically'**
   String get mealGroupSummaryTitle;
 
-  /// Android: the body of the Logged meals cards' group summary, under mealGroupSummaryTitle. A tap on the collapsed group opens the app on Today (the tab, tabToday), where the day's meals are listed, and clears the group's cards; a tap on one card of the expanded group still goes to its meal.
+  /// Android: the body of the Logged meals cards' group summary, under mealGroupSummaryTitle. A tap on the collapsed group opens the day of the group's newest card's meal, with nothing outlined: Today, or that day in History (for a group left in the notification shade past midnight, say), and clears the group's cards; a tap on one card of the expanded group still goes to its meal. It names no tab or day, since which one opens depends on the cards.
   ///
   /// In en, this message translates to:
-  /// **'See them on Today'**
+  /// **'Tap to see them'**
   String get mealGroupSummaryBody;
 }
 

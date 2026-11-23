@@ -3592,5 +3592,5 @@ class AppLocalizationsZh extends AppLocalizations {
   String get mealGroupSummaryTitle => '🍽️ 已自动记录多餐';
 
   @override
-  String get mealGroupSummaryBody => '在「今天」查看';
+  String get mealGroupSummaryBody => '点按查看';
 }

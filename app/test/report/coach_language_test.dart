@@ -180,11 +180,11 @@ void main() {
   test("the meal cards' group summary follows the app language", () {
     final zh = mealGroupSummaryFor('zh');
     expect(zh.title, '🍽️ 已自动记录多餐');
-    expect(zh.body, '在「今天」查看');
+    expect(zh.body, '点按查看');
     expect(RegExp(r'[a-zA-Z]').hasMatch(zh.title + zh.body), isFalse);
     final en = mealGroupSummaryFor('en');
     expect(en.title, '🍽️ Meals logged automatically');
-    expect(en.body, 'See them on Today');
+    expect(en.body, 'Tap to see them');
   });
 
   test('an unknown/system language still produces a usable notification',

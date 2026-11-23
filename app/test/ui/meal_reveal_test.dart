@@ -1,8 +1,9 @@
 /// "Show me that meal" (Android, view-after-share lane): the request a
 /// shared photo's View and a tap on a Logged meals card make, the card
 /// payload that names the meal (and the cards' group summary's, which asks
-/// for Today), and the one-request channel to the shell
-/// (ui/meal_reveal.dart). The shell's side is in view_after_share_test.
+/// for the day of the group's newest meal), and the one-request channel to
+/// the shell (ui/meal_reveal.dart). The shell's side is in
+/// view_after_share_test.
 library;
 
 import 'package:calorie_tracker/core/contracts.dart'
@@ -69,26 +70,40 @@ void main() {
         'daily:2026-11-21T03:30:00.000Z@2026-11-20',
         // Near the group summary's, but not it.
         'meals:',
-        'meals:today ',
-        'MEALS:TODAY',
         'meals:42',
+        'meals:meal:',
+        'meals:meal:0',
+        'meals:meal:4x',
+        'meals:meal:42 ',
+        'meals: meal:42',
+        'meals:meals:meal:42',
+        'MEALS:MEAL:42',
+        'meal:meals:42',
+        // What the group summary carried before the review (PR80-B2):
+        // never released.
+        'meals:today',
       ]) {
         expect(MealReveal.fromPayload(payload), isNull, reason: '$payload');
       }
     });
 
-    // PR80-B2: the Logged meals cards' group summary (Android) asks for
-    // Today, no meal: the shell goes there as for a meal that is gone.
-    test("the cards' group summary asks for Today itself", () {
-      final today = MealReveal.fromPayload('meals:today');
-      expect(today, isNotNull);
-      expect(today!.mealId, isNull, reason: 'no meal: Today itself');
-      expect(today, MealReveal.today);
-      expect(MealReveal.today.payload, 'meals:today');
-      expect(MealReveal.today.payload, ReportNotifier.mealGroupPayload,
-          reason: 'what the notifier posts is what reads back');
-      expect(MealReveal.today, isNot(const MealReveal(1)));
-      expect(MealReveal.today.toString(), 'MealReveal(today)');
+    // PR80-B2: the Logged meals cards' group summary (Android) names the
+    // group's newest card, and asks for that meal's day, nothing ringed:
+    // the day that lists the cards' meals, also past midnight.
+    test("the cards' group summary asks for the day of the newest card's "
+        'meal', () {
+      final day = MealReveal.fromPayload('meals:meal:42');
+      expect(day, const MealReveal.dayOf(42));
+      expect(day!.mealId, 42);
+      expect(day.ring, isFalse, reason: 'its day, no one meal ringed');
+      expect(const MealReveal(42).ring, isTrue, reason: "a card's own");
+      expect(day, isNot(const MealReveal(42)));
+      expect(const MealReveal.dayOf(42).payload, 'meals:meal:42');
+      expect(const MealReveal.dayOf(42).payload,
+          ReportNotifier.mealGroupPayloadFor(const MealReveal(42).payload),
+          reason: 'what the notifier posts after the card reads back');
+      expect(const MealReveal.dayOf(42).toString(), 'MealReveal.dayOf(42)');
+      expect(const MealReveal(42).toString(), 'MealReveal(42)');
     });
   });
 
@@ -266,20 +281,18 @@ void main() {
 
     // PR80-B2: a tap on the collapsed group is a tap on its summary, while
     // the app runs or from a stopped app.
-    test('the group summary, tapped while the app runs, asks for Today',
-        () {
+    test("the group summary, tapped while the app runs, asks for its newest "
+        "card's day", () {
       final reveals = MealReveals();
-      MealCardTaps(reveals).onTap('meals:today');
-      expect(reveals.waiting, isNotNull);
-      expect(reveals.waiting!.mealId, isNull, reason: 'Today, no meal');
+      MealCardTaps(reveals).onTap('meals:meal:42');
+      expect(reveals.waiting, const MealReveal.dayOf(42));
     });
 
-    test('the group summary that started the app asks for Today (cold '
-        'start)', () async {
+    test("the group summary that started the app asks for its newest card's "
+        'day (cold start)', () async {
       final reveals = MealReveals();
-      await MealCardTaps(reveals).launch(() async => 'meals:today');
-      expect(reveals.waiting, isNotNull);
-      expect(reveals.waiting!.mealId, isNull, reason: 'Today, no meal');
+      await MealCardTaps(reveals).launch(() async => 'meals:meal:42');
+      expect(reveals.waiting, const MealReveal.dayOf(42));
     });
   });
 
