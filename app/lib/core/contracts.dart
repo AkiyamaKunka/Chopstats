@@ -674,13 +674,112 @@ class IntakePhoto {
   /// nothing. Null: nothing waits (iOS deletes its copy as it reads it;
   /// picked and watched photos have none).
   final void Function()? onSettled;
+
+  /// Not a photo: the files of share [shareDelivery] that gave none
+  /// ([IntakePhoto.refusedNote]). Null for every photo.
+  final RefusedShareFiles? refused;
   const IntakePhoto(this.bytes, this.assetId, this.fileName,
       {this.capturedAt,
       this.deliberate = false,
       this.capture,
       this.glassesQuota,
       this.shareDelivery,
-      this.onSettled});
+      this.onSettled})
+      : refused = null;
+
+  /// The share intake's note on share [shareDelivery]'s files that gave no
+  /// photo (services/photo/share_intake.dart), handed on after that share's
+  /// photos so its one line comes in its turn. Nothing to read, ask about
+  /// or send: no bytes, no name. The consent gate passes it without a
+  /// question, or drops it with its share's Not now (ui/ai_consent.dart
+  /// SharedPhotoConsentGate), and the photo pipeline only says it
+  /// (PhotoPipeline.bindStream).
+  IntakePhoto.refusedNote(RefusedShareFiles this.refused,
+      {required int this.shareDelivery})
+      : bytes = Uint8List(0),
+        assetId = '',
+        fileName = '',
+        capturedAt = null,
+        deliberate = false,
+        capture = null,
+        glassesQuota = null,
+        onSettled = null;
+}
+
+/// Why a shared file gave no photo: share intake's own checks (an
+/// unsupported type, over 25 MB, empty or unreadable) and, on Android,
+/// MainActivity's before any copy is made (not an image, over 25 MB, a
+/// stream it could not read). The order is the order of preference when
+/// two reasons cover as many files ([RefusedShareFiles.mainReason]): a
+/// type first, whose line says what Chopstats can't read.
+enum ShareRefusal {
+  /// An image of a type share intake does not take (AVIF, DNG, …): its
+  /// name's extension is one of the formats the line names
+  /// (share_intake.dart refusedPhotoExtensions), which gives the type
+  /// ([RefusedShareFiles.photoTypes]).
+  photoType,
+
+  /// A video.
+  video,
+
+  /// Any other kind of file (a PDF), or one whose name gives no image
+  /// format share intake knows (no extension, or another one).
+  fileType,
+
+  /// Over 25 MB (maxPhotoBytes).
+  tooBig,
+
+  /// Empty, or it could not be read or copied.
+  unreadable,
+}
+
+/// The files of one share that gave no photo, and why
+/// ([IntakePhoto.refusedNote]): said in one line, how many and the main
+/// reason (ui/outcome_text.dart refusedFilesLine). Never a file's name or
+/// path: only the type its name gives.
+class RefusedShareFiles {
+  const RefusedShareFiles(this.reasons, {this.photoTypes = const []});
+
+  /// One reason per file, in the order the files were looked at.
+  final List<ShareRefusal> reasons;
+
+  /// The type of each [ShareRefusal.photoType] file, as its name gives it
+  /// ('AVIF', 'DNG'), in the same order.
+  final List<String> photoTypes;
+
+  int get count => reasons.length;
+
+  int countOf(ShareRefusal reason) =>
+      reasons.where((r) => r == reason).length;
+
+  /// The reason that covers the most files; between two that cover as
+  /// many, the earlier one in [ShareRefusal].
+  ShareRefusal get mainReason {
+    var main = ShareRefusal.values.first;
+    var most = -1;
+    for (final reason in ShareRefusal.values) {
+      final n = countOf(reason);
+      if (n > most) {
+        main = reason;
+        most = n;
+      }
+    }
+    return main;
+  }
+
+  /// [photoTypes] once each, the type of the most files first (between
+  /// two of as many files, the one seen first).
+  List<String> get typesNamed {
+    final counts = <String, int>{};
+    for (final type in photoTypes) {
+      counts[type] = (counts[type] ?? 0) + 1;
+    }
+    final order = counts.keys.toList();
+    return [...order]..sort((a, b) {
+        final byCount = counts[b]!.compareTo(counts[a]!);
+        return byCount != 0 ? byCount : order.indexOf(a) - order.indexOf(b);
+      });
+  }
 }
 
 /// What the share intake tells the consent gate about its deliveries
@@ -691,10 +790,14 @@ abstract interface class ShareDeliveries {
   /// The latest delivery whose batch event has arrived (0: none yet).
   int get arrivedDelivery;
 
-  /// How many photos [delivery] holds as far as is known now: all its
-  /// copies, less those already found unreadable. A copy not read yet
-  /// counts, even when it will turn out unusable (an unsupported type,
-  /// over 25 MB, a read that fails), so this can be high, never low.
+  /// How many photos [delivery] holds as far as is known now: its copies
+  /// whose names give a photo type, less those already found unreadable.
+  /// A copy whose name gives none (an AVIF, a DNG, a PDF) never counts. One
+  /// not read yet whose name does counts, even when it will turn out
+  /// unusable (empty, over 25 MB, a read that fails), so this can be high,
+  /// never low. 0: it has no photo left to send (every file refused), and
+  /// another share's Not now leaves it out, so its line on those files
+  /// still comes.
   int photoCountOf(int delivery);
 
   /// Every copy of [deliveries] not read yet is deleted unread (at once,

@@ -1080,5 +1080,15 @@
   "serverKeyRemoveKept": "删除此密钥",
   "autoScanServerKeyOtherHost": "自动记录没有运行：你的服务器上传密钥是为另一个服务器地址保存的，筷拍只会把它发送到那里。请到「AI 服务」›「你自己的服务器」修改。",
   "diagServerKeyOtherHost": "上传密钥是为另一个服务器地址保存的，所以不会发送给这台服务器。",
-  "diagFixServerKeyOtherHost": "在设置 ›「AI 服务」›「你自己的服务器」里粘贴这台服务器的上传密钥，或把已保存的密钥用于它。"
+  "diagFixServerKeyOtherHost": "在设置 ›「AI 服务」›「你自己的服务器」里粘贴这台服务器的上传密钥，或把已保存的密钥用于它。",
+  "shareSkippedPhotoType": "有 {count} 个分享的文件被跳过：筷拍暂时无法读取 {type} 格式的照片。",
+  "shareSkippedVideo": "有 {count} 个分享的文件被跳过：筷拍只记录照片，不记录视频。",
+  "shareSkippedFileType": "有 {count} 个分享的文件被跳过：筷拍无法读取这类文件。",
+  "shareSkippedTooBig": "有 {count} 个分享的文件超过 25 MB，已跳过。",
+  "shareSkippedUnreadable": "有 {count} 个分享的文件无法读取，已跳过。",
+  "shareSkippedSomeTooBig": "有 {count} 个分享的文件被跳过，其中 {some} 个超过 25 MB。",
+  "shareSkippedSomeUnreadable": "有 {count} 个分享的文件被跳过，其中 {some} 个无法读取。",
+  "shareSkippedSomePhotoType": "有 {count} 个分享的文件被跳过，其中 {some} 个是筷拍暂时无法读取的 {type} 格式照片。",
+  "shareSkippedSomeVideo": "有 {count} 个分享的文件被跳过，其中 {some} 个是视频：筷拍只记录照片，不记录视频。",
+  "shareSkippedSomeFileType": "有 {count} 个分享的文件被跳过，其中 {some} 个是筷拍无法读取的文件类型。"
 }
