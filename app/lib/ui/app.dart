@@ -1168,11 +1168,11 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
         child: shell);
     // Android: while a shared photo is on its way to a meal, or any
     // analysis the user started is in flight (owner decision 9), Back at
-    // the root moves the app to the back in every task. Android 14 and
-    // later would finish a task the launcher intent started from somewhere
-    // other than the home screen (Play's Open button), and its engine with
-    // it, mid-request (Q9); MainActivity keeps that Back in Flutter in the
-    // other tasks Android would finish.
+    // the root moves the app to the back in every task. MainActivity keeps
+    // that Back in Flutter wherever it knows Android 14 and later would
+    // finish the activity, and its engine with it, mid-request (Q9); the
+    // guard also covers a start it cannot see (a return from Recents on
+    // Android 15 QPR1 and later, with a third-party home app).
     final sharing = s.sharedPhotosPending;
     final analyzing = s.analysisKeepAlive?.inFlight;
     return sharing == null && analyzing == null

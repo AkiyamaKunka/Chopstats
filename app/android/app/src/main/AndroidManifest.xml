@@ -66,16 +66,21 @@
          follows the finger. A screen with unsaved changes still asks
          before it closes (DiscardChangesGuard). At an idle root route
          Flutter leaves Back to Android: Android 13 moves the task to the
-         back, but Android 14 and later do that only for a task the home
-         screen started with the launcher's intent and finish any other,
-         with its engine. So a task a share, the bitewise://setup link or a
-         notification started keeps Flutter's callback
-         (MainActivity.setFrameworkHandlesBack), and Back at its root goes
-         through Flutter's SystemNavigator.pop to
+         back, but Android 14 and later do that only after starts from the
+         home screen (the start that created the activity on Android 14 and
+         the first release of Android 15, the latest start into its task on
+         Android 15 QPR1 and later and Android 16) and finish the activity
+         otherwise, with its engine. So unless the home screen made both,
+         MainActivity keeps Flutter's callback (setFrameworkHandlesBack),
+         and Back at its root goes through Flutter's SystemNavigator.pop to
          MainActivity.popSystemNavigator, which moves the task to the back,
-         as on Android 12 and lower. A launcher-intent start that did not
-         come from the home screen (Play's Open button) looks the same to
-         the app, and Android 14 and later still finish it on such a Back.
+         as on Android 12 and lower: after a share, the bitewise://setup
+         link, a notification, Play's Open button, a picker or permission
+         dialog the app opened, or split screen. It knows a home start by
+         the caller Android records for it, which is the home app's package
+         (the home apps entry in <queries> below). A return from Recents
+         tells it nothing: with a third-party home app as the default,
+         Android 15 QPR1 and later can still finish the activity after one.
          While a shared photo is pending or an analysis the user started is
          in flight, the shell keeps Back at the root in Flutter in every
          task (SharedPhotosBackGuard). -->
@@ -115,6 +120,20 @@
             <meta-data
               android:name="io.flutter.embedding.android.NormalTheme"
               android:resource="@style/NormalTheme"
+              />
+            <!-- The bitewise://setup link reaches the app through app_links
+                 only (its README and example manifest). Flutter's own deep
+                 linking, on by default since Flutter 3.27, also pushed each
+                 link that arrived while the app was open as a named route
+                 (RCREL-V-1, 2026-11-21): a link with a query failed to find a
+                 route and logged an error, and a bare bitewise://setup became
+                 "/", which opened a second main screen. That screen brought
+                 back the first setup link of the run, and when it closed it
+                 took the sharing-consent question with it, so shared photos
+                 waited until the next start. -->
+            <meta-data
+              android:name="flutter_deeplinking_enabled"
+              android:value="false"
               />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
@@ -192,6 +211,19 @@
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
+        </intent>
+        <!-- The home apps (MainActivity.isHomeStart): Back at the root is
+             left to Android only after starts from the home screen, told
+             by the caller Android records for a start, which must be the
+             default home app's package. From Android 11 the system hides
+             packages the app cannot see: the home intent would resolve to
+             none of them, and the home app would be dropped from the
+             referrer (ActivityRecord.getFilteredReferrer), so every root
+             would keep Flutter's back callback. This makes the home apps
+             visible and nothing more; no permission is involved. -->
+        <intent>
+            <action android:name="android.intent.action.MAIN"/>
+            <category android:name="android.intent.category.HOME"/>
         </intent>
     </queries>
 </manifest>
