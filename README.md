@@ -15,9 +15,10 @@ Lines tied to a release. Re-read them when a new App Store version ships:
    is no longer the newest version.
 2. The caption under the hero slide names the version the screens show.
 3. "Coming next" lists what is on main but not in the App Store version:
-   the native iOS look and iCloud Backup. When they ship, move them into
-   "What else it does" and "More features", and update "Privacy", because
-   iCloud Backup copies the log to the user's own iCloud Drive.
+   the native iOS look, iCloud Backup and Correct with a note. When they
+   ship, move them into "What else it does" and "More features", and update
+   "Privacy", because iCloud Backup copies the log to the user's own iCloud
+   Drive and a note in Edit meal is a new case in "Everything that is sent".
 4. "Privacy" and "Everything that is sent, case by case" describe the App
    Store version. Check them against docs/PRIVACY.md at that version's tag,
    because the policy on main may already describe the next version.
@@ -314,10 +315,11 @@ Something not working? Start with **Settings › AI Provider › Test This Provi
 
 ## Coming next
 
-Built and in the public code on `main`, but not in the App Store version yet. Neither has a release date.
+Built and in the public code on `main`, but not in the App Store version yet. None has a release date yet.
 
 - **A native iOS look.** A redesign in the iOS style.
 - **iCloud Backup.** Copies your log to your own iCloud Drive, so it survives deleting the app or moving to a new iPhone, with no account and no server of ours. It is on by default, and a notice comes first: nothing is uploaded until you answer it.
+- **Correct a meal with a note.** In Edit meal, tell the AI what was different ("only half the rice", "add a fried egg"); it re-estimates that meal, and you check the numbers before saving.
 
 ## For developers
 

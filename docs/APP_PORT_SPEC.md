@@ -663,7 +663,8 @@ null; anything else null. (`test_nl_correction_hostile_index_never_crashes`,
    `old_desc → new_desc`, `old_cal kcal → new_cal kcal (±diff)` (diff formatted with an explicit
    `+` when positive), plus the model's `reason` if present. All interpolations escaped.
    App addition: a `📅 {date} {time}` line under the headline names the rewritten row (snapshot
-   row, computed before the write, locale clock) — corrections have no confirmation step, so a
+   row, computed before the write, locale clock) — corrections have no confirmation step (the
+   Edit meal note, §9.0, is reviewed in the form before Save), so a
    wrong-day hit on a recurring dish would otherwise be invisible.
 
 ### 4.5 `delete` (`_nl_delete`, `telegram_bot.py:4035-4094` + confirm flow `4412-4451`)
@@ -1087,6 +1088,7 @@ one SQLite file). Each is pinned by tests named alongside.
 | Divergence | Server behavior | App behavior | Why | Pinned by |
 |---|---|---|---|---|
 | Editable history | corrections only via NL | full editor: description, date/time move, per-item rows, delete | a mis-typed number should not need a sentence to the model | `meal_edit_logic_test`, `meal_editor_screen_test` |
+| Meal note correction (Edit meal, 2026-11-24) | corrections only through the NL intent over the 7-day list, replacing the whole analysis | a stored meal's editor (any date) sends its form (description, filled foods with four numbers by position, totals; whitelisted) with the user's note and the meal's earlier notes (`earlier_notes_already_applied`, context only) through the text-intent seam (`shared/prompts/meal_correction_prompt.txt`; own server via `/api/text_intent`, unchanged); the reply is a patch (changed/added/removed, or no_change/unclear) read strictly against the editor's bounds and filled into the form as unsaved edits with Undo; only the user's Save writes it (compare-and-set); rows the AI set carry no usual mark; the notes of the corrections the saved form still holds are kept in `analysis.user_notes` (newest 20; every other writer keeps them, a model's reply never writes them) | a user who knows what is wrong with THIS meal should not search 7 days; untouched foods must not drift; a model guess must not enter totals unreviewed (Describe-a-meal row); a later note must not lose an earlier fix, nor apply it twice | `meal_correction_test`, `meal_correction_executor_test`, `meal_note_editor_test`, `meal_edit_logic_test`, `user_notes_writers_test`, `usual_yours_e2e_test` |
 | Meal thumbnails | none (Telegram holds the photo) | 160 px JPEG per photo meal in `meal_thumbs`, lazily backfilled from the library | the numbers are only checkable against the picture; gallery originals get deleted | `meal_thumbs_test`, DAO cascade test |
 | Photo-coverage audit | n/a | manual md5 sweep vs the ledger + one-tap log/retry/re-analyze | the watcher can be frozen by the OS for a whole day; the user needs a way to ask "did you get everything?" | `coverage_test`, `coverage_screen_test` |
 | Describe-a-meal | any NL intent in one channel | dedicated screen forcing new-meal semantics (empty meals list) with an editor PREVIEW before insert | a model guess about food it never saw must not enter totals unreviewed | `describe_meal_test`, `add_text_screen_test` |
