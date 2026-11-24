@@ -1464,8 +1464,10 @@ class _MealEditorScreenState extends State<MealEditorScreen>
     ];
   }
 
-  /// Save with a note that was never sent: Keep editing (false) or Save
-  /// anyway (true).
+  /// Save with a note no answer put into the form ([_noteUnsent]): Keep
+  /// editing (false) or Save anyway (true). Its title says the note is not
+  /// in the meal yet, never that it was not sent: after Stop, an error, an
+  /// answer that could not be used, or Undo, it was (review, 2026-11-24).
   Future<bool?> _confirmUnsentNote() => showDialog<bool>(
         context: context,
         builder: (ctx) {

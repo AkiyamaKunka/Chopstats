@@ -3703,7 +3703,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get mealNoteEmpties => '❌ AI 的回答会让这一餐变空，所以没有修改。要删除这一餐，请用「删除这一餐」。';
 
   @override
-  String get mealNoteUnsentTitle => '说明还没有发送';
+  String get mealNoteUnsentTitle => '这条说明还没有用到这一餐上';
 
   @override
   String get mealNoteUnsentBody => '保存会保留现在显示的数字。要使用这条说明，请先点「让 AI 修正」。';

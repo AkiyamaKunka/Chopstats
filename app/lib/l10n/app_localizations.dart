@@ -6130,13 +6130,13 @@ abstract class AppLocalizations {
   /// **'❌ The AI\'s answer would leave this meal empty, so nothing changed. To remove the meal, use Delete meal.'**
   String get mealNoteEmpties;
 
-  /// Edit meal: the title of the question Save asks when the note field holds a note that was not sent.
+  /// Edit meal: the title of the question Save asks when the note field holds a note no answer put into the form: never sent, or sent and stopped, failed, answered unusably, or undone. It must not say the note was not sent: often it was.
   ///
   /// In en, this message translates to:
-  /// **'Your note wasn\'t sent'**
+  /// **'Your note isn\'t in this meal yet'**
   String get mealNoteUnsentTitle;
 
-  /// Edit meal: the body of mealNoteUnsentTitle. A Save never sends a note, and an unsent note is not kept.
+  /// Edit meal: the body of mealNoteUnsentTitle. A Save never sends a note, and the note in the field is not kept.
   ///
   /// In en, this message translates to:
   /// **'Save keeps the numbers shown. To use your note, tap Correct with AI first.'**

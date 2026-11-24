@@ -4173,7 +4173,7 @@ class AppLocalizationsEn extends AppLocalizations {
       '❌ The AI\'s answer would leave this meal empty, so nothing changed. To remove the meal, use Delete meal.';
 
   @override
-  String get mealNoteUnsentTitle => 'Your note wasn\'t sent';
+  String get mealNoteUnsentTitle => 'Your note isn\'t in this meal yet';
 
   @override
   String get mealNoteUnsentBody =>

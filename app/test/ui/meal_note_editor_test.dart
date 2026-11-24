@@ -255,6 +255,21 @@ Future<void> _onPhone(WidgetTester tester,
 bool _noteFocused(WidgetTester tester) =>
     tester.widget<TextField>(_key('mealNoteField')).focusNode!.hasFocus;
 
+/// Save's question about a note in the field that no answer put into the
+/// form. Its title is true whether or not the note went to the AI: it said
+/// "Your note wasn't sent" after Stop, an error, an unusable answer and
+/// Undo too, when the note had gone (review, 2026-11-24).
+void _expectNoteQuestion({String? reason}) {
+  expect(_key('mealNoteUnsentDialog'), findsOneWidget, reason: reason);
+  expect(find.text("Your note isn't in this meal yet"), findsOneWidget,
+      reason: reason);
+  expect(
+      find.text('Save keeps the numbers shown. To use your note, tap '
+          'Correct with AI first.'),
+      findsOneWidget,
+      reason: reason);
+}
+
 void main() {
   setUpAll(() => initializeDateFormatting('zh'));
 
@@ -833,7 +848,8 @@ void main() {
       // The note is back in the field with nothing of it in the form: a
       // save would drop it, so it asks.
       await _save(tester);
-      expect(_key('mealNoteUnsentDialog'), findsOneWidget);
+      _expectNoteQuestion();
+      expect(rig.executor.correctedNotes, hasLength(1), reason: 'it was sent');
       await tester.tap(_key('mealNoteUnsentKeep'));
       await tester.pumpAndSettle();
       expect(rig.dao.fieldUpdates, isEmpty);
@@ -1218,7 +1234,7 @@ void main() {
       expect(rig.dao.fieldUpdates, isEmpty);
       // The newer meal holds nothing of the note: Save asks first.
       await _save(tester);
-      expect(_key('mealNoteUnsentDialog'), findsOneWidget);
+      _expectNoteQuestion();
       await tester.tap(_key('mealNoteUnsentKeep'));
       await tester.pumpAndSettle();
       expect(rig.dao.fieldUpdates, isEmpty);
@@ -1251,7 +1267,7 @@ void main() {
       // The note is back in the field, its correction gone with the older
       // form: Save asks before it writes the newer meal without it.
       await _save(tester);
-      expect(_key('mealNoteUnsentDialog'), findsOneWidget);
+      _expectNoteQuestion();
       await tester.tap(_key('mealNoteUnsentKeep'));
       await tester.pumpAndSettle();
       expect(rig.dao.fieldUpdates, isEmpty);
@@ -1357,8 +1373,7 @@ void main() {
       final rig = await _open(tester);
       await _type(tester, 'only half the rice');
       await _save(tester);
-      expect(_key('mealNoteUnsentDialog'), findsOneWidget);
-      expect(find.text("Your note wasn't sent"), findsOneWidget);
+      _expectNoteQuestion();
       await tester.tap(_key('mealNoteUnsentKeep'));
       await tester.pumpAndSettle();
       expect(rig.dao.fieldUpdates, isEmpty);
@@ -1409,8 +1424,10 @@ void main() {
         await tester.pumpAndSettle();
         expect(_field(tester, 'mealNoteField'), 'only half the rice',
             reason: name);
+        expect(rig.executor.correctedNotes, hasLength(1),
+            reason: '$name: the note went to the AI');
         await _save(tester);
-        expect(_key('mealNoteUnsentDialog'), findsOneWidget, reason: name);
+        _expectNoteQuestion(reason: name);
         await tester.tap(_key('mealNoteUnsentKeep'));
         await tester.pumpAndSettle();
         expect(rig.dao.fieldUpdates, isEmpty, reason: name);
@@ -1449,7 +1466,7 @@ void main() {
         gate.complete();
         await tester.pumpAndSettle();
         await _save(tester);
-        expect(_key('mealNoteUnsentDialog'), findsOneWidget);
+        _expectNoteQuestion();
       }
     });
 
@@ -1494,5 +1511,14 @@ void main() {
     expect(find.text('你的说明：米饭只吃了一半'), findsOneWidget);
     expect(find.text('合计：660 → 530 千卡'), findsOneWidget);
     expect(find.text('请核对上面的数字，然后点「保存」。'), findsOneWidget);
+    // Undone, the note is back in the field: Save asks, in words true of
+    // a note that went to the AI (it said 说明还没有发送).
+    await tester.tap(_key('mealNoteUndo'));
+    await tester.pumpAndSettle();
+    await _save(tester);
+    expect(find.text('这条说明还没有用到这一餐上'), findsOneWidget);
+    expect(find.text('保存会保留现在显示的数字。要使用这条说明，请先点「让 AI 修正」。'),
+        findsOneWidget);
+    expect(find.text('说明还没有发送'), findsNothing);
   });
 }

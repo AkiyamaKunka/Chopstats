@@ -4148,13 +4148,13 @@
   "@mealNoteEmpties": {
     "description": "Edit meal: the AI's answer removed every food (or set a meal with only totals to 0 kcal). Nothing changed; deleting goes through Delete meal (editorDeleteTooltip), which asks first."
   },
-  "mealNoteUnsentTitle": "Your note wasn't sent",
+  "mealNoteUnsentTitle": "Your note isn't in this meal yet",
   "@mealNoteUnsentTitle": {
-    "description": "Edit meal: the title of the question Save asks when the note field holds a note that was not sent."
+    "description": "Edit meal: the title of the question Save asks when the note field holds a note no answer put into the form: never sent, or sent and stopped, failed, answered unusably, or undone. It must not say the note was not sent: often it was."
   },
   "mealNoteUnsentBody": "Save keeps the numbers shown. To use your note, tap Correct with AI first.",
   "@mealNoteUnsentBody": {
-    "description": "Edit meal: the body of mealNoteUnsentTitle. A Save never sends a note, and an unsent note is not kept."
+    "description": "Edit meal: the body of mealNoteUnsentTitle. A Save never sends a note, and the note in the field is not kept."
   },
   "mealNoteUnsentSave": "Save anyway",
   "@mealNoteUnsentSave": {

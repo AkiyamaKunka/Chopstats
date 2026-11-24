@@ -1119,7 +1119,7 @@
   "mealNoteNoChangeBare": "AI 认为这一餐不需要修改。",
   "mealNoteUnusable": "❌ AI 的回答无法使用，所以没有修改。请换个说法再试。",
   "mealNoteEmpties": "❌ AI 的回答会让这一餐变空，所以没有修改。要删除这一餐，请用「删除这一餐」。",
-  "mealNoteUnsentTitle": "说明还没有发送",
+  "mealNoteUnsentTitle": "这条说明还没有用到这一餐上",
   "mealNoteUnsentBody": "保存会保留现在显示的数字。要使用这条说明，请先点「让 AI 修正」。",
   "mealNoteUnsentSave": "仍然保存",
   "mealNoteSavedHeader": "这一餐的说明",
