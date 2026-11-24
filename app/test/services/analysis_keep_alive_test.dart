@@ -10,6 +10,8 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:calorie_tracker/core/contracts.dart';
+import 'package:calorie_tracker/core/meal_correction.dart'
+    show MealCorrectionInput, MealCorrectionTotals, MealNoChange;
 import 'package:calorie_tracker/core/outcome_kind.dart';
 import 'package:calorie_tracker/l10n/app_localizations_en.dart';
 import 'package:calorie_tracker/services/analysis_keep_alive.dart';
@@ -241,6 +243,59 @@ void main() {
       await _settle();
       expect(native.calls, ['begin:1', 'end:1', 'begin:2', 'end:2']);
       expect(native.open, isEmpty);
+    });
+
+    const meal = MealCorrectionInput(
+      description: 'Braised pork with rice',
+      items: [],
+      totals: MealCorrectionTotals(
+          calories: 660, protein: 32, carbs: 70, fat: 26),
+    );
+
+    test('a note in Edit meal is kept alive while the model answers',
+        () async {
+      final keep = AnalysisKeepAlive();
+      final inner = FakeExecutor();
+      final gate = Completer<void>();
+      final executor = KeptAliveExecutor(_HeldExecutor(inner, gate), keep);
+      final corrector = noteCorrectorOf(executor)!;
+      final out = corrector.correctMeal(meal, 'only half the rice');
+      await _settle();
+      expect(native.open, {1});
+      gate.complete();
+      expect((await out).reply, isA<MealNoChange>());
+      await _settle();
+      expect(inner.correctedNotes.single.$2, 'only half the rice');
+      expect(identical(inner.correctedNotes.single.$1, meal), isTrue);
+      expect(native.calls, ['begin:1', 'end:1']);
+      expect(native.open, isEmpty);
+    });
+
+    test("a note's refusal check sends nothing, so it is not counted",
+        () async {
+      final inner = FakeExecutor()..noteRefusalText = 'no key';
+      final executor = KeptAliveExecutor(inner, AnalysisKeepAlive());
+      expect(noteCorrectorOf(executor)!.noteRefusal(), 'no key');
+      await _settle();
+      expect(native.calls, isEmpty);
+    });
+
+    test('a note request that throws still ends', () async {
+      final keep = AnalysisKeepAlive();
+      final executor = KeptAliveExecutor(_ThrowingExecutor(), keep);
+      await expectLater(
+          noteCorrectorOf(executor)!.correctMeal(meal, 'x'), throwsStateError);
+      await _settle();
+      expect(native.calls, ['begin:1', 'end:1']);
+      expect(native.open, isEmpty);
+    });
+
+    test('an executor that offers no note is not offered as one', () {
+      final executor = KeptAliveExecutor(_PlainExecutor(), AnalysisKeepAlive());
+      expect(executor, isNot(isA<MealNoteCorrector>()));
+      expect(noteCorrectorOf(executor), isNull);
+      expect(noteCorrectorOf(KeptAliveExecutor(FakeExecutor(),
+          AnalysisKeepAlive())), isNotNull);
     });
 
     test("a delete's confirmation sends nothing, so it is not counted",
@@ -636,10 +691,20 @@ Future<void> _until(bool Function() done) async {
 }
 
 /// [inner], answering only once [gate] completes: the request in flight.
-class _HeldExecutor implements NlExecutor {
+class _HeldExecutor implements NlExecutor, MealNoteCorrector {
   _HeldExecutor(this.inner, this.gate);
   final FakeExecutor inner;
   final Completer<void> gate;
+
+  @override
+  String? noteRefusal() => inner.noteRefusal();
+
+  @override
+  Future<MealNoteOutcome> correctMeal(
+      MealCorrectionInput meal, String note) async {
+    await gate.future;
+    return inner.correctMeal(meal, note);
+  }
 
   @override
   Future<DescribeOutcome> describeMeal(String text) async {
@@ -658,7 +723,28 @@ class _HeldExecutor implements NlExecutor {
       inner.confirmPendingDelete(mealIds);
 }
 
-class _ThrowingExecutor implements NlExecutor {
+/// An executor that offers no note (an older one, a test's).
+class _PlainExecutor implements NlExecutor {
+  @override
+  Future<DescribeOutcome> describeMeal(String text) async =>
+      const DescribeOutcome(error: 'x');
+
+  @override
+  Future<List<NlReply>> handleText(String userText) async => const [];
+
+  @override
+  Future<String> confirmPendingDelete(List<int> mealIds) async => '';
+}
+
+class _ThrowingExecutor implements NlExecutor, MealNoteCorrector {
+  @override
+  String? noteRefusal() => null;
+
+  @override
+  Future<MealNoteOutcome> correctMeal(
+          MealCorrectionInput meal, String note) async =>
+      throw StateError('boom');
+
   @override
   Future<DescribeOutcome> describeMeal(String text) async =>
       throw StateError('boom');

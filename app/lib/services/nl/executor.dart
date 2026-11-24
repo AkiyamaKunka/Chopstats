@@ -11,6 +11,13 @@ import 'dart:math' as math;
 
 import '../../core/coerce.dart';
 import '../../core/contracts.dart';
+import '../../core/meal_correction.dart'
+    show
+        MealCorrectionInput,
+        cleanMealNote,
+        composeMealCorrectionRequest,
+        keepUserNotes,
+        parseMealCorrectionReply;
 import '../../core/outcome_kind.dart';
 import '../../core/prompts.dart';
 import '../../core/restaurant_assist_logic.dart'
@@ -48,7 +55,7 @@ NlExecutor createExecutor(
         MealsDao dao, AnalyzerService analyzer, AppSettings settings) =>
     DefaultNlExecutor(dao, analyzer, settings);
 
-class DefaultNlExecutor implements NlExecutor {
+class DefaultNlExecutor implements NlExecutor, MealNoteCorrector {
   DefaultNlExecutor(this.dao, this.analyzer, this.settings, {this.l10n});
 
   final MealsDao dao;
@@ -185,6 +192,54 @@ class DefaultNlExecutor implements NlExecutor {
         _l.nlServerModelRefused(reason),
       _ => _l.nlErrorContactingAi,
     };
+  }
+
+  /// A note typed in Edit meal (core/meal_correction.dart): refused, with
+  /// no model call, in Fix meals' own words during the quota pause and
+  /// without a key or a server.
+  @override
+  String? noteRefusal() {
+    if (settings.isQuotaPaused) {
+      return _quotaPauseMessage(settings.quotaPauseUntil!, _l);
+    }
+    return _missingKeyMessage();
+  }
+
+  /// Sends [note] about ONE meal, as the editor's form shows it, with the
+  /// meal's earlier notes ([MealCorrectionInput]), through the same
+  /// text-intent seam as Fix meals (every provider; the own server's
+  /// /api/text_intent), and reads the answer as a patch. Reads and writes
+  /// no meal: the editor fills its form with the answer and the user's
+  /// Save writes it. Never throws (handleText's containment).
+  @override
+  Future<MealNoteOutcome> correctMeal(
+      MealCorrectionInput meal, String note) async {
+    try {
+      return await _correctMealInner(meal, note);
+    } catch (_) {
+      return MealNoteOutcome(error: _l.nlSomethingWrong);
+    }
+  }
+
+  Future<MealNoteOutcome> _correctMealInner(
+      MealCorrectionInput meal, String note) async {
+    final refusal = noteRefusal();
+    if (refusal != null) return MealNoteOutcome(error: refusal);
+    final cleaned = cleanMealNote(note);
+    if (cleaned.isEmpty) return MealNoteOutcome(error: _l.nlTypeFirst);
+    // The reply-language directive is appended by the direct provider, or
+    // by the own server from `lang` — as for every text request.
+    final prompt =
+        mealCorrectionPrompt(composeMealCorrectionRequest(meal, cleaned));
+    final TextIntentOutcome reply;
+    try {
+      reply = await askTextIntent(analyzer, prompt);
+    } catch (_) {
+      return MealNoteOutcome(error: _l.nlErrorContactingAi);
+    }
+    final json = reply.json;
+    if (json == null) return MealNoteOutcome(error: _textFailure(reply.error));
+    return MealNoteOutcome(reply: parseMealCorrectionReply(json, meal));
   }
 
   /// Describe-only path (app-only, spec §9): analyze [text] as a brand-new
@@ -378,6 +433,11 @@ class DefaultNlExecutor implements NlExecutor {
     dropAssistClaims(sanitized);
     final assist = supersedeAssist(current['assist']);
     if (assist != null) sanitized['assist'] = assist;
+    // The notes the user corrected this meal with in Edit meal
+    // (analysis.user_notes) are theirs, never the model's: the chat model
+    // never sees them (buildMealsList leaves them out), and whatever it
+    // wrote there was dropped above. They stay exactly as stored.
+    keepUserNotes(sanitized, current);
     final oldCal = safeNumber(old['total_calories']);
     final newCal = safeNumber(sanitized['total_calories']);
     final oldDesc = _desc(old);

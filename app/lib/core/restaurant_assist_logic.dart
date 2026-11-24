@@ -60,6 +60,7 @@ library;
 import 'chain_match.dart';
 import 'coerce.dart';
 import 'contracts.dart';
+import 'meal_correction.dart' show kUserNotesKey;
 import 'restaurant_lookup_contract.dart'
     show
         composeLookupItem,
@@ -2794,12 +2795,18 @@ Map<String, Object?>? supersedeAssist(dynamic assist) {
 /// The editor's new-meal save passes [keepUserMarks] true: its describe
 /// prefill was stripped when the editor opened, so the marks left at save
 /// are that session's own.
+/// The meal's notes (`user_notes`, core/meal_correction.dart) go too, with
+/// or without [keepUserMarks]: only the meal editor writes them, from
+/// what the user sent, and a correction sends them to the AI again as the
+/// user's own earlier notes — a reply carrying some is not evidence that
+/// the user wrote anything.
 /// Item maps are copied before a key is removed, never edited in place.
 void dropAssistClaims(
   Map<String, dynamic> analysis, {
   bool keepUserMarks = false,
 }) {
   analysis.remove('assist');
+  analysis.remove(kUserNotesKey);
   final items = analysis['food_items'];
   bool claim(Object? k) =>
       k == 'published' || (!keepUserMarks && k == 'user');

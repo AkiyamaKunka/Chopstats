@@ -43,6 +43,7 @@ import 'package:flutter/foundation.dart' show ValueListenable, ValueNotifier;
 import 'package:flutter/services.dart' show MethodChannel;
 
 import '../core/contracts.dart';
+import '../core/meal_correction.dart' show MealCorrectionInput;
 
 /// MainActivity.KEEP_ALIVE_CHANNEL.
 const String keepAliveChannelName = 'dev.calorietracker/keepalive';
@@ -115,12 +116,20 @@ class AnalysisKeepAlive {
   }
 }
 
-/// The app engine's [NlExecutor] with each typed meal (Describe) and Fix
-/// meals request kept alive while it runs ([AnalysisKeepAlive.guard]): the
-/// model call and, for a fix, the writes it leads to. A delete's
-/// confirmation sends nothing and is passed through.
+/// The app engine's [NlExecutor] with each typed meal (Describe), Fix
+/// meals request and Edit meal note kept alive while it runs
+/// ([AnalysisKeepAlive.guard]): the model call and, for a fix, the writes
+/// it leads to. A delete's confirmation and a note's refusal check send
+/// nothing and are passed through. It is a [MealNoteCorrector] exactly
+/// when the executor it wraps is one, so the editor offers the note only
+/// where it can be sent (contracts.dart noteCorrectorOf).
 class KeptAliveExecutor implements NlExecutor {
-  KeptAliveExecutor(this._inner, this._keepAlive);
+  factory KeptAliveExecutor(NlExecutor inner, AnalysisKeepAlive keepAlive) =>
+      inner is MealNoteCorrector
+          ? _KeptAliveNoteExecutor._(inner, keepAlive)
+          : KeptAliveExecutor._(inner, keepAlive);
+
+  KeptAliveExecutor._(this._inner, this._keepAlive);
 
   final NlExecutor _inner;
   final AnalysisKeepAlive _keepAlive;
@@ -136,4 +145,20 @@ class KeptAliveExecutor implements NlExecutor {
   @override
   Future<String> confirmPendingDelete(List<int> mealIds) =>
       _inner.confirmPendingDelete(mealIds);
+}
+
+/// [KeptAliveExecutor] over an executor that corrects a meal from a note:
+/// the note's request is kept alive too; its refusal check sends nothing.
+class _KeptAliveNoteExecutor extends KeptAliveExecutor
+    implements MealNoteCorrector {
+  _KeptAliveNoteExecutor._(super.inner, super.keepAlive) : super._();
+
+  MealNoteCorrector get _corrector => _inner as MealNoteCorrector;
+
+  @override
+  String? noteRefusal() => _corrector.noteRefusal();
+
+  @override
+  Future<MealNoteOutcome> correctMeal(MealCorrectionInput meal, String note) =>
+      _keepAlive.guard(() => _corrector.correctMeal(meal, note));
 }

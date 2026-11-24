@@ -10,6 +10,7 @@ library;
 import 'dart:convert';
 
 import 'coerce.dart';
+import 'meal_correction.dart' show keepUserNotes;
 import 'shared_generated.dart';
 
 /// The compact original-analysis JSON embedded in the prompt: whitelisted
@@ -305,6 +306,11 @@ LeftoverResult? applyLeftover(
 /// a total still equal to `applied_total`. That is the [leftoverBase]
 /// staleness rule — a chat or editor fix made after the deduction is the
 /// user's newer truth and must never be overwritten by the undo.
+///
+/// The meal's notes (`user_notes`, core/meal_correction.dart) are taken
+/// from [current], never from [before]: an Edit meal save after the
+/// deduction may have kept or removed some, and the undo is about the
+/// deduction only.
 Map<String, dynamic>? revertedLeftover(Map<String, dynamic> current,
     {required Map<String, dynamic> applied,
     required Map<String, dynamic> before}) {
@@ -321,7 +327,7 @@ Map<String, dynamic>? revertedLeftover(Map<String, dynamic> current,
       safeNumber(stamped) != safeNumber(current['total_calories'])) {
     return null;
   }
-  return Map<String, dynamic>.from(before);
+  return keepUserNotes(Map<String, dynamic>.from(before), current);
 }
 
 /// Python-truthiness for same_meal, defaulting TRUE when absent — a model
