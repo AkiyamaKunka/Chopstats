@@ -1,6 +1,8 @@
 // Editor rules (spec §9 app-only divergence: hand-edited meals). Field
 // parsing/bounds, item sums, and the analysis merge that decides what is
 // persisted — the merge is where a bug silently corrupts a meal row.
+import 'dart:convert' show jsonEncode;
+
 import 'package:calorie_tracker/core/contracts.dart';
 import 'package:calorie_tracker/core/leftover_logic.dart'
     show kLeftoverItemMacrosScaled;
@@ -1080,7 +1082,7 @@ void main() {
       test('a row it set, until typed back to what it was', () {
         final d = MealDraft.fromMeal(mealWith(stored))
             .withCorrection(halfRice, step: 1);
-        bool holds() => d.holdsNote(1, removedAny: false);
+        bool holds() => d.holdsNote(1);
         expect(holds(), isTrue);
         d.items[0].calories = '125'; // adjusted: still the note's change
         expect(holds(), isTrue);
@@ -1091,6 +1093,13 @@ void main() {
           ..carbs = '57'
           ..fat = '0.50';
         expect(holds(), isFalse, reason: 'typed back');
+        // Typed back means the name and every number.
+        d.items[0].name = 'Steamed rice (~100 g)';
+        expect(holds(), isTrue, reason: 'the new name stays');
+        d.items[0]
+          ..name = 'Steamed rice (~200 g)'
+          ..calories = '260.5';
+        expect(holds(), isTrue, reason: 'half a kcal off is not the same');
       });
 
       test('an added row, until removed', () {
@@ -1100,9 +1109,9 @@ void main() {
                   name: 'Egg', calories: 90, protein: 6, carbs: 0, fat: 7),
             ]),
             step: 2);
-        expect(d.holdsNote(2, removedAny: false), isTrue);
+        expect(d.holdsNote(2), isTrue);
         d.items.removeLast();
-        expect(d.holdsNote(2, removedAny: false), isFalse);
+        expect(d.holdsNote(2), isFalse);
       });
 
       test('a row a later note changed again still holds the earlier one',
@@ -1119,37 +1128,72 @@ void main() {
                       fat: 1),
                 }),
                 step: 2);
-        expect(d.holdsNote(1, removedAny: false), isTrue);
-        expect(d.holdsNote(2, removedAny: false), isTrue);
+        expect(d.holdsNote(1), isTrue);
+        expect(d.holdsNote(2), isTrue);
         d.items[0]
           ..name = 'Steamed rice (~100 g)'
           ..calories = '130'
           ..protein = '2.5'
           ..carbs = '28.5'
           ..fat = '0.3';
-        expect(d.holdsNote(2, removedAny: false), isFalse);
-        expect(d.holdsNote(1, removedAny: false), isTrue);
+        expect(d.holdsNote(2), isFalse);
+        expect(d.holdsNote(1), isTrue);
       });
 
-      test('a removal, a description and a row-less meal\'s totals', () {
+      test('a removal, while the food stays gone', () {
+        final before = MealDraft.fromMeal(mealWith(stored));
+        final d = before.withCorrection(
+            const MealCorrectionProposal(removed: {1}), step: 4);
+        bool holds() =>
+            d.holdsNote(4, removed: const {1}, removedFrom: before);
+        expect(holds(), isTrue);
+        d.items[0].calories = '250'; // another change: still gone
+        expect(holds(), isTrue);
+        // Typed back by hand: the same name and numbers.
+        d.items.add(MealItemDraft()
+          ..name = ' Braised pork (~120 g)'
+          ..calories = '400'
+          ..protein = '27'
+          ..carbs = '13'
+          ..fat = '25.50');
+        expect(holds(), isFalse);
+        d.items.last.calories = '380';
+        expect(holds(), isTrue, reason: 'another food than the one removed');
+      });
+
+      test('a removal of one of two alike rows, until it is back', () {
+        final two = mealWith({
+          ...stored,
+          'food_items': [
+            ...stored['food_items'] as List,
+            (stored['food_items'] as List)[1],
+          ],
+        });
+        final before = MealDraft.fromMeal(two);
+        final d = before.withCorrection(
+            const MealCorrectionProposal(removed: {2}), step: 6);
+        bool holds() =>
+            d.holdsNote(6, removed: const {2}, removedFrom: before);
+        expect(d.items, hasLength(2));
+        expect(holds(), isTrue, reason: 'one alike row is left, not two');
+        d.items.add(before.items[2].copy());
+        expect(holds(), isFalse);
+      });
+
+      test('a description and a row-less meal\'s totals', () {
         final d = MealDraft.fromMeal(mealWith(stored));
-        expect(d.holdsNote(5, removedAny: true), isTrue);
         expect(
-            d.holdsNote(5,
-                removedAny: false, descBefore: 'Braised pork with rice'),
+            d.holdsNote(5, descBefore: 'Braised pork with rice'),
             isFalse);
         d.description = 'Braised pork';
         expect(
-            d.holdsNote(5,
-                removedAny: false, descBefore: 'Braised pork with rice'),
+            d.holdsNote(5, descBefore: 'Braised pork with rice'),
             isTrue);
         expect(
-            d.holdsNote(5,
-                removedAny: false, totalsBefore: ['700', '32', '70', '26']),
+            d.holdsNote(5, totalsBefore: ['700', '32', '70', '26']),
             isFalse);
         expect(
-            d.holdsNote(5,
-                removedAny: false, totalsBefore: ['650', '32', '70', '26']),
+            d.holdsNote(5, totalsBefore: ['650', '32', '70', '26']),
             isTrue);
       });
     });
@@ -1167,6 +1211,78 @@ void main() {
       ]);
       expect(d.toAnalysis(now: at, notes: const []).containsKey(kUserNotesKey),
           isFalse);
+    });
+
+    test('a save that changes the notes leaves no copy of them in a '
+        "leftover deduction's snapshot (an earlier build kept one there)",
+        () {
+      final withCopy = {
+        ...stored,
+        'leftover': {
+          'applied_total': 700,
+          'original': {...stored, 'total_calories': 1000},
+        },
+      };
+      final d = MealDraft.fromMeal(mealWith(withCopy));
+      // No change to the notes: the meal as stored.
+      expect(d.toAnalysis(now: at)['leftover'], withCopy['leftover']);
+      final out = d.toAnalysis(now: at, notes: const []);
+      expect(jsonEncode(out), isNot(contains('the pork was lean')));
+      final block = out['leftover'] as Map;
+      expect(block['applied_total'], 700);
+      expect((block['original'] as Map)['total_calories'], 1000);
+      expect(((withCopy['leftover'] as Map)['original'] as Map)[kUserNotesKey],
+          stored[kUserNotesKey],
+          reason: 'the loaded meal is not edited in place');
+    });
+
+    test("an answer's description fills a form Save takes", () {
+      final p = parseMealCorrectionReply({
+        'status': 'corrected',
+        'meal_description': '🍚' * 299,
+        'changed': [
+          {'id': 0, 'estimated_calories': 130}
+        ],
+      }, MealDraft.fromMeal(mealWith(stored)).correctionInput());
+      final d = MealDraft.fromMeal(mealWith(stored))
+          .withCorrection((p as MealCorrected).proposal, step: 1);
+      expect(d.validate(), isEmpty);
+    });
+
+    test('copy keeps the loaded totals and the typed moment', () {
+      // A meal with only totals: Add item on a copy seeds the meal's own
+      // totals, which are not the user's.
+      final totalsOnly = MealDraft.fromMeal(mealWith({
+        'is_food': true,
+        'meal_description': 'Coffee and a pastry',
+        'total_calories': 420,
+        'total_protein_g': 8,
+        'total_carbs_g': 50,
+        'total_fat_g': 20,
+      })).copy();
+      totalsOnly.addItem().name = 'Coffee and a pastry';
+      final row =
+          (totalsOnly.toAnalysis(now: at)['food_items'] as List).single as Map;
+      expect(row.containsKey('user'), isFalse);
+      // A typed meal's copy still marks its kept rows at the meal's moment.
+      final typed = MealDraft.fromMeal(Meal(
+        id: 9,
+        date: '2026-11-20',
+        time: '08:00 AM',
+        timestamp: '2026-11-20T08:00:00.000Z',
+        source: MealSource.appManual,
+        analysis: {
+          'is_food': true,
+          'meal_description': 'Toast',
+          'total_calories': 180,
+          'food_items': [
+            {'name': 'Toast', 'estimated_calories': 180},
+          ],
+        },
+      )).copy();
+      final toast =
+          (typed.toAnalysis(now: at)['food_items'] as List).single as Map;
+      expect((toast['user'] as Map)['at'], '2026-11-20T08:00:00.000Z');
     });
   });
 }

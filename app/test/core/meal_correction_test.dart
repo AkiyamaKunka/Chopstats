@@ -256,6 +256,64 @@ void main() {
       expect(p.changed[1]!.numbers, [300, 27, 13, 25.5]);
     });
 
+    test("a missing, blank or echoed name keeps the row's own name, as the "
+        'form has it: never the capped, cleaned copy that was sent', () {
+      // Longer than 120 code points, with what cleaning removes.
+      final long = 'Steamed rice <brown>  and white, ${'grain ' * 25}(~200 g)';
+      final input = MealCorrectionInput(
+        description: 'Rice',
+        items: [item(long, 260, 5, 57, 0.5)],
+        totals: const MealCorrectionTotals(
+            calories: 260, protein: 5, carbs: 57, fat: 0.5),
+      );
+      final sent = (decode(composeMealCorrectionRequest(input, 'half'))['items']
+          as List)[0]['name'] as String;
+      expect(long.runes.length, greaterThan(kMealNoteNameMax));
+      expect(sent.runes.length, lessThanOrEqualTo(kMealNoteNameMax));
+      expect(sent, isNot(contains('<')));
+      for (final name in [null, '  ', sent, ' $sent ']) {
+        final p = corrected(parseMealCorrectionReply({
+          'status': 'corrected',
+          'changed': [
+            {
+              'id': 0,
+              'name': ?name,
+              'estimated_calories': 130,
+              'protein_g': 2.5,
+              'carbs_g': 28.5,
+              'fat_g': 0.3,
+            }
+          ],
+        }, input));
+        expect(p.changed[0]!.name, long, reason: '$name');
+        expect(mealCorrectionDiff(input, p).lines.single.kind,
+            MealCorrectionLineKind.changed,
+            reason: 'not shown as a rename');
+      }
+      // The echoed name with the same numbers changes nothing.
+      expect(
+          parseMealCorrectionReply({
+            'status': 'corrected',
+            'changed': [
+              {'id': 0, 'name': sent, 'estimated_calories': 260}
+            ],
+          }, input),
+          isA<MealNoChange>());
+    });
+
+    test('a new name with the same numbers is a change (another food)', () {
+      final p = corrected(parseMealCorrectionReply({
+        'status': 'corrected',
+        'changed': [
+          {'id': 0, 'name': 'Brown rice (~200 g)'}
+        ],
+      }, meal));
+      expect(p.changed[0]!.name, 'Brown rice (~200 g)');
+      expect(p.changed[0]!.numbers, rice.numbers);
+      expect(mealCorrectionDiff(meal, p).lines.single.kind,
+          MealCorrectionLineKind.renamed);
+    });
+
     test('ids may be integral doubles or numeric strings', () {
       final p = corrected(parseMealCorrectionReply({
         'status': 'corrected',
@@ -297,6 +355,18 @@ void main() {
             'removed': [1],
           }, meal),
           isA<MealCorrected>());
+    });
+
+    test('no_change is no change, even next to a patch', () {
+      expect(
+          parseMealCorrectionReply({
+            'status': 'no_change',
+            'reply': 'Already right.',
+            'changed': [
+              {'id': 0, 'estimated_calories': 130}
+            ],
+          }, meal),
+          isA<MealNoChange>());
     });
 
     final unusable = <String, Object?>{
@@ -354,6 +424,16 @@ void main() {
         'changed': [
           {'id': 2, 'estimated_calories': 1}
         ]
+      },
+      'a negative id': {
+        'status': 'corrected',
+        'changed': [
+          {'id': -1, 'estimated_calories': 1}
+        ]
+      },
+      'a negative removed id': {
+        'status': 'corrected',
+        'removed': [-1]
       },
       'a fractional id': {
         'status': 'corrected',
@@ -472,6 +552,32 @@ void main() {
           }, meal),
           isA<MealReplyUnusable>(),
           reason: '1990 + 27 g is over 2000');
+      expect(
+          parseMealCorrectionReply({
+            'status': 'corrected',
+            'added': [
+              {
+                'name': 'Banquet',
+                'estimated_calories': 19500,
+                'protein_g': 0,
+                'carbs_g': 0,
+                'fat_g': 0
+              }
+            ],
+          }, meal),
+          isA<MealReplyUnusable>(),
+          reason: '660 + 19500 kcal added is over 20000');
+      // A removed row no longer counts.
+      expect(
+          parseMealCorrectionReply({
+            'status': 'corrected',
+            'changed': [
+              {'id': 0, 'estimated_calories': 19700}
+            ],
+            'removed': [1],
+          }, meal),
+          isA<MealCorrected>(),
+          reason: '19700 kcal without the 400 of the pork');
     });
 
     test('every row removed empties the meal', () {
@@ -498,6 +604,26 @@ void main() {
       }, meal);
       expect(r, isA<MealNoChange>());
       expect((r as MealNoChange).reply, 'The rice was already right.');
+      // Both sides rounded: a form number with two decimals echoed back.
+      final typed = MealCorrectionInput(
+        description: 'Rice',
+        items: [item('Rice', 260.4, 5.04, 57, 0.54)],
+        totals: const MealCorrectionTotals(
+            calories: 260.4, protein: 5.04, carbs: 57, fat: 0.54),
+      );
+      expect(
+          parseMealCorrectionReply({
+            'status': 'corrected',
+            'changed': [
+              {
+                'id': 0,
+                'estimated_calories': 260.4,
+                'protein_g': 5.04,
+                'fat_g': 0.54
+              }
+            ],
+          }, typed),
+          isA<MealNoChange>());
     });
 
     test('a new description is read; the same one is no change', () {
@@ -517,6 +643,27 @@ void main() {
         ],
       }, meal));
       expect(same.description, isNull);
+    });
+
+    test('a new description is capped as the editor counts it (UTF-16 '
+        'units), so a Save takes the form it fills', () {
+      final p = corrected(parseMealCorrectionReply({
+        'status': 'corrected',
+        'meal_description': '🍚' * 299,
+        'changed': [
+          {'id': 0, 'estimated_calories': 130}
+        ],
+      }, meal));
+      expect(p.description!.length, lessThanOrEqualTo(kMealNoteDescMax));
+      expect(p.description, '🍚' * 150, reason: 'whole characters only');
+      final plain = corrected(parseMealCorrectionReply({
+        'status': 'corrected',
+        'meal_description': 'x' * 400,
+        'changed': [
+          {'id': 0, 'estimated_calories': 130}
+        ],
+      }, meal));
+      expect(plain.description, 'x' * kMealNoteDescMax);
     });
 
     test('a meal with only totals: totals are read, foods are unusable', () {
@@ -557,6 +704,45 @@ void main() {
             'totals': {'total_calories': 420.3},
           }, totalsOnly),
           isA<MealNoChange>());
+      // Totals out of the editor's bounds, or not a map: unusable.
+      for (final totals in <Object>[
+        {'total_calories': 20000.5},
+        {'total_fat_g': 2000.5},
+        300,
+      ]) {
+        final r = parseMealCorrectionReply(
+            {'status': 'corrected', 'totals': totals}, totalsOnly);
+        expect((r as MealReplyUnusable).emptiesMeal, isFalse, reason: '$totals');
+      }
+    });
+
+    test('a meal with only totals already at 0 kcal (water, black coffee) '
+        'can still be corrected', () {
+      const water = MealCorrectionInput(
+        description: 'Water',
+        items: [],
+        totals: MealCorrectionTotals(calories: 0, protein: 0, carbs: 0, fat: 0),
+      );
+      for (final totals in <Map<String, Object>?>[
+        null,
+        {'total_calories': 0},
+      ]) {
+        final p = corrected(parseMealCorrectionReply({
+          'status': 'corrected',
+          'meal_description': 'Green tea',
+          'totals': ?totals,
+        }, water));
+        expect(p.description, 'Green tea', reason: '$totals');
+        expect(p.totals, isNull, reason: 'the same totals');
+      }
+      final p = corrected(parseMealCorrectionReply({
+        'status': 'corrected',
+        'totals': {'total_calories': 5, 'total_carbs_g': 1},
+      }, water));
+      expect(p.totals!.numbers, [5, 0, 1, 0]);
+      // Nothing to change stays no change.
+      expect(parseMealCorrectionReply({'status': 'corrected', 'totals': {}},
+          water), isA<MealNoChange>());
     });
 
     test('totals on a meal with foods are ignored', () {
@@ -631,6 +817,24 @@ void main() {
       expect(d.unchangedCount, 1);
       expect(d.reason, 'Diet cola, half the rice.');
       expect(d.descBefore, isNull);
+    });
+
+    test('changed foods are listed in form order, whatever the answer\'s',
+        () {
+      for (final ids in [
+        [0, 1],
+        [1, 0],
+      ]) {
+        final p = corrected(parseMealCorrectionReply({
+          'status': 'corrected',
+          'changed': [
+            for (final id in ids) {'id': id, 'estimated_calories': 100 + id},
+          ],
+        }, meal));
+        expect([for (final l in mealCorrectionDiff(meal, p).lines) l.name],
+            [rice.name, pork.name],
+            reason: '$ids');
+      }
     });
 
     test('a removed food and a description change', () {

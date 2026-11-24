@@ -6,6 +6,7 @@
 // shown under the note, removable, and sent again with a later note as
 // already applied.
 import 'dart:async';
+import 'dart:convert' show jsonEncode;
 
 import 'package:calorie_tracker/core/contracts.dart';
 import 'package:calorie_tracker/core/meal_correction.dart';
@@ -82,6 +83,12 @@ final _halfRice = _corrected(const MealCorrectionProposal(
         fat: 0.3),
   },
   reason: 'Halved the rice; the pork is as before.',
+));
+
+/// "I didn't eat the pork".
+final _noPork = _corrected(const MealCorrectionProposal(
+  removed: {1},
+  reason: 'Removed the pork.',
 ));
 
 /// "add a fried egg".
@@ -170,6 +177,13 @@ String _field(WidgetTester tester, String key) =>
 
 bool _readOnly(WidgetTester tester, String key) =>
     tester.widget<TextField>(_key(key)).readOnly;
+
+/// The Save button's fill as drawn.
+Color? _saveColor(WidgetTester tester) => tester
+    .widget<Material>(find
+        .descendant(of: _key('saveMealButton'), matching: find.byType(Material))
+        .first)
+    .color;
 
 Future<void> _save(WidgetTester tester) async {
   await tester.tap(_key('saveMealButton'));
@@ -319,10 +333,13 @@ void main() {
       rig.executor
         ..onCorrect = (() => gate.future)
         ..nextNoteOutcome = _halfRice;
+      final saveColor = _saveColor(tester);
       await tester.showKeyboard(_key('mealNoteField'));
       await _type(tester, 'only half the rice');
       await tester.tap(_key('mealNoteSend'));
       await tester.pump();
+      // Save waits, and looks it, as the other locked controls do.
+      expect(_saveColor(tester), isNot(saveColor));
       expect(_key('mealNoteAsking'), findsOneWidget);
       expect(find.text('Asking Gemini…'), findsOneWidget);
       expect(_key('mealNoteSend'), findsNothing);
@@ -357,6 +374,7 @@ void main() {
       await tester.pump();
       expect(_readOnly(tester, 'editorCalories'), isFalse);
       expect(_key('mealNoteSend'), findsOneWidget);
+      expect(_saveColor(tester), saveColor);
       gate.complete();
       await tester.pumpAndSettle();
       expect(_field(tester, 'itemName0'), 'Steamed rice (~200 g)',
@@ -623,6 +641,49 @@ void main() {
       expect(_field(tester, 'editorCalories'), '660');
       expect(_field(tester, 'mealNoteField'), 'only half the rice');
     });
+
+    testWidgets('keeps a note typed since: only an empty field gets the '
+        'note back', (tester) async {
+      final rig = await _open(tester);
+      rig.executor.nextNoteOutcome = _halfRice;
+      await _type(tester, 'only half the rice');
+      await _send(tester);
+      await _type(tester, 'and no sauce');
+      await tester.tap(_key('mealNoteUndo'));
+      await tester.pumpAndSettle();
+      expect(_field(tester, 'itemCal0'), '260', reason: 'the form is back');
+      expect(_field(tester, 'mealNoteField'), 'and no sauce');
+    });
+
+    testWidgets("the first note's row stays the AI's through a second note "
+        'and an Undo: saved with no usual mark', (tester) async {
+      Map<String, dynamic> riceRow(_Rig rig) =>
+          (rig.dao.fieldUpdates.single.$2!['food_items'] as List)[0]
+              as Map<String, dynamic>;
+      var rig = await _open(tester);
+      rig.executor.nextNoteOutcome = _halfRice;
+      await _type(tester, 'only half the rice');
+      await _send(tester);
+      rig.executor.nextNoteOutcome = _egg;
+      await _type(tester, 'add a fried egg');
+      await _send(tester);
+      await _save(tester);
+      expect(riceRow(rig)['estimated_calories'], 130);
+      expect(riceRow(rig).containsKey('user'), isFalse);
+
+      rig = await _open(tester);
+      rig.executor.nextNoteOutcome = _halfRice;
+      await _type(tester, 'only half the rice');
+      await _send(tester);
+      rig.executor.nextNoteOutcome = _egg;
+      await _type(tester, 'add a fried egg');
+      await _send(tester);
+      await tester.tap(_key('mealNoteUndo'));
+      await tester.pumpAndSettle();
+      await _save(tester);
+      expect(riceRow(rig)['estimated_calories'], 130);
+      expect(riceRow(rig).containsKey('user'), isFalse);
+    });
   });
 
   group('the notes kept with the meal', () {
@@ -769,6 +830,95 @@ void main() {
       await _save(tester);
       expect(rig.dao.fieldUpdates.single.$2![kUserNotesKey], raw);
     });
+
+    testWidgets('a food the note removed is kept while it stays gone, and '
+        'not once the user types it back', (tester) async {
+      Future<void> removePork(_Rig rig) async {
+        rig.executor.nextNoteOutcome = _noPork;
+        await _type(tester, "I didn't eat the pork");
+        await _send(tester);
+        expect(_key('itemName1'), findsNothing);
+        // Another number changed: Undo is no longer offered.
+        await tester.enterText(_key('itemCal0'), '250');
+        await tester.pump();
+        expect(_key('mealNoteUndo'), findsNothing);
+      }
+
+      var rig = await _open(tester);
+      await removePork(rig);
+      await _save(tester);
+      expect(rig.dao.fieldUpdates.single.$2![kUserNotesKey], [
+        {'text': "I didn't eat the pork", 'at': _sentAt},
+      ]);
+
+      rig = await _open(tester);
+      await removePork(rig);
+      await tester.tap(_key('addItemRow'));
+      await tester.pumpAndSettle();
+      for (final (k, v) in [
+        ('itemName1', 'Braised pork (~120 g)'),
+        ('itemCal1', '400'),
+        ('itemPro1', '27'),
+        ('itemCarb1', '13'),
+        ('itemFat1', '25.5'),
+      ]) {
+        await tester.enterText(_key(k), v);
+      }
+      await tester.pump();
+      await _save(tester);
+      final analysis = rig.dao.fieldUpdates.single.$2!;
+      expect([for (final i in analysis['food_items'] as List) i['name']],
+          ['Steamed rice (~200 g)', 'Braised pork (~120 g)']);
+      expect(analysis.containsKey(kUserNotesKey), isFalse);
+    });
+
+    testWidgets('a correction undone by hand is not sent again as applied',
+        (tester) async {
+      final rig = await _open(tester);
+      rig.executor.nextNoteOutcome = _egg;
+      await _type(tester, 'add a fried egg');
+      await _send(tester);
+      await tester.tap(_key('removeItem2'));
+      await tester.pumpAndSettle();
+      rig.executor.nextNoteOutcome = _halfRice;
+      await _type(tester, 'only half the rice');
+      await _send(tester);
+      expect(rig.executor.correctedNotes.last.$1.earlierNotes, isEmpty);
+    });
+
+    testWidgets('removed, a note is gone from the whole meal: a copy an '
+        "earlier build kept in a leftover deduction's snapshot goes too",
+        (tester) async {
+      final withCopy = Meal(
+        id: 1,
+        date: '2026-11-24',
+        time: '12:30 PM',
+        timestamp: '2026-11-24T12:30:00.000',
+        source: MealSource.appPhoto,
+        imageHash: 'h1',
+        analysis: {
+          ..._analysis(notes: stored),
+          'leftover': {
+            'applied_total': 660,
+            'leftover_photo_md5': 'f00d',
+            'original': {..._analysis(notes: stored), 'total_calories': 990},
+          },
+        },
+      );
+      final rig = await _open(tester, meal: withCopy);
+      await tester.tap(_key('mealNoteRemove0'));
+      await tester.pumpAndSettle();
+      await tester.tap(_key('mealNoteRemove1'));
+      await tester.pumpAndSettle();
+      await _save(tester);
+      final saved = rig.dao.fieldUpdates.single.$2!;
+      for (final n in stored) {
+        expect(jsonEncode(saved), isNot(contains(n['text'])));
+      }
+      final block = saved['leftover'] as Map;
+      expect(block['applied_total'], 660);
+      expect((block['original'] as Map)['total_calories'], 990);
+    });
   });
 
   group('a meal that changed meanwhile', () {
@@ -799,6 +949,12 @@ void main() {
       expect(_key('mealNoteChanges'), findsNothing);
       expect(_field(tester, 'mealNoteField'), 'only half the rice');
       expect(rig.dao.fieldUpdates, isEmpty);
+      // The newer meal holds nothing of the note: Save asks first.
+      await _save(tester);
+      expect(_key('mealNoteUnsentDialog'), findsOneWidget);
+      await tester.tap(_key('mealNoteUnsentKeep'));
+      await tester.pumpAndSettle();
+      expect(rig.dao.fieldUpdates, isEmpty);
     });
 
     testWidgets('after the fill: Save says so, reloads and puts the note '
@@ -825,6 +981,57 @@ void main() {
       expect(_field(tester, 'editorCalories'), '600');
       expect(_field(tester, 'mealNoteField'), 'only half the rice');
       expect(_key('mealNoteChanges'), findsNothing);
+      // The note is back in the field, its correction gone with the older
+      // form: Save asks before it writes the newer meal without it.
+      await _save(tester);
+      expect(_key('mealNoteUnsentDialog'), findsOneWidget);
+      await tester.tap(_key('mealNoteUnsentKeep'));
+      await tester.pumpAndSettle();
+      expect(rig.dao.fieldUpdates, isEmpty);
+    });
+
+    testWidgets('after a reload, the notes listed and kept are the newer '
+        "meal's", (tester) async {
+      final rig = await _open(tester, meal: _meal(notes: [
+        {'text': 'the pork was lean', 'at': '2026-11-20T12:00:00.000Z'},
+        {'text': 'no sauce', 'at': '2026-11-21T08:00:00.000Z'},
+      ]));
+      rig.executor.nextNoteOutcome = _halfRice;
+      await _type(tester, 'only half the rice');
+      await _send(tester);
+      // Meanwhile the meal was saved elsewhere with other notes.
+      const newer = {'text': 'a small bowl', 'at': '2026-11-24T18:00:00.000Z'};
+      final m = rig.dao.meals.first;
+      rig.dao.meals[0] = Meal(
+          id: m.id,
+          date: m.date,
+          time: m.time,
+          timestamp: m.timestamp,
+          source: m.source,
+          imageHash: m.imageHash,
+          analysis: {
+            ...m.analysis,
+            'total_calories': 600,
+            kUserNotesKey: [newer],
+          },
+          corrected: true);
+      await _save(tester);
+      await tester.tap(_key('editorSaveConflictOk'));
+      await tester.pumpAndSettle();
+      expect(tester.widget<Text>(_key('mealNoteSavedText0')).data,
+          'a small bowl');
+      expect(_key('mealNoteSaved1'), findsNothing);
+      // The note again, about the newer meal: Save keeps the newer
+      // meal's notes and adds it.
+      rig.executor.nextNoteOutcome = _halfRice;
+      await _send(tester);
+      expect(rig.executor.correctedNotes.last.$1.earlierNotes,
+          ['a small bowl']);
+      await _save(tester);
+      expect(rig.dao.fieldUpdates.single.$2![kUserNotesKey], [
+        newer,
+        {'text': 'only half the rice', 'at': _sentAt},
+      ]);
     });
   });
 

@@ -2,14 +2,17 @@
 // travel with the meal: Export holds them, Import Data brings them back
 // on another phone, and an iCloud Backup (its record tables, restored
 // through the same import) carries them too. Android's Auto Backup copies
-// the database file itself, so they are in it as stored.
+// the database file itself, so they are in it as stored. A note the user
+// removes is gone from all of them: no copy stays behind in the meal.
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:calorie_tracker/core/contracts.dart';
+import 'package:calorie_tracker/core/leftover_logic.dart';
 import 'package:calorie_tracker/core/meal_correction.dart';
 import 'package:calorie_tracker/data/db.dart';
 import 'package:calorie_tracker/data/meals_dao_impl.dart';
+import 'package:calorie_tracker/ui/meal_edit_logic.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
@@ -78,5 +81,39 @@ void main() {
     final row = tables['meals']!.single;
     final stored = jsonDecode(row['analysis'] as String) as Map;
     expect(stored[kUserNotesKey], notes);
+  });
+
+  test('notes removed in Edit meal after a leftover deduction are gone '
+      'from the row, the export and the backup', () async {
+    final daoA = SqfliteMealsDao(dbA);
+    final id = await daoA.saveMeal(meal);
+    // The deduction, as the Leftovers flow writes it.
+    var snap = (await daoA.mealSnapshot(id))!;
+    final cut = applyLeftover(snap.meal.analysis, const {'leftover_fraction': 0.5},
+        leftoverPhotoMd5: 'f00d', appliedAtIso: '2026-11-24T20:00:00')!;
+    expect(
+        await daoA.updateMealAnalysisIfUnchanged(id,
+            expectedRaw: snap.rawAnalysis, analysis: cut.adjusted),
+        isTrue);
+    // Both notes removed in Edit meal, as its Save writes them.
+    snap = (await daoA.mealSnapshot(id))!;
+    expect(readUserNotes(snap.meal.analysis), hasLength(2));
+    expect(
+        await daoA.updateMealFieldsIfUnchanged(id,
+            expectedRaw: snap.rawAnalysis,
+            analysis: MealDraft.fromMeal(snap.meal).toAnalysis(notes: const [])),
+        isTrue);
+
+    final after = (await daoA.mealSnapshot(id))!;
+    expect(readUserNotes(after.meal.analysis), isEmpty);
+    expect(after.meal.analysis['total_calories'], 265, reason: 'still cut');
+    final export = await daoA.exportJson();
+    final tables = jsonEncode(await daoA.backupRecordTables());
+    for (final n in notes) {
+      final text = n['text']!;
+      expect(after.rawAnalysis, isNot(contains(text)));
+      expect(export, isNot(contains(text)));
+      expect(tables, isNot(contains(text)));
+    }
   });
 }

@@ -207,7 +207,8 @@ class MealEditorScreen extends StatefulWidget {
   State<MealEditorScreen> createState() => _MealEditorScreenState();
 }
 
-class _MealEditorScreenState extends State<MealEditorScreen> {
+class _MealEditorScreenState extends State<MealEditorScreen>
+    with WidgetsBindingObserver {
   late MealDraft _draft;
   late final TextEditingController _desc;
   late final TextEditingController _cal;
@@ -276,6 +277,10 @@ class _MealEditorScreenState extends State<MealEditorScreen> {
   /// The note being typed (Correct with a note).
   final TextEditingController _note = TextEditingController();
 
+  /// The note field's focus: gaining it brings Correct with AI into view
+  /// ([_revealNote]).
+  final FocusNode _noteFocus = FocusNode(debugLabel: 'mealNote');
+
   /// The note's checks and consent question are open: the cards' meals
   /// signal is caught up when they end ([_refreshBasis]).
   bool _noteAsking = false;
@@ -309,6 +314,17 @@ class _MealEditorScreenState extends State<MealEditorScreen> {
   /// and Undo offered.
   bool _shownNoteTyped = false;
   bool _shownNoteUndo = false;
+
+  /// The note's field with its footer and Correct with AI (one block),
+  /// the button itself, and Save, as laid out ([_revealNote]).
+  final GlobalKey _noteBlockBox = GlobalKey();
+  final GlobalKey _noteSendBox = GlobalKey();
+  final GlobalKey _saveButtonBox = GlobalKey();
+
+  /// The keyboard's height at the last metrics change, and a reveal already
+  /// waiting for the frame ([_scheduleNoteReveal]).
+  double _lastBottomInset = 0;
+  bool _noteRevealScheduled = false;
 
   @override
   void initState() {
@@ -369,6 +385,10 @@ class _MealEditorScreenState extends State<MealEditorScreen> {
     _meal = meal;
     _storedNotes = readUserNotes(meal?.analysis);
     _note.addListener(_watchDirty);
+    _noteFocus.addListener(() {
+      if (_noteFocus.hasFocus) _scheduleNoteReveal();
+    });
+    WidgetsBinding.instance.addObserver(this);
     // What the form opened with, a new meal's included: a back gesture
     // asks before it drops anything typed since ([_unsaved]).
     _loadedSignature = _signature();
@@ -509,7 +529,9 @@ class _MealEditorScreenState extends State<MealEditorScreen> {
   /// The form, rebuilt from [snap]: the draft, every field and the item
   /// rows, with [snap]'s raw text as the save's basis. The notes this
   /// visit filled the form with are gone with the older form; the last
-  /// one goes back into an empty note field, to be sent again.
+  /// one goes back into an empty note field, to be sent again. A note in
+  /// the field now counts as unsent ([_noteUnsent]): the meal shown holds
+  /// nothing of it, so Save asks first.
   void _load(MealSnapshot snap) {
     _meal = snap.meal;
     _showDraft(
@@ -522,6 +544,7 @@ class _MealEditorScreenState extends State<MealEditorScreen> {
       if (_note.text.trim().isEmpty) _note.text = _noteSteps.last.note;
       _noteSteps.clear();
     }
+    _sentNotes.clear();
     _refreshUsual();
   }
 
@@ -628,6 +651,8 @@ class _MealEditorScreenState extends State<MealEditorScreen> {
     for (final c in [_desc, _cal, _pro, _carb, _fat, _note]) {
       c.dispose();
     }
+    _noteFocus.dispose();
+    WidgetsBinding.instance.removeObserver(this);
     for (final row in _itemCtrls) {
       row.name.dispose();
       row.cal.dispose();
@@ -1359,7 +1384,8 @@ class _MealEditorScreenState extends State<MealEditorScreen> {
 
   bool get _noteTyped => _note.text.trim().isNotEmpty;
 
-  /// Each note sent this visit, as sent ([cleanMealNote]).
+  /// Each note sent about the form shown, as sent ([cleanMealNote]);
+  /// cleared when the form is reloaded ([_load]).
   final Set<String> _sentNotes = {};
 
   /// A note in the field that was never sent: Save asks first.
@@ -1387,7 +1413,8 @@ class _MealEditorScreenState extends State<MealEditorScreen> {
   /// Whether the form still holds a change [step] made (call after
   /// [_harvest]).
   bool _holds(_NoteStep step) => _draft.holdsNote(step.id,
-      removedAny: step.removedAny,
+      removed: step.removed,
+      removedFrom: step.before,
       descBefore: step.descBefore,
       totalsBefore: step.totalsBefore);
 
@@ -1601,7 +1628,7 @@ class _MealEditorScreenState extends State<MealEditorScreen> {
       sentAt: sentAt,
       before: before,
       diff: mealCorrectionDiff(input, proposal),
-      removedAny: proposal.removed.isNotEmpty,
+      removed: proposal.removed,
       descBefore: proposal.description == null ? null : input.description,
       totalsBefore: input.items.isEmpty && proposal.totals != null
           ? [before.calories, before.protein, before.carbs, before.fat]
@@ -1617,13 +1644,14 @@ class _MealEditorScreenState extends State<MealEditorScreen> {
   }
 
   /// Undo: the form exactly as it was before the last note, and that note
-  /// back in the field. Offered only while the form shows what the note
-  /// left ([_noteUndoAvailable]).
+  /// back in the field — unless a note typed since and never sent is
+  /// there: that one is never written over ([_noteUnsent]). Offered only
+  /// while the form shows what the note left ([_noteUndoAvailable]).
   void _undoNote() {
     if (!_noteUndoAvailable) return;
     final step = _noteSteps.removeLast();
     _showDraft(step.before.copy()..expectedRaw = _draft.expectedRaw);
-    _note.text = step.note;
+    if (!_noteUnsent) _note.text = step.note;
     setState(() {});
   }
 
@@ -1635,6 +1663,63 @@ class _MealEditorScreenState extends State<MealEditorScreen> {
     _noteGen++;
     setState(() => _correcting = false);
     _refreshBasis();
+  }
+
+  @override
+  void didChangeMetrics() {
+    if (!mounted) return;
+    final view = View.maybeOf(context);
+    if (view == null) return;
+    final inset = view.viewInsets.bottom;
+    // The keyboard coming up (frame by frame) on the note.
+    if (inset > _lastBottomInset && _noteFocus.hasFocus) _scheduleNoteReveal();
+    _lastBottomInset = inset;
+  }
+
+  /// [_revealNote] after the frame, once however many asked for it.
+  void _scheduleNoteReveal() {
+    if (_noteRevealScheduled) return;
+    _noteRevealScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _noteRevealScheduled = false;
+      _revealNote();
+    });
+  }
+
+  /// The note field has focus (and the keyboard is coming up): Correct with
+  /// AI shows too, above the keyboard and clear of Save. The field's own
+  /// reveal is its caret's line and 120 pt under it, and the button sat
+  /// half under the keyboard, under Save at larger text (device check,
+  /// 2026-11-24). From the field's top down to the button and past Save,
+  /// when that fits what the keyboard leaves; otherwise (2x on a 6.1-inch
+  /// phone, AX5) the field's top goes to the top, so the note's start
+  /// stays in view and the rest scrolls. Measured inside the block: as the
+  /// keyboard shrinks the list, the field can lie past what the list lays
+  /// out, kept only for its focus, where it has no place on screen.
+  void _revealNote() {
+    if (!mounted || !_noteFocus.hasFocus || !_scroll.hasClients) return;
+    RenderBox? box(GlobalKey key) {
+      final o = key.currentContext?.findRenderObject();
+      return o is RenderBox && o.attached && o.hasSize ? o : null;
+    }
+
+    final block = box(_noteBlockBox);
+    final send = box(_noteSendBox);
+    if (block == null || send == null) return;
+    // The button's bottom, a little air so it does not sit on the
+    // keyboard, and Save's height with its margin over the keyboard.
+    var below = send
+            .localToGlobal(Offset(0, send.size.height), ancestor: block)
+            .dy +
+        8;
+    final save = box(_saveButtonBox);
+    if (save != null) below += save.size.height + kFloatingActionButtonMargin;
+    // The floated label sits half above the field's box.
+    const above = 12.0;
+    final room = _scroll.position.viewportDimension;
+    block.showOnScreen(
+        rect: Rect.fromLTRB(
+            0, -above, block.size.width, min(below, room - above)));
   }
 
   /// A kept note removed: an unsaved change until Save (Back asks).
@@ -1671,60 +1756,78 @@ class _MealEditorScreenState extends State<MealEditorScreen> {
             style: theme.textTheme.titleSmall),
       ),
       SizedBox(height: _gapAboveField(context, 8)),
-      TextField(
-        key: const Key('mealNoteField'),
-        controller: _note,
-        readOnly: locked || _noteAsking,
-        minLines: 2,
-        maxLines: isLargeText(context) ? null : 4,
-        textCapitalization: TextCapitalization.sentences,
-        textInputAction: TextInputAction.send,
-        onSubmitted: (_) => _sendNote(),
-        inputFormatters: [LengthLimitingTextInputFormatter(kMealNoteMaxChars)],
-        // The button under the footer stays above the keyboard.
-        scrollPadding: const EdgeInsets.fromLTRB(20, 20, 20, 120),
-        decoration: InputDecoration(
-          labelText: l.mealNoteLabel,
-          hintText: l.mealNoteHint,
-          border: const OutlineInputBorder(),
-        ),
-      ),
-      const SizedBox(height: 8),
-      Text(l.mealNoteFooter(provider),
-          key: const Key('mealNoteFooter'), style: muted),
-      const SizedBox(height: 12),
-      if (_correcting)
-        Semantics(
-          liveRegion: true,
-          container: true,
-          child: Wrap(
-            key: const Key('mealNoteAsking'),
-            crossAxisAlignment: WrapCrossAlignment.center,
-            spacing: 8,
-            runSpacing: 4,
-            children: [
-              const SmallSpinner(),
-              Text(l.mealNoteAsking(provider)),
-              TextButton(
-                  key: const Key('mealNoteStop'),
-                  onPressed: _stopNote,
-                  child: Text(l.mealNoteStop)),
+      // The field, what goes where, and Correct with AI: one child of the
+      // list, so the button is laid out whenever the field is
+      // ([_revealNote]).
+      Column(
+        key: _noteBlockBox,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          TextField(
+            key: const Key('mealNoteField'),
+            controller: _note,
+            focusNode: _noteFocus,
+            readOnly: locked || _noteAsking,
+            minLines: 2,
+            maxLines: isLargeText(context) ? null : 4,
+            textCapitalization: TextCapitalization.sentences,
+            textInputAction: TextInputAction.send,
+            onSubmitted: (_) => _sendNote(),
+            inputFormatters: [
+              LengthLimitingTextInputFormatter(kMealNoteMaxChars)
             ],
+            // The caret's line and 120 pt under it; with the keyboard up,
+            // the button under the footer too ([_revealNote]).
+            scrollPadding: const EdgeInsets.fromLTRB(20, 20, 20, 120),
+            decoration: InputDecoration(
+              labelText: l.mealNoteLabel,
+              hintText: l.mealNoteHint,
+              border: const OutlineInputBorder(),
+            ),
           ),
-        )
-      else
-        // Start-aligned: the extended Save button never covers it.
-        Align(
-          alignment: AlignmentDirectional.centerStart,
-          child: FilledButton.tonalIcon(
-            key: const Key('mealNoteSend'),
-            onPressed: _noteTyped && !locked && !_saving && !_noteAsking
-                ? _sendNote
-                : null,
-            icon: const Icon(Icons.auto_fix_high_outlined),
-            label: Text(l.mealNoteSend),
-          ),
-        ),
+          const SizedBox(height: 8),
+          Text(l.mealNoteFooter(provider),
+              key: const Key('mealNoteFooter'), style: muted),
+          const SizedBox(height: 12),
+          if (_correcting)
+            Semantics(
+              liveRegion: true,
+              container: true,
+              child: Wrap(
+                key: const Key('mealNoteAsking'),
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 8,
+                runSpacing: 4,
+                children: [
+                  const SmallSpinner(),
+                  Text(l.mealNoteAsking(provider)),
+                  TextButton(
+                      key: const Key('mealNoteStop'),
+                      onPressed: _stopNote,
+                      child: Text(l.mealNoteStop)),
+                ],
+              ),
+            )
+          else
+            // Start-aligned: the extended Save button covers it only at
+            // large text, and then not with the keyboard up where there is
+            // room ([_revealNote]).
+            Align(
+              alignment: AlignmentDirectional.centerStart,
+              child: KeyedSubtree(
+                key: _noteSendBox,
+                child: FilledButton.tonalIcon(
+                  key: const Key('mealNoteSend'),
+                  onPressed: _noteTyped && !locked && !_saving && !_noteAsking
+                      ? _sendNote
+                      : null,
+                  icon: const Icon(Icons.auto_fix_high_outlined),
+                  label: Text(l.mealNoteSend),
+                ),
+              ),
+            ),
+        ],
+      ),
       if (reply != null && !_correcting)
         Padding(
           padding: const EdgeInsets.only(top: 12),
@@ -2119,13 +2222,25 @@ class _MealEditorScreenState extends State<MealEditorScreen> {
             if (_noteOffered) ..._noteSection(theme),
           ],
         ),
-        floatingActionButton: FloatingActionButton.extended(
-          key: const Key('saveMealButton'),
-          onPressed: _saving || _correcting ? null : _save,
-          icon: _saving
-              ? const SmallSpinner(size: 18)
-              : const Icon(Icons.check),
-          label: Text(widget.isNew ? context.l10n.editorAdd : context.l10n.save),
+        floatingActionButton: KeyedSubtree(
+          key: _saveButtonBox,
+          child: FloatingActionButton.extended(
+            key: const Key('saveMealButton'),
+            onPressed: _saving || _correcting ? null : _save,
+            // Waiting for a note's answer, Save is drawn as unavailable, as
+            // the other controls the request locks are (a FAB's own look
+            // does not change without onPressed).
+            backgroundColor: _correcting ? context.colors.fill : null,
+            foregroundColor: _correcting
+                ? context.colors.label.withValues(alpha: 0.38)
+                : null,
+            disabledElevation: _correcting ? 0 : null,
+            icon: _saving
+                ? const SmallSpinner(size: 18)
+                : const Icon(Icons.check),
+            label:
+                Text(widget.isNew ? context.l10n.editorAdd : context.l10n.save),
+          ),
         ),
       ),
     );
@@ -2307,7 +2422,7 @@ class _NoteStep {
     required this.sentAt,
     required this.before,
     required this.diff,
-    required this.removedAny,
+    required this.removed,
     required this.descBefore,
     required this.totalsBefore,
     required this.afterSignature,
@@ -2322,7 +2437,9 @@ class _NoteStep {
   /// The form right before the note was sent.
   final MealDraft before;
   final MealCorrectionDiff diff;
-  final bool removedAny;
+
+  /// The foods it removed: positions among [before]'s filled rows.
+  final Set<int> removed;
 
   /// The description before, when the note changed it.
   final String? descBefore;

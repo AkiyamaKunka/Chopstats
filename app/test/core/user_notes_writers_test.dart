@@ -6,6 +6,10 @@
 // a leftover deduction and its Undo, and Fix meals (nl/
 // meal_correction_executor_test.dart). A model's reply never writes them:
 // dropAssistClaims drops any it carries, from a photo, Describe or Fix.
+// Nor does a writer keep a copy of them elsewhere in the meal: a note the
+// user removes is gone from the whole row (the leftover snapshot).
+import 'dart:convert' show jsonEncode;
+
 import 'package:calorie_tracker/core/contracts.dart';
 import 'package:calorie_tracker/core/leftover_logic.dart';
 import 'package:calorie_tracker/core/meal_correction.dart';
@@ -135,6 +139,34 @@ void main() {
           leftoverPhotoMd5: 'abc', appliedAtIso: '2026-11-24T20:00:00')!;
       expect(r.adjusted['total_calories'], 330);
       expect(r.adjusted[kUserNotesKey], _notes);
+    });
+
+    test('its snapshot holds no copy of them: a note the user removes '
+        'later is gone from the whole meal', () {
+      String texts(Object? block) => jsonEncode(block);
+      final r = applyLeftover(meal, const {'leftover_fraction': 0.5},
+          leftoverPhotoMd5: 'abc', appliedAtIso: '2026-11-24T20:00:00')!;
+      final block = r.adjusted['leftover'] as Map;
+      expect((block['original'] as Map)['total_calories'], 660);
+      for (final n in _notes) {
+        expect(texts(block), isNot(contains(n['text'])));
+      }
+      // A second photo re-bases on the snapshot, even one an earlier build
+      // wrote with the notes in it: the new snapshot has none either.
+      final older = {
+        ...r.adjusted,
+        'leftover': {
+          ...block,
+          'original': {...block['original'] as Map, kUserNotesKey: _notes},
+        },
+      };
+      final again = applyLeftover(older, const {'leftover_fraction': 0.25},
+          leftoverPhotoMd5: 'def', appliedAtIso: '2026-11-24T21:00:00')!;
+      expect(again.adjusted['total_calories'], 495, reason: 'of the 660');
+      expect(again.adjusted[kUserNotesKey], _notes);
+      for (final n in _notes) {
+        expect(texts(again.adjusted['leftover']), isNot(contains(n['text'])));
+      }
     });
 
     test('its Undo keeps the notes the meal has NOW, not the older copy',

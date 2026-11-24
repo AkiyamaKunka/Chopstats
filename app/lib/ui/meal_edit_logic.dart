@@ -47,7 +47,7 @@
 ///     when the user changed them ([MealDraft.toAnalysis] `notes`): the
 ///     notes of the corrections the saved form still holds
 ///     ([MealDraft.holdsNote]) are added, and the ones the user removed
-///     go.
+///     go — from the whole meal, a leftover deduction's snapshot included.
 library;
 
 import '../core/coerce.dart';
@@ -708,12 +708,18 @@ class MealDraft {
   /// notes kept at Save are those of the corrections the saved form still
   /// holds): a row it set is still here and not typed back to what it was
   /// before that note ([MealItemDraft.noteBefore]; a row a later note
-  /// changed again still counts), it removed a food (that stays gone), it
+  /// changed again still counts), a food it removed is still gone, it
   /// changed the description and the form does not show the old one
   /// ([descBefore]), or it changed a row-less meal's totals and the form
   /// does not show the old ones ([totalsBefore], the four field texts).
+  ///
+  /// The foods it removed are the filled rows [removed] (by position) of
+  /// [removedFrom], the form right before that note. One is still gone
+  /// while the form has fewer rows like it (the same name and numbers)
+  /// than [removedFrom] had: typed back by hand, the removal is undone.
   bool holdsNote(int step,
-      {required bool removedAny,
+      {Set<int> removed = const {},
+      MealDraft? removedFrom,
       String? descBefore,
       List<String>? totalsBefore}) {
     for (final it in items) {
@@ -721,7 +727,19 @@ class MealDraft {
       final before = it.noteBefore[step];
       if (before == null || !_sameTexts(it.texts, before)) return true;
     }
-    if (removedAny) return true;
+    if (removed.isNotEmpty && removedFrom != null) {
+      List<(String, String, String, String, String)> filled(MealDraft d) =>
+          [for (final it in d.items) if (!it.isBlank) it.texts];
+      int like(List<(String, String, String, String, String)> rows,
+              (String, String, String, String, String) row) =>
+          rows.where((r) => _sameTexts(r, row)).length;
+      final then = filled(removedFrom);
+      final now = filled(this);
+      for (final i in removed) {
+        if (i < 0 || i >= then.length) continue;
+        if (like(now, then[i]) < like(then, then[i])) return true;
+      }
+    }
     if (descBefore != null && description.trim() != descBefore.trim()) {
       return true;
     }
@@ -800,11 +818,16 @@ class MealDraft {
   /// ([MealItemDraft.toStoredMap]); null reads the device clock.
   /// [notes]: the meal's notes when this save changes them (core/
   /// meal_correction.dart writeUserNotes: the newest 20, the key gone
-  /// when none); null keeps the stored ones exactly as they are.
+  /// when none), with no copy left in a leftover deduction's snapshot
+  /// (dropLeftoverSnapshotNotes); null keeps the stored ones exactly as
+  /// they are.
   Map<String, dynamic> toAnalysis({DateTime? now, List<MealNote>? notes}) {
     final when = now ?? DateTime.now();
     final out = Map<String, dynamic>.from(base);
-    if (notes != null) writeUserNotes(out, notes);
+    if (notes != null) {
+      writeUserNotes(out, notes);
+      dropLeftoverSnapshotNotes(out);
+    }
     num field(String raw, num max) =>
         parseNumberField(raw, label: 'x', max: max).value ?? 0;
     final desc = description.trim();

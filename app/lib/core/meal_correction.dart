@@ -187,8 +187,8 @@ final class MealUnclear extends MealCorrectionReply {
 }
 
 /// Nothing in the answer can be used. [emptiesMeal]: it would leave the
-/// meal with no food (every row removed, or a meal with only totals at
-/// 0 kcal) — the same silent-delete guard Fix meals applies.
+/// meal with no food (every row removed, or a meal with only totals taken
+/// to 0 kcal) — the same silent-delete guard Fix meals applies.
 final class MealReplyUnusable extends MealCorrectionReply {
   const MealReplyUnusable({this.emptiesMeal = false});
   final bool emptiesMeal;
@@ -256,6 +256,27 @@ int? _id(Object? v, int count) {
   if (n == null || !n.isFinite || n != n.roundToDouble()) return null;
   final i = n.toInt();
   return i >= 0 && i < count ? i : null;
+}
+
+/// [item]'s name as the request carries it ([composeMealCorrectionRequest]).
+String _sentName(MealCorrectionItem item) =>
+    cleanShortText(item.name, kMealNoteNameMax, keepWidth: true);
+
+/// [text] cut to at most [max] UTF-16 code units, the measure the editor's
+/// own limit counts (ui/meal_edit_logic.dart validate), at a character
+/// boundary: an emoji is two units, and a description of 300 of them would
+/// fill a form that Save refuses.
+String _fitUnits(String text, int max) {
+  if (text.length <= max) return text;
+  final out = StringBuffer();
+  var units = 0;
+  for (final rune in text.runes) {
+    final width = rune > 0xFFFF ? 2 : 1;
+    if (units + width > max) break;
+    out.writeCharCode(rune);
+    units += width;
+  }
+  return out.toString().trimRight();
 }
 
 /// Thrown inside the parser for a wrong shape; never escapes it.
@@ -363,9 +384,10 @@ MealCorrectionReply _readPatch(Map json, MealCorrectionInput sent) {
     final name = cleanShortText(rawName, kMealNoteNameMax, keepWidth: true);
     final numbers = _numbers(e, _itemNumberKeys, was.numbers);
     changed[id] = MealCorrectionItem(
-      name: name.isEmpty
-          ? cleanShortText(was.name, kMealNoteNameMax, keepWidth: true)
-          : name,
+      // A missing or blank name, or the name as it was sent back again,
+      // keeps the row's own (the form's text, never the capped and
+      // cleaned copy that was sent): only a name the AI wrote is new.
+      name: name.isEmpty || name == _sentName(was) ? was.name : name,
       calories: numbers[0],
       protein: numbers[1],
       carbs: numbers[2],
@@ -402,8 +424,9 @@ MealCorrectionReply _readPatch(Map json, MealCorrectionInput sent) {
 
   final rawDesc = json['meal_description'];
   if (rawDesc != null && rawDesc is! String) throw const _Unusable();
-  final description =
-      cleanShortText(rawDesc, kMealNoteDescMax, keepWidth: true);
+  final description = _fitUnits(
+      cleanShortText(rawDesc, kMealNoteDescMax, keepWidth: true),
+      kMealNoteDescMax);
   final sentDesc =
       cleanShortText(sent.description, kMealNoteDescMax, keepWidth: true);
   final String? newDescription =
@@ -423,19 +446,21 @@ MealCorrectionReply _readPatch(Map json, MealCorrectionInput sent) {
       totals = MealCorrectionTotals(
           calories: t[0], protein: t[1], carbs: t[2], fat: t[3]);
     }
+    // The silent-delete guard: an answer that takes the meal to 0 kcal.
+    // One already at 0 (water, black coffee) can still be corrected.
     final kcal = (totals ?? sent.totals).calories;
-    if (kcal <= 0) return const MealReplyUnusable(emptiesMeal: true);
+    if (kcal <= 0 && sent.totals.calories > 0) {
+      return const MealReplyUnusable(emptiesMeal: true);
+    }
     if (totals != null && _sameNumbers(totals.numbers, sent.totals.numbers)) {
       totals = null;
     }
   } else {
-    // A changed row that the answer left as it was (after rounding) is no
-    // change.
+    // A changed row that the answer left as it was (its own name, the
+    // same numbers after rounding) is no change.
     changed.removeWhere((id, item) {
       final was = sent.items[id];
-      return item.name ==
-              cleanShortText(was.name, kMealNoteNameMax, keepWidth: true) &&
-          _sameNumbers(item.numbers, was.numbers);
+      return item.name == was.name && _sameNumbers(item.numbers, was.numbers);
     });
     final left = n - removed.length + added.length;
     if (left <= 0) return const MealReplyUnusable(emptiesMeal: true);

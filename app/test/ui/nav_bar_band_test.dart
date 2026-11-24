@@ -382,8 +382,13 @@ void main() {
               of: find.byType(MealEditorScreen),
               matching: find.byType(Scrollable))
           .first);
-      scroll.position.jumpTo(scroll.position.maxScrollExtent);
-      await tester.pumpAndSettle();
+      // The list estimates its end until it has laid out its last child
+      // (the note's block, one child): jump until the end holds.
+      for (var end = -1.0; end != scroll.position.maxScrollExtent;) {
+        end = scroll.position.maxScrollExtent;
+        scroll.position.jumpTo(end);
+        await tester.pumpAndSettle();
+      }
       expect(find.byKey(const Key('mealNoteSend')), findsOneWidget);
       expect(tester.getRect(find.byKey(const Key('mealNoteSend'))).bottom,
           lessThanOrEqualTo(barTop));

@@ -203,6 +203,76 @@ void main() {
     });
   }
 
+  // The keyboard up on the note: Correct with AI shows above it, clear of
+  // the Save button where the two meet (larger text widens both). The
+  // field revealed only its caret's line and 120 pt under it, and the
+  // button sat half under the keyboard (device check, 2026-11-24). Where
+  // the field, its footer and the button are taller than what the
+  // keyboard leaves (2x on a 6.1-inch phone, AX5), the note's text stays
+  // in view at the top and the rest scrolls.
+  const phone = Size(390, 844); // 6.1-inch
+  const large = Size(430, 932); // 6.7-inch
+  const keyboard = 336.0;
+  for (final (locale, scale, size, fits) in [
+    (const Locale('en'), 1.0, phone, true),
+    (const Locale('zh'), 1.0, phone, true),
+    (const Locale('en'), 2.0, large, true),
+    (const Locale('en'), 2.0, phone, false),
+    (const Locale('en'), 53 / 17, phone, false), // AX5
+    (const Locale('zh'), 53 / 17, phone, false),
+  ]) {
+    testWidgets('${locale.languageCode} at ${scale.toStringAsFixed(2)}x on '
+        '${size.width.round()} pt, the keyboard up on the note: '
+        '${fits ? 'the button shows above it' : 'the text stays in view'}',
+        (tester) async {
+      final dao = FakeDao()..seed(_mealWithNotes());
+      await pumpApp(
+        tester,
+        MealEditorScreen(
+            dao: dao,
+            meal: dao.meals.first,
+            settings: FakeSettings(),
+            noteCorrector: FakeExecutor()),
+        size: size,
+        locale: locale,
+        scale: scale,
+      );
+      final field = find.byKey(const Key('mealNoteField'));
+      // Scrolled just far enough to see the field: at the bottom edge.
+      final list = tester.state<ScrollableState>(find.byType(Scrollable).first);
+      while (field.evaluate().isEmpty) {
+        expect(list.position.pixels, lessThan(list.position.maxScrollExtent));
+        list.position.jumpTo(list.position.pixels + 200);
+        await tester.pump();
+      }
+      await Scrollable.ensureVisible(tester.element(field), alignment: 1);
+      await tester.pumpAndSettle();
+      await tester.showKeyboard(field);
+      tester.view.viewInsets = const FakeViewPadding(bottom: keyboard);
+      await tester.pumpAndSettle();
+      await tester.enterText(field, 'only half the rice');
+      await tester.pumpAndSettle();
+
+      final top = tester.getRect(find.byType(AppBar)).bottom;
+      final keyboardTop = size.height - keyboard;
+      final text = tester.getRect(
+          find.descendant(of: field, matching: find.byType(EditableText)));
+      expect(text.top, greaterThanOrEqualTo(top - 0.5),
+          reason: "the note's text is under the app bar");
+      expect(text.top, lessThan(keyboardTop),
+          reason: "the note's text is under the keyboard");
+      if (!fits) return;
+      final send = tester.getRect(find.byKey(const Key('mealNoteSend')));
+      final save = tester.getRect(find.byKey(const Key('saveMealButton')));
+      expect(send.bottom, lessThanOrEqualTo(keyboardTop + 0.5),
+          reason: 'the button is under the keyboard');
+      if (send.left < save.right && save.left < send.right) {
+        expect(send.bottom, lessThanOrEqualTo(save.top + 0.5),
+            reason: 'the Save button covers it');
+      }
+    });
+  }
+
   for (final (locale, scale) in [
     (const Locale('zh'), 53 / 17), // AX5
     (const Locale('en'), 53 / 17),
