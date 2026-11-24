@@ -1,7 +1,7 @@
 # Google Play Data safety: the answers for Chopstats
 
 Paste-ready answers for **Play Console › Monitor and improve › Policy and
-programs › App content › Data safety**, written 2026-11-13 for the first Google Play release (planned then as 1.7.0; it is the newest Android release at the time of the first upload: 1.7.1 until `android-v1.7.2` is published, then 1.7.2, `docs/RELEASING.md` § 6.3).
+programs › App content › Data safety**, written 2026-11-13 for the first Google Play release (planned then as 1.7.0; it is the newest Android release at the time of the first upload: 1.7.2 since `android-v1.7.2` went out on 2026-11-24, `docs/RELEASING.md` § 6.3).
 The console moves things around: match the meaning of each question, not
 its position. `docs/RELEASING.md` § 6.5 says where this fits; the App
 Store's own label is a different form with different definitions
