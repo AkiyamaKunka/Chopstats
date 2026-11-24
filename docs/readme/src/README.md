@@ -86,8 +86,8 @@ and `13-next` matter only if one of those slides goes back on the page.
   Drop it once 1.6 is no longer the newest version.
 - `13-next` shows what is on `main` but not in the App Store build (the
   native iOS look, iCloud Backup). It has no screenshots and no date. When
-  the first App Store version built from `main` after 1.6.0 ships (1.7.2:
-  the iPhone skips 1.7.0 and 1.7.1, and a 1.6.x hotfix has neither
+  the first App Store version built from `main` after 1.6.0 ships (1.8.0:
+  the iPhone skips 1.7.0, 1.7.1 and 1.7.2, and a 1.6.x hotfix has neither
   feature; docs/RELEASING.md § 6.6), its features go into the README's
   list (What else it does), not onto a slide.
 - `07-restaurant` shows Chipotle's published numbers as demo data, with

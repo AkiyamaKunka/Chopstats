@@ -9,7 +9,7 @@ Roll, no Photo Coverage; decision 1, 2026-11-13: `flutter build apk
 § 6.3), never from a debug build (the DEBUG banner) and never from the
 iPhone sets, which Play refuses (1320×2868 and 1206×2622 are about
 2.17:1). Redo them the same way on each release candidate whose screens
-changed (1.7.2 next), and look at every PNG before committing it.
+changed (1.8.0 next), and look at every PNG before committing it.
 
 ## What Play accepts
 

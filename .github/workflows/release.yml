@@ -485,7 +485,7 @@ jobs:
           fi
           echo "team_id=$runner_team" >> "$GITHUB_OUTPUT"
 
-      # iCloud Backup (iPhone 1.7.2; the iPhone skips 1.7.0 and 1.7.1):
+      # iCloud Backup (iPhone 1.8.0; the iPhone skips 1.7.0, 1.7.1 and 1.7.2):
       # once Runner.entitlements names the iCloud container, the Runner
       # App Store profile must allow it with iCloud Documents, or the
       # archive fails late or ships without the container. Checked here,
@@ -587,7 +587,7 @@ jobs:
         run: |
           set -euo pipefail
           app=build/ios/archive/Runner.xcarchive/Products/Applications/Runner.app
-          # iCloud Backup (iPhone 1.7.2): the signed Runner carries the
+          # iCloud Backup (iPhone 1.8.0): the signed Runner carries the
           # container exactly when Runner.entitlements names it; the
           # ShareExtension never carries iCloud.
           want_container=$(/usr/libexec/PlistBuddy -c "Print :com.apple.developer.icloud-container-identifiers:0" ios/Runner/Runner.entitlements 2>/dev/null || true)
