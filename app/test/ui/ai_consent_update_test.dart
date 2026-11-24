@@ -88,13 +88,20 @@ void main() {
               matching: find.text('What Chopstats sends has changed')),
           findsOneWidget);
       final body = _bodyOf(tester, _update);
-      // What is new first, then the full text it changed.
+      // What is new first — the B14 line, then the Edit meal note's — then
+      // the full text it changed.
       expect(
           body,
           startsWith('New: a photo taken before 4 a.m. now also carries a '
               "short summary of the day before's meals"));
       expect(body, contains('Not now keeps it that way.\n\n'
+          'New: in Edit meal you can tell the AI what was different about '
+          'a meal.'));
+      expect(body, contains('Not now sends nothing.\n\n'
           'Chopstats estimates calories'));
+      expect(body, contains('• a note you type in Edit meal to correct a '
+          "meal, with that meal's description, foods and numbers and its "
+          'earlier notes (kept with the meal)'));
       expect(body, contains('Google (Gemini)'));
       expect(body, contains('(for a photo taken before 4 a.m., the day before too)'));
       expect(find.text('Not now'), findsOneWidget);
@@ -142,6 +149,10 @@ void main() {
         'no key': _oldGrant(apiKey: ''),
         'key, no grant': _oldGrant()..aiConsent = {},
         'granted under the current text': FakeSettings(apiKey: 'k'),
+        // The Edit meal note's text (3) is asked about at the note's own
+        // send, never at launch (aiConsentShellAskVersion).
+        'granted under the B14 text (2)': FakeSettings(apiKey: 'k')
+          ..aiConsentVersions = {'gemini': 2},
         'another recipient has the old grant': _oldGrant()
           ..aiConsent = {'openai'}
           ..provider = 'gemini',
@@ -266,6 +277,177 @@ void main() {
       // ModalRoute.of(context) made it 2: the shell and its selected tab
       // rebuilt on every push and every pop for the rest of the session.
       expect(shellBuilds, 0);
+    });
+  });
+
+  // Version 3 lists a note typed in Edit meal. A grant from before it is
+  // asked once more at the first note send, never at launch; Not now
+  // sends nothing and is not remembered (owner question 1 = A).
+  group("the Edit meal note's text (ensureMealNoteConsent)", () {
+    Finder noteAsk() => find.byKey(const Key('mealNoteConsentDialog'));
+
+    /// A screen whose button asks as the editor's note does; [results]
+    /// records each answer.
+    Widget harness(SettingsStore settings, List<bool> results,
+            {Locale? locale}) =>
+        _app(
+            Scaffold(
+              body: Builder(
+                  builder: (context) => TextButton(
+                      onPressed: () async => results
+                          .add(await ensureMealNoteConsent(context, settings)),
+                      child: const Text('note'))),
+            ),
+            locale: locale);
+
+    Future<void> tapNote(WidgetTester tester) async {
+      await tester.tap(find.text('note'));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('a version-2 grant is asked at the note, with the note line '
+        'first; Allow records version 3 and lets it go', (tester) async {
+      final settings = FakeSettings(apiKey: 'k')
+        ..aiConsentVersions = {'gemini': 2};
+      final results = <bool>[];
+      await tester.pumpWidget(harness(settings, results));
+      await tapNote(tester);
+      expect(noteAsk(), findsOneWidget);
+      expect(
+          find.descendant(
+              of: noteAsk(),
+              matching: find.text('What Chopstats sends has changed')),
+          findsOneWidget);
+      final body = _bodyOf(tester, noteAsk());
+      expect(
+          body,
+          startsWith('New: in Edit meal you can tell the AI what was '
+              'different about a meal.'));
+      expect(body, isNot(contains('before 4 a.m. now also carries')),
+          reason: 'a version-2 grant already allowed the B14 text');
+      expect(body, contains('Not now sends nothing.\n\n'
+          'Chopstats estimates calories'));
+      expect(body, contains('• a note you type in Edit meal'));
+      await tester.tap(find.byKey(const Key('mealNoteConsentAllow')));
+      await tester.pumpAndSettle();
+      expect(results, [true]);
+      expect(settings.aiConsentWrites, [('gemini', true)]);
+      expect(settings.aiConsentVersion('gemini'), 3);
+      // Asked once: the next note goes without a question.
+      await tapNote(tester);
+      expect(noteAsk(), findsNothing);
+      expect(results, [true, true]);
+    });
+
+    testWidgets('Not now sends nothing, says so, and is asked again',
+        (tester) async {
+      final settings = FakeSettings(apiKey: 'k')
+        ..aiConsentVersions = {'gemini': 2};
+      final results = <bool>[];
+      await tester.pumpWidget(harness(settings, results));
+      await tapNote(tester);
+      await tester.tap(find.byKey(const Key('mealNoteConsentNotNow')));
+      await tester.pump();
+      expect(results, [false]);
+      expect(find.text('Nothing was sent.'), findsOneWidget);
+      expect(settings.aiConsentWrites, isEmpty);
+      expect(settings.aiConsentUpdateDeclines, isEmpty,
+          reason: 'not remembered: the shell question is a different one');
+      expect(settings.aiConsentVersion('gemini'), 2);
+      await tester.pumpAndSettle();
+      await tapNote(tester);
+      expect(noteAsk(), findsOneWidget, reason: 'asked again');
+    });
+
+    testWidgets('a version-1 grant that declined the launch question is '
+        'silent at launch, and asked at the note with both lines',
+        (tester) async {
+      final settings = _oldGrant()..aiConsentUpdateDeclines.add('gemini');
+      await _launch(tester, settings);
+      expect(_update, findsNothing);
+      final results = <bool>[];
+      await tester.pumpWidget(harness(settings, results));
+      await tapNote(tester);
+      final body = _bodyOf(tester, noteAsk());
+      expect(body, startsWith('New: a photo taken before 4 a.m.'));
+      expect(body, contains('Not now keeps it that way.\n\n'
+          'New: in Edit meal you can tell the AI'));
+      await tester.tap(find.byKey(const Key('mealNoteConsentAllow')));
+      await tester.pumpAndSettle();
+      expect(settings.aiConsentVersion('gemini'), aiConsentWordingVersion);
+    });
+
+    testWidgets('no grant: the usual question, whose text lists the note',
+        (tester) async {
+      final settings = FakeSettings(apiKey: 'k')..aiConsent = {};
+      final results = <bool>[];
+      await tester.pumpWidget(harness(settings, results));
+      await tapNote(tester);
+      expect(noteAsk(), findsNothing);
+      final ask = find.byKey(const Key('aiConsentDialog'));
+      expect(_bodyOf(tester, ask), contains('• a note you type in Edit meal'));
+      await tester.tap(find.byKey(const Key('aiConsentAllow')));
+      await tester.pumpAndSettle();
+      expect(results, [true]);
+      expect(settings.aiConsentVersion('gemini'), 3);
+    });
+
+    testWidgets('nothing is asked under the current text, or without a key',
+        (tester) async {
+      for (final settings in [
+        FakeSettings(apiKey: 'k'),
+        FakeSettings(apiKey: '')..aiConsentVersions = {'gemini': 2},
+      ]) {
+        final results = <bool>[];
+        await tester.pumpWidget(harness(settings, results));
+        await tapNote(tester);
+        expect(find.byType(AlertDialog), findsNothing);
+        expect(results, [true]);
+        expect(settings.aiConsentWrites, isEmpty);
+      }
+    });
+
+    testWidgets('with Watch Camera Roll on, the notice follows the note line',
+        (tester) async {
+      final settings = FakeSettings(
+          apiKey: 'k', watcherEnabled: true, watcherDisclosureSeen: true)
+        ..aiConsentVersions = {'gemini': 2};
+      await tester.pumpWidget(harness(settings, []));
+      await tapNote(tester);
+      final body = _bodyOf(tester, noteAsk());
+      final notice = body.indexOf('While Watch Camera Roll is on');
+      expect(notice, greaterThan(body.indexOf('Not now sends nothing.')));
+      expect(body.indexOf('Chopstats estimates calories'),
+          greaterThan(notice));
+    });
+
+    testWidgets('Chinese', (tester) async {
+      final settings = FakeSettings(apiKey: 'k')
+        ..aiConsentVersions = {'gemini': 2};
+      await tester.pumpWidget(
+          harness(settings, [], locale: const Locale('zh')));
+      await tapNote(tester);
+      expect(find.text('筷拍发送的内容有更新'), findsOneWidget);
+      final body = _bodyOf(tester, noteAsk());
+      expect(body, startsWith('新增：在「编辑这一餐」里，你可以告诉 AI 这一餐哪里不一样。'));
+      expect(body, contains('选择「暂不」不会发送任何内容。'));
+      expect(body, contains('• 你在「编辑这一餐」里为修正一餐写的说明'));
+    });
+
+    testWidgets('the real store records version 3', (tester) async {
+      final (s, _, _) = await freshSettings(initial: {
+        'settings.ai_consent_routes': ['gemini'],
+        'settings.ai_consent_versions': ['gemini=2'],
+      });
+      await s.setGeminiApiKey('k');
+      final store = createSettingsStore(s);
+      final results = <bool>[];
+      await tester.pumpWidget(harness(store, results));
+      await tapNote(tester);
+      await tester.tap(find.byKey(const Key('mealNoteConsentAllow')));
+      await tester.pumpAndSettle();
+      expect(results, [true]);
+      expect(s.aiConsentVersion('gemini'), 3);
     });
   });
 

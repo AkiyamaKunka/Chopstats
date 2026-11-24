@@ -1629,11 +1629,16 @@ class AppSettings extends ChangeNotifier {
   int aiConsentVersion(String route) =>
       hasAiConsent(route) ? (_aiConsentVersions[route] ?? 1) : 0;
 
-  /// Whether the user answered Not now when asked to allow [route] again
-  /// for the current text (ui/ai_consent.dart askAiConsentUpdate): it is
-  /// not asked again, and the older grant stands as it was.
+  /// Whether the user answered Not now when the app shell asked to allow
+  /// [route] again (ui/ai_consent.dart askAiConsentUpdate): it is not
+  /// asked again at launch, and the older grant stands as it was. A Not
+  /// now given to any text from [aiConsentShellAskVersion] on counts —
+  /// the shell asks about no newer one, so a Not now to the B14 question
+  /// (stored as 2) still silences it. The decline is stored as the text
+  /// shown then ([aiConsentWordingVersion]). The Edit meal note asks at
+  /// its own send and remembers no Not now (ensureMealNoteConsent).
   bool aiConsentUpdateDeclined(String route) =>
-      (_aiConsentUpdateDeclined[route] ?? 0) >= aiConsentWordingVersion;
+      (_aiConsentUpdateDeclined[route] ?? 0) >= aiConsentShellAskVersion;
 
   Future<void> declineAiConsentUpdate(String route) async {
     _aiConsentUpdateDeclined = {

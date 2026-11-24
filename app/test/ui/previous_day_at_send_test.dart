@@ -40,7 +40,8 @@ class _HookDao extends FakeDao {
 
 Future<AppSettings> _settings() async {
   SharedPreferences.setMockInitialValues({
-    // gemini allowed under the current text (v2), openai only under v1.
+    // gemini allowed under the B14 text (v2 or later: the previous day goes),
+    // openai only under v1.
     'settings.ai_consent_routes': <String>['gemini', 'openai'],
     'settings.ai_consent_versions': <String>['gemini=2'],
     'settings.provider': 'gemini',

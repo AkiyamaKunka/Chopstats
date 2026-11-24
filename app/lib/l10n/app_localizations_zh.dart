@@ -294,7 +294,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String aiConsentBody(String recipient) {
-    return '筷拍用 AI 服务估算热量。你允许后，筷拍会把以下内容发送给 $recipient：\n• 你记录的每张照片，连同你的饮食档案和当天其他已记录餐食的简短摘要（凌晨 4 点前拍的照片还包括前一天的餐食）\n• 剩菜照片，连同它对应的那一餐\n• 你为描述一餐输入的文字\n• 你为修正餐食输入的文字，连同最近 7 天的餐食\n\n筷拍没有自己的服务器，开发者收不到其中任何内容。AI 公司按它自己的隐私政策和条款处理收到的内容。你允许之前不会发送任何内容，也可以随时在设置里停止。';
+    return '筷拍用 AI 服务估算热量。你允许后，筷拍会把以下内容发送给 $recipient：\n• 你记录的每张照片，连同你的饮食档案和当天其他已记录餐食的简短摘要（凌晨 4 点前拍的照片还包括前一天的餐食）\n• 剩菜照片，连同它对应的那一餐\n• 你为描述一餐输入的文字\n• 你为修正餐食输入的文字，连同最近 7 天的餐食\n• 你在「编辑这一餐」里为修正一餐写的说明，连同这一餐的描述、食物、数值和之前的说明（说明会随这一餐保存）\n\n筷拍没有自己的服务器，开发者收不到其中任何内容。AI 公司按它自己的隐私政策和条款处理收到的内容。你允许之前不会发送任何内容，也可以随时在设置里停止。';
   }
 
   @override
@@ -3593,4 +3593,131 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get mealGroupSummaryBody => '点按查看';
+
+  @override
+  String get mealNoteHeader => '用一句话修正';
+
+  @override
+  String get mealNoteLabel => '哪里不一样？';
+
+  @override
+  String get mealNoteHint => '例如：「米饭只吃了一半」或「加一个煎蛋」';
+
+  @override
+  String mealNoteFooter(String provider) {
+    return '你的说明，以及这一餐的食物、数值和之前的说明，会发送给 $provider。点「保存」之前不会保存任何改动。';
+  }
+
+  @override
+  String get mealNoteSend => '让 AI 修正';
+
+  @override
+  String mealNoteAsking(String provider) {
+    return '正在询问 $provider…';
+  }
+
+  @override
+  String get mealNoteStop => '停止';
+
+  @override
+  String get mealNoteChangedTitle => '已按你的说明修改，尚未保存';
+
+  @override
+  String mealNoteYourNote(String note) {
+    return '你的说明：$note';
+  }
+
+  @override
+  String mealNoteDescChange(String before, String after) {
+    return '这一餐：$before → $after';
+  }
+
+  @override
+  String mealNoteTotalChange(String before, String after) {
+    return '合计：$before → $after 千卡';
+  }
+
+  @override
+  String mealNoteMacroChange(String macro, String before, String after) {
+    return '$macro：$before → $after 克';
+  }
+
+  @override
+  String mealNoteItemChanged(String name, String kcalBefore, String kcalAfter) {
+    return '$name：$kcalBefore → $kcalAfter 千卡';
+  }
+
+  @override
+  String mealNoteItemRenamed(
+    String before,
+    String after,
+    String kcalBefore,
+    String kcalAfter,
+  ) {
+    return '$before → $after：$kcalBefore → $kcalAfter 千卡';
+  }
+
+  @override
+  String mealNoteItemAdded(String name, String kcal) {
+    return '新增 $name，$kcal 千卡';
+  }
+
+  @override
+  String mealNoteItemRemoved(String name, String kcal) {
+    return '去掉 $name，$kcal 千卡';
+  }
+
+  @override
+  String mealNoteMoreChanges(int count) {
+    return '还有 $count 处修改';
+  }
+
+  @override
+  String mealNoteUnchangedCount(int count) {
+    return '其他 $count 种食物未改';
+  }
+
+  @override
+  String get mealNoteCheckThenSave => '请核对上面的数字，然后点「保存」。';
+
+  @override
+  String get mealNoteUndoLabel => '撤销按说明做的修改';
+
+  @override
+  String mealNoteUnclear(String reply) {
+    return '还没有修改。AI 问：$reply';
+  }
+
+  @override
+  String mealNoteNoChange(String reply) {
+    return '没有修改。AI 说：$reply';
+  }
+
+  @override
+  String get mealNoteNoChangeBare => 'AI 认为这一餐不需要修改。';
+
+  @override
+  String get mealNoteUnusable => '❌ AI 的回答无法使用，所以没有修改。请换个说法再试。';
+
+  @override
+  String get mealNoteEmpties => '❌ AI 的回答会让这一餐变空，所以没有修改。要删除这一餐，请用「删除这一餐」。';
+
+  @override
+  String get mealNoteUnsentTitle => '说明还没有发送';
+
+  @override
+  String get mealNoteUnsentBody => '保存会保留现在显示的数字。要使用这条说明，请先点「让 AI 修正」。';
+
+  @override
+  String get mealNoteUnsentSave => '仍然保存';
+
+  @override
+  String get mealNoteSavedHeader => '这一餐的说明';
+
+  @override
+  String get mealNoteRemoveLabel => '删除这条说明';
+
+  @override
+  String get aiConsentUpdateLeadMealNote =>
+      '新增：在「编辑这一餐」里，你可以告诉 AI 这一餐哪里不一样。只有你点「让 AI 修正」时，才会发送你的说明，连同这一餐的描述、食物、数值和之前的说明。选择「暂不」不会发送任何内容。';
 }

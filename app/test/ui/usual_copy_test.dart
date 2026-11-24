@@ -202,8 +202,11 @@ final _placeholderRe = RegExp(r'\{(\w+)\}');
 /// View-after-share lane's action on a shared photo's snackbar
 /// (mealViewAction); and the Android meal-cards group lane's summary over
 /// two or more Logged meals cards (mealGroupSummaryTitle,
-/// mealGroupSummaryBody).
-const _keyCount = 976;
+/// mealGroupSummaryBody); and the Edit meal note lane's 31: the note
+/// section, its changes card and replies, the unsent-note question and
+/// the notes kept on a meal (mealNoteHeader … mealNoteRemoveLabel), and
+/// the consent update's note line (aiConsentUpdateLeadMealNote).
+const _keyCount = 1007;
 
 Directory _appRoot() {
   var dir = Directory.current;

@@ -552,22 +552,22 @@ abstract class AppLocalizations {
   /// **'Allow AI analysis?'**
   String get aiConsentTitle;
 
-  /// Title of the same consent dialog (aiConsentBody, Not now / Allow), asked ONCE on a launch or return to the app when the current recipient was allowed under an older consent text (core/ai_consent.dart aiConsentWordingVersion): the text now also says a photo taken before 4 a.m. carries the day before's meals, which are sent only after Allow. Not now keeps the older permission as it was.
+  /// Title of the same consent dialog (aiConsentBody, Not now / Allow), asked ONCE more when the current recipient was allowed under an older consent text (core/ai_consent.dart aiConsentWordingVersion): by the app shell on a launch or return to the app for a version-1 grant (the text now also says a photo taken before 4 a.m. carries the day before's meals, which are sent only after Allow; Not now keeps the older permission as it was), and at the first note sent in Edit meal for a grant from before version 3 (aiConsentUpdateLeadMealNote; Not now sends no note and is asked again at the next one).
   ///
   /// In en, this message translates to:
   /// **'What Chopstats sends has changed'**
   String get aiConsentUpdateTitle;
 
-  /// First paragraph of the aiConsentUpdateTitle dialog, above the camera-roll notice (while Watch Camera Roll is on) and aiConsentBody: names what changed, so the user need not find it in the full text. Must stay true to AppSettings.previousDayLeftoverContext (a version-1 grant sends that day's meals only) and to aiConsentNotNow's label.
+  /// First paragraph of the aiConsentUpdateTitle dialog for a version-1 grant, above aiConsentUpdateLeadMealNote, the camera-roll notice (while Watch Camera Roll is on) and aiConsentBody: names what changed, so the user need not find it in the full text. Must stay true to AppSettings.previousDayLeftoverContext (a version-1 grant sends that day's meals only) and to aiConsentNotNow's label.
   ///
   /// In en, this message translates to:
   /// **'New: a photo taken before 4 a.m. now also carries a short summary of the day before\'s meals, so leftovers from a late dinner are recognized. Until you allow it, a photo carries only that day\'s meals; Not now keeps it that way.'**
   String get aiConsentUpdateLead;
 
-  /// Consent dialog body. {recipient} is aiConsentCompany, aiConsentRelayRecipient or aiConsentServerRecipient(NoHost). The list must stay true to what the app sends (photo_pipeline: the day's other meals; nl/executor: handleText (Fix) sends the 7-day window, describeMeal sends no meals; leftover_flow). A change to WHAT it says is sent also bumps aiConsentWordingVersion (core/ai_consent.dart), so a grant given under the older text is asked again (aiConsentUpdateTitle) before the new data goes.
+  /// Consent dialog body. {recipient} is aiConsentCompany, aiConsentRelayRecipient or aiConsentServerRecipient(NoHost). The list must stay true to what the app sends (photo_pipeline: the day's other meals; nl/executor: handleText (Fix) sends the 7-day window, describeMeal sends no meals; leftover_flow; an Edit meal note sends that one meal and its kept notes, core/meal_correction.dart). A change to WHAT it says is sent also bumps aiConsentWordingVersion (core/ai_consent.dart), so a grant given under the older text is asked again (aiConsentUpdateTitle) before the new data goes.
   ///
   /// In en, this message translates to:
-  /// **'Chopstats estimates calories with an AI service. If you allow it, Chopstats sends the following to {recipient}:\n• each photo you log, with your dietary profile and a short summary of the other meals logged that day (for a photo taken before 4 a.m., the day before too)\n• leftover photos, with the meal they belong to\n• what you type to describe a meal\n• what you type to fix a meal, with your meals from the last 7 days\n\nChopstats has no server of its own, and its developer never receives any of this. The AI company\'s own privacy policy and terms apply to what it receives. Nothing is sent until you allow it, and you can stop at any time in Settings.'**
+  /// **'Chopstats estimates calories with an AI service. If you allow it, Chopstats sends the following to {recipient}:\n• each photo you log, with your dietary profile and a short summary of the other meals logged that day (for a photo taken before 4 a.m., the day before too)\n• leftover photos, with the meal they belong to\n• what you type to describe a meal\n• what you type to fix a meal, with your meals from the last 7 days\n• a note you type in Edit meal to correct a meal, with that meal\'s description, foods and numbers and its earlier notes (kept with the meal)\n\nChopstats has no server of its own, and its developer never receives any of this. The AI company\'s own privacy policy and terms apply to what it receives. Nothing is sent until you allow it, and you can stop at any time in Settings.'**
   String aiConsentBody(String recipient);
 
   /// The company that receives the data for an API-key provider id.
@@ -5974,6 +5974,197 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Tap to see them'**
   String get mealGroupSummaryBody;
+
+  /// Edit meal (a stored meal only): the header of the section at the end of the form where the user tells the AI what was different about this meal. A semantics header.
+  ///
+  /// In en, this message translates to:
+  /// **'Correct with a note'**
+  String get mealNoteHeader;
+
+  /// Edit meal: the label of the note field (mealNoteHeader's section).
+  ///
+  /// In en, this message translates to:
+  /// **'What was different?'**
+  String get mealNoteLabel;
+
+  /// Edit meal: the hint inside the empty note field. Two short examples of a note: an amount and an added food.
+  ///
+  /// In en, this message translates to:
+  /// **'e.g. \"only half the rice\" or \"add a fried egg\"'**
+  String get mealNoteHint;
+
+  /// Edit meal: the line under the note field. {provider} is the current AI provider's short name (providerDisplayLabel). Must stay true to what core/meal_correction.dart composeMealCorrectionRequest sends: the note, the meal's description, foods and their four numbers, its totals, and the notes kept on this meal; no photo, no date or time, no other meal. The answer only fills the form.
+  ///
+  /// In en, this message translates to:
+  /// **'Your note and this meal\'s foods, numbers and earlier notes go to {provider}. Nothing is saved until you tap Save.'**
+  String mealNoteFooter(String provider);
+
+  /// Edit meal: the button that sends the note (and the keyboard's send key). Named in mealNoteUnsentBody and aiConsentUpdateLeadMealNote.
+  ///
+  /// In en, this message translates to:
+  /// **'Correct with AI'**
+  String get mealNoteSend;
+
+  /// Edit meal: shown with a spinner while the note is being answered; the form is read-only meanwhile. {provider} as in mealNoteFooter.
+  ///
+  /// In en, this message translates to:
+  /// **'Asking {provider}…'**
+  String mealNoteAsking(String provider);
+
+  /// Edit meal: beside mealNoteAsking. Stops waiting for the answer (a late answer is ignored) and unlocks the form; nothing was written.
+  ///
+  /// In en, this message translates to:
+  /// **'Stop'**
+  String get mealNoteStop;
+
+  /// Edit meal: the title of the card that lists what the AI's answer changed in the form. Nothing is written until the user taps Save.
+  ///
+  /// In en, this message translates to:
+  /// **'Changed from your note — not saved yet'**
+  String get mealNoteChangedTitle;
+
+  /// Edit meal, the changes card: the note that was sent.
+  ///
+  /// In en, this message translates to:
+  /// **'Your note: {note}'**
+  String mealNoteYourNote(String note);
+
+  /// Edit meal, the changes card: the meal's description before and after, shown only when it changed.
+  ///
+  /// In en, this message translates to:
+  /// **'Meal: {before} → {after}'**
+  String mealNoteDescChange(String before, String after);
+
+  /// Edit meal, the changes card: the meal's total calories before and after (the form's totals follow its foods).
+  ///
+  /// In en, this message translates to:
+  /// **'Total: {before} → {after} kcal'**
+  String mealNoteTotalChange(String before, String after);
+
+  /// Edit meal, the changes card: one macro total that moved, in grams. {macro} is macroProtein, macroCarbs or macroFat.
+  ///
+  /// In en, this message translates to:
+  /// **'{macro}: {before} → {after} g'**
+  String mealNoteMacroChange(String macro, String before, String after);
+
+  /// Edit meal, the changes card: a food whose amount or numbers changed, under the same name.
+  ///
+  /// In en, this message translates to:
+  /// **'{name}: {kcalBefore} → {kcalAfter} kcal'**
+  String mealNoteItemChanged(String name, String kcalBefore, String kcalAfter);
+
+  /// Edit meal, the changes card: a food the AI renamed (often with its new amount, 'Steamed rice (~100 g)') or replaced.
+  ///
+  /// In en, this message translates to:
+  /// **'{before} → {after}: {kcalBefore} → {kcalAfter} kcal'**
+  String mealNoteItemRenamed(
+    String before,
+    String after,
+    String kcalBefore,
+    String kcalAfter,
+  );
+
+  /// Edit meal, the changes card: a food the note added.
+  ///
+  /// In en, this message translates to:
+  /// **'Added {name}, {kcal} kcal'**
+  String mealNoteItemAdded(String name, String kcal);
+
+  /// Edit meal, the changes card: a food the note said was not eaten.
+  ///
+  /// In en, this message translates to:
+  /// **'Removed {name}, {kcal} kcal'**
+  String mealNoteItemRemoved(String name, String kcal);
+
+  /// Edit meal, the changes card: after six food lines, how many more foods changed (see the form).
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{and 1 more change} other{and {count} more changes}}'**
+  String mealNoteMoreChanges(int count);
+
+  /// Edit meal, the changes card: how many foods the note left as they were.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 other food unchanged} other{{count} other foods unchanged}}'**
+  String mealNoteUnchangedCount(int count);
+
+  /// Edit meal, the changes card: its last line, above Undo. The answer only filled the form.
+  ///
+  /// In en, this message translates to:
+  /// **'Check the numbers above, then tap Save.'**
+  String get mealNoteCheckThenSave;
+
+  /// Edit meal, the changes card: the screen-reader label of its Undo button (assistUndo), which puts the form back as it was before the note and the note back in the field.
+  ///
+  /// In en, this message translates to:
+  /// **'Undo the changes from your note'**
+  String get mealNoteUndoLabel;
+
+  /// Edit meal: the AI could not tell what the note means for this meal. {reply} is its question, shown as written. The note stays in the field.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing changed yet. The AI asks: {reply}'**
+  String mealNoteUnclear(String reply);
+
+  /// Edit meal: the AI found nothing in the note to change in this meal (it is about something else, or the meal already shows it). {reply} is its sentence, shown as written.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing changed. The AI says: {reply}'**
+  String mealNoteNoChange(String reply);
+
+  /// Edit meal: as mealNoteNoChange, when the AI gave no sentence.
+  ///
+  /// In en, this message translates to:
+  /// **'The AI found nothing to change in this meal.'**
+  String get mealNoteNoChangeBare;
+
+  /// Edit meal: the AI's answer was not a usable correction of this meal (a wrong shape, or numbers outside the editor's limits). Nothing changed; the note stays.
+  ///
+  /// In en, this message translates to:
+  /// **'❌ The AI\'s answer could not be used, so nothing changed. Try saying it another way.'**
+  String get mealNoteUnusable;
+
+  /// Edit meal: the AI's answer removed every food (or set a meal with only totals to 0 kcal). Nothing changed; deleting goes through Delete meal (editorDeleteTooltip), which asks first.
+  ///
+  /// In en, this message translates to:
+  /// **'❌ The AI\'s answer would leave this meal empty, so nothing changed. To remove the meal, use Delete meal.'**
+  String get mealNoteEmpties;
+
+  /// Edit meal: the title of the question Save asks when the note field holds a note that was not sent.
+  ///
+  /// In en, this message translates to:
+  /// **'Your note wasn\'t sent'**
+  String get mealNoteUnsentTitle;
+
+  /// Edit meal: the body of mealNoteUnsentTitle. A Save never sends a note, and an unsent note is not kept.
+  ///
+  /// In en, this message translates to:
+  /// **'Save keeps the numbers shown. To use your note, tap Correct with AI first.'**
+  String get mealNoteUnsentBody;
+
+  /// Edit meal: the button of mealNoteUnsentTitle that saves without the note (the other is discardChangesKeep).
+  ///
+  /// In en, this message translates to:
+  /// **'Save anyway'**
+  String get mealNoteUnsentSave;
+
+  /// Edit meal: above the notes kept on this meal (sent with a correction and saved), oldest first, each with its date. A later correction sends them again as earlier notes, already applied.
+  ///
+  /// In en, this message translates to:
+  /// **'Notes on this meal'**
+  String get mealNoteSavedHeader;
+
+  /// Edit meal: the tooltip and screen-reader label of the button beside a note kept on this meal. Removing is an unsaved change: Save removes it from the meal, and the meal's numbers stay as they are.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove this note'**
+  String get mealNoteRemoveLabel;
+
+  /// First paragraph (after aiConsentUpdateLead for a version-1 grant) of the aiConsentUpdateTitle dialog for a grant given before consent text version 3 (core/ai_consent.dart aiConsentMealNoteVersion): asked at the first note sent in Edit meal (ui/ai_consent.dart ensureMealNoteConsent), and in the app shell's question to a version-1 grant. Must stay true to mealNoteFooter and to aiConsentNotNow's label: Not now sends no note.
+  ///
+  /// In en, this message translates to:
+  /// **'New: in Edit meal you can tell the AI what was different about a meal. Your note goes with that meal\'s description, foods and numbers and its earlier notes, and only when you tap Correct with AI. Not now sends nothing.'**
+  String get aiConsentUpdateLeadMealNote;
 }
 
 class _AppLocalizationsDelegate

@@ -5,15 +5,19 @@
 ///
 /// Consent is per RECIPIENT (core/ai_consent.dart aiConsentRoute), asked:
 /// - before a foreground send: a picked photo, Describe/Fix a meal,
-///   Leftovers, Test This Provider, Photo Coverage ([ensureAiConsent]);
+///   Leftovers, Test This Provider, Photo Coverage ([ensureAiConsent]), a
+///   note in Edit meal ([ensureMealNoteConsent]);
 /// - for a photo shared into the app, held until answered
 ///   ([SharedPhotoConsentGate]);
 /// - when Watch Camera Roll is turned on (settings_screen.dart), and when
 ///   the recipient changes while it is on ([confirmAiRecipientChange]).
 ///
-/// And once more, by the app shell, when the text changed what is sent
-/// since the current recipient was allowed ([askAiConsentUpdate]); the
-/// newly described data waits for that Allow.
+/// And once more when the text changed what is sent since the current
+/// recipient was allowed: by the app shell for a change to what goes on
+/// its own ([askAiConsentUpdate], up to aiConsentShellAskVersion), and at
+/// the first note sent in Edit meal for the note's text
+/// ([ensureMealNoteConsent]). The newly described data waits for that
+/// Allow.
 ///
 /// A share of several photos is ONE question: Not now covers that share
 /// (and any that arrived before the answer), dropped without being asked
@@ -225,28 +229,53 @@ Future<bool> confirmAiRecipientChange(BuildContext context,
 }
 
 /// Whether the app shell should ask once more for the CURRENT recipient:
-/// it is allowed, but under an older consent text than the dialogs show
-/// now (core/ai_consent.dart aiConsentWordingVersion), and the user has not
-/// answered that yet. Never without a key (nothing could be sent) and
-/// never without a grant: the first send's own question covers that.
+/// it is allowed, but under a consent text older than the newest one the
+/// shell asks about (core/ai_consent.dart aiConsentShellAskVersion: the
+/// B14 text, a change to what an automatic photo carries), and the user
+/// has not answered that yet. A grant under that text or newer is not
+/// asked at launch: the Edit meal note, the one change since, asks at its
+/// own send ([ensureMealNoteConsent]). Never without a key (nothing could
+/// be sent) and never without a grant: the first send's own question
+/// covers that.
 bool aiConsentUpdateNeeded(SettingsStore s) {
   if (s.apiKey.trim().isEmpty) return false;
   final route = currentAiConsentRoute(s);
   final version = s.aiConsentVersion(route);
   return version > 0 &&
-      version < aiConsentWordingVersion &&
+      version < aiConsentShellAskVersion &&
       !s.aiConsentUpdateDeclined(route);
 }
 
+/// What is new since consent text [version], oldest change first, for the
+/// update question's lead: the B14 line below aiConsentPreviousDayVersion,
+/// the Edit meal note's below aiConsentMealNoteVersion.
+List<String> aiConsentUpdateLeads(AppLocalizations l, int version) => [
+      if (version < aiConsentPreviousDayVersion) l.aiConsentUpdateLead,
+      if (version < aiConsentMealNoteVersion) l.aiConsentUpdateLeadMealNote,
+    ];
+
+/// The update question's text before the full consent text: what is new
+/// for a grant under [version] ([aiConsentUpdateLeads] — each change sits
+/// in the full text, where nobody would find it), then the camera-roll
+/// notice while Watch Camera Roll is on (the order it was turned on with).
+String _updateAppendix(
+        AppLocalizations l, SettingsStore settings, int version) =>
+    [
+      ...aiConsentUpdateLeads(l, version),
+      if (settings.watcherEnabled)
+        l.watcherDisclosureBody(
+            providerDisplayLabel(l, settings.provider, settings.serverBackend),
+            settings.lookbackDays.clamp(1, 30)),
+    ].join('\n\n');
+
 /// The one-time question for [aiConsentUpdateNeeded], under a title saying
-/// what is sent has changed: first what is new (aiConsentUpdateLead — the
-/// change sits in a parenthesis of the full text, where nobody would find
-/// it), then the camera-roll notice while Watch Camera Roll is on (the
-/// order it was turned on with), then the full consent text for the
-/// current recipient. Allow records the current text for that recipient,
-/// which is what sends the newly described data; anything else is
-/// remembered as Not now, and the older grant goes on exactly as before.
-/// True = Allow.
+/// what is sent has changed: first what is new ([aiConsentUpdateLeads]:
+/// for a version-1 grant the B14 line, then the Edit meal note's), then
+/// the camera-roll notice while Watch Camera Roll is on, then the full
+/// consent text for the current recipient. Allow records the current text
+/// for that recipient, which is what sends the newly described data;
+/// anything else is remembered as Not now, and the older grant goes on
+/// exactly as before. True = Allow.
 Future<bool> askAiConsentUpdate(
     BuildContext context, SettingsStore settings) async {
   final route = currentAiConsentRoute(settings);
@@ -256,13 +285,8 @@ Future<bool> askAiConsentUpdate(
       serverBackend: settings.serverBackend,
       serverBaseUrl: settings.serverBaseUrl,
       title: l.aiConsentUpdateTitle,
-      appendix: [
-        l.aiConsentUpdateLead,
-        if (settings.watcherEnabled)
-          l.watcherDisclosureBody(
-              providerDisplayLabel(l, settings.provider, settings.serverBackend),
-              settings.lookbackDays.clamp(1, 30)),
-      ].join('\n\n'),
+      appendix:
+          _updateAppendix(l, settings, settings.aiConsentVersion(route)),
       leadWithAppendix: true,
       dialogKey: const Key('aiConsentUpdateDialog'),
       cancelKey: const Key('aiConsentUpdateNotNow'),
@@ -273,6 +297,47 @@ Future<bool> askAiConsentUpdate(
     await settings.declineAiConsentUpdate(route);
   }
   return ok;
+}
+
+/// Before a note typed in Edit meal is sent (with that meal's description,
+/// foods and numbers, and its earlier notes): true = go ahead.
+/// - No key: true; nothing can be sent, and the send says why.
+/// - Allowed under the text that lists the note
+///   (core/ai_consent.dart aiConsentMealNoteVersion) or newer: true.
+/// - Not allowed at all: the usual question ([ensureAiConsent]), whose
+///   text lists the note.
+/// - Allowed under an older text: asked once more now, at the note's own
+///   send, under the update title with what is new for that grant leading
+///   ([aiConsentUpdateLeads]), then the camera-roll notice while Watch
+///   Camera Roll is on, then the full text. Allow records the current text
+///   and the note goes; Not now sends nothing, says so, and is not
+///   remembered: the next note asks again. The app shell never asks about
+///   this text at launch (aiConsentShellAskVersion).
+Future<bool> ensureMealNoteConsent(
+    BuildContext context, SettingsStore settings) async {
+  if (settings.apiKey.trim().isEmpty) return true;
+  final route = currentAiConsentRoute(settings);
+  final version = settings.aiConsentVersion(route);
+  if (version >= aiConsentMealNoteVersion) return true;
+  if (version <= 0) return ensureAiConsent(context, settings);
+  final l = context.l10n;
+  final messenger = ScaffoldMessenger.maybeOf(context);
+  final ok = await showAiConsentDialog(context,
+      provider: settings.provider,
+      serverBackend: settings.serverBackend,
+      serverBaseUrl: settings.serverBaseUrl,
+      title: l.aiConsentUpdateTitle,
+      appendix: _updateAppendix(l, settings, version),
+      leadWithAppendix: true,
+      dialogKey: const Key('mealNoteConsentDialog'),
+      cancelKey: const Key('mealNoteConsentNotNow'),
+      allowKey: const Key('mealNoteConsentAllow'));
+  if (ok) {
+    await settings.setAiConsent(route, granted: true);
+    return true;
+  }
+  messenger?.showSnackBar(SnackBar(content: Text(l.aiConsentDeclined)));
+  return false;
 }
 
 /// Holds each photo shared into the app until the current recipient is
