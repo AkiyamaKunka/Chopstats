@@ -60,6 +60,7 @@ import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show RenderAbstractViewport;
 import 'package:url_launcher/url_launcher.dart' as launcher;
 
 import '../../core/coerce.dart'
@@ -320,6 +321,11 @@ class _MealEditorScreenState extends State<MealEditorScreen>
   final GlobalKey _noteBlockBox = GlobalKey();
   final GlobalKey _noteSendBox = GlobalKey();
   final GlobalKey _saveButtonBox = GlobalKey();
+
+  /// The answer under the button, as laid out: the reply line, and the
+  /// card of what the last note changed ([_scrollNoteIntoView]).
+  final GlobalKey _noteReplyBox = GlobalKey();
+  final GlobalKey _noteCardBox = GlobalKey();
 
   /// The keyboard's height at the last metrics change, and a reveal already
   /// waiting for the frame ([_scheduleNoteReveal]).
@@ -1487,14 +1493,82 @@ class _MealEditorScreenState extends State<MealEditorScreen>
   /// card of changes) show together. Brought to the bottom edge instead,
   /// the card's last lines sat under the Save button (device check,
   /// 2026-11-24), and with the keyboard up an answer would land under it.
+  /// Where the header down to the answer's end is taller than the list
+  /// shows above Save (the largest text sizes: the field and its footer
+  /// fill the screen), the answer's own top goes to the top instead: the
+  /// header there left the answer below the fold (iPhone check at AX5,
+  /// 2026-11-24).
   void _scrollNoteIntoView() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final target = _noteHeaderKey.currentContext;
-      if (!mounted || target == null) return;
-      Scrollable.ensureVisible(target,
-          duration: AppMotion.of(context, AppMotion.standard),
-          curve: AppMotion.curve);
-    });
+    WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _revealNoteAnswer(tries: _revealTries));
+  }
+
+  /// How often [_revealNoteAnswer] moves the list to lay the answer out.
+  static const int _revealTries = 3;
+
+  /// [_scrollNoteIntoView]'s scroll, once the answer is laid out. Where it
+  /// is not, it lies past what the list built: under a block taller than
+  /// the screen (the largest text sizes), or the form was scrolled away
+  /// while the AI answered. The list jumps — the header to the top first,
+  /// then to where the answer starts (the block's end), or to the form's
+  /// end — and measures again. With the header not laid out, it is far
+  /// above: the answer goes to the top.
+  void _revealNoteAnswer({required int tries}) {
+    if (!mounted || !_scroll.hasClients) return;
+    final header = _noteHeaderKey.currentContext;
+    final answer =
+        (_noteReply != null ? _noteReplyBox : _noteCardBox).currentContext;
+    if (answer == null && tries > 0) {
+      final block = _noteBlockBox.currentContext?.findRenderObject();
+      final viewport =
+          block == null ? null : RenderAbstractViewport.maybeOf(block);
+      if (header != null && tries == _revealTries) {
+        Scrollable.ensureVisible(header);
+      } else if (block is RenderBox &&
+          block.attached &&
+          block.hasSize &&
+          viewport != null) {
+        _scroll.jumpTo(min(
+            viewport.getOffsetToReveal(block, 0).offset + block.size.height,
+            _scroll.position.maxScrollExtent));
+      } else {
+        _scroll.jumpTo(_scroll.position.maxScrollExtent);
+      }
+      WidgetsBinding.instance.addPostFrameCallback(
+          (_) => _revealNoteAnswer(tries: tries - 1));
+      return;
+    }
+    final target = answer == null ||
+            (header != null && _fitsAboveSave(header, answer))
+        ? header
+        : answer;
+    if (target == null) return;
+    Scrollable.ensureVisible(target,
+        duration: AppMotion.of(context, AppMotion.standard),
+        curve: AppMotion.curve);
+  }
+
+  /// Whether the form from [from]'s top down to [to]'s end fits the
+  /// height the list shows above the Save button. True when either is not
+  /// laid out: the header alone is brought into view then, as before.
+  bool _fitsAboveSave(BuildContext from, BuildContext to) {
+    final a = from.findRenderObject();
+    final b = to.findRenderObject();
+    if (a is! RenderBox || b is! RenderBox) return true;
+    if (!a.attached || !b.attached || !b.hasSize || !_scroll.hasClients) {
+      return true;
+    }
+    final viewport = RenderAbstractViewport.maybeOf(a);
+    if (viewport == null) return true;
+    final span = viewport.getOffsetToReveal(b, 0).offset +
+        b.size.height -
+        viewport.getOffsetToReveal(a, 0).offset;
+    var room = _scroll.position.viewportDimension;
+    final save = _saveButtonBox.currentContext?.findRenderObject();
+    if (save is RenderBox && save.hasSize) {
+      room -= save.size.height + kFloatingActionButtonMargin;
+    }
+    return span <= room;
   }
 
   /// An answer that changed nothing, or a refusal: on the page, under the
@@ -1874,6 +1948,7 @@ class _MealEditorScreenState extends State<MealEditorScreen>
       ),
       if (reply != null && !_correcting)
         Padding(
+          key: _noteReplyBox,
           padding: const EdgeInsets.only(top: 12),
           child: ReplyNote(
               key: const Key('mealNoteReplyNote'),
@@ -1882,6 +1957,7 @@ class _MealEditorScreenState extends State<MealEditorScreen>
         ),
       if (_noteSteps.isNotEmpty)
         Padding(
+          key: _noteCardBox,
           padding: const EdgeInsets.only(top: 12),
           child: _NoteChangesCard(
               step: _noteSteps.last,

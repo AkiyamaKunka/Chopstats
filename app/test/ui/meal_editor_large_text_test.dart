@@ -276,6 +276,106 @@ void main() {
     });
   }
 
+  // An answer lands in view at every text size. At AX5 the header, the
+  // tall field and its footer filled the screen, the header went to the
+  // top, and the card or the reply landed below the fold (iPhone check,
+  // 2026-11-24). Where the header down to the answer fits above Save, the
+  // header goes to the top (meal_note_editor_test pins that); where it
+  // does not, the answer's own top does. Checked only for what holds with
+  // either font: the answer's first lines show between the app bar and
+  // Save.
+  for (final (locale, scale) in [
+    (const Locale('en'), 1.0),
+    (const Locale('en'), 53 / 17), // AX5
+    (const Locale('zh'), 53 / 17),
+  ]) {
+    testWidgets('${locale.languageCode} at ${scale.toStringAsFixed(2)}x on '
+        '390 pt: the card, then a reply, land in view', (tester) async {
+      final dao = FakeDao()..seed(_mealWithNotes());
+      final executor = FakeExecutor()
+        ..nextNoteOutcome = const MealNoteOutcome(
+            reply: MealCorrected(MealCorrectionProposal(
+          changed: {
+            0: MealCorrectionItem(
+                name: 'Pan-fried pork dumplings (6 pieces)',
+                calories: 360,
+                protein: 13.5,
+                carbs: 39,
+                fat: 16.5),
+          },
+          reason: 'Six dumplings instead of eight.',
+        )));
+      await pumpApp(
+        tester,
+        MealEditorScreen(
+            dao: dao,
+            meal: dao.meals.first,
+            settings: FakeSettings(),
+            noteCorrector: executor),
+        size: const Size(390, 844),
+        locale: locale,
+        scale: scale,
+      );
+      final list = tester.state<ScrollableState>(find.byType(Scrollable).first);
+      WidgetController.hitTestWarningShouldBeFatal = true;
+      addTearDown(() => WidgetController.hitTestWarningShouldBeFatal = false);
+      // Typed, then sent as on the phone: with the keyboard's send key
+      // (the field focused, its top revealed), or with the button
+      // scrolled just into view, right above Save.
+      Future<void> send(String note, {required bool sendKey}) async {
+        final field = find.byKey(const Key('mealNoteField'));
+        list.position.jumpTo(0);
+        await tester.pump();
+        while (field.evaluate().isEmpty) {
+          expect(list.position.pixels, lessThan(list.position.maxScrollExtent));
+          list.position.jumpTo(list.position.pixels + 200);
+          await tester.pump();
+        }
+        await tester.enterText(field, note);
+        await tester.pumpAndSettle();
+        if (sendKey) {
+          await tester.testTextInput.receiveAction(TextInputAction.send);
+        } else {
+          final button = find.byKey(const Key('mealNoteSend'));
+          await Scrollable.ensureVisible(tester.element(button), alignment: 1);
+          await tester.pumpAndSettle();
+          final under = tester.getRect(button).bottom -
+              tester.getRect(find.byKey(const Key('saveMealButton'))).top +
+              8;
+          list.position.jumpTo(list.position.pixels + under);
+          await tester.pumpAndSettle();
+          await tester.tap(button);
+        }
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+      }
+
+      void expectInView(Finder first, String what) {
+        final top = tester.getRect(find.byType(AppBar)).bottom;
+        final save =
+            tester.getRect(find.byKey(const Key('saveMealButton'))).top;
+        final r = tester.getRect(first);
+        expect(r.top, greaterThanOrEqualTo(top - 0.5),
+            reason: '$what starts above the screen');
+        expect(r.bottom, lessThanOrEqualTo(save + 0.5),
+            reason: '$what lands below the fold, or under Save');
+      }
+
+      await send('only six dumplings', sendKey: true);
+      final card = find.byKey(const Key('mealNoteChanges'));
+      expect(card, findsOneWidget, reason: 'the card landed below the fold');
+      // The card's title, its first line.
+      expectInView(
+          find.descendant(of: card, matching: find.byType(Text)).first,
+          "the card's title");
+
+      executor.nextNoteOutcome = const MealNoteOutcome(
+          reply: MealUnclear('Was the porridge sweetened?'));
+      await send('the porridge', sendKey: false);
+      expectInView(find.byKey(const Key('mealNoteReply')), 'the reply');
+    });
+  }
+
   for (final (locale, scale) in [
     (const Locale('zh'), 53 / 17), // AX5
     (const Locale('en'), 53 / 17),

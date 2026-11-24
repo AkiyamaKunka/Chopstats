@@ -70,6 +70,32 @@ Meal _meal({List<Object?>? notes}) => Meal(
       analysis: _analysis(notes: notes),
     );
 
+/// [_meal] with eight foods: on a phone its note section lies far past what
+/// the list builds from the form's top.
+Meal _longMeal() => Meal(
+      id: 1,
+      date: '2026-11-24',
+      time: '12:30 PM',
+      timestamp: '2026-11-24T12:30:00.000',
+      source: MealSource.appPhoto,
+      imageHash: 'h1',
+      analysis: {
+        ..._analysis(),
+        'food_items': [
+          _rice,
+          _pork,
+          for (var i = 1; i <= 6; i++)
+            {
+              'name': 'Side dish $i',
+              'estimated_calories': 50,
+              'protein_g': 1,
+              'carbs_g': 5,
+              'fat_g': 2,
+            },
+        ],
+      },
+    );
+
 MealNoteOutcome _corrected(MealCorrectionProposal p) =>
     MealNoteOutcome(reply: MealCorrected(p));
 
@@ -662,6 +688,40 @@ void main() {
       expect(card.top, lessThan(2400 / 2.75),
           reason: 'the card starts on screen');
       expect(rig.dao.fieldUpdates, isEmpty);
+    });
+
+    testWidgets('the form scrolled to its top while the AI answered: the '
+        'answer is still brought into view', (tester) async {
+      for (final (outcome, answer) in [
+        (_halfRice, 'mealNoteChanges'),
+        (
+          const MealNoteOutcome(reply: MealUnclear('Which rice?')),
+          'mealNoteReplyNote'
+        ),
+      ]) {
+        final rig = await _open(tester, meal: _longMeal());
+        await _onPhone(tester);
+        final gate = Completer<void>();
+        rig.executor
+          ..onCorrect = (() => gate.future)
+          ..nextNoteOutcome = outcome;
+        await _type(tester, 'only half the rice');
+        await tester.tap(_key('mealNoteSend'));
+        await tester.pump();
+        await _reveal(tester, 'editorDescription');
+        expect(find.byKey(const Key('mealNoteHeader'), skipOffstage: false),
+            findsNothing,
+            reason: 'the note section is out of what the list built');
+        gate.complete();
+        await tester.pumpAndSettle();
+        expect(_key(answer), findsOneWidget, reason: answer);
+        final top = tester.getRect(find.byType(AppBar)).bottom;
+        final landed = tester.getRect(_key(answer));
+        expect(landed.top, greaterThanOrEqualTo(top - 0.5), reason: answer);
+        expect(landed.top + 40,
+            lessThanOrEqualTo(tester.getRect(_key('saveMealButton')).top),
+            reason: answer);
+      }
     });
 
     testWidgets('a number the user then changes on the AI row is theirs; '
