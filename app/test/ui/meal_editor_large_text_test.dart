@@ -216,7 +216,10 @@ void main() {
   for (final (locale, scale, size, fits) in [
     (const Locale('en'), 1.0, phone, true),
     (const Locale('zh'), 1.0, phone, true),
-    (const Locale('en'), 2.0, large, true),
+    // Fits with the iPhone's glyphs. The test font (CI has no SF) wraps
+    // the footer far more, the block outgrows what the keyboard leaves,
+    // and the note's text is what stays in view.
+    (const Locale('en'), 2.0, large, haveIphoneFonts),
     (const Locale('en'), 2.0, phone, false),
     (const Locale('en'), 53 / 17, phone, false), // AX5
     (const Locale('zh'), 53 / 17, phone, false),
