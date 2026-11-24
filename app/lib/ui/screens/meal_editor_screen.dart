@@ -1877,35 +1877,44 @@ class _MealEditorScreenState extends State<MealEditorScreen>
         key: _noteBlockBox,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          TextField(
-            key: const Key('mealNoteField'),
-            controller: _note,
-            focusNode: _noteFocus,
-            readOnly: locked || _noteAsking,
-            // While the AI answers, a tap takes no focus: focused, the
-            // field would bring the keyboard up over the answer as it
-            // lands ([_dropFieldFocus] for the form's other fields).
-            canRequestFocus: !_correcting,
-            minLines: 2,
-            maxLines: isLargeText(context) ? null : 4,
-            textCapitalization: TextCapitalization.sentences,
-            textInputAction: TextInputAction.send,
-            onSubmitted: (_) => _sendNote(),
-            inputFormatters: [
-              LengthLimitingTextInputFormatter(kMealNoteMaxChars)
-            ],
-            // The caret's line and 120 pt under it; with the keyboard up,
-            // the button under the footer too ([_revealNote]).
-            scrollPadding: const EdgeInsets.fromLTRB(20, 20, 20, 120),
-            decoration: InputDecoration(
-              labelText: l.mealNoteLabel,
-              hintText: l.mealNoteHint,
-              border: const OutlineInputBorder(),
+          // The field, the footer and the button are each their own node
+          // for a screen reader. In one list child with no boundary, the
+          // field's node read the footer as its label and held the button.
+          Semantics(
+            container: true,
+            child: TextField(
+              key: const Key('mealNoteField'),
+              controller: _note,
+              focusNode: _noteFocus,
+              readOnly: locked || _noteAsking,
+              // While the AI answers, a tap takes no focus: focused, the
+              // field would bring the keyboard up over the answer as it
+              // lands ([_dropFieldFocus] for the form's other fields).
+              canRequestFocus: !_correcting,
+              minLines: 2,
+              maxLines: isLargeText(context) ? null : 4,
+              textCapitalization: TextCapitalization.sentences,
+              textInputAction: TextInputAction.send,
+              onSubmitted: (_) => _sendNote(),
+              inputFormatters: [
+                LengthLimitingTextInputFormatter(kMealNoteMaxChars)
+              ],
+              // The caret's line and 120 pt under it; with the keyboard
+              // up, the button under the footer too ([_revealNote]).
+              scrollPadding: const EdgeInsets.fromLTRB(20, 20, 20, 120),
+              decoration: InputDecoration(
+                labelText: l.mealNoteLabel,
+                hintText: l.mealNoteHint,
+                border: const OutlineInputBorder(),
+              ),
             ),
           ),
           const SizedBox(height: 8),
-          Text(l.mealNoteFooter(provider),
-              key: const Key('mealNoteFooter'), style: muted),
+          Semantics(
+            container: true,
+            child: Text(l.mealNoteFooter(provider),
+                key: const Key('mealNoteFooter'), style: muted),
+          ),
           const SizedBox(height: 12),
           if (_correcting)
             Semantics(

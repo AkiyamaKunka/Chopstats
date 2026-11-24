@@ -14,6 +14,7 @@ import 'package:calorie_tracker/core/meal_correction.dart';
 import 'package:calorie_tracker/l10n/app_localizations.dart';
 import 'package:calorie_tracker/ui/screens/meal_editor_screen.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show SemanticsNode;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
 
@@ -273,6 +274,37 @@ void main() {
       // Below every food and Add item: the description stays first.
       expect(tester.getTopLeft(_key('mealNoteHeader')).dy,
           greaterThan(tester.getTopLeft(_key('addItemRow')).dy));
+    });
+
+    // The field, its footer and the button share one child of the list (so
+    // the button is laid out with the field, for the keyboard's reveal).
+    // With no boundary of their own, a screen reader read the footer as
+    // the field's label every time the field was focused, the field's
+    // frame covered the footer and the button, and the button was a child
+    // of the text field (review 2026-11-24).
+    testWidgets('a screen reader finds the field, what goes where and '
+        'Correct with AI as three nodes, the button not inside the field',
+        (tester) async {
+      await _open(tester);
+      final field = tester.getSemantics(_key('mealNoteField'));
+      final footer = tester.getSemantics(_key('mealNoteFooter'));
+      final button = tester.getSemantics(_key('mealNoteSend'));
+      expect(field.label, 'Your note');
+      expect(
+          footer.label,
+          "Your note and this meal's description, foods, numbers and "
+          'earlier notes go to Gemini. Nothing is saved until you tap Save.');
+      expect(button.label, 'Correct with AI');
+      expect({field.id, footer.id, button.id}, hasLength(3));
+      for (SemanticsNode? n = button.parent; n != null; n = n.parent) {
+        expect(n.id, isNot(field.id), reason: 'the button is in the field');
+      }
+      for (SemanticsNode? n = footer.parent; n != null; n = n.parent) {
+        expect(n.id, isNot(field.id), reason: 'the footer is in the field');
+      }
+      // The field's frame is the field's own.
+      expect(field.rect.height,
+          closeTo(tester.getSize(_key('mealNoteField')).height, 0.5));
     });
 
     testWidgets('never without a corrector or the settings, nor on a new meal',
