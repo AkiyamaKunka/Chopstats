@@ -24,6 +24,7 @@ import 'fakes.dart';
 
 class _Explaining extends FakeAnalyzer implements TextIntentExplainer {
   String? nextError;
+  bool nextNotJson = false;
   int calls = 0;
 
   @override
@@ -31,7 +32,7 @@ class _Explaining extends FakeAnalyzer implements TextIntentExplainer {
     calls++;
     lastPrompt = prompt;
     if (throwOnText) throw StateError('network down');
-    return TextIntentOutcome(next, error: nextError);
+    return TextIntentOutcome(next, error: nextError, notJson: nextNotJson);
   }
 }
 
@@ -170,6 +171,52 @@ void main() {
         '❌ ${l.errServerKeyOtherHost}');
     expect(await errorFor(null), l.nlErrorContactingAi);
     expect(await errorFor('Request timed out'), l.nlErrorContactingAi);
+  });
+
+  // The AI answered in prose: "Error contacting AI" sent the user to retry
+  // a request that went through (iPhone check, 2026-11-24).
+  test('an answer in prose or a bare value, or the own server saying its '
+      'run produced no usable result, is an answer that could not be used',
+      () async {
+    final fix = executor();
+    Future<MealNoteOutcome> outcomeFor(
+        {String? error, bool notJson = false}) async {
+      analyzer
+        ..next = null
+        ..nextError = error
+        ..nextNotJson = notJson;
+      return fix.correctMeal(_meal, 'x');
+    }
+
+    for (final out in [
+      await outcomeFor(notJson: true),
+      await outcomeFor(
+          error: 'The server cannot analyze right now: the analysis ran but '
+              'produced no usable result.'),
+    ]) {
+      expect(out.error, isNull);
+      expect(out.reply, isA<MealReplyUnusable>());
+      expect((out.reply! as MealReplyUnusable).emptiesMeal, isFalse);
+    }
+    // A failure with no reason, or the server's other refusals, stay as
+    // Fix meals words them.
+    for (final (error, line) in [
+      (null, l.nlErrorContactingAi),
+      (
+        'The server cannot analyze right now: the analyzer is busy with '
+            'another photo.',
+        l.nlErrorContactingAi
+      ),
+      (
+        'The server cannot analyze right now: Fable 5 requires usage '
+            'credits..',
+        l.nlServerModelRefused('Fable 5 requires usage credits')
+      ),
+    ]) {
+      final out = await outcomeFor(error: error);
+      expect(out.reply, isNull, reason: '$error');
+      expect(out.error, line, reason: '$error');
+    }
   });
 
   test('a throwing analyzer says the AI could not be reached', () async {

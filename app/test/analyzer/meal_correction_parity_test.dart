@@ -136,6 +136,68 @@ http.Response _reply(AiProvider p) {
   };
 }
 
+/// What the AI says instead of a patch.
+const _prose = 'Sorry, I could not work out which part of the meal you mean.';
+
+/// [_prose] as [p] delivers it. The own server reads the CLI's reply
+/// itself and answers a reply that is no JSON with its 503 "produced no
+/// usable result" (retry: false); a server that passed the text on
+/// (an older or a test one) sends it as the result.
+List<http.Response> _proseReplies(AiProvider p) => switch (p) {
+      AiProvider.gemini => [
+          http.Response(
+              jsonEncode({
+                'candidates': [
+                  {
+                    'content': {
+                      'parts': [
+                        {'text': _prose}
+                      ]
+                    }
+                  }
+                ]
+              }),
+              200,
+              headers: _json)
+        ],
+      AiProvider.anthropic => [
+          http.Response(
+              jsonEncode({
+                'content': [
+                  {'type': 'text', 'text': _prose}
+                ]
+              }),
+              200,
+              headers: _json)
+        ],
+      AiProvider.server => [
+          http.Response(
+              jsonEncode({
+                'error': 'claude_unavailable',
+                'reason': 'the analysis ran but produced no usable result',
+                'retry': false,
+              }),
+              503,
+              headers: _json),
+          http.Response(
+              jsonEncode({'ok': true, 'result': _prose, 'analyzed_by': 'claude'}),
+              200,
+              headers: _json),
+        ],
+      _ => [
+          http.Response(
+              jsonEncode({
+                'choices': [
+                  {
+                    'message': {'role': 'assistant', 'content': _prose}
+                  }
+                ]
+              }),
+              200,
+              headers: _json)
+        ],
+    };
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -213,6 +275,34 @@ void main() {
           }
           expect(text, withReplyLanguage(prompt, chinese: true));
           expect(body.containsKey('response_format'), isFalse);
+      }
+    });
+  }
+
+  // The AI answered, but in prose: the note says its answer could not be
+  // used (zh "AI 的回答无法使用"), as for any other answer that is no
+  // patch. It said "Error contacting AI" (zh 联系 AI 失败), though the
+  // request went through (iPhone check, 2026-11-24). Fix meals and
+  // Describe keep spec §4 step 4's wording for the same reply.
+  for (final p in AiProvider.values) {
+    test('${p.name}: an answer in prose is an answer that could not be '
+        'used; Fix meals and Describe word it as before', () async {
+      final l = AppLocalizationsEn();
+      for (final reply in _proseReplies(p)) {
+        final s = await _settings(p);
+        final analyzer = MultiProviderAnalyzer(s,
+            client: MockClient((_) async => reply));
+        final executor = DefaultNlExecutor(FakeDao(), analyzer, s, l10n: l);
+        final outcome = await executor.correctMeal(_meal, _note);
+        expect(outcome.error, isNull, reason: reply.body);
+        expect(outcome.reply, isA<MealReplyUnusable>(), reason: reply.body);
+        expect((outcome.reply! as MealReplyUnusable).emptiesMeal, isFalse);
+        expect((await executor.handleText('the rice was half')).single.text,
+            l.nlErrorContactingAi,
+            reason: reply.body);
+        expect((await executor.describeMeal('a bowl of rice')).error,
+            l.nlErrorContactingAi,
+            reason: reply.body);
       }
     });
   }

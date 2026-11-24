@@ -523,9 +523,15 @@ abstract class AnalyzerService {
 /// `classifyAnalysisError` reads it), or null when the cause is unknown or
 /// the reply simply would not parse.
 class TextIntentOutcome {
-  const TextIntentOutcome(this.json, {this.error});
+  const TextIntentOutcome(this.json, {this.error, this.notJson = false});
   final Map<String, dynamic>? json;
   final String? error;
+
+  /// The AI did answer, but with no JSON object or array: prose, or a
+  /// bare value. The request itself went through. A note in Edit meal
+  /// says the answer could not be used; Fix meals and Describe keep spec
+  /// §4 step 4's wording for it.
+  final bool notJson;
 }
 
 /// Optional companion to [AnalyzerService.textIntent] for analyzers that can
