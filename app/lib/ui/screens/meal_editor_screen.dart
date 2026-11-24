@@ -1820,16 +1820,18 @@ class _MealEditorScreenState extends State<MealEditorScreen>
   }
 
   /// The note field has focus (and the keyboard is coming up): Correct with
-  /// AI shows too, above the keyboard and clear of Save. The field's own
-  /// reveal is its caret's line and 120 pt under it, and the button sat
-  /// half under the keyboard, under Save at larger text (device check,
-  /// 2026-11-24). From the field's top down to the button and past Save,
-  /// when that fits what the keyboard leaves; otherwise (2x on a 6.1-inch
-  /// phone, AX5) the field's top goes to the top, so the note's start
-  /// stays in view and the rest scrolls. Measured inside the block: as the
-  /// keyboard shrinks the list, the field can lie past what the list lays
-  /// out, kept only for its focus, where it has no place on screen.
-  void _revealNote() {
+  /// AI shows too, above the keyboard and clear of Save, and so does a
+  /// reply under it (the AI's question being answered) where it fits. The
+  /// field's own reveal is its caret's line and 120 pt under it, and the
+  /// button sat half under the keyboard, under Save at larger text (device
+  /// check, 2026-11-24). From the field's top down to the button, or the
+  /// reply, and past Save, when that fits what the keyboard leaves;
+  /// otherwise (2x on a 6.1-inch phone, AX5) the field's top goes to the
+  /// top, so the note's start stays in view and the rest scrolls. Measured
+  /// inside the block: as the keyboard shrinks the list, the field can lie
+  /// past what the list lays out, kept only for its focus, where it has no
+  /// place on screen.
+  void _revealNote({bool again = false}) {
     if (!mounted || !_noteFocus.hasFocus || !_scroll.hasClients) return;
     RenderBox? box(GlobalKey key) {
       final o = key.currentContext?.findRenderObject();
@@ -1839,20 +1841,40 @@ class _MealEditorScreenState extends State<MealEditorScreen>
     final block = box(_noteBlockBox);
     final send = box(_noteSendBox);
     if (block == null || send == null) return;
-    // The button's bottom, a little air so it does not sit on the
-    // keyboard, and Save where it floats: over the keyboard, or with none
-    // up (a hardware keyboard) over the home indicator.
-    var below = send
-            .localToGlobal(Offset(0, send.size.height), ancestor: block)
-            .dy +
-        8;
-    below += _saveBand(RenderAbstractViewport.maybeOf(block));
     // The floated label sits half above the field's box.
     const above = 12.0;
     final room = _scroll.position.viewportDimension;
+    // Save where it floats: over the keyboard, or with none up (a
+    // hardware keyboard) over the home indicator.
+    final save = _saveBand(RenderAbstractViewport.maybeOf(block));
+    // The button's bottom, and a little air so it does not sit on the
+    // keyboard.
+    var end = send
+            .localToGlobal(Offset(0, send.size.height), ancestor: block)
+            .dy +
+        8;
+    // A reply under the button (the AI's question, an answer it could not
+    // use) is what the user types after: down to its end too, where that
+    // fits. Brought only to the button, the reply sat under Save and the
+    // keyboard (iPhone check, 2026-11-24).
+    final reply = _noteReply == null ? null : box(_noteReplyBox);
+    if (reply != null) {
+      final replyEnd = reply.localToGlobal(Offset(0, reply.size.height)).dy -
+          block.localToGlobal(Offset.zero).dy +
+          8;
+      if (above + replyEnd + save <= room) end = replyEnd;
+    }
     block.showOnScreen(
         rect: Rect.fromLTRB(
-            0, -above, block.size.width, min(below, room - above)));
+            0, -above, block.size.width, min(end + save, room - above)));
+    // A reply the list has not laid out: the keyboard came up at once,
+    // with the field far under it. Once more after the frame that brings
+    // the button up, with the reply right under it.
+    if (_noteReply != null && reply == null && !again) {
+      WidgetsBinding.instance
+        ..addPostFrameCallback((_) => _revealNote(again: true))
+        ..scheduleFrame();
+    }
   }
 
   /// A kept note removed: an unsaved change until Save (Back asks).

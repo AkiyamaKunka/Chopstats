@@ -276,6 +276,84 @@ void main() {
     });
   }
 
+  // The keyboard up to answer the AI: the reply under the button (its
+  // question, or an answer it could not use) shows too, above Save and the
+  // keyboard, where the field's top down to it fits. Revealed only to the
+  // button, the question's line ends sat under Save and its last line
+  // under the keyboard (iPhone check, 2026-11-24). The keyboard comes up
+  // at once, or frame by frame as a phone raises it. Where it does not fit
+  // (the test font, without the iPhone fonts, wraps far more), the button
+  // still shows above the keyboard.
+  const question = MealNoteOutcome(
+      reply: MealUnclear('你说的是哪一种：猪肉饺子还是小米粥？如果是饺子，'
+          '是只吃了一半，还是一半都不到呢？'));
+  const unusable = MealNoteOutcome(reply: MealReplyUnusable());
+  for (final (locale, outcome, steps) in [
+    (const Locale('zh'), question, 1),
+    (const Locale('zh'), question, 6),
+    (const Locale('en'), unusable, 1),
+    (const Locale('en'), unusable, 6),
+  ]) {
+    testWidgets('${locale.languageCode} at 1.00x on 390 pt, the keyboard up '
+        'to answer (${steps == 1 ? 'at once' : 'over $steps frames'}): the '
+        'reply shows above Save and the keyboard', (tester) async {
+      final dao = FakeDao()..seed(_mealWithNotes());
+      await pumpApp(
+        tester,
+        MealEditorScreen(
+            dao: dao,
+            meal: dao.meals.first,
+            settings: FakeSettings(),
+            noteCorrector: FakeExecutor()..nextNoteOutcome = outcome),
+        size: phone,
+        locale: locale,
+      );
+      final field = find.byKey(const Key('mealNoteField'));
+      final list = tester.state<ScrollableState>(find.byType(Scrollable).first);
+      while (field.evaluate().isEmpty) {
+        expect(list.position.pixels, lessThan(list.position.maxScrollExtent));
+        list.position.jumpTo(list.position.pixels + 200);
+        await tester.pump();
+      }
+      await tester.enterText(field, 'only half the rice');
+      await tester.pumpAndSettle();
+      await tester.testTextInput.receiveAction(TextInputAction.send);
+      await tester.pumpAndSettle();
+      final reply = find.byKey(const Key('mealNoteReply'));
+      expect(reply, findsOneWidget);
+      // Looked back up the form, then down to the field: at the bottom edge.
+      await Scrollable.ensureVisible(tester.element(field), alignment: 1);
+      await tester.pumpAndSettle();
+      await tester.showKeyboard(field);
+      for (var i = 1; i <= steps; i++) {
+        tester.view.viewInsets = FakeViewPadding(bottom: keyboard * i / steps);
+        await tester.pump();
+      }
+      await tester.pumpAndSettle();
+
+      final top = tester.getRect(find.byType(AppBar)).bottom;
+      final keyboardTop = phone.height - keyboard;
+      final text = tester.getRect(
+          find.descendant(of: field, matching: find.byType(EditableText)));
+      final send = tester.getRect(find.byKey(const Key('mealNoteSend')));
+      final save = tester.getRect(find.byKey(const Key('saveMealButton')));
+      final note = tester.getRect(find.byKey(const Key('mealNoteReplyNote')));
+      expect(text.top, greaterThanOrEqualTo(top - 0.5),
+          reason: "the note's text is under the app bar");
+      expect(send.bottom, lessThanOrEqualTo(keyboardTop + 0.5),
+          reason: 'the button is under the keyboard');
+      // The field's top (its floated label 12 pt above) down to the
+      // reply's end, a little air and Save's band: what the reveal fits.
+      final fits = note.bottom + 8 + (keyboardTop - save.top) -
+              (tester.getRect(field).top - 12) <=
+          keyboardTop - top;
+      if (haveIphoneFonts) expect(fits, isTrue);
+      if (!fits) return;
+      expect(tester.getRect(reply).bottom, lessThanOrEqualTo(save.top + 0.5),
+          reason: "the reply's end is under Save, or the keyboard");
+    });
+  }
+
   // An answer lands in view at every text size. At AX5 the header, the
   // tall field and its footer filled the screen, the header went to the
   // top, and the card or the reply landed below the fold (iPhone check,
