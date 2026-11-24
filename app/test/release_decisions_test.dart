@@ -1539,6 +1539,13 @@ void main() {
       } else {
         expect(android,
             contains('The next one is $version, which the steps name'));
+        // After it, the next bump is made as the bump to pubspec's version
+        // was: #93's "as for 1.7.2" and #97's "as for 1.8.0"; no test held
+        // either (review of #97).
+        expect(
+            android,
+            contains('bump pubspec first for the next one, with the '
+                "owner's OK, as for $version:"));
         expect(android,
             isNot(contains("The next one is pubspec's version at that time")));
         for (final r in _kAndroidReleases) {
@@ -1550,6 +1557,8 @@ void main() {
         'build name `$next`, and the artifact `android-$next-2xx`',
         "tag the run's commit `android-v$next`",
         '`git tag android-v$next <sha> && git push origin android-v$next`',
+        // The release form's tag too (review of #97: no test held it).
+        '*Draft a new release* › tag `android-v$next` ›',
         'title `Chopstats Android $next`',
         'the APK renamed `Chopstats-v$next-b2xx-arm64-v8a.apk`',
       ]) {
@@ -1565,6 +1574,7 @@ void main() {
           RegExp('`android-$v-2xx`'),
           RegExp("tag the run's commit `android-v$v`"),
           RegExp('android-v$v <sha>'),
+          RegExp('› tag `android-v$v`'),
           RegExp('Chopstats Android $v'),
           RegExp('`Chopstats-v$v-b'),
         ])
@@ -1612,6 +1622,17 @@ void main() {
         expect(flat, isNot(contains(unscoped)), reason: unscoped);
       }
       expect(s6, contains("`main`'s next iPhone version is $version"));
+      // So do § 6.6's other sentences on that release, whether or not a
+      // GitHub release holds pubspec's version (they did at #93 and at #95
+      // alike): the tag, the v* release that run makes, and the bump's
+      // record. No test held them, at 1.7.2 or at 1.8.0 (review of #97).
+      for (final next in [
+        "tag `main` as usual with pubspec's version, `v$version`",
+        'it puts that APK on the `v$version` release',
+        "it makes `main`'s next iPhone release $version too",
+      ]) {
+        expect(s6, contains(next), reason: next);
+      }
       expect(
           s6,
           contains('so no build of `main` may be named below the newest '
