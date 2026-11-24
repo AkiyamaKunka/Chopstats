@@ -1589,7 +1589,8 @@ class _MealEditorScreenState extends State<MealEditorScreen>
       _noteReply = null;
     });
     // The form is read-only now; a field left focused would bring the
-    // keyboard back up when the answer lands.
+    // keyboard back up when the answer lands. Until then the note's field
+    // takes no focus at all ([_noteSection]).
     FocusManager.instance.primaryFocus?.unfocus();
     MealNoteOutcome outcome;
     try {
@@ -1603,6 +1604,7 @@ class _MealEditorScreenState extends State<MealEditorScreen>
     // the AI answered is never filled over.
     await _readBasis();
     if (!mounted || gen != _noteGen) return;
+    _dropFieldFocus();
     setState(() => _correcting = false);
     if (!identical(meal, _meal) || _basisStale) {
       await _assistConflict(key: const Key('mealNoteConflict'));
@@ -1683,8 +1685,24 @@ class _MealEditorScreenState extends State<MealEditorScreen>
   void _stopNote() {
     if (!_correcting) return;
     _noteGen++;
+    _dropFieldFocus();
     setState(() => _correcting = false);
     _refreshBasis();
+  }
+
+  /// A field of the form tapped while a note's request ran: it took the
+  /// focus (read-only, so no keyboard) and, as the form unlocks, would
+  /// bring the keyboard up over what just landed — an answer, a refusal,
+  /// an error (iPhone check, 2026-11-24). The focus goes instead: nothing
+  /// could be typed meanwhile. Focus anywhere else (a dialog's, a
+  /// button's) stays.
+  void _dropFieldFocus() {
+    final node = FocusManager.instance.primaryFocus;
+    final at = node?.context;
+    if (node == null || at == null || !at.mounted) return;
+    if (at.findAncestorStateOfType<EditableTextState>() == null) return;
+    if (at.findAncestorStateOfType<_MealEditorScreenState>() != this) return;
+    node.unfocus();
   }
 
   @override
@@ -1790,6 +1808,10 @@ class _MealEditorScreenState extends State<MealEditorScreen>
             controller: _note,
             focusNode: _noteFocus,
             readOnly: locked || _noteAsking,
+            // While the AI answers, a tap takes no focus: focused, the
+            // field would bring the keyboard up over the answer as it
+            // lands ([_dropFieldFocus] for the form's other fields).
+            canRequestFocus: !_correcting,
             minLines: 2,
             maxLines: isLargeText(context) ? null : 4,
             textCapitalization: TextCapitalization.sentences,

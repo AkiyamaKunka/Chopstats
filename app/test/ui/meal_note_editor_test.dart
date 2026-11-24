@@ -7,6 +7,7 @@
 // already applied.
 import 'dart:async';
 import 'dart:convert' show jsonEncode;
+import 'dart:math' show min;
 
 import 'package:calorie_tracker/core/contracts.dart';
 import 'package:calorie_tracker/core/meal_correction.dart';
@@ -189,6 +190,43 @@ Future<void> _save(WidgetTester tester) async {
   await tester.tap(_key('saveMealButton'));
   await tester.pumpAndSettle();
 }
+
+/// Scrolls the editor's form until [k] is built, then into view. Pumps
+/// frames only: a request's spinner never settles.
+Future<void> _reveal(WidgetTester tester, String k) async {
+  final position = tester
+      .state<ScrollableState>(find
+          .descendant(
+              of: find.byType(MealEditorScreen),
+              matching: find.byType(Scrollable))
+          .first)
+      .position;
+  if (_key(k).evaluate().isEmpty) {
+    position.jumpTo(0);
+    await tester.pump();
+    while (_key(k).evaluate().isEmpty &&
+        position.pixels < position.maxScrollExtent) {
+      position.jumpTo(min(position.pixels + 200, position.maxScrollExtent));
+      await tester.pump();
+    }
+  }
+  await tester.ensureVisible(_key(k));
+  await tester.pump();
+}
+
+/// A phone (by default 6.1-inch, 390 x 844 pt) at 3x, the note's field in
+/// view.
+Future<void> _onPhone(WidgetTester tester,
+    {Size size = const Size(390, 844)}) async {
+  tester.view.physicalSize = size * 3;
+  tester.view.devicePixelRatio = 3.0;
+  addTearDown(tester.view.resetViewInsets);
+  await tester.pumpAndSettle();
+  await _reveal(tester, 'mealNoteField');
+}
+
+bool _noteFocused(WidgetTester tester) =>
+    tester.widget<TextField>(_key('mealNoteField')).focusNode!.hasFocus;
 
 void main() {
   setUpAll(() => initializeDateFormatting('zh'));
@@ -384,6 +422,110 @@ void main() {
       expect(_field(tester, 'mealNoteField'), 'only half the rice');
       expect(rig.dao.fieldUpdates, isEmpty);
     });
+
+    // iPhone check, 2026-11-24: the note field tapped once while the AI
+    // answered, and as the answer landed the keyboard came up on the
+    // emptied field, over the card, with Save floating over it (4/4).
+    // A read-only field still took the focus, and the form unlocking let
+    // it open the keyboard. Now the note's field takes no focus while the
+    // AI answers, and a field of the form that did is let go as the answer
+    // lands: nothing could be typed meanwhile.
+    for (final (name, outcome, answer) in [
+      ('a correction', _halfRice, 'mealNoteChanges'),
+      (
+        'a question',
+        const MealNoteOutcome(reply: MealUnclear('Which rice?')),
+        'mealNoteReplyNote'
+      ),
+      (
+        'an error',
+        const MealNoteOutcome(
+            error: '❌ Error contacting AI. Please try again.'),
+        'mealNoteReplyNote'
+      ),
+    ]) {
+      testWidgets('$name lands with no keyboard over it, whatever field '
+          'was tapped while the AI answered', (tester) async {
+        for (final tapped in ['mealNoteField', 'itemCal1', 'editorDescription']) {
+          final rig = await _open(tester);
+          await _onPhone(tester);
+          final gate = Completer<void>();
+          rig.executor
+            ..onCorrect = (() => gate.future)
+            ..nextNoteOutcome = outcome;
+          await _type(tester, 'only half the rice');
+          await tester.tap(_key('mealNoteSend'));
+          await tester.pump();
+          expect(tester.testTextInput.isVisible, isFalse);
+          await _reveal(tester, tapped);
+          await tester.tap(_key(tapped));
+          await tester.pump();
+          expect(tester.testTextInput.isVisible, isFalse,
+              reason: '$tapped is read-only');
+          expect(_noteFocused(tester), isFalse,
+              reason: 'the note field takes no focus while the AI answers');
+          gate.complete();
+          await tester.pumpAndSettle();
+
+          // A field that asks for the keyboard gets it, as on the phone.
+          final raised = tester.testTextInput.isVisible;
+          if (raised) {
+            tester.view.viewInsets = const FakeViewPadding(bottom: 336 * 3);
+            await tester.pumpAndSettle();
+          }
+          final top = tester.getRect(find.byType(AppBar)).bottom;
+          final bottom = min(tester.getRect(_key('saveMealButton')).top,
+              844 - tester.view.viewInsets.bottom / 3);
+          expect(_key(answer), findsOneWidget,
+              reason: '$tapped: the list scrolled the answer far out of view');
+          final landed = tester.getRect(_key(answer));
+          expect(landed.top, greaterThanOrEqualTo(top - 0.5),
+              reason: '$tapped: the answer starts above the screen');
+          expect(landed.top + 40, lessThanOrEqualTo(bottom),
+              reason: '$tapped: the answer is under the keyboard or Save');
+          expect(raised, isFalse,
+              reason: '$tapped: the keyboard came up as the answer landed');
+          expect(_noteFocused(tester), isFalse, reason: tapped);
+
+          // The note can still be typed: a tap now brings the keyboard.
+          await _reveal(tester, 'mealNoteField');
+          await tester.tap(_key('mealNoteField'));
+          await tester.pump();
+          expect(tester.testTextInput.isVisible, isTrue);
+          expect(_noteFocused(tester), isTrue);
+          tester.view.resetViewInsets();
+        }
+      }, variant: TargetPlatformVariant(
+          const {TargetPlatform.iOS, TargetPlatform.android}));
+    }
+
+    testWidgets('Stop: a field tapped while the AI answered brings no '
+        'keyboard up either', (tester) async {
+      for (final tapped in ['mealNoteField', 'itemCal1']) {
+        final rig = await _open(tester);
+        await _onPhone(tester);
+        final gate = Completer<void>();
+        rig.executor
+          ..onCorrect = (() => gate.future)
+          ..nextNoteOutcome = _halfRice;
+        await _type(tester, 'only half the rice');
+        await tester.tap(_key('mealNoteSend'));
+        await tester.pump();
+        await _reveal(tester, tapped);
+        await tester.tap(_key(tapped));
+        await tester.pump();
+        await _reveal(tester, 'mealNoteStop');
+        await tester.tap(_key('mealNoteStop'));
+        await tester.pump();
+        await tester.pump();
+        expect(tester.testTextInput.isVisible, isFalse, reason: tapped);
+        expect(_noteFocused(tester), isFalse, reason: tapped);
+        gate.complete();
+        await tester.pumpAndSettle();
+        expect(tester.testTextInput.isVisible, isFalse, reason: tapped);
+      }
+    }, variant: TargetPlatformVariant(
+        const {TargetPlatform.iOS, TargetPlatform.android}));
 
     testWidgets('Back asks, and Discard closes with nothing written',
         (tester) async {
