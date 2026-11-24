@@ -55,7 +55,7 @@
 library;
 
 import 'dart:convert' show jsonEncode;
-import 'dart:math' show min;
+import 'dart:math' show max, min;
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
@@ -1565,12 +1565,29 @@ class _MealEditorScreenState extends State<MealEditorScreen>
     final span = viewport.getOffsetToReveal(b, 0).offset +
         b.size.height -
         viewport.getOffsetToReveal(a, 0).offset;
-    var room = _scroll.position.viewportDimension;
+    return span <= _scroll.position.viewportDimension - _saveBand(viewport);
+  }
+
+  /// How far the Save button reaches up into the list from the list's
+  /// bottom edge, measured where it floats: its height and the gap under
+  /// it; 0 while it is not laid out. Over the keyboard that gap is
+  /// [kFloatingActionButtonMargin]. With no keyboard up, an iPhone with a
+  /// home indicator lifts Save by that inset too (50 pt in all), and so
+  /// does a snack bar: a fixed margin left the 34 pt out, and an answer
+  /// ending there went to the top with its last line under Save (iPhone
+  /// check at AX1, 2026-11-24).
+  double _saveBand(RenderObject? list) {
     final save = _saveButtonBox.currentContext?.findRenderObject();
-    if (save is RenderBox && save.hasSize) {
-      room -= save.size.height + kFloatingActionButtonMargin;
+    if (list is! RenderBox ||
+        !list.attached ||
+        !list.hasSize ||
+        save is! RenderBox ||
+        !save.attached ||
+        !save.hasSize) {
+      return 0;
     }
-    return span <= room;
+    final bottom = list.localToGlobal(Offset(0, list.size.height)).dy;
+    return max(0.0, bottom - save.localToGlobal(Offset.zero).dy);
   }
 
   /// An answer that changed nothing, or a refusal: on the page, under the
@@ -1823,13 +1840,13 @@ class _MealEditorScreenState extends State<MealEditorScreen>
     final send = box(_noteSendBox);
     if (block == null || send == null) return;
     // The button's bottom, a little air so it does not sit on the
-    // keyboard, and Save's height with its margin over the keyboard.
+    // keyboard, and Save where it floats: over the keyboard, or with none
+    // up (a hardware keyboard) over the home indicator.
     var below = send
             .localToGlobal(Offset(0, send.size.height), ancestor: block)
             .dy +
         8;
-    final save = box(_saveButtonBox);
-    if (save != null) below += save.size.height + kFloatingActionButtonMargin;
+    below += _saveBand(RenderAbstractViewport.maybeOf(block));
     // The floated label sits half above the field's box.
     const above = 12.0;
     final room = _scroll.position.viewportDimension;

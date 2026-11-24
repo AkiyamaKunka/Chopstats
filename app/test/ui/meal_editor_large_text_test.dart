@@ -376,6 +376,142 @@ void main() {
     });
   }
 
+  // With no keyboard up, an iPhone with a home indicator floats Save 50 pt
+  // over the screen's bottom, not 16 (the Scaffold adds the 34-pt inset).
+  // The fit check counted 16, so an answer ending in those 34 pt sent the
+  // header to the top and left the answer's last line under Save (iPhone
+  // check at AX1, 2026-11-24). A first, tall run measures the section as
+  // laid out and where Save floats; the second is sized so the header
+  // down to the reply's end is 17 pt taller than what shows above Save.
+  // The reply must then show whole between the app bar and Save, with
+  // either font.
+  for (final (locale, scale, note, question) in [
+    (
+      const Locale('zh'),
+      28 / 17, // AX1
+      '饺子只吃了一半，豆浆也只喝了半杯',
+      '你说的是哪一种：猪肉饺子还是小米粥？如果是饺子，是只吃了一半，还是一半都不到呢？'
+    ),
+    (
+      const Locale('en'),
+      1.0,
+      'only half the dumplings, and half a glass of soy milk',
+      'Which one do you mean, the dumplings or the porridge? If the '
+          'dumplings, was it half of them or fewer?'
+    ),
+  ]) {
+    testWidgets('${locale.languageCode} at ${scale.toStringAsFixed(2)}x with '
+        'a home indicator: a reply that would end under Save shows whole',
+        (tester) async {
+      const width = 402.0; // iPhone 17 Pro
+      const insets = EdgeInsets.only(top: 62, bottom: 34);
+      final reply = find.byKey(const Key('mealNoteReplyNote'));
+      final save = find.byKey(const Key('saveMealButton'));
+      Future<void> answer(double height) async {
+        await tester.pumpWidget(const SizedBox());
+        final dao = FakeDao()..seed(_mealWithNotes());
+        final executor = FakeExecutor()
+          ..nextNoteOutcome = MealNoteOutcome(reply: MealUnclear(question));
+        await pumpApp(
+          tester,
+          MealEditorScreen(
+              dao: dao,
+              meal: dao.meals.first,
+              settings: FakeSettings(),
+              noteCorrector: executor),
+          size: Size(width, height),
+          locale: locale,
+          scale: scale,
+          padding: insets,
+        );
+        final list =
+            tester.state<ScrollableState>(find.byType(Scrollable).first);
+        final field = find.byKey(const Key('mealNoteField'));
+        while (field.evaluate().isEmpty) {
+          expect(list.position.pixels, lessThan(list.position.maxScrollExtent));
+          list.position.jumpTo(list.position.pixels + 200);
+          await tester.pump();
+        }
+        await tester.enterText(field, note);
+        await tester.pumpAndSettle();
+        await tester.testTextInput.receiveAction(TextInputAction.send);
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        expect(reply, findsOneWidget);
+      }
+
+      const tall = 3000.0;
+      await answer(tall);
+      final span = tester.getRect(reply).bottom -
+          tester.getRect(find.byKey(const Key('mealNoteHeader'))).top;
+      final saveHeight = tester.getRect(save).height;
+      final lift = tall - tester.getRect(save).bottom;
+      expect(lift, greaterThan(kFloatingActionButtonMargin + 30),
+          reason: 'Save floats over the home indicator');
+      final appBar = tester.getRect(find.byType(AppBar)).bottom;
+
+      await answer(appBar + span - 17 + saveHeight + lift);
+      final shown = tester.getRect(reply);
+      expect(shown.top, greaterThanOrEqualTo(appBar - 0.5),
+          reason: 'the reply starts above the screen');
+      expect(shown.bottom, lessThanOrEqualTo(tester.getRect(save).top + 0.5),
+          reason: 'the reply ends under Save');
+    });
+  }
+
+  // A hardware keyboard: the note's field takes the focus with no keyboard
+  // on screen, so Save stays 50 pt over the bottom of a phone with a home
+  // indicator. The reveal counted 16, and Correct with AI sat under Save.
+  testWidgets('en at 2.00x on 430 pt with a home indicator, the note '
+      'focused with no keyboard on screen: the button shows clear of Save',
+      (tester) async {
+    const size = Size(430, 932);
+    final dao = FakeDao()..seed(_mealWithNotes());
+    await pumpApp(
+      tester,
+      MealEditorScreen(
+          dao: dao,
+          meal: dao.meals.first,
+          settings: FakeSettings(),
+          noteCorrector: FakeExecutor()),
+      size: size,
+      scale: 2.0,
+      padding: const EdgeInsets.only(top: 59, bottom: 34),
+    );
+    final field = find.byKey(const Key('mealNoteField'));
+    final list = tester.state<ScrollableState>(find.byType(Scrollable).first);
+    while (field.evaluate().isEmpty) {
+      expect(list.position.pixels, lessThan(list.position.maxScrollExtent));
+      list.position.jumpTo(list.position.pixels + 200);
+      await tester.pump();
+    }
+    // Scrolled just far enough to see the field: at the bottom edge.
+    await Scrollable.ensureVisible(tester.element(field), alignment: 1);
+    await tester.pumpAndSettle();
+    await tester.showKeyboard(field);
+    await tester.pumpAndSettle();
+
+    final top = tester.getRect(find.byType(AppBar)).bottom;
+    final block = tester.getRect(field).top - 12;
+    final send = tester.getRect(find.byKey(const Key('mealNoteSend')));
+    final save = tester.getRect(find.byKey(const Key('saveMealButton')));
+    final text = tester.getRect(
+        find.descendant(of: field, matching: find.byType(EditableText)));
+    expect(text.top, greaterThanOrEqualTo(top - 0.5),
+        reason: "the note's text is under the app bar");
+    // Where the field's top down to the button and past Save is taller
+    // than the screen (the test font, without the iPhone fonts, wraps far
+    // more), the note's text is what stays in view.
+    final fits = send.bottom + 8 + (size.height - save.top) - block <=
+        size.height - top;
+    if (haveIphoneFonts) expect(fits, isTrue);
+    if (!fits) return;
+    expect(send.left < save.right && save.left < send.right, isTrue,
+        reason: 'at 2x the button reaches under Save');
+    expect(send.bottom, lessThanOrEqualTo(save.top + 0.5),
+        reason: 'the Save button covers it');
+  });
+
   for (final (locale, scale) in [
     (const Locale('zh'), 53 / 17), // AX5
     (const Locale('en'), 53 / 17),
