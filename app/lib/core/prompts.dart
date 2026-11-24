@@ -4,7 +4,8 @@
 /// The prompt BODIES live in shared/prompts/*.txt and are emitted into
 /// core/shared_generated.dart by scripts/sync_shared.py; this module only
 /// preserves the app's original public API (foodDetectionPrompt,
-/// textHandlerPrompt, withDietaryProfile) so existing callers are unchanged.
+/// textHandlerPrompt, withDietaryProfile) so existing callers are unchanged,
+/// plus [mealCorrectionPrompt] for a note typed in Edit meal.
 /// Do not "improve" the wording in shared/ — the server and the app must stay
 /// behaviorally identical, and every rule is pinned by production behavior.
 library;
@@ -35,6 +36,14 @@ String textHandlerPrompt({
       weekday: weekday,
       yesterday: yesterday,
     );
+
+/// The prompt for a note typed in Edit meal: the shared template with
+/// [requestJson] (core/meal_correction.dart composeMealCorrectionRequest)
+/// in its data block. Sent through the text-intent seam, so the
+/// reply-language directive is appended later, by the direct provider or,
+/// from `lang`, by the own server — never here.
+String mealCorrectionPrompt(String requestJson) =>
+    sharedMealCorrectionPrompt(requestJson: requestJson);
 
 /// The reply-language appendix (mirrors telegram_bot.with_reply_language):
 /// [prompt] UNCHANGED unless [chinese], else the shared directive appended.
