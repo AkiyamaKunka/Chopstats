@@ -903,6 +903,34 @@ void main() {
       expect(_field(tester, 'mealNoteField'), 'only half the rice');
     });
 
+    // The same note sent again and answered with no change counts as dealt
+    // with; Undo then puts it back with its correction gone, so it is
+    // unsent again whatever answered it since: Save asks, not writes the
+    // meal without it.
+    testWidgets('a note sent again and answered with no change, the field '
+        'cleared, then undone: Save asks first', (tester) async {
+      final rig = await _open(tester);
+      rig.executor.nextNoteOutcome = _halfRice;
+      await _type(tester, 'only half the rice');
+      await _send(tester);
+      rig.executor.nextNoteOutcome =
+          const MealNoteOutcome(reply: MealNoChange('Already half.'));
+      await _type(tester, 'only half the rice');
+      await _send(tester);
+      expect(_key('mealNoteUndo'), findsOneWidget);
+      await _type(tester, '');
+      await tester.tap(_key('mealNoteUndo'));
+      await tester.pumpAndSettle();
+      expect(_field(tester, 'itemCal0'), '260', reason: 'the form is back');
+      expect(_field(tester, 'mealNoteField'), 'only half the rice');
+      await _save(tester);
+      _expectNoteQuestion();
+      await tester.tap(_key('mealNoteUnsentKeep'));
+      await tester.pumpAndSettle();
+      expect(rig.dao.fieldUpdates, isEmpty);
+      expect(_field(tester, 'mealNoteField'), 'only half the rice');
+    });
+
     testWidgets('keeps a note typed since: only an empty field gets the '
         'note back', (tester) async {
       final rig = await _open(tester);
