@@ -1917,8 +1917,7 @@ void main() {
     // change that followed its release, as #87 followed 1.7.1's. Until then
     // this test held that nothing said 1.7.2 was out; now it holds that
     // nothing says a version after the newest release is out. The store
-    // pack's "1.7.1 until android-v1.7.2 is published, then 1.7.2" stays
-    // true. Review of the prep (2026-11-23): the rule went by the day the
+    // pack says 1.7.2 since android-v1.7.2 went out. Review of the prep (2026-11-23): the rule went by the day the
     // Play account exists, which comes well before the upload in § 6.8,
     // while its bullets and its reason go by the upload (PREP-R1); the
     // bundle and the GitHub APK share a version and build number, not a
@@ -1985,7 +1984,9 @@ void main() {
       ]) {
         expect(s6, contains(fact), reason: fact);
       }
-      // The store pack gives both answers, so it stays true.
+      // The store pack names the newest release's version since it went
+      // out (review of #95: "1.7.1 until android-v1.7.2 is published, then
+      // 1.7.2" was true but read as if 1.7.2 were not out).
       for (final store in [
         'android/store/app_content.md',
         'android/store/data_safety.md',
@@ -1994,9 +1995,11 @@ void main() {
         expect(
             text,
             contains('(planned then as 1.7.0; it is the newest Android '
-                'release at the time of the first upload: 1.7.1 until '
-                '`android-v1.7.2` is published, then 1.7.2, '
+                'release at the time of the first upload: 1.7.2 since '
+                '`android-v1.7.2` went out on 2026-11-24, '
                 '`docs/RELEASING.md` § 6.3)'),
+            reason: store);
+        expect(text, isNot(contains('until `android-v1.7.2` is published')),
             reason: store);
         expect(text, isNot(contains('it is 1.7.1, `docs/RELEASING.md`')),
             reason: store);
@@ -2061,7 +2064,7 @@ void main() {
           expect(m.group(1), newest.version, reason: '$path: ${m.group(0)}');
         }
         for (final m
-            in RegExp(r'Chopstats-v(\d+\.\d+\.\d+)-b(\d+)').allMatches(text)) {
+            in RegExp(r'Chopstats-v(\d+\.\d+\.\d+)-b(\d+)\b').allMatches(text)) {
           expect('${m.group(1)} (${m.group(2)})',
               '${newest.version} (${newest.build})',
               reason: '$path: ${m.group(0)}');
@@ -2084,11 +2087,19 @@ void main() {
         final text = _readRepo(path).replaceAll(RegExp(r'\s+'), ' ');
         for (final claim in [
           RegExp(r'android-v(\d+\.\d+\.\d+)`? \((?:build |b)(\d+)'),
-          RegExp(r'Chopstats-v(\d+\.\d+\.\d+)-b(\d+)'),
+          RegExp(r'Chopstats-v(\d+\.\d+\.\d+)-b(\d+)\b'),
         ]) {
           for (final m in claim.allMatches(text)) {
-            expect(builds[m.group(1)], int.parse(m.group(2)!),
-                reason: '$path: ${m.group(0)}');
+            final v = m.group(1)!;
+            if (builds.containsKey(v)) {
+              expect(builds[v], int.parse(m.group(2)!),
+                  reason: '$path: ${m.group(0)}');
+            } else {
+              // Not an Android release (a 1.6.x hotfix, say): fine only
+              // below the newest release (review of #95).
+              expect(_compareVersions(v, newest.version), lessThan(0),
+                  reason: '$path: ${m.group(0)}');
+            }
           }
         }
         for (final claim in [
@@ -2096,7 +2107,11 @@ void main() {
           RegExp(r'(\d+\.\d+\.\d+) (?:went out|followed|is out)'),
         ]) {
           for (final m in claim.allMatches(text)) {
-            expect(builds.keys, contains(m.group(1)),
+            final v = m.group(1)!;
+            expect(
+                builds.containsKey(v) ||
+                    _compareVersions(v, newest.version) < 0,
+                isTrue,
                 reason: '$path: ${m.group(0)}');
           }
         }
