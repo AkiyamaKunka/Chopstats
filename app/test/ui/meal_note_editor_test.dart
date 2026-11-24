@@ -583,8 +583,8 @@ void main() {
   });
 
   group('Undo', () {
-    testWidgets('puts back the form and the note; a save then keeps no note',
-        (tester) async {
+    testWidgets('puts back the form and the note, unsent again: Save asks '
+        'first, then keeps no note', (tester) async {
       final rig = await _open(tester);
       rig.executor.nextNoteOutcome = _halfRice;
       await _type(tester, 'only half the rice');
@@ -596,7 +596,17 @@ void main() {
       expect(_field(tester, 'editorCalories'), '660');
       expect(_field(tester, 'mealNoteField'), 'only half the rice');
       expect(_key('mealNoteChanges'), findsNothing);
+      // The note is back in the field with nothing of it in the form: a
+      // save would drop it, so it asks.
       await _save(tester);
+      expect(_key('mealNoteUnsentDialog'), findsOneWidget);
+      await tester.tap(_key('mealNoteUnsentKeep'));
+      await tester.pumpAndSettle();
+      expect(rig.dao.fieldUpdates, isEmpty);
+      expect(_field(tester, 'mealNoteField'), 'only half the rice');
+      await _save(tester);
+      await tester.tap(_key('mealNoteUnsentSave'));
+      await tester.pumpAndSettle();
       final analysis = rig.dao.fieldUpdates.single.$2!;
       expect(analysis.containsKey(kUserNotesKey), isFalse);
       expect((analysis['food_items'] as List)[0], _rice);
@@ -656,6 +666,22 @@ void main() {
       expect(_field(tester, 'mealNoteField'), 'and no sauce');
     });
 
+    testWidgets('keeps a note typed since even once it was sent, whatever '
+        'its answer', (tester) async {
+      final rig = await _open(tester);
+      rig.executor.nextNoteOutcome = _halfRice;
+      await _type(tester, 'only half the rice');
+      await _send(tester);
+      rig.executor.nextNoteOutcome =
+          const MealNoteOutcome(reply: MealUnclear('Which sauce?'));
+      await _type(tester, 'and no sauce');
+      await _send(tester);
+      await tester.tap(_key('mealNoteUndo'));
+      await tester.pumpAndSettle();
+      expect(_field(tester, 'itemCal0'), '260', reason: 'the form is back');
+      expect(_field(tester, 'mealNoteField'), 'and no sauce');
+    });
+
     testWidgets("the first note's row stays the AI's through a second note "
         'and an Undo: saved with no usual mark', (tester) async {
       Map<String, dynamic> riceRow(_Rig rig) =>
@@ -681,9 +707,15 @@ void main() {
       await _send(tester);
       await tester.tap(_key('mealNoteUndo'));
       await tester.pumpAndSettle();
+      // The egg's note is back in the field, unsent: Save asks first.
       await _save(tester);
+      await tester.tap(_key('mealNoteUnsentSave'));
+      await tester.pumpAndSettle();
       expect(riceRow(rig)['estimated_calories'], 130);
       expect(riceRow(rig).containsKey('user'), isFalse);
+      expect(rig.dao.fieldUpdates.single.$2![kUserNotesKey], [
+        {'text': 'only half the rice', 'at': _sentAt},
+      ]);
     });
   });
 
@@ -1103,6 +1135,88 @@ void main() {
       expect(rig.executor.correctedNotes, isEmpty, reason: 'never sent');
       final analysis = rig.dao.fieldUpdates.single.$2!;
       expect(analysis.containsKey(kUserNotesKey), isFalse);
+    });
+
+    // iPhone check, 2026-11-24: send, then Stop (or Undo the result), then
+    // Save: the editor closed and the note was gone, with no question. The
+    // note counted as sent from before its request, and nothing that left
+    // the form without its correction took it back out.
+    testWidgets('a note stopped, failed or unusable stays in the field, '
+        'and Save asks before it drops it', (tester) async {
+      for (final (name, outcome) in [
+        ('stopped', null),
+        (
+          'an error',
+          const MealNoteOutcome(
+              error: '❌ Error contacting AI. Please try again.')
+        ),
+        ('unusable', const MealNoteOutcome(reply: MealReplyUnusable())),
+        (
+          'it would empty the meal',
+          const MealNoteOutcome(reply: MealReplyUnusable(emptiesMeal: true))
+        ),
+      ]) {
+        final rig = await _open(tester);
+        final gate = Completer<void>();
+        rig.executor
+          ..onCorrect = (() => gate.future)
+          // Stopped: an answer that would have dealt with it comes late,
+          // and is dropped.
+          ..nextNoteOutcome = outcome ??
+              const MealNoteOutcome(reply: MealNoChange('Already right.'));
+        await _type(tester, 'only half the rice');
+        await tester.tap(_key('mealNoteSend'));
+        await tester.pump();
+        if (outcome == null) {
+          await tester.tap(_key('mealNoteStop'));
+          await tester.pump();
+        }
+        gate.complete();
+        await tester.pumpAndSettle();
+        expect(_field(tester, 'mealNoteField'), 'only half the rice',
+            reason: name);
+        await _save(tester);
+        expect(_key('mealNoteUnsentDialog'), findsOneWidget, reason: name);
+        await tester.tap(_key('mealNoteUnsentKeep'));
+        await tester.pumpAndSettle();
+        expect(rig.dao.fieldUpdates, isEmpty, reason: name);
+        expect(_field(tester, 'mealNoteField'), 'only half the rice',
+            reason: name);
+      }
+    });
+
+    testWidgets('a note the AI answered with no change or a question was '
+        'dealt with: Save does not ask, and keeps no note; sent again and '
+        'stopped, it asks', (tester) async {
+      for (final outcome in [
+        const MealNoteOutcome(reply: MealNoChange('That is about lunch.')),
+        const MealNoteOutcome(reply: MealUnclear('Which rice?')),
+      ]) {
+        var rig = await _open(tester);
+        rig.executor.nextNoteOutcome = outcome;
+        await _type(tester, 'the rice');
+        await _send(tester);
+        await _save(tester);
+        expect(_key('mealNoteUnsentDialog'), findsNothing);
+        expect(rig.dao.fieldUpdates.single.$2!.containsKey(kUserNotesKey),
+            isFalse);
+
+        // Its last send is what counts.
+        rig = await _open(tester);
+        rig.executor.nextNoteOutcome = outcome;
+        await _type(tester, 'the rice');
+        await _send(tester);
+        final gate = Completer<void>();
+        rig.executor.onCorrect = () => gate.future;
+        await tester.tap(_key('mealNoteSend'));
+        await tester.pump();
+        await tester.tap(_key('mealNoteStop'));
+        await tester.pump();
+        gate.complete();
+        await tester.pumpAndSettle();
+        await _save(tester);
+        expect(_key('mealNoteUnsentDialog'), findsOneWidget);
+      }
     });
 
     testWidgets('a filled correction makes Back ask; Discard writes nothing',

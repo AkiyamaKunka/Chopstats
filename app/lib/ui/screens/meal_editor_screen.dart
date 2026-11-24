@@ -544,7 +544,7 @@ class _MealEditorScreenState extends State<MealEditorScreen>
       if (_note.text.trim().isEmpty) _note.text = _noteSteps.last.note;
       _noteSteps.clear();
     }
-    _sentNotes.clear();
+    _answeredNotes.clear();
     _refreshUsual();
   }
 
@@ -1384,15 +1384,26 @@ class _MealEditorScreenState extends State<MealEditorScreen>
 
   bool get _noteTyped => _note.text.trim().isNotEmpty;
 
-  /// Each note sent about the form shown, as sent ([cleanMealNote]);
-  /// cleared when the form is reloaded ([_load]).
-  final Set<String> _sentNotes = {};
+  /// The notes, as sent ([cleanMealNote]), whose last send about the form
+  /// shown the AI answered with no change or with a question: the answer
+  /// is on the page, so one still in the field was dealt with. A note
+  /// whose request was stopped, failed or came back unusable, or whose
+  /// correction was undone, is not here. Cleared when the form is
+  /// reloaded ([_load]).
+  final Set<String> _answeredNotes = {};
 
-  /// A note in the field that was never sent: Save asks first.
+  /// What the editor itself last put in the note field: nothing after a
+  /// fill, the note an Undo put back. A field still holding it holds
+  /// nothing typed since ([_undoNote]).
+  String _notePutBack = '';
+
+  /// A note in the field that no answer dealt with — never sent, or sent
+  /// and stopped, failed, unusable or undone: Save asks first, so it is
+  /// never dropped in silence.
   bool get _noteUnsent =>
       _noteOffered &&
       _noteTyped &&
-      !_sentNotes.contains(cleanMealNote(_note.text));
+      !_answeredNotes.contains(cleanMealNote(_note.text));
 
   /// Something else is under way: no note starts.
   bool get _noteBusy =>
@@ -1571,7 +1582,8 @@ class _MealEditorScreenState extends State<MealEditorScreen>
     final before = _draft.copy();
     final gen = ++_noteGen;
     final sentAt = (widget.now ?? DateTime.now)().toUtc().toIso8601String();
-    _sentNotes.add(note);
+    // Dealt with again only by this send's own answer ([_answeredNotes]).
+    _answeredNotes.remove(note);
     setState(() {
       _correcting = true;
       _noteReply = null;
@@ -1599,9 +1611,13 @@ class _MealEditorScreenState extends State<MealEditorScreen>
     switch (outcome.reply) {
       case null:
         _showNoteReply(outcome.error ?? l.nlErrorContactingAi);
+      // The AI read the note and said so on the page: Save does not ask
+      // about it ([_noteUnsent]), and keeps no note for it.
       case MealUnclear(reply: final question):
+        _answeredNotes.add(note);
         _showNoteReply(l.mealNoteUnclear(question));
       case MealNoChange(reply: final said):
+        _answeredNotes.add(note);
         _showNoteReply(
             said.isEmpty ? l.mealNoteNoChangeBare : l.mealNoteNoChange(said));
       case MealReplyUnusable(emptiesMeal: final empties):
@@ -1636,6 +1652,7 @@ class _MealEditorScreenState extends State<MealEditorScreen>
       afterSignature: _signature(),
     );
     _note.clear();
+    _notePutBack = '';
     setState(() {
       _noteSteps.add(step);
       _noteReply = null;
@@ -1643,21 +1660,26 @@ class _MealEditorScreenState extends State<MealEditorScreen>
     _scrollNoteIntoView();
   }
 
-  /// Undo: the form exactly as it was before the last note, and that note
-  /// back in the field — unless a note typed since and never sent is
-  /// there: that one is never written over ([_noteUnsent]). Offered only
-  /// while the form shows what the note left ([_noteUndoAvailable]).
+  /// Undo: the form exactly as it was before the last note, and the note
+  /// field as it was before that send: the note back in it, unsent again,
+  /// so Save asks before it drops it ([_noteUnsent]). A note typed since
+  /// is never written over. Offered only while the form shows what the
+  /// note left ([_noteUndoAvailable]).
   void _undoNote() {
     if (!_noteUndoAvailable) return;
     final step = _noteSteps.removeLast();
     _showDraft(step.before.copy()..expectedRaw = _draft.expectedRaw);
-    if (!_noteUnsent) _note.text = step.note;
+    if (!_noteTyped || _note.text == _notePutBack) {
+      _note.text = step.note;
+      _notePutBack = _note.text;
+      _answeredNotes.remove(step.note);
+    }
     setState(() {});
   }
 
   /// Stop: the answer is no longer waited for (a late one is dropped) and
   /// the form unlocks; nothing was written. The request itself is not
-  /// cancelled.
+  /// cancelled, and the note stays in the field, unsent ([_noteUnsent]).
   void _stopNote() {
     if (!_correcting) return;
     _noteGen++;
