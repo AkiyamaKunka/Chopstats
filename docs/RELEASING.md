@@ -1158,9 +1158,9 @@ step. Revisit if the app is ever published with a developer-run service.
 ## 6. Google Play
 
 Rewritten 2026-11-13 for the first Google Play release (planned then as
-Android 1.7.0, which went out on GitHub only, as 1.7.1 did after it; the
-first Play upload is the newest Android release's bundle at the time of
-that upload, § 6.3), from Google's pages as they read that day;
+Android 1.7.0, which went out on GitHub only, as 1.7.1 and 1.7.2 did
+after it; the first Play upload is the newest Android release's bundle
+at the time of that upload, § 6.3), from Google's pages as they read that day;
 each source below carries its read date. The console moves things
 around: match the wording, not the position. The paste-ready answers
 live next to the app in
@@ -1189,9 +1189,10 @@ live next to the app in
    iPhone 1.7.0. Done on 2026-11-19 for GitHub (`android-v1.7.0`, build
    207); no bundle reached Play. Android 1.7.1 went out the same way on
    2026-11-22 (`android-v1.7.1`, build 209), on GitHub only too. Android
-   1.7.2 goes out the same way, as `android-v1.7.2`, on GitHub only while
-   there is no Play account (§ 6.6). The first Play upload, still to come,
-   is the bundle of the newest Android release at the time of that upload
+   1.7.2 followed on 2026-11-24 (`android-v1.7.2`, build 210), on GitHub
+   only as well, since there is no Play account yet (§ 6.6). The first
+   Play upload, still to come, is the bundle of the newest Android release
+   at the time of that upload
    (§ 6.3). The iPhone 1.7.0 and 1.7.1 never shipped (1.6.0 is live),
    and pubspec is 1.7.2 since PR #93, so the iPhone's next tag
    from `main` is `v1.7.2`: `v1.7.0` and `v1.7.1` stay unused (§ 6.6). A
@@ -1552,42 +1553,37 @@ Android release at the time of that upload (decided on 2026-11-23 by
 Claude on the owner's delegation), so that Play starts at the version
 and build number GitHub users already have: an older bundle would be a
 downgrade for a phone moving from the GitHub APK (§ 6.6, *The friends
-and the GitHub APK*). Which bundle that is:
+and the GitHub APK*). Since `android-v1.7.2` went out on 2026-11-24,
+that is 1.7.2: the bundle of Release run 10 (lane `play`, from `main` at
+`c7a0e8a5`, where the tag `android-v1.7.2` is), build 210, the same
+build number as the GitHub APK `android-v1.7.2` (same run, same signer;
+the bundle is the Play build, without Watch Camera Roll), in the
+artifact `android-1.7.2-210`, which GitHub keeps 90 days.
 
-- Until `android-v1.7.2` is published, 1.7.1: the bundle of Release run 9
-  (lane `play`, from `main` at `189f34c6`, where the tag `android-v1.7.1`
-  is), build 209, the same build number as the GitHub APK
-  `android-v1.7.1` (same run, same signer; the bundle is the Play build,
-  without Watch Camera Roll), in the artifact `android-1.7.1-209`, which
-  GitHub keeps 90 days.
-- From then on, 1.7.2: the bundle of the run that `android-v1.7.2` comes
-  from (§ 6.6), in that run's artifact `android-1.7.2-2xx`.
+`android-v1.7.0` (build 207), `android-v1.7.1` (build 209) and
+`android-v1.7.2` (build 210) went out on GitHub only: there is no Play
+account yet (§ 6.6). The steps name run 10; for a later release, take
+its run, artifact, build number and name instead.
 
-`android-v1.7.0` (build 207) and `android-v1.7.1` went out on GitHub only,
-before the Play account existed, and 1.7.2 goes out on GitHub the same
-way (§ 6.6). The steps name run 9; for a later release, take its run,
-artifact, build number and name instead.
-
-1. Actions › Release › run 9. Its plan summary says build name `1.7.1`
-   and build number 209 (`BUILD_NUMBER_OFFSET` 200 + run 9), the build
-   number GitHub `android-v1.7.1` users have, above `android-v1.7.0`'s 207.
+1. Actions › Release › run 10. Its plan summary says build name `1.7.2`
+   and build number 210 (`BUILD_NUMBER_OFFSET` 200 + run 10), the build
+   number GitHub `android-v1.7.2` users have, above `android-v1.7.1`'s 209.
    Never upload a Mac hand build: it gets pubspec's `+11`, below 207.
    The run page keeps the artifact 90 days (§ 8): GitHub deletes
-   `android-1.7.1-209` on 2027-02-19, and a later release's artifact 90
+   `android-1.7.2-210` on 2027-02-22, and a later release's artifact 90
    days after its run. If the artifact is gone, no run can make that
    bundle again, so make a new Android release (§ 6.6, steps 1 to 5; a
    dispatch alone creates no tag and no GitHub Release) and upload its
    bundle: Run workflow › branch `main` › lane `play` builds pubspec's
-   version with a higher number. Until `android-v1.7.2` is out, that
-   version is 1.7.2. Once a GitHub release holds pubspec's version
-   (1.7.2, after `android-v1.7.2`), bump pubspec first, with the owner's
-   OK (§ 6.6).
-2. Download the artifact `android-1.7.1-209` and take `app-release.aab`.
+   version with a higher number. Once a GitHub release holds pubspec's
+   version, as `android-v1.7.2` holds 1.7.2, bump pubspec first, with the
+   owner's OK (§ 6.6).
+2. Download the artifact `android-1.7.2-210` and take `app-release.aab`.
 3. Play Console › *Test and release* › *Testing* › *Internal testing* ›
    *Create new release* › upload it. **Do not roll it out yet.** First
    change the signing key (above) and clear every App content alert
    (§ 6.5).
-4. Name the release `1.7.1 (209)`, paste the release notes from
+4. Name the release `1.7.2 (210)`, paste the release notes from
    `app/android/whatsnew/`, *Save* › *Review* › *Roll out*, and add
    testers by email list.
 
@@ -1784,26 +1780,30 @@ any `v*` tag, and the iOS lane stops until the iCloud container exists
 (§ 11.1). So Android goes first without a `v*` tag. Android 1.7.0 went
 out this way on 2026-11-19 (`android-v1.7.0`, build 207, GitHub only).
 Android 1.7.1 followed on 2026-11-22 (`android-v1.7.1`, build 209 from
-run 9, GitHub only). The next one is 1.7.2, which the steps name:
-pubspec's version since PR #93 (*Pubspec and the versions
-the policy names*, below). It goes out on GitHub only while there is no
-Play account. After it, bump pubspec first for the next one, with the
-owner's OK, as for 1.7.2: a version that a GitHub release already holds
-is not built again under its name, and the bump also names `main`'s next
-iPhone version.
+run 9, GitHub only). Android 1.7.2 followed on 2026-11-24
+(`android-v1.7.2`, build 210 from run 10, GitHub only), pubspec's
+version since PR #93. The next one is pubspec's version at that time,
+bumped first (`X.Y.Z` in the steps): `android-v1.7.2` holds 1.7.2, and
+a version that a GitHub release already holds is not built again under
+its name. So, with the owner's OK, raise `version:` in
+`app/pubspec.yaml` and `kAppVersion`
+(`lib/services/backup/backup_files.dart`) above 1.7.2 before the run,
+as PR #93 raised them from 1.7.1 to 1.7.2. The bump also names `main`'s
+next iPhone version (*Pubspec and the versions the policy names*,
+below). It goes out on GitHub only while there is no Play account.
 
 1. Actions › Release › Run workflow › `main` › lane **`play`**. The plan
-   summary says build name `1.7.2`, and the artifact `android-1.7.2-2xx`
+   summary says build name `X.Y.Z`, and the artifact `android-X.Y.Z-2xx`
    holds the bundle and the arm64 APK, with one build number
    (`BUILD_NUMBER_OFFSET` 200 + the run's number, above
-   `android-v1.7.1`'s 209) and one signer (the verify step checks both).
+   `android-v1.7.2`'s 210) and one signer (the verify step checks both).
 2. The bundle goes to Play by hand (§ 6.3). Until the first Play
    upload, § 6.3 says which release's bundle that upload is.
 3. The APK goes on a GitHub Release made by hand: tag the run's commit
-   `android-v1.7.2` and push the tag (`git tag android-v1.7.2 <sha> &&
-   git push origin android-v1.7.2`), then GitHub › Releases › *Draft a new
-   release* › tag `android-v1.7.2` › title `Chopstats Android 1.7.2` ›
-   attach the APK renamed `Chopstats-v1.7.2-b2xx-arm64-v8a.apk` (the name
+   `android-vX.Y.Z` and push the tag (`git tag android-vX.Y.Z <sha> &&
+   git push origin android-vX.Y.Z`), then GitHub › Releases › *Draft a new
+   release* › tag `android-vX.Y.Z` › title `Chopstats Android X.Y.Z` ›
+   attach the APK renamed `Chopstats-vX.Y.Z-b2xx-arm64-v8a.apk` (the name
    release.yml's own releases use) › notes (below) › *Publish*.
    release.yml triggers only on tags matching `v*`, and an `android-v*`
    tag such as `android-v1.7.0` does not match it (pinned by
@@ -1812,7 +1812,8 @@ iPhone version.
    is harmless.
 4. Notes: what changed for Android since the previous GitHub release (for
    1.7.0 that was 1.6.0, with PR #60's fix to shared photos; for 1.7.1 it
-   was `android-v1.7.0`; for 1.7.2 it is `android-v1.7.1`, build 209);
+   was `android-v1.7.0`; for 1.7.2 it was `android-v1.7.1`, build 209;
+   for the next one it is `android-v1.7.2`, build 210);
    installing over a GitHub build from 1.5.0 or later keeps the data. Say
    that the GitHub APK and the Play build can replace each other **only
    after** the signing-key check of § 6.3 (*Play App Signing*, step 3)
@@ -1868,17 +1869,17 @@ tagged). A `v1.6.1` tag needs no § 11, since that branch has no iCloud
 entitlement, and it runs that branch's own `release.yml`: both lanes on
 a tag push, `BUILD_NUMBER_OFFSET` 100, and none of the checks added
 since 1.6.0 (the run floor and the `+N` tag check of § 5, the policy
-check above). So its build is numbered 100 + its run number (110 or
-more: run 9 built `android-v1.7.1`), inside § 11.2's 107–199: on a phone
+check above). So its build is numbered 100 + its run number (111 or
+more: run 10 built `android-v1.7.2`), inside § 11.2's 107–199: on a phone
 that installs it, later device test builds go above it. It also puts an
 Android 1.6.1 APK with that number on a new GitHub Release, `v1.6.1`.
-That is below `android-v1.7.1`'s 209 and `android-v1.7.0`'s 207, so
-Android refuses it on a phone with 1.7.0 or 1.7.1: say so in that
-release's notes, and leave the README's
+That is below `android-v1.7.2`'s 210, `android-v1.7.1`'s 209 and
+`android-v1.7.0`'s 207, so Android refuses it on a phone with 1.7.0,
+1.7.1 or 1.7.2: say so in that release's notes, and leave the README's
 Android section on the 1.7.x release. Keep that branch's own
 `release.yml`: `main`'s would stop its Android job (the branch has no
 `kRequireHttpsServer`), and its offset 200 would number the APK above
-209, so Android would install 1.6.1 (database schema 3) over 1.7.x
+210, so Android would install 1.6.1 (database schema 3) over 1.7.x
 (schema 4).
 
 **Developer verification and the GitHub APK.** Because the package
@@ -1995,11 +1996,10 @@ the screenshots:
    it and `kAppVersion` first, with the owner's OK (§ 6.6); release.yml's
    plan step refuses the Android lane until then.
 9. Run workflow › `main` › lane `play` (for the first upload, the run of
-   the newest Android release instead, § 6.3: run 9, build 209, until
-   `android-v1.7.2` is published, then 1.7.2's run); check the plan
-   summary's build name (pubspec's version at the run's commit: 1.7.1 for
-   run 9, 1.7.2 for 1.7.2's run) and number, the bundle's permissions
-   (§ 6.3), and that
+   the newest Android release instead, § 6.3: run 10, build 210, which
+   built `android-v1.7.2`); check the plan summary's build name (pubspec's
+   version at the run's commit: 1.7.2 for run 10) and number, the
+   bundle's permissions (§ 6.3), and that
    `app/lib/core/server_transport.dart` says `kRequireHttpsServer = true`
    at the run's commit (the Android job's *Check the app refuses plain-http
    servers* step stops the run otherwise).
@@ -2010,13 +2010,13 @@ the screenshots:
     picker, a share, Describe a meal and the daily summary.
 12. Create the closed track, add at least 12 testers outside mainland
     China, roll out, share the opt-in link, and start the 14-day log.
-13. Publish 1.7.2's GitHub APK as `android-v1.7.2` by hand, then update
-    the README's Android section (§ 6.6, steps 1 to 5). It does not wait
-    for Play (decision 4); when the first upload is 1.7.2, its run is
-    step 9's. Before it, run 9's GitHub APK went out by hand as
-    `android-v1.7.1` (build 209) on 2026-11-22, before any Play upload,
-    and the README's Android section names it. `android-v1.7.0` (build
-    207) is already out, since 2026-11-19.
+13. Done on 2026-11-24: run 10's GitHub APK went out by hand as
+    `android-v1.7.2` (build 210), before any Play upload, and the README's
+    Android section names it (§ 6.6, steps 1 to 5). It did not wait for
+    Play (decision 4); its run is step 9's as long as it is the newest
+    Android release (§ 6.3). Before it, run 9's GitHub APK went out by
+    hand as `android-v1.7.1` (build 209) on 2026-11-22, before any Play
+    upload. `android-v1.7.0` (build 207) is already out, since 2026-11-19.
 
 Optional, only after the first manual rollout:
 
