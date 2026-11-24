@@ -139,10 +139,9 @@ http.Response _reply(AiProvider p) {
 /// What the AI says instead of a patch.
 const _prose = 'Sorry, I could not work out which part of the meal you mean.';
 
-/// [_prose] as [p] delivers it. The own server reads the CLI's reply
-/// itself and answers a reply that is no JSON with its 503 "produced no
-/// usable result" (retry: false); a server that passed the text on
-/// (an older or a test one) sends it as the result.
+/// [_prose] as [p] delivers it to the app. The own server here is one that
+/// passes the text on (an older or a test one) as the result; the real one
+/// reads the CLI's reply itself and answers it with its 503 (below).
 List<http.Response> _proseReplies(AiProvider p) => switch (p) {
       AiProvider.gemini => [
           http.Response(
@@ -171,14 +170,6 @@ List<http.Response> _proseReplies(AiProvider p) => switch (p) {
               headers: _json)
         ],
       AiProvider.server => [
-          http.Response(
-              jsonEncode({
-                'error': 'claude_unavailable',
-                'reason': 'the analysis ran but produced no usable result',
-                'retry': false,
-              }),
-              503,
-              headers: _json),
           http.Response(
               jsonEncode({'ok': true, 'result': _prose, 'analyzed_by': 'claude'}),
               200,
@@ -306,4 +297,38 @@ void main() {
       }
     });
   }
+
+  // The own server answers a CLI reply in prose with its 503 "the analysis
+  // ran but produced no usable result" (retry: false), and sends the same
+  // body when the run never answered: an exit with a 401 or 529 envelope,
+  // an error envelope, a crashed CLI. Read as the AI's unusable answer, a
+  // lapsed login said "Try saying it another way" (review, 2026-11-24). So
+  // the note says "Error contacting AI" for it, as Fix meals and Describe
+  // do, and makes one request (retry false).
+  test("server: its 503 'produced no usable result' says Error contacting "
+      'AI, for the note as for Fix meals and Describe', () async {
+    final l = AppLocalizationsEn();
+    final s = await _settings(AiProvider.server);
+    var requests = 0;
+    final analyzer = MultiProviderAnalyzer(s, client: MockClient((_) async {
+      requests++;
+      return http.Response(
+          jsonEncode({
+            'error': 'claude_unavailable',
+            'reason': 'the analysis ran but produced no usable result',
+            'retry': false,
+          }),
+          503,
+          headers: _json);
+    }));
+    final executor = DefaultNlExecutor(FakeDao(), analyzer, s, l10n: l);
+    final outcome = await executor.correctMeal(_meal, _note);
+    expect(outcome.reply, isNull);
+    expect(outcome.error, l.nlErrorContactingAi);
+    expect(requests, 1);
+    expect((await executor.handleText('the rice was half')).single.text,
+        l.nlErrorContactingAi);
+    expect((await executor.describeMeal('a bowl of rice')).error,
+        l.nlErrorContactingAi);
+  });
 }

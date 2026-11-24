@@ -243,22 +243,20 @@ class DefaultNlExecutor implements NlExecutor, MealNoteCorrector {
       // The AI did answer, but in prose (or a bare value): an answer that
       // cannot be used, like any other that is no patch — never "Error
       // contacting AI", which sent the user to retry a request that went
-      // through (iPhone check, 2026-11-24). The own server reads the
-      // CLI's reply itself and says the same as "produced no usable
-      // result", which the photo path words as the AI's answer too.
-      if (reply.notJson || _serverRanUnusable(reply.error)) {
+      // through (iPhone check, 2026-11-24). Only where the app itself read
+      // the AI's text: the own server's 503 "... produced no usable
+      // result" is one body for a reply in prose and for a run that never
+      // answered (a lapsed login, an overloaded API, a crashed CLI), so it
+      // stays "Error contacting AI", as Fix meals and Describe say it; its
+      // "Try saying it another way" would not help those (review,
+      // 2026-11-24).
+      if (reply.notJson) {
         return const MealNoteOutcome(reply: MealReplyUnusable());
       }
       return MealNoteOutcome(error: _textFailure(reply.error));
     }
     return MealNoteOutcome(reply: parseMealCorrectionReply(json, meal));
   }
-
-  /// The own server ran the request and its reply was unusable (its 503
-  /// "... produced no usable result", retry: false).
-  static bool _serverRanUnusable(String? error) =>
-      error != null &&
-      (serverReason(error)?.contains('produced no usable result') ?? false);
 
   /// Describe-only path (app-only, spec §9): analyze [text] as a brand-new
   /// meal and hand the analysis back for preview. NOTHING is saved.

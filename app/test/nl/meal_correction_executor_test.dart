@@ -174,10 +174,14 @@ void main() {
   });
 
   // The AI answered in prose: "Error contacting AI" sent the user to retry
-  // a request that went through (iPhone check, 2026-11-24).
-  test('an answer in prose or a bare value, or the own server saying its '
-      'run produced no usable result, is an answer that could not be used',
-      () async {
+  // a request that went through (iPhone check, 2026-11-24). The own
+  // server's "produced no usable result" is not that: the server sends the
+  // same 503 for a prose reply and for a CLI run that never answered (a
+  // lapsed login, an overloaded API, a crash), where "Try saying it another
+  // way" would not help (review, 2026-11-24).
+  test('an answer in prose or a bare value is an answer that could not be '
+      "used; the own server's no-usable-result 503 and other failures stay "
+      'as Fix meals words them', () async {
     final fix = executor();
     Future<MealNoteOutcome> outcomeFor(
         {String? error, bool notJson = false}) async {
@@ -188,20 +192,19 @@ void main() {
       return fix.correctMeal(_meal, 'x');
     }
 
-    for (final out in [
-      await outcomeFor(notJson: true),
-      await outcomeFor(
-          error: 'The server cannot analyze right now: the analysis ran but '
-              'produced no usable result.'),
-    ]) {
-      expect(out.error, isNull);
-      expect(out.reply, isA<MealReplyUnusable>());
-      expect((out.reply! as MealReplyUnusable).emptiesMeal, isFalse);
-    }
-    // A failure with no reason, or the server's other refusals, stay as
-    // Fix meals words them.
+    final out = await outcomeFor(notJson: true);
+    expect(out.error, isNull);
+    expect(out.reply, isA<MealReplyUnusable>());
+    expect((out.reply! as MealReplyUnusable).emptiesMeal, isFalse);
+    // A failure with no reason, or the server's refusals, stay as Fix
+    // meals words them.
     for (final (error, line) in [
       (null, l.nlErrorContactingAi),
+      (
+        'The server cannot analyze right now: the analysis ran but produced '
+            'no usable result.',
+        l.nlErrorContactingAi
+      ),
       (
         'The server cannot analyze right now: the analyzer is busy with '
             'another photo.',
