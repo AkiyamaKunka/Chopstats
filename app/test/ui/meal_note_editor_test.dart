@@ -477,6 +477,32 @@ void main() {
       expect(openRaw, isNot(rig.dao.rawOf(rig.dao.meals.first)));
     });
 
+    testWidgets('on a phone, the answer brings the section to the top: the '
+        'field, the button and the card show together', (tester) async {
+      final rig = await _open(tester);
+      tester.view.physicalSize = const Size(1080, 2400);
+      tester.view.devicePixelRatio = 2.75;
+      await tester.pumpAndSettle();
+      rig.executor.nextNoteOutcome = _halfRice;
+      await tester.scrollUntilVisible(_key('mealNoteField'), 200,
+          scrollable: find
+              .descendant(
+                  of: find.byType(MealEditorScreen),
+                  matching: find.byType(Scrollable))
+              .first);
+      await _type(tester, 'only half the rice');
+      await _send(tester);
+      final appBar = tester.getRect(find.byType(AppBar));
+      final header = tester.getRect(_key('mealNoteHeader'));
+      expect(header.top, greaterThanOrEqualTo(appBar.bottom));
+      expect(header.top, lessThan(appBar.bottom + 40),
+          reason: 'the section starts at the top of the form');
+      final card = tester.getRect(_key('mealNoteChanges'));
+      expect(card.top, lessThan(2400 / 2.75),
+          reason: 'the card starts on screen');
+      expect(rig.dao.fieldUpdates, isEmpty);
+    });
+
     testWidgets('a number the user then changes on the AI row is theirs; '
         'the note is kept', (tester) async {
       final rig = await _open(tester);

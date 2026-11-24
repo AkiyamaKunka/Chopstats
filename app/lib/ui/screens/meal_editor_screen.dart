@@ -290,13 +290,14 @@ class _MealEditorScreenState extends State<MealEditorScreen> {
 
   /// The last answer that changed nothing, or a refusal, on the page.
   String? _noteReply;
-  final GlobalKey _noteReplyKey = GlobalKey();
+
+  /// The note section's header: what an answer scrolls to the top.
+  final GlobalKey _noteHeaderKey = GlobalKey();
 
   /// Each note that filled the form this visit, oldest first: what Undo
   /// steps back through, and the notes Save keeps ([_notesToSave]).
   final List<_NoteStep> _noteSteps = [];
   int _noteStepIds = 0;
-  final GlobalKey _noteCardKey = GlobalKey();
 
   /// The notes kept on the meal as loaded (analysis.user_notes, oldest
   /// first), and the ones the user removed this visit (by position): an
@@ -1443,16 +1444,18 @@ class _MealEditorScreenState extends State<MealEditorScreen> {
         },
       );
 
-  /// After the frame, scrolls [key]'s widget into view (with the keyboard
-  /// up it would land under it).
-  void _scrollIntoView(GlobalKey key) {
+  /// After the frame, scrolls the note's section to the top of the form,
+  /// so its field, the button and the answer under them (a reply or the
+  /// card of changes) show together. Brought to the bottom edge instead,
+  /// the card's last lines sat under the Save button (device check,
+  /// 2026-11-24), and with the keyboard up an answer would land under it.
+  void _scrollNoteIntoView() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      final target = key.currentContext;
+      final target = _noteHeaderKey.currentContext;
       if (!mounted || target == null) return;
       Scrollable.ensureVisible(target,
           duration: AppMotion.of(context, AppMotion.standard),
-          curve: AppMotion.curve,
-          alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtEnd);
+          curve: AppMotion.curve);
     });
   }
 
@@ -1460,7 +1463,7 @@ class _MealEditorScreenState extends State<MealEditorScreen> {
   /// button, until the next send.
   void _showNoteReply(String text) {
     setState(() => _noteReply = text);
-    _scrollIntoView(_noteReplyKey);
+    _scrollNoteIntoView();
   }
 
   /// Correct with AI: the note and the meal as the form shows it go to
@@ -1610,7 +1613,7 @@ class _MealEditorScreenState extends State<MealEditorScreen> {
       _noteSteps.add(step);
       _noteReply = null;
     });
-    _scrollIntoView(_noteCardKey);
+    _scrollNoteIntoView();
   }
 
   /// Undo: the form exactly as it was before the last note, and that note
@@ -1661,6 +1664,7 @@ class _MealEditorScreenState extends State<MealEditorScreen> {
     return [
       const SizedBox(height: 24),
       Semantics(
+        key: _noteHeaderKey,
         header: true,
         child: Text(l.mealNoteHeader,
             key: const Key('mealNoteHeader'),
@@ -1725,7 +1729,7 @@ class _MealEditorScreenState extends State<MealEditorScreen> {
         Padding(
           padding: const EdgeInsets.only(top: 12),
           child: ReplyNote(
-              key: _noteReplyKey,
+              key: const Key('mealNoteReplyNote'),
               message: reply,
               textKey: const Key('mealNoteReply')),
         ),
@@ -1733,7 +1737,6 @@ class _MealEditorScreenState extends State<MealEditorScreen> {
         Padding(
           padding: const EdgeInsets.only(top: 12),
           child: _NoteChangesCard(
-              key: _noteCardKey,
               step: _noteSteps.last,
               onUndo: _noteUndoAvailable ? _undoNote : null),
         ),
@@ -2337,7 +2340,7 @@ class _NoteStep {
 /// for the user to check before Save, with Undo while the form still
 /// shows exactly that. A live region: it appears after a round trip.
 class _NoteChangesCard extends StatelessWidget {
-  const _NoteChangesCard({super.key, required this.step, this.onUndo});
+  const _NoteChangesCard({required this.step, this.onUndo});
 
   final _NoteStep step;
   final VoidCallback? onUndo;
