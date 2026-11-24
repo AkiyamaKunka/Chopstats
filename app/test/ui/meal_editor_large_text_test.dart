@@ -96,13 +96,17 @@ Meal _mealWithNotes() {
 
 /// The no-overlap rule of the test above, over the whole form: no floated
 /// label covers a field, a pill or any text that is not a field's or a
-/// button's.
+/// button's. Over the rows the list has built: an answer scrolls the note
+/// section to the top, and where the form is taller than the surface (the
+/// test font, without the iPhone fonts, wraps far more) the date row is
+/// then out of the list. The check before the first send covers it.
 void _expectNoLabelCovers(WidgetTester tester) {
   final fields = _fields(tester);
   final obstacles = <Rect>[
     for (final f in fields) f.field,
     for (final k in ['editorDateButton', 'editorTimeButton'])
-      tester.getRect(find.byKey(Key(k))),
+      for (final e in find.byKey(Key(k)).evaluate())
+        _global(e.renderObject! as RenderBox),
     for (final e in find.byType(Text).evaluate())
       if (e.findAncestorWidgetOfExactType<InputDecorator>() == null &&
           e.findAncestorWidgetOfExactType<ButtonStyleButton>() == null &&
@@ -171,6 +175,7 @@ void main() {
         scale: scale,
       );
       expect(find.byKey(const Key('mealNoteSaved1')), findsOneWidget);
+      expect(find.byKey(const Key('editorDateButton')), findsOneWidget);
       _expectNoLabelCovers(tester);
 
       await tester.enterText(find.byKey(const Key('mealNoteField')),
