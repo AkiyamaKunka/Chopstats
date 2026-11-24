@@ -3949,13 +3949,13 @@
   "@mealNoteHeader": {
     "description": "Edit meal (a stored meal only): the header of the section at the end of the form where the user tells the AI what was different about this meal. A semantics header."
   },
-  "mealNoteLabel": "What was different?",
+  "mealNoteLabel": "Your note",
   "@mealNoteLabel": {
-    "description": "Edit meal: the label of the note field (mealNoteHeader's section)."
+    "description": "Edit meal: the label of the note field (mealNoteHeader's section). Short: an empty field rests it inside the box at full size, and at the largest accessibility text size on a 390 pt phone a longer one ('What was different?') was cut to an ellipsis. The question is in mealNoteHint."
   },
-  "mealNoteHint": "e.g. \"only half the rice\" or \"add a fried egg\"",
+  "mealNoteHint": "What was different? e.g. \"only half the rice\" or \"add a fried egg\"",
   "@mealNoteHint": {
-    "description": "Edit meal: the hint inside the empty note field. Two short examples of a note: an amount and an added food."
+    "description": "Edit meal: the hint inside the note field (shown once the field is focused): the question the note answers, then two short examples, an amount and an added food. It wraps."
   },
   "mealNoteFooter": "Your note and this meal's foods, numbers and earlier notes go to {provider}. Nothing is saved until you tap Save.",
   "@mealNoteFooter": {

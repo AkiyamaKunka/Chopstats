@@ -5,6 +5,7 @@
 // and the field above them, the first one was clipped under the app bar,
 // and the one-line description showed only 'Pan-fried du'.
 import 'package:calorie_tracker/core/contracts.dart';
+import 'package:calorie_tracker/core/meal_correction.dart';
 import 'package:calorie_tracker/ui/screens/meal_editor_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -73,8 +74,129 @@ List<({Rect field, Rect label, String text})> _fields(WidgetTester tester) {
   return out;
 }
 
+/// [_meal] with two notes kept on it (Correct with a note).
+Meal _mealWithNotes() {
+  final m = _meal();
+  return Meal(
+    id: m.id,
+    date: m.date,
+    time: m.time,
+    timestamp: m.timestamp,
+    source: m.source,
+    imageHash: m.imageHash,
+    analysis: {
+      ...m.analysis,
+      kUserNotesKey: [
+        {'text': 'only six dumplings', 'at': '2026-10-31T09:00:00.000Z'},
+        {'text': 'the porridge had sugar', 'at': '2026-10-31T09:30:00.000Z'},
+      ],
+    },
+  );
+}
+
+/// The no-overlap rule of the test above, over the whole form: no floated
+/// label covers a field, a pill or any text that is not a field's or a
+/// button's.
+void _expectNoLabelCovers(WidgetTester tester) {
+  final fields = _fields(tester);
+  final obstacles = <Rect>[
+    for (final f in fields) f.field,
+    for (final k in ['editorDateButton', 'editorTimeButton'])
+      tester.getRect(find.byKey(Key(k))),
+    for (final e in find.byType(Text).evaluate())
+      if (e.findAncestorWidgetOfExactType<InputDecorator>() == null &&
+          e.findAncestorWidgetOfExactType<ButtonStyleButton>() == null &&
+          e.findAncestorWidgetOfExactType<AppBar>() == null &&
+          e.findAncestorWidgetOfExactType<FloatingActionButton>() == null)
+        _global(e.renderObject! as RenderBox),
+  ];
+  for (final f in fields) {
+    for (final o in obstacles) {
+      if (o == f.field) continue;
+      expect(
+        f.label.overlaps(o.deflate(0.5)),
+        isFalse,
+        reason: "'${f.text}' label ${f.label} covers $o",
+      );
+    }
+  }
+}
+
 void main() {
   setUpAll(loadIphoneFonts);
+
+  // Correct with a note: the section is the form's last block — its header,
+  // field, footer and button, the card of what a note changed, an answer
+  // that changed nothing, and the notes kept on the meal — all at enlarged
+  // text, with no label over anything and nothing overflowing.
+  for (final (locale, scale) in [
+    (const Locale('zh'), 53 / 17), // AX5
+    (const Locale('en'), 53 / 17),
+    (const Locale('en'), 1.35),
+  ]) {
+    testWidgets('${locale.languageCode} at ${scale.toStringAsFixed(2)}x: the '
+        'note section, its changes card and its reply lay out clear',
+        (tester) async {
+      final dao = FakeDao()..seed(_mealWithNotes());
+      final executor = FakeExecutor()
+        ..nextNoteOutcome = const MealNoteOutcome(
+            reply: MealCorrected(MealCorrectionProposal(
+          changed: {
+            0: MealCorrectionItem(
+                name: 'Pan-fried pork dumplings (6 pieces)',
+                calories: 360,
+                protein: 13.5,
+                carbs: 39,
+                fat: 16.5),
+          },
+          added: [
+            MealCorrectionItem(
+                name: 'Soy milk (1 glass, ~250 ml)',
+                calories: 110,
+                protein: 8,
+                carbs: 10,
+                fat: 4),
+          ],
+          reason: 'Six dumplings instead of eight, and a glass of soy milk.',
+        )));
+      await pumpApp(
+        tester,
+        MealEditorScreen(
+            dao: dao,
+            meal: dao.meals.first,
+            settings: FakeSettings(),
+            noteCorrector: executor),
+        size: const Size(375, 12000),
+        locale: locale,
+        scale: scale,
+      );
+      expect(find.byKey(const Key('mealNoteSaved1')), findsOneWidget);
+      _expectNoLabelCovers(tester);
+
+      await tester.enterText(find.byKey(const Key('mealNoteField')),
+          'only six dumplings, and a glass of soy milk');
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('mealNoteSend')));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.byKey(const Key('mealNoteChanges')), findsOneWidget);
+      _expectNoLabelCovers(tester);
+
+      executor.nextNoteOutcome = const MealNoteOutcome(
+          reply: MealUnclear('Was the soy milk sweetened, and how much?'));
+      await tester.enterText(
+          find.byKey(const Key('mealNoteField')), 'the soy milk');
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('mealNoteSend')));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.byKey(const Key('mealNoteReply')), findsOneWidget);
+      _expectNoLabelCovers(tester);
+      // The button's label wraps rather than overflow its row.
+      final send = tester.getRect(find.byKey(const Key('mealNoteSend')));
+      expect(send.right, lessThanOrEqualTo(375));
+    });
+  }
 
   for (final (locale, scale) in [
     (const Locale('zh'), 53 / 17), // AX5

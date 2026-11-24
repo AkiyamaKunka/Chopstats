@@ -2,6 +2,9 @@
 // parsing/bounds, item sums, and the analysis merge that decides what is
 // persisted — the merge is where a bug silently corrupts a meal row.
 import 'package:calorie_tracker/core/contracts.dart';
+import 'package:calorie_tracker/core/leftover_logic.dart'
+    show kLeftoverItemMacrosScaled;
+import 'package:calorie_tracker/core/meal_correction.dart';
 import 'package:calorie_tracker/core/usual_foods_logic.dart';
 import 'package:calorie_tracker/ui/meal_edit_logic.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -842,6 +845,328 @@ void main() {
         },
       ]));
       expect(save(d)[0]['user'], mark);
+    });
+  });
+
+  // Correct with a note (Edit meal): the answer fills a NEW draft; the
+  // rows it set are the AI's until the user changes a number; every other
+  // row stays exactly as it was; the save keeps the base and the basis.
+  group('a note in Edit meal', () {
+    final stored = <String, dynamic>{
+      'is_food': true,
+      'meal_description': 'Braised pork with rice',
+      'total_calories': 700, // the rows sum to 660
+      'total_protein_g': 32,
+      'total_carbs_g': 70,
+      'total_fat_g': 26,
+      'capture': {'device': 'phone'},
+      'food_items': [
+        {
+          'name': 'Steamed rice (~200 g)',
+          'estimated_calories': 260,
+          'protein_g': 5,
+          'carbs_g': 57,
+          'fat_g': 0.5,
+          'brand': '',
+        },
+        {
+          'name': 'Braised pork (~120 g)',
+          'estimated_calories': 400,
+          'protein_g': 27,
+          'carbs_g': 13,
+          'fat_g': 25.5,
+          'published': true,
+        },
+      ],
+      kUserNotesKey: [
+        {'text': 'the pork was lean', 'at': '2026-11-20T12:00:00.000Z'},
+      ],
+    };
+    const halfRice = MealCorrectionProposal(changed: {
+      0: MealCorrectionItem(
+          name: 'Steamed rice (~100 g)',
+          calories: 130,
+          protein: 2.5,
+          carbs: 28.5,
+          fat: 0.3),
+    });
+    final at = DateTime.utc(2026, 11, 24, 19, 5);
+
+    test('correctionInput reads the form: filled rows only, numbers as '
+        'validate reads them, nothing else', () {
+      final d = MealDraft.fromMeal(mealWith(stored))
+        ..description = '  Pork, rice  '
+        ..calories = '';
+      d.items.insert(1, MealItemDraft()); // a blank row on screen
+      d.items[2].protein = '';
+      final input = d.correctionInput(earlierNotes: ['the pork was lean']);
+      expect(input.description, 'Pork, rice');
+      expect([for (final i in input.items) [i.name, ...i.numbers]], [
+        ['Steamed rice (~200 g)', 260, 5, 57, 0.5],
+        ['Braised pork (~120 g)', 400, 0, 13, 25.5],
+      ]);
+      expect(input.totals.numbers, [0, 32, 70, 26]);
+      expect(input.earlierNotes, ['the pork was lean']);
+    });
+
+    test('withCorrection: a new draft with the same base, basis, typed '
+        'moment, day and time; totals are the rows\' sums', () {
+      final d = MealDraft.fromMeal(mealWith(stored))..expectedRaw = 'RAW';
+      final after = d.withCorrection(halfRice, step: 1);
+      expect(identical(after, d), isFalse);
+      expect(identical(after.base, d.base), isTrue);
+      expect(after.expectedRaw, 'RAW');
+      expect((after.dateIso, after.time), (d.dateIso, d.time));
+      expect(after.items.map((i) => i.name),
+          ['Steamed rice (~100 g)', 'Braised pork (~120 g)']);
+      expect([after.calories, after.protein, after.carbs, after.fat],
+          ['530', '29.5', '41.5', '25.8']);
+      // The draft it came from is untouched.
+      expect(d.items[0].name, 'Steamed rice (~200 g)');
+      expect(d.calories, '700');
+    });
+
+    test('the AI row carries no mark until a number is the user\'s; the '
+        'other row keeps every stored key', () {
+      final d =
+          MealDraft.fromMeal(mealWith(stored)).withCorrection(halfRice, step: 1);
+      var items = d.toAnalysis(now: at)['food_items'] as List;
+      expect(items[0], {
+        'name': 'Steamed rice (~100 g)',
+        'estimated_calories': 130,
+        'protein_g': 2.5,
+        'carbs_g': 28.5,
+        'fat_g': 0.3,
+      });
+      expect(items[1], (stored['food_items'] as List)[1]);
+      d.items[0].calories = '125';
+      items = d.toAnalysis(now: at)['food_items'] as List;
+      expect((items[0] as Map)['user'], {
+        'set': true,
+        'at': '2026-11-24T19:05:00.000Z',
+        'n': [125, 2.5, 28.5, 0.3],
+        'qty': 1,
+      });
+    });
+
+    test('removed and blank rows go; added foods come last', () {
+      final d = MealDraft.fromMeal(mealWith(stored));
+      d.items.add(MealItemDraft()); // blank
+      final after = d.withCorrection(
+          const MealCorrectionProposal(removed: {1}, added: [
+            MealCorrectionItem(
+                name: 'Fried egg', calories: 90, protein: 6, carbs: 0, fat: 7),
+          ]),
+          step: 3);
+      expect(after.items.map((i) => i.name),
+          ['Steamed rice (~200 g)', 'Fried egg']);
+      expect(after.calories, '350');
+    });
+
+    test('a meal with only totals takes the answer\'s, and Add item then '
+        'seeds the AI\'s totals, not the user\'s', () {
+      final d = MealDraft.fromMeal(mealWith({
+        'is_food': true,
+        'meal_description': 'Coffee and a pastry',
+        'total_calories': 420,
+        'total_protein_g': 8,
+        'total_carbs_g': 50,
+        'total_fat_g': 20,
+      }));
+      final after = d.withCorrection(
+          const MealCorrectionProposal(
+              totals: MealCorrectionTotals(
+                  calories: 300, protein: 8, carbs: 35, fat: 14)),
+          step: 1);
+      expect([after.calories, after.carbs, after.fat], ['300', '35', '14']);
+      after.addItem().name = 'Coffee and a pastry';
+      final row = (after.toAnalysis(now: at)['food_items'] as List).single;
+      expect((row as Map).containsKey('user'), isFalse);
+      expect(row['estimated_calories'], 300);
+    });
+
+    test('copy is apart, and a copied untouched row is still untouched', () {
+      final d = MealDraft.fromMeal(mealWith(stored))..expectedRaw = 'RAW';
+      final c = d.copy();
+      c.items[0].calories = '1';
+      c.description = 'x';
+      expect(d.items[0].calories, '260');
+      expect(d.description, 'Braised pork with rice');
+      expect(c.expectedRaw, 'RAW');
+      final again = d.copy();
+      expect(again.items[1].untouched, isTrue);
+      expect((again.toAnalysis(now: at)['food_items'] as List)[1],
+          (stored['food_items'] as List)[1]);
+    });
+
+    test('a legacy leftover row the note left alone is not scaled twice', () {
+      final legacy = <String, dynamic>{
+        'is_food': true,
+        'meal_description': 'Noodles and tea',
+        'total_calories': 340,
+        'leftover': {'applied_total': 340, 'eaten_fraction': 0.5},
+        'food_items': [
+          {
+            'name': 'Noodles',
+            'estimated_calories': 300,
+            'protein_g': 20,
+            'carbs_g': 80,
+            'fat_g': 10,
+            'leftover_left_fraction': 0.5,
+          },
+          {
+            'name': 'Tea',
+            'estimated_calories': 40,
+            'protein_g': 0,
+            'carbs_g': 10,
+            'fat_g': 0,
+          },
+        ],
+      };
+      final d = MealDraft.fromMeal(mealWith(legacy));
+      expect(d.items[0].protein, '10', reason: 'the eaten half shown');
+      final after = d.withCorrection(
+          const MealCorrectionProposal(changed: {
+            1: MealCorrectionItem(
+                name: 'Milk tea', calories: 120, protein: 3, carbs: 20, fat: 4),
+          }),
+          step: 1);
+      final out = after.toAnalysis(now: at);
+      final items = out['food_items'] as List;
+      expect(items[0]['protein_g'], 10);
+      expect((out['leftover'] as Map)[kLeftoverItemMacrosScaled], isTrue);
+      expect(MealDraft.fromMeal(mealWith(out)).items[0].protein, '10',
+          reason: 'loaded again, not halved again');
+    });
+
+    test('a typed meal\'s kept rows still gain the typed mark', () {
+      final typed = Meal(
+        id: 9,
+        date: '2026-11-20',
+        time: '08:00 AM',
+        timestamp: '2026-11-20T08:00:00.000Z',
+        source: MealSource.appManual,
+        analysis: {
+          'is_food': true,
+          'meal_description': 'Toast and juice',
+          'total_calories': 300,
+          'food_items': [
+            {'name': 'Toast', 'estimated_calories': 180},
+            {'name': 'Orange juice', 'estimated_calories': 120},
+          ],
+        },
+      );
+      final after = MealDraft.fromMeal(typed).withCorrection(
+          const MealCorrectionProposal(changed: {
+            1: MealCorrectionItem(
+                name: 'Orange juice (small)',
+                calories: 80,
+                protein: 1,
+                carbs: 18,
+                fat: 0),
+          }),
+          step: 1);
+      final items = after.toAnalysis(now: at)['food_items'] as List;
+      expect((items[0] as Map)['user'], {
+        'set': true,
+        'at': '2026-11-20T08:00:00.000Z',
+        'n': [180, 0, 0, 0],
+        'qty': 1,
+      });
+      expect((items[1] as Map).containsKey('user'), isFalse);
+    });
+
+    group('holdsNote', () {
+      test('a row it set, until typed back to what it was', () {
+        final d = MealDraft.fromMeal(mealWith(stored))
+            .withCorrection(halfRice, step: 1);
+        bool holds() => d.holdsNote(1, removedAny: false);
+        expect(holds(), isTrue);
+        d.items[0].calories = '125'; // adjusted: still the note's change
+        expect(holds(), isTrue);
+        d.items[0]
+          ..name = ' Steamed rice (~200 g) '
+          ..calories = '260.0'
+          ..protein = '5'
+          ..carbs = '57'
+          ..fat = '0.50';
+        expect(holds(), isFalse, reason: 'typed back');
+      });
+
+      test('an added row, until removed', () {
+        final d = MealDraft.fromMeal(mealWith(stored)).withCorrection(
+            const MealCorrectionProposal(added: [
+              MealCorrectionItem(
+                  name: 'Egg', calories: 90, protein: 6, carbs: 0, fat: 7),
+            ]),
+            step: 2);
+        expect(d.holdsNote(2, removedAny: false), isTrue);
+        d.items.removeLast();
+        expect(d.holdsNote(2, removedAny: false), isFalse);
+      });
+
+      test('a row a later note changed again still holds the earlier one',
+          () {
+        final d = MealDraft.fromMeal(mealWith(stored))
+            .withCorrection(halfRice, step: 1)
+            .withCorrection(
+                const MealCorrectionProposal(changed: {
+                  0: MealCorrectionItem(
+                      name: 'Brown rice (~100 g)',
+                      calories: 125,
+                      protein: 2.6,
+                      carbs: 26,
+                      fat: 1),
+                }),
+                step: 2);
+        expect(d.holdsNote(1, removedAny: false), isTrue);
+        expect(d.holdsNote(2, removedAny: false), isTrue);
+        d.items[0]
+          ..name = 'Steamed rice (~100 g)'
+          ..calories = '130'
+          ..protein = '2.5'
+          ..carbs = '28.5'
+          ..fat = '0.3';
+        expect(d.holdsNote(2, removedAny: false), isFalse);
+        expect(d.holdsNote(1, removedAny: false), isTrue);
+      });
+
+      test('a removal, a description and a row-less meal\'s totals', () {
+        final d = MealDraft.fromMeal(mealWith(stored));
+        expect(d.holdsNote(5, removedAny: true), isTrue);
+        expect(
+            d.holdsNote(5,
+                removedAny: false, descBefore: 'Braised pork with rice'),
+            isFalse);
+        d.description = 'Braised pork';
+        expect(
+            d.holdsNote(5,
+                removedAny: false, descBefore: 'Braised pork with rice'),
+            isTrue);
+        expect(
+            d.holdsNote(5,
+                removedAny: false, totalsBefore: ['700', '32', '70', '26']),
+            isFalse);
+        expect(
+            d.holdsNote(5,
+                removedAny: false, totalsBefore: ['650', '32', '70', '26']),
+            isTrue);
+      });
+    });
+
+    test('toAnalysis writes the notes only when given them', () {
+      final d = MealDraft.fromMeal(mealWith(stored));
+      expect(d.toAnalysis(now: at)[kUserNotesKey], stored[kUserNotesKey]);
+      final out = d.toAnalysis(now: at, notes: const [
+        MealNote('the pork was lean', '2026-11-20T12:00:00.000Z'),
+        MealNote('only half the rice', '2026-11-24T19:05:00.000Z'),
+      ]);
+      expect(out[kUserNotesKey], [
+        {'text': 'the pork was lean', 'at': '2026-11-20T12:00:00.000Z'},
+        {'text': 'only half the rice', 'at': '2026-11-24T19:05:00.000Z'},
+      ]);
+      expect(d.toAnalysis(now: at, notes: const []).containsKey(kUserNotesKey),
+          isFalse);
     });
   });
 }

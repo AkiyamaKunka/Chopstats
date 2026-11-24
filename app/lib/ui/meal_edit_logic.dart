@@ -37,11 +37,23 @@
 ///     by hand before 1.6.0 has no marks and taught only while it was
 ///     never corrected; the save sets `corrected`, so its unchanged rows
 ///     gain the mark at the meal's own `timestamp` and still teach.
+///   - a row a note set (Edit meal's "Correct with a note",
+///     [MealDraft.withCorrection]) is the AI's until the user changes a
+///     number on it: it is saved with no usual-foods mark while its numbers
+///     are the AI's, and gains one once the user's differ. Rows the note did
+///     not concern stay exactly as they were.
+///   - the notes kept on the meal (`user_notes`, core/meal_correction.dart)
+///     survive every save through the base merge; a save writes them only
+///     when the user changed them ([MealDraft.toAnalysis] `notes`): the
+///     notes of the corrections the saved form still holds
+///     ([MealDraft.holdsNote]) are added, and the ones the user removed
+///     go.
 library;
 
 import '../core/coerce.dart';
 import '../core/contracts.dart';
 import '../core/leftover_logic.dart';
+import '../core/meal_correction.dart';
 import '../core/usual_foods_logic.dart';
 import '../l10n/app_localizations.dart';
 import '../l10n/app_localizations_en.dart';
@@ -144,7 +156,41 @@ class MealItemDraft {
   })  : stored = null,
         _seed = null,
         _loaded = null,
+        _macroScale = null,
+        noteBefore = const {};
+
+  /// A row a note set ([MealDraft.withCorrection]): [item]'s name and
+  /// numbers, which are the AI's — [_seed] holds them, so the row is the
+  /// user's (a usual-foods mark at save) only once one of its numbers
+  /// differs. [noteBefore]: see the field.
+  MealItemDraft.fromNote(MealCorrectionItem item,
+      {this.noteBefore = const {}})
+      : name = item.name,
+        calories = _numText(item.calories),
+        protein = _numText(item.protein),
+        carbs = _numText(item.carbs),
+        fat = _numText(item.fat),
+        stored = null,
+        _seed = List<num>.unmodifiable(item.numbers),
+        _loaded = null,
         _macroScale = null;
+
+  MealItemDraft._copyOf(MealItemDraft o)
+      : name = o.name,
+        calories = o.calories,
+        protein = o.protein,
+        carbs = o.carbs,
+        fat = o.fat,
+        stored = o.stored,
+        _seed = o._seed,
+        _loaded = o._loaded,
+        _macroScale = o._macroScale,
+        noteBefore = o.noteBefore;
+
+  /// This row as it is now, apart: the same fields, the same stored row,
+  /// seed, loaded texts and leftover share, so a copy of an untouched row
+  /// is still untouched.
+  MealItemDraft copy() => MealItemDraft._copyOf(this);
 
   /// The first row "Add item" adds to a stored meal with no rows
   /// ([MealDraft.addItem]): its fields are the totals above it, and [_seed]
@@ -158,7 +204,8 @@ class MealItemDraft {
   })  : name = '',
         stored = null,
         _loaded = null,
-        _macroScale = null;
+        _macroScale = null,
+        noteBefore = const {};
 
   MealItemDraft._fromStored(Map<String, dynamic> m, [this._macroScale])
       : name = (m['name'] ?? '').toString(),
@@ -168,7 +215,8 @@ class MealItemDraft {
         fat = _macroText(m['fat_g'], _macroScale),
         stored = m,
         _seed = null,
-        _loaded = null {
+        _loaded = null,
+        noteBefore = const {} {
     _loaded = (name, calories, protein, carbs, fat);
   }
 
@@ -190,6 +238,18 @@ class MealItemDraft {
 
   /// The five field texts as loaded, to tell an untouched row.
   (String, String, String, String, String)? _loaded;
+
+  /// The notes that set this row, by their step in the editor
+  /// ([MealDraft.withCorrection]): each with the row's five field texts
+  /// right before that note changed it, or null for the note that added
+  /// it. A row a later note changes again keeps the earlier notes, so
+  /// each note that led to it still counts as held ([MealDraft.holdsNote]).
+  /// Empty for every row no note set.
+  final Map<int, (String, String, String, String, String)?> noteBefore;
+
+  /// The five field texts as they are now.
+  (String, String, String, String, String) get texts =>
+      (name, calories, protein, carbs, fat);
 
   /// For a row of a leftover deduction 1.5.0 stored, whose protein, carbs
   /// and fat are still the whole plate's (legacyLeftoverMacroScale): the
@@ -240,7 +300,9 @@ class MealItemDraft {
   ///   * a row the user ADDED is [toMap] plus `user {set: true, at: now,
   ///     n: its four numbers, qty: 1}`: every number on it is the user's —
   ///     except the first row seeded from a loaded meal's totals
-  ///     ([MealDraft.addItem]) while it still holds them, and a row under
+  ///     ([MealDraft.addItem]) and a row a note set
+  ///     ([MealItemDraft.fromNote]), while each still holds the numbers it
+  ///     was seeded with (the meal's or the AI's), and a row under
   ///     [kUsualMinKcal] kcal (one left blank reads 0), which get no
   ///     `user`;
   ///   * a stored row the user TOUCHED is [toMap] plus a `user` map: a new
@@ -287,8 +349,8 @@ class MealItemDraft {
     ];
     if (src == null) {
       final seed = _seed;
-      // A row seeded from a stored meal's totals and never changed holds
-      // the meal's numbers, not the user's.
+      // A row seeded from a stored meal's totals, or set by a note, and
+      // never changed holds the meal's or the AI's numbers, not the user's.
       if (seed != null && !_differs(numbers, seed)) return out;
       // A row whose numbers were left blank (all four read 0), or that is
       // under the usual-foods minimum, says no number of the user's: a
@@ -530,6 +592,146 @@ class MealDraft {
     return it;
   }
 
+  /// This draft as it is now, apart (an Undo step's copy): every row
+  /// copied ([MealItemDraft.copy]), the same [base], and the basis, the
+  /// loaded totals and the typed moment kept.
+  MealDraft copy() => MealDraft(
+        description: description,
+        dateIso: dateIso,
+        time: time,
+        calories: calories,
+        protein: protein,
+        carbs: carbs,
+        fat: fat,
+        items: [for (final it in items) it.copy()],
+        base: base,
+      )
+        ..expectedRaw = expectedRaw
+        .._loadedTotals = _loadedTotals
+        .._typedAt = _typedAt;
+
+  /// What a note in Edit meal is sent with: the form as it shows it — the
+  /// description, the filled rows in screen order (blank rows skipped, as
+  /// [validate] and [toAnalysis] skip them; a row's position among them
+  /// is its id) with their four numbers read as [validate] reads them (a
+  /// blank is 0; a 1.5.0 leftover row's macros are the eaten part the form
+  /// shows), the four totals — and [earlierNotes]. Nothing else of the
+  /// stored analysis is read: a whitelist by construction. Call only when
+  /// [validate] is empty.
+  MealCorrectionInput correctionInput(
+      {List<String> earlierNotes = const []}) {
+    num field(String raw, num max) =>
+        parseNumberField(raw, label: 'x', max: max).value ?? 0;
+    return MealCorrectionInput(
+      description: description.trim(),
+      items: [
+        for (final it in items)
+          if (!it.isBlank)
+            MealCorrectionItem(
+              name: it.name.trim(),
+              calories: field(it.calories, maxMealCalories),
+              protein: field(it.protein, maxMacroGrams),
+              carbs: field(it.carbs, maxMacroGrams),
+              fat: field(it.fat, maxMacroGrams),
+            ),
+      ],
+      totals: MealCorrectionTotals(
+        calories: field(calories, maxMealCalories),
+        protein: field(protein, maxMacroGrams),
+        carbs: field(carbs, maxMacroGrams),
+        fat: field(fat, maxMacroGrams),
+      ),
+      earlierNotes: earlierNotes,
+    );
+  }
+
+  /// A new draft with [p] (the answer to a note, against
+  /// [correctionInput] of this draft) applied, for the form to show as
+  /// unsaved edits; [step] names the note ([MealItemDraft.noteBefore]).
+  /// The same [base], basis ([expectedRaw]), typed moment, day and time.
+  ///
+  /// Rows, in form order with blank rows dropped: a removed one goes; a
+  /// changed one becomes [MealItemDraft.fromNote] (the AI's until the
+  /// user changes a number), remembering the row it replaced; every other
+  /// row is copied as it is, so a row the note did not concern keeps every
+  /// key it was stored with. Added foods come last. The totals are the
+  /// rows' sums (the editor's totals follow its rows); a meal with no rows
+  /// takes [p]'s totals, which also become the totals a later Add item
+  /// seeds its row with (the AI's, not the user's). The description is
+  /// [p]'s when it gives one.
+  MealDraft withCorrection(MealCorrectionProposal p, {required int step}) {
+    final filled = [for (final it in items) if (!it.isBlank) it];
+    final rows = <MealItemDraft>[
+      for (var i = 0; i < filled.length; i++)
+        if (!p.removed.contains(i))
+          if (p.changed[i] case final change?)
+            MealItemDraft.fromNote(change,
+                noteBefore: {...filled[i].noteBefore, step: filled[i].texts})
+          else
+            filled[i].copy(),
+      for (final a in p.added)
+        MealItemDraft.fromNote(a, noteBefore: {step: null}),
+    ];
+    final out = MealDraft(
+      description: p.description ?? description,
+      dateIso: dateIso,
+      time: time,
+      calories: calories,
+      protein: protein,
+      carbs: carbs,
+      fat: fat,
+      items: rows,
+      base: base,
+    )
+      ..expectedRaw = expectedRaw
+      .._loadedTotals = _loadedTotals
+      .._typedAt = _typedAt;
+    if (rows.isNotEmpty) {
+      final t = out.itemTotals();
+      out
+        ..calories = _numText(t.calories)
+        ..protein = _numText(t.protein)
+        ..carbs = _numText(t.carbs)
+        ..fat = _numText(t.fat);
+    } else if (p.totals case final t?) {
+      out
+        ..calories = _numText(t.calories)
+        ..protein = _numText(t.protein)
+        ..carbs = _numText(t.carbs)
+        ..fat = _numText(t.fat)
+        .._loadedTotals = List<num>.of(t.numbers);
+    }
+    return out;
+  }
+
+  /// Whether this form still holds a change the note of [step] made (the
+  /// notes kept at Save are those of the corrections the saved form still
+  /// holds): a row it set is still here and not typed back to what it was
+  /// before that note ([MealItemDraft.noteBefore]; a row a later note
+  /// changed again still counts), it removed a food (that stays gone), it
+  /// changed the description and the form does not show the old one
+  /// ([descBefore]), or it changed a row-less meal's totals and the form
+  /// does not show the old ones ([totalsBefore], the four field texts).
+  bool holdsNote(int step,
+      {required bool removedAny,
+      String? descBefore,
+      List<String>? totalsBefore}) {
+    for (final it in items) {
+      if (it.isBlank || !it.noteBefore.containsKey(step)) continue;
+      final before = it.noteBefore[step];
+      if (before == null || !_sameTexts(it.texts, before)) return true;
+    }
+    if (removedAny) return true;
+    if (descBefore != null && description.trim() != descBefore.trim()) {
+      return true;
+    }
+    if (totalsBefore != null &&
+        !_sameNumbers([calories, protein, carbs, fat], totalsBefore)) {
+      return true;
+    }
+    return false;
+  }
+
   /// Sum of the item rows, for the "use item totals" action.
   ({num calories, num protein, num carbs, num fat}) itemTotals() {
     num c = 0, p = 0, cb = 0, f = 0;
@@ -596,9 +798,13 @@ class MealDraft {
   /// The analysis map to persist. Call only when [validate] is empty.
   /// [now] stamps the usual-foods marks of the rows the user set
   /// ([MealItemDraft.toStoredMap]); null reads the device clock.
-  Map<String, dynamic> toAnalysis({DateTime? now}) {
+  /// [notes]: the meal's notes when this save changes them (core/
+  /// meal_correction.dart writeUserNotes: the newest 20, the key gone
+  /// when none); null keeps the stored ones exactly as they are.
+  Map<String, dynamic> toAnalysis({DateTime? now, List<MealNote>? notes}) {
     final when = now ?? DateTime.now();
     final out = Map<String, dynamic>.from(base);
+    if (notes != null) writeUserNotes(out, notes);
     num field(String raw, num max) =>
         parseNumberField(raw, label: 'x', max: max).value ?? 0;
     final desc = description.trim();
@@ -630,6 +836,21 @@ class MealDraft {
     }
     return out;
   }
+}
+
+/// The same row: the same trimmed name and the same four numbers (a
+/// blank or unreadable field reads 0, as a save writes it).
+bool _sameTexts((String, String, String, String, String) a,
+        (String, String, String, String, String) b) =>
+    a.$1.trim() == b.$1.trim() &&
+    _sameNumbers([a.$2, a.$3, a.$4, a.$5], [b.$2, b.$3, b.$4, b.$5]);
+
+bool _sameNumbers(List<String> a, List<String> b) {
+  num read(String raw) => num.tryParse(normalizeTypedNumber(raw.trim())) ?? 0;
+  for (var i = 0; i < a.length && i < b.length; i++) {
+    if ((read(a[i]) - read(b[i])).abs() > 1e-9) return false;
+  }
+  return true;
 }
 
 /// Description without the display fallback (the editor shows an empty field

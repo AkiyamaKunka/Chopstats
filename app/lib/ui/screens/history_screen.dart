@@ -33,6 +33,10 @@ class HistoryScreen extends StatefulWidget {
   final RestaurantAssistControls? restaurantAssist;
   final SettingsStore? settings;
 
+  /// Handed to the day's editor: its note ("Correct with a note"); null
+  /// shows none.
+  final MealNoteCorrector? noteCorrector;
+
   /// Test seam; defaults to [DateTime.now]. The window, the Today label and
   /// the gap rows all read it, so a test can seed its days from the same
   /// instant.
@@ -46,6 +50,7 @@ class HistoryScreen extends StatefulWidget {
       this.mealInUse,
       this.restaurantAssist,
       this.settings,
+      this.noteCorrector,
       this.clock});
 
   @override
@@ -112,6 +117,7 @@ class HistoryScreenState extends State<HistoryScreen> {
               mealInUse: widget.mealInUse,
               restaurantAssist: widget.restaurantAssist,
               settings: widget.settings,
+              noteCorrector: widget.noteCorrector,
               revealMealId: revealMealId),
     ));
     // Same reason for the signal: today's meals edited from here must

@@ -1,22 +1,27 @@
 // Nothing new leaves the phone (usual-foods spec §7, T34). The usual-foods
-// mark (`user`), the re-log stamp (`logged_again`) and a saved answer's
-// `fetched_on` live inside a meal's own analysis, and every outbound
+// mark (`user`), the re-log stamp (`logged_again`), a saved answer's
+// `fetched_on` and, since the Edit meal note, the notes kept on a meal
+// (`user_notes`) live inside a meal's own analysis, and every outbound
 // composer whitelists what it reads. So with or without them, every
 // outbound text is byte for byte the same: the photo prompt's and the own
 // server's recent meals, the chat meals list, the restaurant lookup
-// request, and the leftover flow's compact original (also when the marks
-// sit inside `leftover.original`).
+// request, the leftover flow's compact original (also when the marks
+// sit inside `leftover.original`), and an Edit meal note's request (the
+// editor hands that meal's notes over itself, as earlier notes).
 import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:calorie_tracker/core/contracts.dart';
 import 'package:calorie_tracker/core/leftover_logic.dart';
+import 'package:calorie_tracker/core/meal_correction.dart'
+    show composeMealCorrectionRequest, kUserNotesKey;
 import 'package:calorie_tracker/core/restaurant_lookup_contract.dart';
 import 'package:calorie_tracker/services/analyzer/provider_analyzers.dart';
 import 'package:calorie_tracker/services/assist/meal_assist.dart'
     show composeAssistRequest;
 import 'package:calorie_tracker/services/nl/executor.dart' show buildMealsList;
 import 'package:calorie_tracker/services/settings/app_settings.dart';
+import 'package:calorie_tracker/ui/meal_edit_logic.dart' show MealDraft;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -84,6 +89,9 @@ Map<String, dynamic> _marked(Map<String, dynamic> a) {
     'food_items': items,
     'logged_again': '2026-11-07T15:10:04.321Z',
     'assist': {...a['assist'] as Map, 'fetched_on': '2026-03-02'},
+    kUserNotesKey: [
+      {'text': 'no syrup in the latte', 'at': '2026-11-24T12:00:00.000Z'},
+    ],
   };
 }
 
@@ -112,7 +120,17 @@ void main() {
     expect(jsonEncode(marked), contains('"user"'));
     expect(jsonEncode(marked), contains('logged_again'));
     expect(jsonEncode(marked), contains('fetched_on'));
+    expect(jsonEncode(marked), contains(kUserNotesKey));
     expect(jsonEncode(marked), isNot(jsonEncode(plain)));
+  });
+
+  test("an Edit meal note's request (the editor's form, no notes given)",
+      () {
+    String request(Map<String, dynamic> a) => composeMealCorrectionRequest(
+        MealDraft.fromMeal(_meal(1, a)).correctionInput(), 'only half');
+    expect(request(marked), request(plain));
+    expect(request(_withLeftover(marked)), request(_withLeftover(plain)));
+    expect(request(marked), isNot(contains('syrup')));
   });
 
   test('recentMealCompact (the photo prompt and the server payload)', () {

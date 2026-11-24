@@ -641,6 +641,7 @@ class _StoryShellState extends State<StoryShell>
         mealInUse: s.mealInUse,
         restaurantAssist: s.restaurantAssist,
         settings: s.settings,
+        noteCorrector: noteCorrectorOf(s.executor),
         usual: s.usualFoods,
         now: p.clock,
       ),

@@ -1,0 +1,916 @@
+// Edit meal's "Correct with a note" (owner 2026-11-24): the note and the
+// meal as the form shows it go to the AI as text; the answer FILLS the form
+// with the changes listed, and nothing is written until Save — the
+// editor's existing compare-and-set. The notes of the corrections the
+// saved form still holds are kept with the meal (analysis.user_notes),
+// shown under the note, removable, and sent again with a later note as
+// already applied.
+import 'dart:async';
+
+import 'package:calorie_tracker/core/contracts.dart';
+import 'package:calorie_tracker/core/meal_correction.dart';
+import 'package:calorie_tracker/l10n/app_localizations.dart';
+import 'package:calorie_tracker/ui/screens/meal_editor_screen.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:intl/date_symbol_data_local.dart';
+
+import 'fakes.dart';
+
+DateTime _clock() => DateTime(2026, 11, 24, 19, 5);
+
+/// When a note is sent: the editor's clock, in UTC.
+final _sentAt = _clock().toUtc().toIso8601String();
+
+const _rice = {
+  'name': 'Steamed rice (~200 g)',
+  'estimated_calories': 260,
+  'protein_g': 5,
+  'carbs_g': 57,
+  'fat_g': 0.5,
+};
+const _pork = {
+  'name': 'Braised pork (~120 g)',
+  'estimated_calories': 400,
+  'protein_g': 27,
+  'carbs_g': 13,
+  'fat_g': 25.5,
+  'brand': '',
+  'published': false,
+  'user': {
+    'set': true,
+    'at': '2026-11-20T12:00:00.000Z',
+    'n': [400, 27, 13, 25.5],
+    'qty': 1,
+  },
+};
+
+Map<String, dynamic> _analysis({List<Object?>? notes}) => {
+      'is_food': true,
+      'meal_description': 'Braised pork with rice',
+      'total_calories': 660,
+      'total_protein_g': 32,
+      'total_carbs_g': 70,
+      'total_fat_g': 26,
+      'food_items': [_rice, _pork],
+      'capture': {'device': 'phone'},
+      'estimate_confidence': 'medium',
+      kUserNotesKey: ?notes,
+    };
+
+Meal _meal({List<Object?>? notes}) => Meal(
+      id: 1,
+      date: '2026-11-24',
+      time: '12:30 PM',
+      timestamp: '2026-11-24T12:30:00.000',
+      source: MealSource.appPhoto,
+      imageHash: 'h1',
+      analysis: _analysis(notes: notes),
+    );
+
+MealNoteOutcome _corrected(MealCorrectionProposal p) =>
+    MealNoteOutcome(reply: MealCorrected(p));
+
+/// "only half the rice".
+final _halfRice = _corrected(const MealCorrectionProposal(
+  changed: {
+    0: MealCorrectionItem(
+        name: 'Steamed rice (~100 g)',
+        calories: 130,
+        protein: 2.5,
+        carbs: 28.5,
+        fat: 0.3),
+  },
+  reason: 'Halved the rice; the pork is as before.',
+));
+
+/// "add a fried egg".
+final _egg = _corrected(const MealCorrectionProposal(
+  added: [
+    MealCorrectionItem(
+        name: 'Fried egg (1 large, ~50 g)',
+        calories: 90,
+        protein: 6.3,
+        carbs: 0.4,
+        fat: 7),
+  ],
+  reason: 'Added a fried egg.',
+));
+
+class _Rig {
+  _Rig(this.dao, this.executor, this.settings);
+  final FakeDao dao;
+  final FakeExecutor executor;
+  final FakeSettings settings;
+  bool? popped;
+}
+
+Finder _key(String k) => find.byKey(Key(k));
+
+Future<_Rig> _open(
+  WidgetTester tester, {
+  Meal? meal,
+  FakeSettings? settings,
+  FakeExecutor? executor,
+  bool corrector = true,
+  bool withSettings = true,
+  bool newMeal = false,
+  Locale? locale,
+}) async {
+  tester.view.physicalSize = const Size(1400, 4000);
+  tester.view.devicePixelRatio = 1.0;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+  // A fresh tree: a route an earlier call pushed must not stay on top.
+  await tester.pumpWidget(const SizedBox());
+  final dao = FakeDao();
+  if (!newMeal) dao.seed(meal ?? _meal());
+  final rig = _Rig(dao, executor ?? FakeExecutor(),
+      settings ?? FakeSettings(apiKey: 'k'));
+  await tester.pumpWidget(MaterialApp(
+    locale: locale,
+    localizationsDelegates: AppLocalizations.localizationsDelegates,
+    supportedLocales: AppLocalizations.supportedLocales,
+    home: Builder(
+      builder: (context) => Scaffold(
+        body: TextButton(
+          onPressed: () async {
+            rig.popped = await Navigator.of(context).push<bool>(
+                MaterialPageRoute(
+                    builder: (_) => MealEditorScreen(
+                          dao: dao,
+                          meal: newMeal ? null : dao.meals.first,
+                          now: _clock,
+                          settings: withSettings ? rig.settings : null,
+                          noteCorrector: corrector ? rig.executor : null,
+                        )));
+          },
+          child: const Text('open'),
+        ),
+      ),
+    ),
+  ));
+  await tester.tap(find.text('open'));
+  await tester.pumpAndSettle();
+  return rig;
+}
+
+Future<void> _type(WidgetTester tester, String note) async {
+  await tester.enterText(_key('mealNoteField'), note);
+  await tester.pump();
+}
+
+Future<void> _send(WidgetTester tester) async {
+  await tester.tap(_key('mealNoteSend'));
+  await tester.pumpAndSettle();
+}
+
+String _field(WidgetTester tester, String key) =>
+    tester.widget<TextField>(_key(key)).controller!.text;
+
+bool _readOnly(WidgetTester tester, String key) =>
+    tester.widget<TextField>(_key(key)).readOnly;
+
+Future<void> _save(WidgetTester tester) async {
+  await tester.tap(_key('saveMealButton'));
+  await tester.pumpAndSettle();
+}
+
+void main() {
+  setUpAll(() => initializeDateFormatting('zh'));
+
+  group('where it shows', () {
+    testWidgets('a stored meal opened with the settings and a corrector',
+        (tester) async {
+      await _open(tester);
+      expect(_key('mealNoteHeader'), findsOneWidget);
+      expect(find.text('Correct with a note'), findsOneWidget);
+      expect(_key('mealNoteField'), findsOneWidget);
+      expect(find.text('Your note'), findsOneWidget);
+      expect(
+          find.text("Your note and this meal's foods, numbers and earlier "
+              'notes go to Gemini. Nothing is saved until you tap Save.'),
+          findsOneWidget);
+      // Below every food and Add item: the description stays first.
+      expect(tester.getTopLeft(_key('mealNoteHeader')).dy,
+          greaterThan(tester.getTopLeft(_key('addItemRow')).dy));
+    });
+
+    testWidgets('never without a corrector or the settings, nor on a new meal',
+        (tester) async {
+      for (final (name, corrector, withSettings, newMeal) in [
+        ('no corrector', false, true, false),
+        ('no settings', true, false, false),
+        ('a new meal', true, true, true),
+      ]) {
+        await _open(tester,
+            corrector: corrector, withSettings: withSettings, newMeal: newMeal);
+        expect(_key('mealNoteHeader'), findsNothing, reason: name);
+        expect(_key('mealNoteField'), findsNothing, reason: name);
+      }
+    });
+  });
+
+  group('sending', () {
+    testWidgets('Send waits for a note; it sends the form as shown, with '
+        'unsaved typing, and nothing else', (tester) async {
+      final rig = await _open(tester);
+      expect(tester.widget<ButtonStyleButton>(_key('mealNoteSend')).onPressed,
+          isNull);
+      // Typing in the form first: what is sent is what the form shows.
+      await tester.enterText(_key('itemCal1'), '380');
+      await tester.pump();
+      await _type(tester, '  only half   the rice ');
+      expect(tester.widget<ButtonStyleButton>(_key('mealNoteSend')).onPressed,
+          isNotNull);
+      rig.executor.nextNoteOutcome =
+          const MealNoteOutcome(reply: MealNoChange(''));
+      await _send(tester);
+      final (input, note) = rig.executor.correctedNotes.single;
+      expect(note, 'only half the rice');
+      expect(input.description, 'Braised pork with rice');
+      expect([for (final i in input.items) [i.name, ...i.numbers]], [
+        ['Steamed rice (~200 g)', 260, 5, 57, 0.5],
+        ['Braised pork (~120 g)', 380, 27, 13, 25.5],
+      ]);
+      expect(input.totals.numbers, [640, 32, 70, 26]);
+      expect(input.earlierNotes, isEmpty);
+      expect(rig.dao.fieldUpdates, isEmpty);
+    });
+
+    testWidgets("the keyboard's send key sends", (tester) async {
+      final rig = await _open(tester);
+      await tester.showKeyboard(_key('mealNoteField'));
+      await tester.enterText(_key('mealNoteField'), 'add a fried egg');
+      await tester.testTextInput.receiveAction(TextInputAction.send);
+      await tester.pumpAndSettle();
+      expect(rig.executor.correctedNotes.single.$2, 'add a fried egg');
+    });
+
+    testWidgets('a form Save would refuse shows its errors and sends nothing',
+        (tester) async {
+      final rig = await _open(tester);
+      await tester.enterText(_key('itemCal0'), 'abc');
+      await _type(tester, 'only half the rice');
+      await _send(tester);
+      expect(_key('editorErrors'), findsOneWidget);
+      expect(rig.executor.correctedNotes, isEmpty);
+    });
+
+    testWidgets('what cannot be sent is said first, with no question and no '
+        'model call', (tester) async {
+      final rig = await _open(tester);
+      rig.executor.noteRefusalText = '⏸️ Daily quota reached.';
+      rig.settings.aiConsentVersions = {'gemini': 2}; // would be asked
+      await _type(tester, 'only half the rice');
+      await _send(tester);
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(tester.widget<Text>(_key('mealNoteReply')).data,
+          '⏸️ Daily quota reached.');
+      expect(rig.executor.correctedNotes, isEmpty);
+
+      // The own server at an http:// address, or its key saved for
+      // another address.
+      rig.executor.noteRefusalText = null;
+      rig.settings
+        ..provider = 'server'
+        ..serverBaseUrl = 'http://10.0.0.5'
+        ..keysByProvider['server'] = 'upload';
+      await _send(tester);
+      expect(tester.widget<Text>(_key('mealNoteReply')).data,
+          startsWith('❌ Your server address'));
+      rig.settings
+        ..serverBaseUrl = 'https://a.example'
+        ..keySavedFor = 'b.example';
+      await _send(tester);
+      expect(tester.widget<Text>(_key('mealNoteReply')).data, startsWith('❌'));
+      expect(tester.widget<Text>(_key('mealNoteReply')).data,
+          isNot(contains('https://')));
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(rig.executor.correctedNotes, isEmpty);
+    });
+
+    testWidgets('an older grant is asked at the note; Not now sends nothing '
+        'and keeps the note', (tester) async {
+      final rig = await _open(
+          tester, settings: FakeSettings(apiKey: 'k')
+            ..aiConsentVersions = {'gemini': 2});
+      await _type(tester, 'only half the rice');
+      await _send(tester);
+      expect(_key('mealNoteConsentDialog'), findsOneWidget);
+      await tester.tap(_key('mealNoteConsentNotNow'));
+      await tester.pumpAndSettle();
+      expect(rig.executor.correctedNotes, isEmpty);
+      expect(find.text('Nothing was sent.'), findsOneWidget);
+      expect(_field(tester, 'mealNoteField'), 'only half the rice');
+      await _send(tester);
+      await tester.tap(_key('mealNoteConsentAllow'));
+      await tester.pumpAndSettle();
+      expect(rig.executor.correctedNotes, hasLength(1));
+      expect(rig.settings.aiConsentVersion('gemini'), 3);
+    });
+  });
+
+  group('while the AI answers', () {
+    testWidgets('the form is read-only, Save waits, the cards are busy, and '
+        'Stop unlocks it; a late answer is dropped', (tester) async {
+      final rig = await _open(tester);
+      final gate = Completer<void>();
+      rig.executor
+        ..onCorrect = (() => gate.future)
+        ..nextNoteOutcome = _halfRice;
+      await tester.showKeyboard(_key('mealNoteField'));
+      await _type(tester, 'only half the rice');
+      await tester.tap(_key('mealNoteSend'));
+      await tester.pump();
+      expect(_key('mealNoteAsking'), findsOneWidget);
+      expect(find.text('Asking Gemini…'), findsOneWidget);
+      expect(_key('mealNoteSend'), findsNothing);
+      for (final k in [
+        'editorDescription',
+        'editorCalories',
+        'editorProtein',
+        'itemName0',
+        'itemCal0',
+        'itemFat1',
+        'mealNoteField',
+      ]) {
+        expect(_readOnly(tester, k), isTrue, reason: k);
+      }
+      for (final k in ['editorDateButton', 'editorTimeButton', 'addItemRow']) {
+        expect(tester.widget<ButtonStyleButton>(_key(k)).onPressed, isNull,
+            reason: k);
+      }
+      expect(tester.widget<IconButton>(_key('removeItem0')).onPressed, isNull);
+      expect(
+          tester
+              .widget<FloatingActionButton>(_key('saveMealButton'))
+              .onPressed,
+          isNull);
+      expect(tester.testTextInput.isVisible, isFalse,
+          reason: 'the keyboard goes down');
+      // Delete stays (it asks first).
+      expect(tester.widget<IconButton>(_key('deleteMealButton')).onPressed,
+          isNotNull);
+
+      await tester.tap(_key('mealNoteStop'));
+      await tester.pump();
+      expect(_readOnly(tester, 'editorCalories'), isFalse);
+      expect(_key('mealNoteSend'), findsOneWidget);
+      gate.complete();
+      await tester.pumpAndSettle();
+      expect(_field(tester, 'itemName0'), 'Steamed rice (~200 g)',
+          reason: 'the late answer is dropped');
+      expect(_key('mealNoteChanges'), findsNothing);
+      expect(_field(tester, 'mealNoteField'), 'only half the rice');
+      expect(rig.dao.fieldUpdates, isEmpty);
+    });
+
+    testWidgets('Back asks, and Discard closes with nothing written',
+        (tester) async {
+      final rig = await _open(tester);
+      final gate = Completer<void>();
+      rig.executor
+        ..onCorrect = (() => gate.future)
+        ..nextNoteOutcome = _halfRice;
+      await _type(tester, 'only half the rice');
+      await tester.tap(_key('mealNoteSend'));
+      await tester.pump();
+      // The spinner turns until the answer: pump, never settle.
+      await tester.pageBack();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(_key('discardChangesDialog'), findsOneWidget);
+      await tester.tap(_key('discardChangesDiscard'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(find.text('open'), findsOneWidget);
+      gate.complete();
+      await tester.pumpAndSettle();
+      expect(rig.dao.fieldUpdates, isEmpty);
+      expect(rig.dao.updates, isEmpty);
+    });
+
+    testWidgets('Delete still deletes (it asks first)', (tester) async {
+      final rig = await _open(tester);
+      final gate = Completer<void>();
+      rig.executor
+        ..onCorrect = (() => gate.future)
+        ..nextNoteOutcome = _halfRice;
+      await _type(tester, 'only half the rice');
+      await tester.tap(_key('mealNoteSend'));
+      await tester.pump();
+      await tester.tap(_key('deleteMealButton'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.tap(_key('confirmDeleteMeal'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(rig.dao.deletedIds, [1]);
+      expect(rig.popped, isTrue);
+      gate.complete();
+      await tester.pumpAndSettle();
+      expect(rig.dao.fieldUpdates, isEmpty);
+    });
+  });
+
+  group('the answer fills the form', () {
+    testWidgets('the new numbers show with what changed; nothing is written '
+        'until Save, which writes once through the compare-and-set',
+        (tester) async {
+      final rig = await _open(tester);
+      final openRaw = rig.dao.rawOf(rig.dao.meals.first);
+      rig.executor.nextNoteOutcome = _halfRice;
+      await _type(tester, 'only half the rice');
+      await _send(tester);
+
+      expect(_field(tester, 'itemName0'), 'Steamed rice (~100 g)');
+      expect(_field(tester, 'itemCal0'), '130');
+      expect(_field(tester, 'itemPro0'), '2.5');
+      expect(_field(tester, 'itemName1'), 'Braised pork (~120 g)');
+      expect(_field(tester, 'editorCalories'), '530');
+      expect(_field(tester, 'editorProtein'), '29.5');
+      expect(_field(tester, 'editorCarbs'), '41.5');
+      expect(_field(tester, 'editorFat'), '25.8');
+      expect(_field(tester, 'mealNoteField'), '', reason: 'the note is used');
+      expect(_key('mealNoteChanges'), findsOneWidget);
+      for (final line in [
+        'Changed from your note — not saved yet',
+        'Your note: only half the rice',
+        'Total: 660 → 530 kcal',
+        'Protein: 32 → 29.5 g',
+        'Carbs: 70 → 41.5 g',
+        'Fat: 26 → 25.8 g',
+        'Steamed rice (~200 g) → Steamed rice (~100 g): 260 → 130 kcal',
+        '1 other food unchanged',
+        '💬 Halved the rice; the pork is as before.',
+        'Check the numbers above, then tap Save.',
+      ]) {
+        expect(find.text(line), findsOneWidget, reason: line);
+      }
+      expect(rig.dao.fieldUpdates, isEmpty, reason: 'nothing written yet');
+
+      await _save(tester);
+      expect(rig.dao.compareMisses, 0);
+      final (id, analysis, date, time) = rig.dao.fieldUpdates.single;
+      expect(id, 1);
+      expect((date, time), ('2026-11-24', '12:30 PM'));
+      final items = analysis!['food_items'] as List;
+      // The AI's row: its numbers, no usual-foods mark.
+      expect(items[0], {
+        'name': 'Steamed rice (~100 g)',
+        'estimated_calories': 130,
+        'protein_g': 2.5,
+        'carbs_g': 28.5,
+        'fat_g': 0.3,
+      });
+      // The row the note did not concern: every key as stored.
+      expect(items[1], _pork);
+      expect(analysis['total_calories'], 530);
+      expect(analysis['capture'], {'device': 'phone'});
+      expect(analysis['estimate_confidence'], 'medium');
+      expect(analysis[kUserNotesKey], [
+        {'text': 'only half the rice', 'at': _sentAt},
+      ]);
+      expect(rig.dao.meals.first.corrected, isTrue);
+      expect(rig.popped, isTrue);
+      expect(openRaw, isNot(rig.dao.rawOf(rig.dao.meals.first)));
+    });
+
+    testWidgets('a number the user then changes on the AI row is theirs; '
+        'the note is kept', (tester) async {
+      final rig = await _open(tester);
+      rig.executor.nextNoteOutcome = _halfRice;
+      await _type(tester, 'only half the rice');
+      await _send(tester);
+      await tester.enterText(_key('itemCal0'), '125');
+      await tester.pump();
+      await _save(tester);
+      final analysis = rig.dao.fieldUpdates.single.$2!;
+      final rice = (analysis['food_items'] as List)[0] as Map;
+      expect(rice['estimated_calories'], 125);
+      expect((rice['user'] as Map)['n'], [125, 2.5, 28.5, 0.3]);
+      expect(analysis[kUserNotesKey], hasLength(1));
+    });
+
+    testWidgets('an added food, and a meal with only totals', (tester) async {
+      var rig = await _open(tester);
+      rig.executor.nextNoteOutcome = _egg;
+      await _type(tester, 'add a fried egg');
+      await _send(tester);
+      expect(_field(tester, 'itemName2'), 'Fried egg (1 large, ~50 g)');
+      expect(_field(tester, 'editorCalories'), '750');
+      expect(find.text('Added Fried egg (1 large, ~50 g), 90 kcal'),
+          findsOneWidget);
+      expect(find.text('2 other foods unchanged'), findsOneWidget);
+
+      rig = await _open(tester,
+          meal: Meal(
+              id: 1,
+              date: '2026-11-24',
+              time: '08:00 AM',
+              timestamp: '2026-11-24T08:00:00.000',
+              source: MealSource.appManual,
+              analysis: const {
+                'is_food': true,
+                'meal_description': 'Coffee and a pastry',
+                'total_calories': 420,
+                'total_protein_g': 8,
+                'total_carbs_g': 50,
+                'total_fat_g': 20,
+              }));
+      rig.executor.nextNoteOutcome = _corrected(const MealCorrectionProposal(
+        totals: MealCorrectionTotals(
+            calories: 300, protein: 8, carbs: 35, fat: 14),
+      ));
+      await _type(tester, 'no pastry, just a small one');
+      await _send(tester);
+      expect(_field(tester, 'editorCalories'), '300');
+      expect(_field(tester, 'editorCarbs'), '35');
+      expect(find.text('Total: 420 → 300 kcal'), findsOneWidget);
+      await _save(tester);
+      final analysis = rig.dao.fieldUpdates.single.$2!;
+      expect(analysis['total_calories'], 300);
+      expect(analysis[kUserNotesKey], [
+        {'text': 'no pastry, just a small one', 'at': _sentAt},
+      ]);
+    });
+  });
+
+  group('Undo', () {
+    testWidgets('puts back the form and the note; a save then keeps no note',
+        (tester) async {
+      final rig = await _open(tester);
+      rig.executor.nextNoteOutcome = _halfRice;
+      await _type(tester, 'only half the rice');
+      await _send(tester);
+      await tester.tap(_key('mealNoteUndo'));
+      await tester.pumpAndSettle();
+      expect(_field(tester, 'itemName0'), 'Steamed rice (~200 g)');
+      expect(_field(tester, 'itemCal0'), '260');
+      expect(_field(tester, 'editorCalories'), '660');
+      expect(_field(tester, 'mealNoteField'), 'only half the rice');
+      expect(_key('mealNoteChanges'), findsNothing);
+      await _save(tester);
+      final analysis = rig.dao.fieldUpdates.single.$2!;
+      expect(analysis.containsKey(kUserNotesKey), isFalse);
+      expect((analysis['food_items'] as List)[0], _rice);
+    });
+
+    testWidgets('goes once the form no longer shows what the note left',
+        (tester) async {
+      final rig = await _open(tester);
+      rig.executor.nextNoteOutcome = _halfRice;
+      await _type(tester, 'only half the rice');
+      await _send(tester);
+      expect(_key('mealNoteUndo'), findsOneWidget);
+      expect(
+          tester.getSemantics(_key('mealNoteUndo')).label,
+          contains('Undo the changes from your note'));
+      await tester.enterText(_key('itemCal1'), '390');
+      await tester.pump();
+      expect(_key('mealNoteUndo'), findsNothing);
+    });
+
+    testWidgets('two notes stack: the second is sent with the first as '
+        'already applied, and Undo steps back through both', (tester) async {
+      final rig = await _open(tester);
+      rig.executor.nextNoteOutcome = _halfRice;
+      await _type(tester, 'only half the rice');
+      await _send(tester);
+      rig.executor.nextNoteOutcome = _egg;
+      await _type(tester, 'add a fried egg');
+      await _send(tester);
+      final (second, _) = rig.executor.correctedNotes[1];
+      expect(second.earlierNotes, ['only half the rice']);
+      expect(second.items[0].calories, 130, reason: 'the form as it is now');
+      expect(_field(tester, 'editorCalories'), '620');
+
+      await tester.tap(_key('mealNoteUndo'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('itemName2')), findsNothing,
+          reason: 'no egg row');
+      expect(_field(tester, 'editorCalories'), '530');
+      expect(_field(tester, 'mealNoteField'), 'add a fried egg');
+      await tester.tap(_key('mealNoteUndo'));
+      await tester.pumpAndSettle();
+      expect(_field(tester, 'editorCalories'), '660');
+      expect(_field(tester, 'mealNoteField'), 'only half the rice');
+    });
+  });
+
+  group('the notes kept with the meal', () {
+    testWidgets('both notes are kept, oldest first', (tester) async {
+      final rig = await _open(tester);
+      rig.executor.nextNoteOutcome = _halfRice;
+      await _type(tester, 'only half the rice');
+      await _send(tester);
+      rig.executor.nextNoteOutcome = _egg;
+      await _type(tester, 'add a fried egg');
+      await _send(tester);
+      await _save(tester);
+      expect(rig.dao.fieldUpdates.single.$2![kUserNotesKey], [
+        {'text': 'only half the rice', 'at': _sentAt},
+        {'text': 'add a fried egg', 'at': _sentAt},
+      ]);
+    });
+
+    testWidgets('a correction undone in the form by hand is not kept',
+        (tester) async {
+      final rig = await _open(tester);
+      rig.executor.nextNoteOutcome = _egg;
+      await _type(tester, 'add a fried egg');
+      await _send(tester);
+      await tester.tap(_key('removeItem2'));
+      await tester.pumpAndSettle();
+      await _save(tester);
+      final analysis = rig.dao.fieldUpdates.single.$2!;
+      expect(analysis['food_items'], [_rice, _pork]);
+      expect(analysis.containsKey(kUserNotesKey), isFalse);
+    });
+
+    testWidgets('a note typed back to the old numbers is not kept',
+        (tester) async {
+      final rig = await _open(tester);
+      rig.executor.nextNoteOutcome = _halfRice;
+      await _type(tester, 'only half the rice');
+      await _send(tester);
+      await tester.enterText(_key('itemName0'), 'Steamed rice (~200 g)');
+      for (final (k, v) in [
+        ('itemCal0', '260'),
+        ('itemPro0', '5'),
+        ('itemCarb0', '57'),
+        ('itemFat0', '0.50'),
+      ]) {
+        await tester.enterText(_key(k), v);
+      }
+      await tester.pump();
+      await _save(tester);
+      expect(rig.dao.fieldUpdates.single.$2!.containsKey(kUserNotesKey),
+          isFalse);
+    });
+
+    testWidgets('an answer that changed nothing is not kept', (tester) async {
+      final rig = await _open(tester);
+      rig.executor.nextNoteOutcome =
+          const MealNoteOutcome(reply: MealUnclear('Which rice?'));
+      await _type(tester, 'the rice');
+      await _send(tester);
+      await _save(tester); // the note was sent: no unsent question
+      expect(_key('mealNoteUnsentDialog'), findsNothing);
+      expect(rig.dao.fieldUpdates.single.$2!.containsKey(kUserNotesKey),
+          isFalse);
+    });
+
+    final stored = [
+      {'text': 'the pork was lean', 'at': '2026-11-20T12:00:00.000Z'},
+      {'text': 'no sauce', 'at': '2026-11-21T08:00:00.000Z'},
+    ];
+
+    testWidgets('shown oldest first with their dates, and sent again as '
+        'already applied', (tester) async {
+      final rig = await _open(tester, meal: _meal(notes: stored));
+      expect(_key('mealNoteSavedHeader'), findsOneWidget);
+      expect(find.text('Notes on this meal'), findsOneWidget);
+      expect(tester.widget<Text>(_key('mealNoteSavedText0')).data,
+          'the pork was lean');
+      expect(tester.widget<Text>(_key('mealNoteSavedText1')).data, 'no sauce');
+      expect(find.text('Nov 20'), findsOneWidget);
+      expect(find.text('Nov 21'), findsOneWidget);
+      expect(
+          tester.getTopLeft(_key('mealNoteSaved0')).dy,
+          lessThan(tester.getTopLeft(_key('mealNoteSaved1')).dy));
+      rig.executor.nextNoteOutcome = _halfRice;
+      await _type(tester, 'only half the rice');
+      await _send(tester);
+      expect(rig.executor.correctedNotes.single.$1.earlierNotes,
+          ['the pork was lean', 'no sauce']);
+      await _save(tester);
+      expect(rig.dao.fieldUpdates.single.$2![kUserNotesKey], [
+        ...stored,
+        {'text': 'only half the rice', 'at': _sentAt},
+      ]);
+    });
+
+    testWidgets('removing one is an unsaved change: Back asks, Discard keeps '
+        'it, Save removes it, and it is not sent again', (tester) async {
+      var rig = await _open(tester, meal: _meal(notes: stored));
+      expect(
+          tester.widget<IconButton>(_key('mealNoteRemove0')).tooltip,
+          'Remove this note');
+      await tester.tap(_key('mealNoteRemove0'));
+      await tester.pumpAndSettle();
+      expect(find.text('the pork was lean'), findsNothing);
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      expect(_key('discardChangesDialog'), findsOneWidget);
+      await tester.tap(_key('discardChangesDiscard'));
+      await tester.pumpAndSettle();
+      expect(rig.dao.fieldUpdates, isEmpty);
+      expect(rig.dao.meals.first.analysis[kUserNotesKey], stored);
+
+      rig = await _open(tester, meal: _meal(notes: stored));
+      await tester.tap(_key('mealNoteRemove0'));
+      await tester.pumpAndSettle();
+      rig.executor.nextNoteOutcome =
+          const MealNoteOutcome(reply: MealNoChange('Already right.'));
+      await _type(tester, 'the sauce was on the side');
+      await _send(tester);
+      expect(rig.executor.correctedNotes.single.$1.earlierNotes, ['no sauce']);
+      await _save(tester);
+      expect(rig.dao.fieldUpdates.single.$2![kUserNotesKey], [stored[1]]);
+
+      rig = await _open(tester, meal: _meal(notes: stored));
+      await tester.tap(_key('mealNoteRemove0'));
+      await tester.pumpAndSettle();
+      await tester.tap(_key('mealNoteRemove1'));
+      await tester.pumpAndSettle();
+      expect(_key('mealNoteSavedHeader'), findsNothing);
+      await _save(tester);
+      expect(rig.dao.fieldUpdates.single.$2!.containsKey(kUserNotesKey),
+          isFalse);
+    });
+
+    testWidgets('a save that changes no note keeps them exactly as stored',
+        (tester) async {
+      final raw = [
+        ...stored,
+        {'odd': 'an entry from an import'},
+      ];
+      final rig = await _open(tester, meal: _meal(notes: raw));
+      await tester.enterText(_key('editorDescription'), 'Pork and rice');
+      await tester.pump();
+      await _save(tester);
+      expect(rig.dao.fieldUpdates.single.$2![kUserNotesKey], raw);
+    });
+  });
+
+  group('a meal that changed meanwhile', () {
+    testWidgets('during the request: said, the newer meal shown, the note '
+        'kept', (tester) async {
+      final rig = await _open(tester);
+      rig.executor
+        ..nextNoteOutcome = _halfRice
+        ..onCorrect = () async {
+          final m = rig.dao.meals.first;
+          rig.dao.meals[0] = Meal(
+              id: m.id,
+              date: m.date,
+              time: m.time,
+              timestamp: m.timestamp,
+              source: m.source,
+              imageHash: m.imageHash,
+              analysis: {...m.analysis, 'total_calories': 600},
+              corrected: true);
+        };
+      await _type(tester, 'only half the rice');
+      await _send(tester);
+      expect(_key('mealNoteConflict'), findsOneWidget);
+      expect(find.text('This meal was just updated — please review.'),
+          findsOneWidget);
+      expect(_field(tester, 'editorCalories'), '600');
+      expect(_field(tester, 'itemName0'), 'Steamed rice (~200 g)');
+      expect(_key('mealNoteChanges'), findsNothing);
+      expect(_field(tester, 'mealNoteField'), 'only half the rice');
+      expect(rig.dao.fieldUpdates, isEmpty);
+    });
+
+    testWidgets('after the fill: Save says so, reloads and puts the note '
+        'back', (tester) async {
+      final rig = await _open(tester);
+      rig.executor.nextNoteOutcome = _halfRice;
+      await _type(tester, 'only half the rice');
+      await _send(tester);
+      final m = rig.dao.meals.first;
+      rig.dao.meals[0] = Meal(
+          id: m.id,
+          date: m.date,
+          time: m.time,
+          timestamp: m.timestamp,
+          source: m.source,
+          imageHash: m.imageHash,
+          analysis: {...m.analysis, 'total_calories': 600},
+          corrected: true);
+      await _save(tester);
+      expect(_key('editorSaveConflict'), findsOneWidget);
+      await tester.tap(_key('editorSaveConflictOk'));
+      await tester.pumpAndSettle();
+      expect(rig.dao.fieldUpdates, isEmpty);
+      expect(_field(tester, 'editorCalories'), '600');
+      expect(_field(tester, 'mealNoteField'), 'only half the rice');
+      expect(_key('mealNoteChanges'), findsNothing);
+    });
+  });
+
+  group('answers that change nothing', () {
+    for (final (name, outcome, text) in [
+      (
+        'unclear',
+        const MealNoteOutcome(reply: MealUnclear('Which drink?')),
+        'Nothing changed yet. The AI asks: Which drink?'
+      ),
+      (
+        'no change',
+        const MealNoteOutcome(reply: MealNoChange('That is about lunch.')),
+        'Nothing changed. The AI says: That is about lunch.'
+      ),
+      (
+        'no change, no sentence',
+        const MealNoteOutcome(reply: MealNoChange('')),
+        'The AI found nothing to change in this meal.'
+      ),
+      (
+        'unusable',
+        const MealNoteOutcome(reply: MealReplyUnusable()),
+        "❌ The AI's answer could not be used, so nothing changed. Try "
+            'saying it another way.'
+      ),
+      (
+        'empties the meal',
+        const MealNoteOutcome(reply: MealReplyUnusable(emptiesMeal: true)),
+        "❌ The AI's answer would leave this meal empty, so nothing changed. "
+            'To remove the meal, use Delete meal.'
+      ),
+      (
+        'an error',
+        const MealNoteOutcome(error: '❌ Error contacting AI. Please try again.'),
+        '❌ Error contacting AI. Please try again.'
+      ),
+    ]) {
+      testWidgets(name, (tester) async {
+        final rig = await _open(tester);
+        rig.executor.nextNoteOutcome = outcome;
+        await _type(tester, 'the drink');
+        await _send(tester);
+        expect(tester.widget<Text>(_key('mealNoteReply')).data, text);
+        expect(_field(tester, 'editorCalories'), '660');
+        expect(_field(tester, 'mealNoteField'), 'the drink');
+        expect(_key('mealNoteChanges'), findsNothing);
+        expect(rig.dao.fieldUpdates, isEmpty);
+      });
+    }
+  });
+
+  group('Save with a note never sent', () {
+    testWidgets('asks first: Keep editing writes nothing; Save anyway saves '
+        'without the note', (tester) async {
+      final rig = await _open(tester);
+      await _type(tester, 'only half the rice');
+      await _save(tester);
+      expect(_key('mealNoteUnsentDialog'), findsOneWidget);
+      expect(find.text("Your note wasn't sent"), findsOneWidget);
+      await tester.tap(_key('mealNoteUnsentKeep'));
+      await tester.pumpAndSettle();
+      expect(rig.dao.fieldUpdates, isEmpty);
+      expect(rig.executor.correctedNotes, isEmpty);
+      await _save(tester);
+      await tester.tap(_key('mealNoteUnsentSave'));
+      await tester.pumpAndSettle();
+      expect(rig.executor.correctedNotes, isEmpty, reason: 'never sent');
+      final analysis = rig.dao.fieldUpdates.single.$2!;
+      expect(analysis.containsKey(kUserNotesKey), isFalse);
+    });
+
+    testWidgets('a filled correction makes Back ask; Discard writes nothing',
+        (tester) async {
+      final rig = await _open(tester);
+      rig.executor.nextNoteOutcome = _halfRice;
+      await _type(tester, 'only half the rice');
+      await _send(tester);
+      expect(_field(tester, 'mealNoteField'), '');
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      expect(_key('discardChangesDialog'), findsOneWidget);
+      await tester.tap(_key('discardChangesDiscard'));
+      await tester.pumpAndSettle();
+      expect(find.text('open'), findsOneWidget);
+      expect(rig.dao.fieldUpdates, isEmpty);
+      expect(rig.dao.meals.first.analysis, _analysis());
+    });
+
+    testWidgets('a typed note alone makes Back ask', (tester) async {
+      await _open(tester);
+      await _type(tester, 'only half the rice');
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      expect(_key('discardChangesDialog'), findsOneWidget);
+    });
+  });
+
+  testWidgets('Chinese', (tester) async {
+    final rig = await _open(tester, locale: const Locale('zh'));
+    expect(find.text('用一句话修正'), findsOneWidget);
+    expect(find.text('你的说明'), findsOneWidget);
+    await tester.showKeyboard(_key('mealNoteField')); // the hint shows
+    await tester.pump();
+    expect(find.text('哪里不一样？例如：「米饭只吃了一半」或「加一个煎蛋」'), findsOneWidget);
+    expect(find.text('让 AI 修正'), findsOneWidget);
+    rig.executor.nextNoteOutcome = _halfRice;
+    await _type(tester, '米饭只吃了一半');
+    await _send(tester);
+    expect(find.text('已按你的说明修改，尚未保存'), findsOneWidget);
+    expect(find.text('你的说明：米饭只吃了一半'), findsOneWidget);
+    expect(find.text('合计：660 → 530 千卡'), findsOneWidget);
+    expect(find.text('请核对上面的数字，然后点「保存」。'), findsOneWidget);
+  });
+}

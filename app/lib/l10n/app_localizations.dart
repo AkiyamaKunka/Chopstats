@@ -5981,16 +5981,16 @@ abstract class AppLocalizations {
   /// **'Correct with a note'**
   String get mealNoteHeader;
 
-  /// Edit meal: the label of the note field (mealNoteHeader's section).
+  /// Edit meal: the label of the note field (mealNoteHeader's section). Short: an empty field rests it inside the box at full size, and at the largest accessibility text size on a 390 pt phone a longer one ('What was different?') was cut to an ellipsis. The question is in mealNoteHint.
   ///
   /// In en, this message translates to:
-  /// **'What was different?'**
+  /// **'Your note'**
   String get mealNoteLabel;
 
-  /// Edit meal: the hint inside the empty note field. Two short examples of a note: an amount and an added food.
+  /// Edit meal: the hint inside the note field (shown once the field is focused): the question the note answers, then two short examples, an amount and an added food. It wraps.
   ///
   /// In en, this message translates to:
-  /// **'e.g. \"only half the rice\" or \"add a fried egg\"'**
+  /// **'What was different? e.g. \"only half the rice\" or \"add a fried egg\"'**
   String get mealNoteHint;
 
   /// Edit meal: the line under the note field. {provider} is the current AI provider's short name (providerDisplayLabel). Must stay true to what core/meal_correction.dart composeMealCorrectionRequest sends: the note, the meal's description, foods and their four numbers, its totals, and the notes kept on this meal; no photo, no date or time, no other meal. The answer only fills the form.

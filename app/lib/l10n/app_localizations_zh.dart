@@ -3598,10 +3598,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get mealNoteHeader => '用一句话修正';
 
   @override
-  String get mealNoteLabel => '哪里不一样？';
+  String get mealNoteLabel => '你的说明';
 
   @override
-  String get mealNoteHint => '例如：「米饭只吃了一半」或「加一个煎蛋」';
+  String get mealNoteHint => '哪里不一样？例如：「米饭只吃了一半」或「加一个煎蛋」';
 
   @override
   String mealNoteFooter(String provider) {

@@ -4052,11 +4052,11 @@ class AppLocalizationsEn extends AppLocalizations {
   String get mealNoteHeader => 'Correct with a note';
 
   @override
-  String get mealNoteLabel => 'What was different?';
+  String get mealNoteLabel => 'Your note';
 
   @override
   String get mealNoteHint =>
-      'e.g. \"only half the rice\" or \"add a fried egg\"';
+      'What was different? e.g. \"only half the rice\" or \"add a fried egg\"';
 
   @override
   String mealNoteFooter(String provider) {

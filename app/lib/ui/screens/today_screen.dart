@@ -64,6 +64,10 @@ class TodayScreen extends StatefulWidget {
   /// Null (tests) shows neither.
   final UsualFoods? usual;
 
+  /// Corrects a meal from a note typed in its editor (Edit meal's "Correct
+  /// with a note"); null shows no note.
+  final MealNoteCorrector? noteCorrector;
+
   /// The clock that says which day is today; null is the device's (tests
   /// inject one to cross midnight).
   final DateTime Function()? now;
@@ -75,6 +79,7 @@ class TodayScreen extends StatefulWidget {
       this.mealInUse,
       this.restaurantAssist,
       this.settings,
+      this.noteCorrector,
       this.usual,
       this.now});
 
@@ -283,7 +288,8 @@ class TodayScreenState extends State<TodayScreen>
   }
 
   /// Tap-through to the editor: correcting a number by hand is often faster
-  /// than typing a sentence, and it costs no model call.
+  /// than typing a sentence. Opening it costs no model call; only its
+  /// note's Correct with AI sends anything.
   Future<void> _editMeal(Meal meal) async {
     // Opened: its dot goes now (the editor tells the assist too).
     if (_assistUnseen.contains(meal.id)) {
@@ -296,6 +302,7 @@ class TodayScreenState extends State<TodayScreen>
           inUse: widget.mealInUse,
           assist: widget.restaurantAssist,
           settings: widget.settings,
+          noteCorrector: widget.noteCorrector,
           usual: widget.usual,
           mealsChanged: mealsChangedSignal,
           now: widget.now),
