@@ -23,7 +23,7 @@ import 'jpeg_strip.dart';
 
 /// The app's version, written into every backup header. MUST equal the
 /// x.y.z of `version:` in pubspec.yaml (backup_files_test.dart pins it).
-const String kAppVersion = '1.7.2';
+const String kAppVersion = '1.8.0';
 
 /// A file [BackupFileWriter] wrote.
 class WrittenBackupFile {
