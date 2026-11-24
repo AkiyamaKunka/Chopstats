@@ -196,9 +196,10 @@ void main() {
         _refusedItem('file_type/CR3'),
         _refusedItem('file_type/x.cr3'),
         _refusedItem('file_type/'),
-        // Only a type refusal's extension is read.
+        // A video's extension is not read (MainActivity sends none). The
+        // extension of an item over 25 MB or unreadable is read since
+        // PR81-QA-4: the next test.
         _refusedItem('video/cr3'),
-        _refusedItem('too_big/cr3'),
         // An unknown reason, or more than a reason and an extension.
         _refusedItem('something_new/cr3'),
         _refusedItem('file_type/cr3/x'),
@@ -208,7 +209,6 @@ void main() {
         ...List.filled(7, _type),
         ...List.filled(8, _file),
         _video,
-        _big,
         _gone,
         _gone,
       ]);
@@ -233,6 +233,83 @@ void main() {
         expect(item.refused, [_type], reason: ext);
         expect(item.photoTypes, [sharedPhotoTypeOf('IMG_0001$ext')],
             reason: ext);
+      }
+    });
+
+    // Device QA (2026-11-23, PR81-QA-4): MainActivity copies a RAW file
+    // shared alone, and one typed as an image among several (a DNG). A copy
+    // over 25 MB, or one that failed, gave "over 25 MB" or "could not be
+    // read", although Chopstats reads no file of that format, of any size.
+    // Its refused item now carries its name's extension too, which names it
+    // as a copy of that name is named (share intake looks at a copy's name
+    // before its size).
+    test('an item over 25 MB or unreadable whose extension is an image '
+        'format share intake does not read is named, as a copy of that name '
+        'is; any other keeps its reason, and the paths without one read as '
+        'before', () {
+      final batch = sharedBatchOf([
+        _copied('/cache/shared_photos/1/IMG_1.jpg'),
+        _refusedItem('too_big/cr3'),
+        _refusedItem('too_big/dng'),
+        _refusedItem('unreadable/cr3'),
+        _refusedItem('unreadable/nef'),
+        // No image format share intake names: the reason, as before. A
+        // JPEG over 25 MB is still over 25 MB.
+        _refusedItem('too_big/jpg'),
+        _refusedItem('too_big/png'),
+        _refusedItem('too_big/heic'),
+        _refusedItem('too_big/txt'),
+        _refusedItem('too_big/mom'), // 'Dinner.Mom': part of a name
+        _refusedItem('unreadable/jpg'),
+        _refusedItem('unreadable/txt'),
+        _refusedItem('unreadable/mom'),
+        // The paths before PR81-QA-4.
+        _refusedItem('too_big'),
+        _refusedItem('unreadable'),
+        // Not as MainActivity sends an extension: never named.
+        _refusedItem('too_big/CR3'),
+        _refusedItem('too_big/x.cr3'),
+        _refusedItem('too_big/'),
+        _refusedItem('unreadable/DNG'),
+        // More than a reason and an extension.
+        _refusedItem('too_big/cr3/x'),
+        _refusedItem('unreadable/cr3/x'),
+      ]);
+      expect(batch.paths, ['/cache/shared_photos/1/IMG_1.jpg']);
+      expect(batch.refused, [
+        ...List.filled(4, _type),
+        ...List.filled(5, _big),
+        ...List.filled(3, _gone),
+        _big,
+        _gone,
+        _big,
+        _big,
+        _big,
+        _gone,
+        _gone,
+        _gone,
+      ]);
+      expect(batch.photoTypes, ['CR3', 'DNG', 'CR3', 'NEF']);
+      // As the plugin's JSON reads.
+      final json = sharedBatchOf([
+        SharedMediaFile.fromMap({
+          'path': '/chopstats-refused/too_big/cr3',
+          'type': 'file',
+          'mimeType': 'application/x-chopstats-refused',
+        }),
+      ]);
+      expect(json.paths, isEmpty);
+      expect(json.refused, [_type]);
+      expect(json.photoTypes, ['CR3']);
+      // Every listed format, either way, as a copy of that name names it.
+      for (final ext in refusedPhotoExtensions) {
+        for (final why in ['too_big', 'unreadable']) {
+          final item =
+              sharedBatchOf([_refusedItem('$why/${ext.substring(1)}')]);
+          expect(item.refused, [_type], reason: '$why$ext');
+          expect(item.photoTypes, [sharedPhotoTypeOf('IMG_0001$ext')],
+              reason: '$why$ext');
+        }
       }
     });
 
@@ -459,6 +536,85 @@ void main() {
       expect(intake.photosPending.value, isFalse);
       expect(read, isEmpty);
       await sub.cancel();
+    });
+
+    // PR81-QA-4: a RAW file over 25 MB that MainActivity refused is the
+    // photo type its copy would be, named in its share's note, and still
+    // no photo: never counted (ShareDeliveries.photoCountOf), never read.
+    test('Android, cold start: a launch share of a RAW file over 25 MB that '
+        'MainActivity refused names it, with no photo to count', () async {
+      final source = _Source()
+        ..initial = sharedBatchOf([_refusedItem('too_big/cr3')]);
+      final intake = intakeOf(source, android: true);
+      final got = <IntakePhoto>[];
+      final sub = intake.photos().listen(got.add);
+      await pumpEventQueue();
+      expect(got.single.refused!.reasons, [_type]);
+      expect(got.single.refused!.photoTypes, ['CR3']);
+      expect(intake.photoCountOf(1), 0, reason: 'no photo to count');
+      expect(intake.photosPending.value, isFalse);
+      expect(read, isEmpty);
+      await sub.cancel();
+    });
+
+    test('Android: a DNG over 25 MB and a CR3 whose copy failed that '
+        'MainActivity refused are named in the note, a JPEG over 25 MB is '
+        'still over 25 MB, and none is counted or read', () async {
+      final source = _Source();
+      final intake = intakeOf(source, android: true);
+      files['/shared/1/a.jpg'] = Uint8List.fromList([1]);
+      final got = <IntakePhoto>[];
+      final counts = <int>[];
+      final sub = intake.photos().listen((p) {
+        got.add(p);
+        counts.add(intake.photoCountOf(p.shareDelivery!));
+        p.onSettled?.call();
+      });
+      source.controller.add(sharedBatchOf([
+        _copied('/shared/1/a.jpg'),
+        _refusedItem('too_big/dng'),
+        _refusedItem('too_big/jpg'),
+        _refusedItem('unreadable/cr3'),
+      ]));
+      await pumpEventQueue();
+      expect(got.map((p) => p.fileName), ['a.jpg', '']);
+      expect(got.last.refused!.reasons, [_type, _big, _type]);
+      expect(got.last.refused!.photoTypes, ['DNG', 'CR3']);
+      expect(counts, [1, 1], reason: 'the JPEG copy only');
+      expect(read, ['/shared/1/a.jpg']);
+      await sub.cancel();
+    });
+
+    // For an image format, one share intake reads or one it names
+    // (refusedPhotoExtensions), what a copy of a name over 25 MB gives
+    // (ShareIntake._fromPath looks at its name before its size),
+    // MainActivity's refused item of that name over 25 MB gives too
+    // (PR81-QA-4). Any other extension differs, as designed: a copy named
+    // IMG_1.txt is a kind of file, while MainActivity's too_big/txt is
+    // still over 25 MB (the regression guard further down).
+    test('Android: an image MainActivity refused as over 25 MB gets the '
+        'refusal a copy of that name over 25 MB gets, for a format share '
+        'intake reads or names', () async {
+      final big = Uint8List(maxPhotoBytes + 1);
+      for (final ext in ['cr3', 'dng', 'nef', 'avif', 'jpg', 'png', 'heic']) {
+        final source = _Source();
+        final got = <IntakePhoto>[];
+        final sub = intakeOf(source, android: true).photos().listen(got.add);
+        files['/shared/$ext/IMG_1.$ext'] = big;
+        source.controller
+          ..add(SharedBatch(['/shared/$ext/IMG_1.$ext']))
+          ..add(sharedBatchOf([_refusedItem('too_big/$ext')]));
+        await pumpEventQueue();
+        expect(got, hasLength(2), reason: ext);
+        final copy = got.first.refused!;
+        final refused = got.last.refused!;
+        expect(refused.reasons, copy.reasons, reason: ext);
+        expect(refused.photoTypes, copy.photoTypes, reason: ext);
+        // A photo Chopstats reads is over 25 MB; any other format is named.
+        final photo = hasSupportedPhotoExtension('IMG_1.$ext');
+        expect(copy.reasons, [photo ? _big : _type], reason: ext);
+        await sub.cancel();
+      }
     });
 
     test('Android, a share while the app runs: refused whole, then one with '
@@ -1163,6 +1319,186 @@ void main() {
       expect(asked, 1, reason: 'the second share was answered too');
       expect(analyses, 0);
       expect(lines, isEmpty);
+    });
+
+    // Device QA (2026-11-23, PR81-QA-4): a 26 MB CR3 or DNG shared alone
+    // was refused by the size its provider gave, before it was opened, and
+    // said to be over 25 MB, although no smaller one would be read. It is
+    // named now, as its copy would be.
+    test('Android: a RAW file over 25 MB shared alone, which MainActivity '
+        'refused whole: no question, and its line names it', () async {
+      answers = [];
+      await start();
+      source.controller.add(sharedBatchOf([_refusedItem('too_big/cr3')]));
+      await pumpEventQueue(times: 100);
+      expect(asked, 0);
+      expect(analyses, 0);
+      expect(lines,
+          ["One shared file was skipped: Chopstats can't read CR3 photos yet."]);
+      source.controller
+        ..add(sharedBatchOf([_refusedItem('too_big/dng')]))
+        // Two at once, each over 25 MB and typed as an image.
+        ..add(sharedBatchOf(
+            [_refusedItem('too_big/nef'), _refusedItem('too_big/cr2')]));
+      await pumpEventQueue(times: 100);
+      expect(asked, 0, reason: 'nothing to ask about');
+      expect(analyses, 0);
+      expect(lines.sublist(1), [
+        "One shared file was skipped: Chopstats can't read DNG photos yet.",
+        "2 shared files were skipped: Chopstats can't read NEF/CR2 photos "
+            'yet.',
+      ]);
+      expect(read, isEmpty);
+    });
+
+    test('Android: a photo and a DNG over 25 MB shared together: the photo '
+        'logged, then the DNG named, as a smaller DNG\'s copy is', () async {
+      answers = [true];
+      await start();
+      files['/shared/1/IMG_1.jpg'] = Uint8List.fromList([1, 1]);
+      source.controller.add(sharedBatchOf(
+          [_copied('/shared/1/IMG_1.jpg'), _refusedItem('too_big/dng')]));
+      await pumpEventQueue(times: 100);
+      expect(asked, 1);
+      expect(analyses, 1);
+      expect(lines, [
+        'Meal logged: Beef noodles — ~620 kcal',
+        "One shared file was skipped: Chopstats can't read DNG photos yet.",
+      ]);
+      expect(read, ['/shared/1/IMG_1.jpg'], reason: 'nothing read for it');
+      // A DNG under 25 MB is copied, and its copy's name gives the same
+      // line.
+      files['/shared/2/IMG_2.jpg'] = Uint8List.fromList([2, 2]);
+      files['/shared/3/IMG_3.dng'] = Uint8List.fromList([3]);
+      source.controller.add(sharedBatchOf([
+        _copied('/shared/2/IMG_2.jpg'),
+        _copied('/shared/3/IMG_3.dng'),
+      ]));
+      await pumpEventQueue(times: 100);
+      expect(analyses, 2);
+      expect(lines.sublist(2), [
+        'Meal logged: Beef noodles — ~620 kcal',
+        "One shared file was skipped: Chopstats can't read DNG photos yet.",
+      ]);
+    });
+
+    test('Android: a RAW file whose copy failed is named, alone or with a '
+        'photo', () async {
+      answers = [true];
+      await start();
+      source.controller.add(sharedBatchOf([_refusedItem('unreadable/cr3')]));
+      await pumpEventQueue(times: 100);
+      expect(asked, 0);
+      expect(lines,
+          ["One shared file was skipped: Chopstats can't read CR3 photos yet."]);
+      files['/shared/1/IMG_1.jpg'] = Uint8List.fromList([1, 1]);
+      source.controller.add(sharedBatchOf(
+          [_copied('/shared/1/IMG_1.jpg'), _refusedItem('unreadable/nef')]));
+      await pumpEventQueue(times: 100);
+      expect(asked, 1);
+      expect(analyses, 1);
+      expect(lines.sublist(1), [
+        'Meal logged: Beef noodles — ~620 kcal',
+        "One shared file was skipped: Chopstats can't read NEF photos yet.",
+      ]);
+    });
+
+    // A regression guard, not a test that fails on the code before: these
+    // items read so before PR81-QA-4 too. Only an image format share intake
+    // does not read is named; a photo it reads that is over 25 MB, or whose
+    // copy failed, says so as before, and so does an item with no extension
+    // or one that is no image format.
+    test('Android: a JPEG over 25 MB, or one whose copy failed, still says '
+        'so, and so do the items with no extension or another one', () async {
+      answers = [];
+      await start();
+      for (final rest in [
+        'too_big/jpg',
+        'too_big/heic',
+        'too_big/txt',
+        'too_big',
+        'unreadable/jpg',
+        'unreadable/png',
+        'unreadable/mom',
+        'unreadable',
+      ]) {
+        source.controller.add(sharedBatchOf([_refusedItem(rest)]));
+      }
+      await pumpEventQueue(times: 100);
+      expect(asked, 0);
+      expect(analyses, 0);
+      expect(lines, [
+        ...List.filled(
+            4, 'One shared file was skipped because it is over 25 MB.'),
+        ...List.filled(
+            4, 'One shared file was skipped because it could not be read.'),
+      ]);
+    });
+
+    test('Android: a photo with a CR3 over 25 MB, a text file and a JPEG over '
+        '25 MB: the photo logged, then one line that names the CR3', () async {
+      answers = [true];
+      await start();
+      files['/shared/1/IMG_1.jpg'] = Uint8List.fromList([1, 1]);
+      source.controller.add(sharedBatchOf([
+        _copied('/shared/1/IMG_1.jpg'),
+        _refusedItem('too_big/cr3'),
+        _refusedItem('file_type/txt'),
+        _refusedItem('too_big/jpg'),
+      ]));
+      await pumpEventQueue(times: 100);
+      expect(asked, 1);
+      expect(analyses, 1);
+      expect(lines, [
+        'Meal logged: Beef noodles — ~620 kcal',
+        '3 shared files were skipped, one of them because Chopstats can\'t '
+            'read CR3 photos yet.',
+      ]);
+      // With two RAW files over 25 MB, they are most of what was skipped.
+      source.controller.add(sharedBatchOf([
+        _refusedItem('too_big/cr3'),
+        _refusedItem('too_big/arw'),
+        _refusedItem('too_big/jpg'),
+      ]));
+      await pumpEventQueue(times: 100);
+      expect(lines.sublist(2), [
+        '3 shared files were skipped, 2 of them because Chopstats can\'t '
+            'read CR3/ARW photos yet.',
+      ]);
+    });
+
+    // Counts and consent as before PR81-QA-4: a refused item was never a
+    // copy, so it never counted as a photo, and a share of refused items
+    // alone asks nothing and is not covered by another share's Not now.
+    // What changed is its line: it names the CR3.
+    test('Android: while a share\'s question is open, a CR3 over 25 MB shared '
+        'alone and a photo with a DNG over 25 MB: the Not now counts the two '
+        'photos only, and the CR3\'s line, naming it, follows', () async {
+      answers = [];
+      await start();
+      final answer = Completer<bool>();
+      final notSent = <int>[];
+      askUntil(answer, notSent);
+      files['/shared/1/IMG_1.jpg'] = Uint8List.fromList([1, 1]);
+      files['/shared/3/IMG_3.jpg'] = Uint8List.fromList([3, 3]);
+      source.controller.add(const SharedBatch(['/shared/1/IMG_1.jpg']));
+      await pumpEventQueue(times: 100);
+      expect(asked, 1, reason: 'the question is open');
+      source.controller
+        ..add(sharedBatchOf([_refusedItem('too_big/cr3')]))
+        ..add(sharedBatchOf(
+            [_copied('/shared/3/IMG_3.jpg'), _refusedItem('too_big/dng')]));
+      await pumpEventQueue(times: 100);
+      expect(lines, isEmpty, reason: 'they wait behind the open question');
+      answer.complete(false);
+      await pumpEventQueue(times: 100);
+      expect(notSent, [2], reason: 'IMG_1 and IMG_3, not the CR3 or the DNG');
+      expect(asked, 1, reason: 'the third share was answered too');
+      expect(analyses, 0, reason: 'nothing sent');
+      expect(lines,
+          ["One shared file was skipped: Chopstats can't read CR3 photos yet."],
+          reason: 'the photo and the DNG went with the Not now');
+      expect(cleaned, contains('/shared/3/IMG_3.jpg'));
     });
 
     test('iOS: a share of one AVIF while another share\'s question is open '

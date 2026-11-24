@@ -139,17 +139,18 @@ abstract class SharedMediaSource {
 /// before any copy (MainActivity.kt withSafeShares,
 /// IntakeRules.REFUSED_SHARE_TYPE). Such an item reaches the plugin as a
 /// file:// URI that names no file, [androidRefusedSharePath] and the
-/// reason (and, for one refused for its type, its name's extension),
-/// which the plugin hands on as the item's path without opening it; it is
-/// no image, so nothing reads it. It lets the share's refusals travel in
-/// the share's own event, the launch share's and a held one's included,
-/// and a share whose every item was refused still arrives.
+/// reason (and, for one refused for its type, its size or a failed copy,
+/// its name's extension), which the plugin hands on as the item's path
+/// without opening it; it is no image, so nothing reads it. It lets the
+/// share's refusals travel in the share's own event, the launch share's
+/// and a held one's included, and a share whose every item was refused
+/// still arrives.
 const String androidRefusedShareType = 'application/x-chopstats-refused';
 
 /// The folder part of a refused item's path (IntakeRules.REFUSED_SHARE_PATH):
-/// `/chopstats-refused/<reason>`, or `/chopstats-refused/file_type/cr3`
-/// for an item refused for its type whose name gives an extension
-/// (IntakeRules.refusedSharePath); a path no file has.
+/// `/chopstats-refused/<reason>`, or `/chopstats-refused/too_big/cr3` for
+/// an item refused for its type, its size or a failed copy whose name
+/// gives an extension (IntakeRules.refusedSharePath); a path no file has.
 const String androidRefusedSharePath = '/chopstats-refused';
 
 /// The reasons MainActivity gives a refused item, the part of its path
@@ -165,21 +166,39 @@ const Map<String, ShareRefusal> androidRefusalTokens = {
 /// (IntakeRules.refusedExtension): letters a-z and digits only.
 final RegExp _refusedItemExtension = RegExp(r'^[a-z0-9]+$');
 
+/// The reasons whose refused item may carry its name's extension
+/// (IntakeRules.refusedSharePath): all but a video's.
+const Set<ShareRefusal> _reasonsWithExtension = {
+  ShareRefusal.fileType,
+  ShareRefusal.tooBig,
+  ShareRefusal.unreadable,
+};
+
 /// What MainActivity's refused item at [path] says
 /// (IntakeRules.refusedSharePath): its reason, the part after
-/// [androidRefusedSharePath], and, for an item refused for its type
-/// (file_type), the extension of its name that may follow:
-/// `/chopstats-refused/file_type/cr3`. Android has no type for a CR3, 3FR,
-/// RWL, SR2, SRF or X3F, so in a share of several with no listed types
-/// such an image is refused before any copy, and the line called it a
-/// kind of file Chopstats can't read. Now it is the refusal a copy of
-/// that name gives (ShareIntake._fromPath): a photo type, named (device
-/// QA 2026-11-22, PR81-QA-3). As there, only an extension in
-/// [refusedPhotoExtensions] is named ([sharedPhotoTypeOf]), so no other
-/// part of a sender's name reaches the line: with any other extension
-/// the item stays a kind of file, and another reason's extension is not
-/// read. A path with no extension reads as before; an unknown reason, or
-/// more parts than a reason and an extension, as unreadable.
+/// [androidRefusedSharePath], and, for an item refused for its type, its
+/// size or a failed copy (file_type, too_big, unreadable), the extension
+/// of its name that may follow: `/chopstats-refused/too_big/cr3`. An image
+/// format share intake does not read is then the refusal a copy of that
+/// name gives (ShareIntake._fromPath, which looks at the name before the
+/// size): a photo type, named.
+/// - file_type: Android has no type for a CR3, 3FR, RWL, SR2, SRF or X3F,
+///   so in a share of several with no listed types such an image is
+///   refused before any copy, and the line called it a kind of file
+///   Chopstats can't read (device QA 2026-11-22, PR81-QA-3).
+/// - too_big, unreadable: MainActivity copies such a format, up to 25 MB,
+///   when it is shared alone, or typed as an image among several (a DNG).
+///   One over 25 MB, or whose copy failed, was said to be over 25 MB or
+///   unreadable, although Chopstats reads no file of that format, of any
+///   size (device QA 2026-11-23, PR81-QA-4). Its extension is the one its
+///   name gives, else its copy's name's, which its image type gives
+///   (IntakeRules.failedCopyName).
+/// As there, only an extension in [refusedPhotoExtensions] is named
+/// ([sharedPhotoTypeOf]), so no other part of a sender's name reaches the
+/// line: with any other extension (a .jpg over 25 MB, a .txt) the item
+/// keeps its reason, and a video's extension is not read. A path with no
+/// extension reads as before; an unknown reason, or more parts than a
+/// reason and an extension, as unreadable.
 (ShareRefusal, String?) _androidRefusalOf(String path) {
   const folder = '$androidRefusedSharePath/';
   final parts = path.startsWith(folder)
@@ -188,7 +207,7 @@ final RegExp _refusedItemExtension = RegExp(r'^[a-z0-9]+$');
   final why = parts.length <= 2 ? androidRefusalTokens[parts.first] : null;
   if (why == null) return (ShareRefusal.unreadable, null);
   final extension = parts.length == 2 ? parts.last : '';
-  final type = why == ShareRefusal.fileType &&
+  final type = _reasonsWithExtension.contains(why) &&
           _refusedItemExtension.hasMatch(extension)
       ? sharedPhotoTypeOf('.$extension')
       : null;
@@ -198,10 +217,10 @@ final RegExp _refusedItemExtension = RegExp(r'^[a-z0-9]+$');
 /// The plugin's [files] for one share as a [SharedBatch]: the images'
 /// paths, and a refusal for each item that is no image. MainActivity's
 /// refused items say why ([androidRefusedShareType]; an unknown reason
-/// reads as unreadable), and one refused for its type whose extension
-/// gives a photo type is that type, named ([_androidRefusalOf]); a video
-/// or another file the plugin reports as it is counts by its kind. Text
-/// and links are no file: left out.
+/// reads as unreadable), and one whose extension gives a photo type is
+/// that type, named ([_androidRefusalOf]); a video or another file the
+/// plugin reports as it is counts by its kind. Text and links are no
+/// file: left out.
 SharedBatch sharedBatchOf(List<SharedMediaFile> files) {
   final paths = <String>[];
   final refused = <ShareRefusal>[];

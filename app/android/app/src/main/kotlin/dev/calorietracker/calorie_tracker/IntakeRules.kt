@@ -232,7 +232,7 @@ internal object IntakeRules {
     /// of them fits.
     const val MAX_REFUSED_EXTENSION = 4
 
-    /// The extension an item refused for its type carries to share intake
+    /// The extension a refused item carries to share intake
     /// (refusedSharePath): the part of its [name] after the last dot,
     /// lower-cased, when that is 1 to MAX_REFUSED_EXTENSION letters a-z
     /// (either case) or digits: "cr3" for "IMG_0001.CR3". Null for any
@@ -252,22 +252,35 @@ internal object IntakeRules {
 
     /// The path a refused item reaches the plugin with: a file:// URI of
     /// it names no file, and the plugin hands a file:// URI's path on as it
-    /// is, without opening it. An item refused for its type (FILE_TYPE)
+    /// is, without opening it. An item refused for its type (FILE_TYPE),
+    /// for its size (TOO_BIG) or because it could not be read (UNREADABLE)
     /// whose [name] gives an extension (refusedExtension) carries it as a
-    /// last part: /chopstats-refused/file_type/cr3. Android has no type for
-    /// a CR3, 3FR, RWL, SR2, SRF or X3F (they are not in its MIME table), so
-    /// in a share of several with no listed types such an image is refused
-    /// for its type before any copy, and the line called it a kind of file
-    /// Chopstats can't read, where a copy of it is named ("Chopstats can't
-    /// read CR3 photos yet"). Share intake names the type from the
-    /// extension as it does from a copy's name, only for an image format
-    /// it does not read (share_intake.dart sharedPhotoTypeOf), and nothing
-    /// is copied or read for it (device QA 2026-11-22, PR81-QA-3). Any
-    /// other refusal, and a name with no such extension, gives the reason
-    /// alone, as before.
+    /// last part: /chopstats-refused/file_type/cr3. Share intake names the
+    /// type from the extension as it does from a copy's name, only for an
+    /// image format it does not read (share_intake.dart sharedPhotoTypeOf),
+    /// and nothing more is copied or read for it.
+    /// - FILE_TYPE: Android has no type for a CR3, 3FR, RWL, SR2, SRF or
+    ///   X3F (they are not in its MIME table), so in a share of several
+    ///   with no listed types such an image is refused for its type before
+    ///   any copy, and the line called it a kind of file Chopstats can't
+    ///   read, where a copy of it is named ("Chopstats can't read CR3
+    ///   photos yet") (device QA 2026-11-22, PR81-QA-3).
+    /// - TOO_BIG and UNREADABLE: MainActivity copies an image format share
+    ///   intake does not read, up to 25 MB, when it is shared alone, or
+    ///   when it is typed as an image among several (a DNG, NEF or AVIF).
+    ///   One over 25 MB (by the size its provider gives, before it is
+    ///   opened, or counted while copying), or whose copy failed, was said
+    ///   to be over 25 MB or unreadable, although Chopstats reads no file
+    ///   of that format, of any size. RAW files are often over 25 MB
+    ///   (device QA 2026-11-23, PR81-QA-4). Its [name] is failedCopyName's.
+    /// A video carries none: its line says it is a video. A name with no
+    /// such extension gives the reason alone, as before.
     fun refusedSharePath(refusal: ShareRefusal, name: String? = null): String {
         val path = "$REFUSED_SHARE_PATH/${refusal.token}"
-        val ext = if (refusal == ShareRefusal.FILE_TYPE) refusedExtension(name) else null
+        val ext = when (refusal) {
+            ShareRefusal.FILE_TYPE, ShareRefusal.TOO_BIG, ShareRefusal.UNREADABLE -> refusedExtension(name)
+            ShareRefusal.VIDEO -> null
+        }
         return if (ext == null) path else "$path/$ext"
     }
 
@@ -294,6 +307,20 @@ internal object IntakeRules {
         val named = if (name.endsWith('.')) name + ext else "$name.$ext"
         return if (named.toByteArray(Charsets.UTF_8).size > MAX_NAME_BYTES) name else named
     }
+
+    /// The name whose extension a shared image's refused item carries when
+    /// it was not copied: over MAX_SHARE_BYTES, or a copy that failed
+    /// (refusedSharePath). It is [name] as its provider shows it when that
+    /// gives an extension (refusedExtension), else [copyName], the name it
+    /// was to be copied under (copyName), which has the extension its image
+    /// type gives. A provider may show a name without one
+    /// (IMG_1731500000000, "Lunch with.Sarah"): such a DNG under 25 MB was
+    /// named by its copy's name, and one over 25 MB was said to be over
+    /// 25 MB (device QA 2026-11-23, review of PR81-QA-4). The provider's
+    /// extension comes first, so a CR3 shared as image/jpeg, copied as
+    /// IMG_0001.CR3.jpg, is still named a CR3 when it is over 25 MB.
+    fun failedCopyName(name: String, copyName: String): String =
+        if (refusedExtension(name) != null) name else copyName
 
     /// Whether [path] is [dir] or lies inside it once both are resolved
     /// (symbolic links included). True when that cannot be told: callers
