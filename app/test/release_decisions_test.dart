@@ -261,7 +261,7 @@ String _pubspecVersion(String pubspec) =>
 /// version and `+N` main keeps until the next bump. android-v1.7.2 went
 /// out from main at 1.7.2+11 on 2026-11-24, so the next Android-only
 /// version was bumped first (§ 6.6): main builds 1.8.0+12 since the 1.8.0
-/// prep (PR #97, decided on 2026-11-24 with the owner's OK), its next
+/// prep (PR #97, decided on 2026-11-24 on the owner's delegation), its next
 /// iPhone tag is v1.8.0, and the iPhone skips 1.7.2 too.
 const _kAndroidReleases = [
   (version: '1.7.0', build: 207, day: '2026-11-19', plus: 9, sha: '610df6c6'),
@@ -1760,7 +1760,7 @@ void main() {
     // next. The 1.7.2 bump (decided on 2026-11-23) is dated by its PR too,
     // and the sentences that gave 1.7.1 as pubspec's version or as the
     // next one are gone, as are those that gave 1.7.2 as the next one. The
-    // 1.8.0 bump (decided on 2026-11-24 with the owner's OK) is dated by
+    // 1.8.0 bump (decided on 2026-11-24 on the owner's delegation) is dated by
     // its PR, the 1.7.2 bump is history, and the sentences that gave 1.7.2
     // as pubspec's version or the iPhone's next one are gone.
     test('android-v1.7.0 is dated 2026-11-19, android-v1.7.1 2026-11-22 and '
@@ -1801,8 +1801,8 @@ void main() {
       expect(
           flat,
           contains('So `version:` is `1.8.0+12` and `kAppVersion` `1.8.0` '
-              "since PR #97, decided on 2026-11-24 with the owner's OK: the "
-              '1.8.0 bump is done'));
+              'since PR #97, decided on 2026-11-24 by Claude on the '
+              "owner's delegation: the 1.8.0 bump is done"));
       expect(
           flat,
           contains('(pubspec is 1.8.0 since PR #97; the '
@@ -1904,8 +1904,9 @@ void main() {
     // android-v1.7.2 went out from main at 1.7.2+11 (2026-11-24): main
     // keeps the newest release's version and +N, and only the newest's,
     // until the next bump, which the next Android-only version needs first
-    // (§ 6.6). The 1.8.0 prep (decided on 2026-11-24 with the owner's OK)
-    // is that bump: main builds 1.8.0, and the +N went up by one, to 12.
+    // (§ 6.6). The 1.8.0 prep (decided on 2026-11-24 on the owner's
+    // delegation) is that bump: main builds 1.8.0, and the +N went up by
+    // one, to 12.
     test("main builds 1.8.0 or later, and RELEASING gives pubspec's version "
         'and +N', () {
       final pubspec = _read('pubspec.yaml');

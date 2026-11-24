@@ -1834,10 +1834,10 @@ from PR #93 on, decided on 2026-11-23 by Claude on the owner's
 delegation, which made `main`'s next iPhone release 1.7.2. Then
 `android-v1.7.2` (build 210) went out as 1.7.2 on 2026-11-24. So
 `version:` is `1.8.0+12` and `kAppVersion` `1.8.0` since PR #97,
-decided on 2026-11-24 with the owner's OK: the 1.8.0 bump is done, and
-it makes `main`'s next iPhone release 1.8.0 too. The policy did not
-change for either bump: its newest *From version* is still 1.7.1, below
-pubspec. The rule stays for later
+decided on 2026-11-24 by Claude on the owner's delegation: the 1.8.0
+bump is done, and it makes `main`'s next iPhone release 1.8.0 too. The
+policy did not change for either bump: its newest *From version* is
+still 1.7.1, below pubspec. The rule stays for later
 versions: when the policy dates a change from a version above pubspec's,
 set `version:` in `app/pubspec.yaml` and `kAppVersion`
 (`lib/services/backup/backup_files.dart`) to that version or later
