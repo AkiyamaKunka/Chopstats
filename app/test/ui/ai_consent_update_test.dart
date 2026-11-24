@@ -422,7 +422,9 @@ void main() {
       await tapNote(tester);
       final body = _bodyOf(tester, noteAsk());
       final notice = body.indexOf('While Watch Camera Roll is on');
-      expect(notice, greaterThan(body.indexOf('Not now sends no note.')));
+      final noteLine = body.indexOf('Not now sends no note.');
+      expect(noteLine, greaterThan(0));
+      expect(notice, greaterThan(noteLine));
       expect(body.indexOf('Chopstats estimates calories'),
           greaterThan(notice));
     });
