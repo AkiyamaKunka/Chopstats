@@ -202,8 +202,9 @@ void main() {
       expect(_key('mealNoteField'), findsOneWidget);
       expect(find.text('Your note'), findsOneWidget);
       expect(
-          find.text("Your note and this meal's foods, numbers and earlier "
-              'notes go to Gemini. Nothing is saved until you tap Save.'),
+          find.text("Your note and this meal's description, foods, numbers "
+              'and earlier notes go to Gemini. Nothing is saved until you '
+              'tap Save.'),
           findsOneWidget);
       // Below every food and Add item: the description stays first.
       expect(tester.getTopLeft(_key('mealNoteHeader')).dy,

@@ -2263,7 +2263,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String setupLinkSharing(String company) {
-    return 'The server passes your photos, dietary profile, meal descriptions and recent meals to $company. Confirming allows that; you can stop it in Settings.';
+    return 'The server passes your photos, dietary profile, meal descriptions, recent meals and a note you send in Edit meal (with that meal) to $company. Confirming allows that; you can stop it in Settings.';
   }
 
   @override
@@ -4060,7 +4060,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String mealNoteFooter(String provider) {
-    return 'Your note and this meal\'s foods, numbers and earlier notes go to $provider. Nothing is saved until you tap Save.';
+    return 'Your note and this meal\'s description, foods, numbers and earlier notes go to $provider. Nothing is saved until you tap Save.';
   }
 
   @override
@@ -4190,5 +4190,5 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get aiConsentUpdateLeadMealNote =>
-      'New: in Edit meal you can tell the AI what was different about a meal. Your note goes with that meal\'s description, foods and numbers and its earlier notes, and only when you tap Correct with AI. Not now sends nothing.';
+      'New: in Edit meal you can tell the AI what was different about a meal. Your note goes with that meal\'s description, foods and numbers and its earlier notes, and only when you tap Correct with AI. Not now sends no note.';
 }

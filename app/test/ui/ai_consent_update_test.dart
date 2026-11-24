@@ -97,8 +97,11 @@ void main() {
       expect(body, contains('Not now keeps it that way.\n\n'
           'New: in Edit meal you can tell the AI what was different about '
           'a meal.'));
-      expect(body, contains('Not now sends nothing.\n\n'
+      // At launch Not now keeps the older grant (photos go on), so the
+      // note's line says only that no note goes.
+      expect(body, contains('Not now sends no note.\n\n'
           'Chopstats estimates calories'));
+      expect(body, isNot(contains('Not now sends nothing')));
       expect(body, contains('• a note you type in Edit meal to correct a '
           "meal, with that meal's description, foods and numbers and its "
           'earlier notes (kept with the meal)'));
@@ -184,6 +187,9 @@ void main() {
       final body = _bodyOf(tester, _update);
       expect(body, startsWith('新增：凌晨 4 点前拍的照片，现在还会附带前一天餐食的简短摘要'));
       expect(body, contains('选择「暂不」会保持这样。'));
+      // The note's line, true at launch too: Not now sends no note.
+      expect(body, contains('选择「暂不」不会发送说明。'));
+      expect(body, isNot(contains('选择「暂不」不会发送任何内容')));
       expect(body, contains('凌晨 4 点前拍的照片还包括前一天的餐食'));
       expect(find.text('暂不'), findsOneWidget);
       expect(find.text('允许'), findsOneWidget);
@@ -325,7 +331,7 @@ void main() {
               'different about a meal.'));
       expect(body, isNot(contains('before 4 a.m. now also carries')),
           reason: 'a version-2 grant already allowed the B14 text');
-      expect(body, contains('Not now sends nothing.\n\n'
+      expect(body, contains('Not now sends no note.\n\n'
           'Chopstats estimates calories'));
       expect(body, contains('• a note you type in Edit meal'));
       await tester.tap(find.byKey(const Key('mealNoteConsentAllow')));
@@ -416,7 +422,7 @@ void main() {
       await tapNote(tester);
       final body = _bodyOf(tester, noteAsk());
       final notice = body.indexOf('While Watch Camera Roll is on');
-      expect(notice, greaterThan(body.indexOf('Not now sends nothing.')));
+      expect(notice, greaterThan(body.indexOf('Not now sends no note.')));
       expect(body.indexOf('Chopstats estimates calories'),
           greaterThan(notice));
     });
@@ -430,7 +436,7 @@ void main() {
       expect(find.text('筷拍发送的内容有更新'), findsOneWidget);
       final body = _bodyOf(tester, noteAsk());
       expect(body, startsWith('新增：在「编辑这一餐」里，你可以告诉 AI 这一餐哪里不一样。'));
-      expect(body, contains('选择「暂不」不会发送任何内容。'));
+      expect(body, contains('选择「暂不」不会发送说明。'));
       expect(body, contains('• 你在「编辑这一餐」里为修正一餐写的说明'));
     });
 

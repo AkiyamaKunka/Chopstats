@@ -2074,7 +2074,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String setupLinkSharing(String company) {
-    return '服务器会把你的照片、饮食档案、餐食描述和最近的餐食转交给 $company。确认即表示你同意；可以在设置里停止。';
+    return '服务器会把你的照片、饮食档案、餐食描述、最近的餐食，以及你在「编辑这一餐」里发送的说明（连同那一餐）转交给 $company。确认即表示你同意；可以在设置里停止。';
   }
 
   @override
@@ -3605,7 +3605,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String mealNoteFooter(String provider) {
-    return '你的说明，以及这一餐的食物、数值和之前的说明，会发送给 $provider。点「保存」之前不会保存任何改动。';
+    return '你的说明，以及这一餐的描述、食物、数值和之前的说明，会发送给 $provider。点「保存」之前不会保存任何改动。';
   }
 
   @override
@@ -3719,5 +3719,5 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get aiConsentUpdateLeadMealNote =>
-      '新增：在「编辑这一餐」里，你可以告诉 AI 这一餐哪里不一样。只有你点「让 AI 修正」时，才会发送你的说明，连同这一餐的描述、食物、数值和之前的说明。选择「暂不」不会发送任何内容。';
+      '新增：在「编辑这一餐」里，你可以告诉 AI 这一餐哪里不一样。只有你点「让 AI 修正」时，才会发送你的说明，连同这一餐的描述、食物、数值和之前的说明。选择「暂不」不会发送说明。';
 }

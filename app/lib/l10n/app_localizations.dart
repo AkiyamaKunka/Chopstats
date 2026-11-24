@@ -3498,10 +3498,10 @@ abstract class AppLocalizations {
   /// **'That setup link is not valid.'**
   String get setupLinkInvalid;
 
-  /// Second paragraph of the setup-link dialog: confirming counts as the AI consent for this plan (App Store 5.1.2(i)). {company} is aiConsentPlanCompany.
+  /// Second paragraph of the setup-link dialog: confirming counts as the AI consent for this plan (App Store 5.1.2(i)), recorded under the current consent text (core/ai_consent.dart aiConsentWordingVersion), so it must list what that text adds: the Edit meal note (version 3). {company} is aiConsentPlanCompany.
   ///
   /// In en, this message translates to:
-  /// **'The server passes your photos, dietary profile, meal descriptions and recent meals to {company}. Confirming allows that; you can stop it in Settings.'**
+  /// **'The server passes your photos, dietary profile, meal descriptions, recent meals and a note you send in Edit meal (with that meal) to {company}. Confirming allows that; you can stop it in Settings.'**
   String setupLinkSharing(String company);
 
   /// No description provided for @serverLoginRow.
@@ -5996,7 +5996,7 @@ abstract class AppLocalizations {
   /// Edit meal: the line under the note field. {provider} is the current AI provider's short name (providerDisplayLabel). Must stay true to what core/meal_correction.dart composeMealCorrectionRequest sends: the note, the meal's description, foods and their four numbers, its totals, and the notes kept on this meal; no photo, no date or time, no other meal. The answer only fills the form.
   ///
   /// In en, this message translates to:
-  /// **'Your note and this meal\'s foods, numbers and earlier notes go to {provider}. Nothing is saved until you tap Save.'**
+  /// **'Your note and this meal\'s description, foods, numbers and earlier notes go to {provider}. Nothing is saved until you tap Save.'**
   String mealNoteFooter(String provider);
 
   /// Edit meal: the button that sends the note (and the keyboard's send key). Named in mealNoteUnsentBody and aiConsentUpdateLeadMealNote.
@@ -6160,10 +6160,10 @@ abstract class AppLocalizations {
   /// **'Remove this note'**
   String get mealNoteRemoveLabel;
 
-  /// First paragraph (after aiConsentUpdateLead for a version-1 grant) of the aiConsentUpdateTitle dialog for a grant given before consent text version 3 (core/ai_consent.dart aiConsentMealNoteVersion): asked at the first note sent in Edit meal (ui/ai_consent.dart ensureMealNoteConsent), and in the app shell's question to a version-1 grant. Must stay true to mealNoteFooter and to aiConsentNotNow's label: Not now sends no note.
+  /// First paragraph (after aiConsentUpdateLead for a version-1 grant) of the aiConsentUpdateTitle dialog for a grant given before consent text version 3 (core/ai_consent.dart aiConsentMealNoteVersion): asked at the first note sent in Edit meal (ui/ai_consent.dart ensureMealNoteConsent), and in the app shell's question to a version-1 grant. Must stay true to mealNoteFooter and to aiConsentNotNow's label in both places: Not now sends no note. At launch Not now keeps the older grant (photos go on as before), so the line must not say that Not now sends nothing.
   ///
   /// In en, this message translates to:
-  /// **'New: in Edit meal you can tell the AI what was different about a meal. Your note goes with that meal\'s description, foods and numbers and its earlier notes, and only when you tap Correct with AI. Not now sends nothing.'**
+  /// **'New: in Edit meal you can tell the AI what was different about a meal. Your note goes with that meal\'s description, foods and numbers and its earlier notes, and only when you tap Correct with AI. Not now sends no note.'**
   String get aiConsentUpdateLeadMealNote;
 }
 

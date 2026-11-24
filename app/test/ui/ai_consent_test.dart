@@ -1491,7 +1491,9 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.textContaining('ByteDance Volcengine (Doubao)'),
         findsOneWidget);
-    expect(find.textContaining('meal descriptions and recent meals'),
+    expect(
+        find.textContaining('meal descriptions, recent meals and a note you '
+            'send in Edit meal'),
         findsOneWidget);
     // This confirmation is the consent: it says where the plan's company
     // processes the data, as the consent dialog does (PRIVACY.md).

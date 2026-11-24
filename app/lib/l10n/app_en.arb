@@ -1782,9 +1782,9 @@
   "setupLinkConfirm": "Use this server",
   "setupLinkDone": "Server configured — your server will analyze the photos.",
   "setupLinkInvalid": "That setup link is not valid.",
-  "setupLinkSharing": "The server passes your photos, dietary profile, meal descriptions and recent meals to {company}. Confirming allows that; you can stop it in Settings.",
+  "setupLinkSharing": "The server passes your photos, dietary profile, meal descriptions, recent meals and a note you send in Edit meal (with that meal) to {company}. Confirming allows that; you can stop it in Settings.",
   "@setupLinkSharing": {
-    "description": "Second paragraph of the setup-link dialog: confirming counts as the AI consent for this plan (App Store 5.1.2(i)). {company} is aiConsentPlanCompany.",
+    "description": "Second paragraph of the setup-link dialog: confirming counts as the AI consent for this plan (App Store 5.1.2(i)), recorded under the current consent text (core/ai_consent.dart aiConsentWordingVersion), so it must list what that text adds: the Edit meal note (version 3). {company} is aiConsentPlanCompany.",
     "placeholders": {
       "company": {
         "type": "String"
@@ -3957,7 +3957,7 @@
   "@mealNoteHint": {
     "description": "Edit meal: the hint inside the note field (shown once the field is focused): the question the note answers, then two short examples, an amount and an added food. It wraps."
   },
-  "mealNoteFooter": "Your note and this meal's foods, numbers and earlier notes go to {provider}. Nothing is saved until you tap Save.",
+  "mealNoteFooter": "Your note and this meal's description, foods, numbers and earlier notes go to {provider}. Nothing is saved until you tap Save.",
   "@mealNoteFooter": {
     "description": "Edit meal: the line under the note field. {provider} is the current AI provider's short name (providerDisplayLabel). Must stay true to what core/meal_correction.dart composeMealCorrectionRequest sends: the note, the meal's description, foods and their four numbers, its totals, and the notes kept on this meal; no photo, no date or time, no other meal. The answer only fills the form.",
     "placeholders": {
@@ -4168,8 +4168,8 @@
   "@mealNoteRemoveLabel": {
     "description": "Edit meal: the tooltip and screen-reader label of the button beside a note kept on this meal. Removing is an unsaved change: Save removes it from the meal, and the meal's numbers stay as they are."
   },
-  "aiConsentUpdateLeadMealNote": "New: in Edit meal you can tell the AI what was different about a meal. Your note goes with that meal's description, foods and numbers and its earlier notes, and only when you tap Correct with AI. Not now sends nothing.",
+  "aiConsentUpdateLeadMealNote": "New: in Edit meal you can tell the AI what was different about a meal. Your note goes with that meal's description, foods and numbers and its earlier notes, and only when you tap Correct with AI. Not now sends no note.",
   "@aiConsentUpdateLeadMealNote": {
-    "description": "First paragraph (after aiConsentUpdateLead for a version-1 grant) of the aiConsentUpdateTitle dialog for a grant given before consent text version 3 (core/ai_consent.dart aiConsentMealNoteVersion): asked at the first note sent in Edit meal (ui/ai_consent.dart ensureMealNoteConsent), and in the app shell's question to a version-1 grant. Must stay true to mealNoteFooter and to aiConsentNotNow's label: Not now sends no note."
+    "description": "First paragraph (after aiConsentUpdateLead for a version-1 grant) of the aiConsentUpdateTitle dialog for a grant given before consent text version 3 (core/ai_consent.dart aiConsentMealNoteVersion): asked at the first note sent in Edit meal (ui/ai_consent.dart ensureMealNoteConsent), and in the app shell's question to a version-1 grant. Must stay true to mealNoteFooter and to aiConsentNotNow's label in both places: Not now sends no note. At launch Not now keeps the older grant (photos go on as before), so the line must not say that Not now sends nothing."
   }
 }

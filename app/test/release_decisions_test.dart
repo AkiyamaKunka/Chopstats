@@ -1082,9 +1082,11 @@ void main() {
         '**A note in Edit meal** sends what you typed, the notes you sent '
             'about that meal before, and its description, foods and numbers '
             '— no photo, no date or time, and no other meal.',
+        // Before the first note, not at it: a version-1 grant is asked at
+        // launch, with the note's line too, and not again at its first note.
         'If you allowed AI analysis before notes in Edit meal were added, '
-            'the app asks you once more the first time you send one, and the '
-            'note goes only after you allow it.',
+            'the app asks you once more before your first note is sent, and '
+            'the note goes only after you allow it.',
         '会保存你为它发送过的说明，以及每条的发送时间。',
         '并包含在导出文件和手机的备份中（iPhone 上也包括「iCloud 备份」），'
             '直到你在编辑页里删除它们，或删除这一餐。',
@@ -1093,8 +1095,8 @@ void main() {
             '估算。不发送照片、日期或时间，也不发送其他餐食。',
         '**编辑这一餐里的说明**会发送你输入的文字、你以前为这一餐发送过的说明，'
             '以及这一餐的描述、食物和数值，不发送照片、日期或时间，也不发送其他餐食。',
-        '如果你在加入「编辑这一餐」的说明修正之前就已允许 AI 分析，第一次发送说明时'
-            '应用会再询问你一次；你允许之后才会发送。',
+        '如果你在加入「编辑这一餐」的说明修正之前就已允许 AI 分析，在你第一次发送说明'
+            '之前，应用会再询问你一次；你允许之后才会发送。',
       ]) {
         expect(flat, contains(sentence), reason: sentence);
       }
@@ -1252,6 +1254,12 @@ void main() {
       expect(text, contains('a specific user-initiated action'));
       expect(text,
           contains("a prominent in-app disclosure and the user's consent"));
+      // Every user action that sends is named, the Edit meal note too.
+      expect(
+          text,
+          contains('picking or sharing a photo, tapping Describe, Fix, '
+              'Leftovers or Test This Provider, or Correct with AI in *Edit '
+              'meal*.'));
     });
   });
 

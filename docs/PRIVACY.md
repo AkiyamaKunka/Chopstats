@@ -391,8 +391,8 @@ nothing is sent to it until you tap **Allow**. Another provider, or
 another AI on your server, is a new recipient and is asked about again.
 Confirming a setup link for your own server counts as allowing it, and
 the link's dialog says so. If you allowed AI analysis before notes in Edit
-meal were added, the app asks you once more the first time you send one,
-and the note goes only after you allow it.
+meal were added, the app asks you once more before your first note is
+sent, and the note goes only after you allow it.
 
 **Withdrawing consent.** Settings › **Stop Sharing with …** (followed by
 the recipient's name) stops all sending to that recipient and turns off
@@ -533,7 +533,7 @@ date. Questions: see *Who we are* above, or open an issue at
 - **编辑这一餐里的说明**会发送你输入的文字、你以前为这一餐发送过的说明，以及这一餐的描述、食物和数值，不发送照片、日期或时间，也不发送其他餐食。
 - **餐厅营养查询**只有在你开启后才会使用，会按上文「**餐厅营养查询**」所述发送连锁店和食物名称，并会先单独征得你的同意。
 
-**先征得同意**。第一次向某个接收方发送任何内容之前，应用会弹出对话框，写明公司名称和要发送的内容；在你点「**允许**」之前，不会向它发送任何内容。换用其他服务商，或换用你服务器上的其他 AI，都算新的接收方，会再次询问。确认你自己服务器的设置链接即表示同意，链接的对话框里也会写明。如果你在加入「编辑这一餐」的说明修正之前就已允许 AI 分析，第一次发送说明时应用会再询问你一次；你允许之后才会发送。
+**先征得同意**。第一次向某个接收方发送任何内容之前，应用会弹出对话框，写明公司名称和要发送的内容；在你点「**允许**」之前，不会向它发送任何内容。换用其他服务商，或换用你服务器上的其他 AI，都算新的接收方，会再次询问。确认你自己服务器的设置链接即表示同意，链接的对话框里也会写明。如果你在加入「编辑这一餐」的说明修正之前就已允许 AI 分析，在你第一次发送说明之前，应用会再询问你一次；你允许之后才会发送。
 
 **撤回同意**。设置 › **停止发送给 …**（后面是接收方的名称）会停止向该接收方发送任何内容，并关闭「监控相册」；如果餐厅营养查询也是发给这个接收方，查询也会一并关闭（待处理的查询会被丢弃）；之后再向它发送任何内容（包括查询）前，应用都会重新询问。已经记录的餐食仍保留在你的手机上。已经发送出去的内容，应用无法收回：它们按该服务商自己的规定保存（或保存在你自己的服务器上）。
 

@@ -658,7 +658,9 @@ All done; this is what each one is and where it lives.
    grant below 3 is asked once more at its first note
    (`ensureMealNoteConsent`, the same update title, the note's line
    leading): Allow records 3 and the note goes; Not now sends nothing and
-   is asked again at the next note. A new grant records 3.
+   is asked again at the next note. A new grant records 3, a setup link's
+   too (its dialog lists the note). The note's line says only that Not
+   now sends no note: at launch Not now keeps the older grant.
 5. **Share extension purpose string** — **done.** The extension links
    Photos.framework (`receive_sharing_intent`'s `PHAsset` lookup), and the
    ITMS-90683 scan runs per bundle, so its `Info.plist` and en/zh-Hans

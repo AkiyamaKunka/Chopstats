@@ -585,7 +585,7 @@
   "setupLinkConfirm": "使用这台服务器",
   "setupLinkDone": "服务器已配置 —— 照片将由你的服务器分析。",
   "setupLinkInvalid": "这个配置链接无效。",
-  "setupLinkSharing": "服务器会把你的照片、饮食档案、餐食描述和最近的餐食转交给 {company}。确认即表示你同意；可以在设置里停止。",
+  "setupLinkSharing": "服务器会把你的照片、饮食档案、餐食描述、最近的餐食，以及你在「编辑这一餐」里发送的说明（连同那一餐）转交给 {company}。确认即表示你同意；可以在设置里停止。",
   "serverLoginRow": "服务器 Claude 登录",
   "serverLoginOk": "已登录 ✓",
   "serverLoginMissing": "未登录",
@@ -1097,7 +1097,7 @@
   "mealNoteHeader": "用一句话修正",
   "mealNoteLabel": "你的说明",
   "mealNoteHint": "哪里不一样？例如：「米饭只吃了一半」或「加一个煎蛋」",
-  "mealNoteFooter": "你的说明，以及这一餐的食物、数值和之前的说明，会发送给 {provider}。点「保存」之前不会保存任何改动。",
+  "mealNoteFooter": "你的说明，以及这一餐的描述、食物、数值和之前的说明，会发送给 {provider}。点「保存」之前不会保存任何改动。",
   "mealNoteSend": "让 AI 修正",
   "mealNoteAsking": "正在询问 {provider}…",
   "mealNoteStop": "停止",
@@ -1124,5 +1124,5 @@
   "mealNoteUnsentSave": "仍然保存",
   "mealNoteSavedHeader": "这一餐的说明",
   "mealNoteRemoveLabel": "删除这条说明",
-  "aiConsentUpdateLeadMealNote": "新增：在「编辑这一餐」里，你可以告诉 AI 这一餐哪里不一样。只有你点「让 AI 修正」时，才会发送你的说明，连同这一餐的描述、食物、数值和之前的说明。选择「暂不」不会发送任何内容。"
+  "aiConsentUpdateLeadMealNote": "新增：在「编辑这一餐」里，你可以告诉 AI 这一餐哪里不一样。只有你点「让 AI 修正」时，才会发送你的说明，连同这一餐的描述、食物、数值和之前的说明。选择「暂不」不会发送说明。"
 }

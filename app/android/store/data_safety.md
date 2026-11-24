@@ -137,7 +137,7 @@ country from Android first. That is a code change, not a form choice.
 - Photos and typed requests go to the AI service **the user set up with
   their own API key** (or their own server), right after a **specific
   user action**: picking or sharing a photo, tapping Describe, Fix,
-  Leftovers or Test This Provider.
+  Leftovers or Test This Provider, or Correct with AI in *Edit meal*.
 - Before the first send to a recipient the app shows a **consent
   dialog** that names the company, lists what is sent, and offers
   **Allow** / **Not now**; *Stop Sharing with …* in Settings withdraws
