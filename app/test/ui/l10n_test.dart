@@ -26,6 +26,8 @@ void main() {
     expect(find.text('身体'), findsOneWidget);
     expect(find.text('设置'), findsOneWidget);
     expect(find.text('Today'), findsNothing);
+    // The task's title, which Android's Recents shows (RECENTS-1).
+    expect(tester.widget<Title>(find.byType(Title)).title, '筷拍');
   });
 
   testWidgets('History day labels speak the app language '
@@ -76,6 +78,7 @@ void main() {
         CalorieTrackerApp(services: makeServices(settings: settings)));
     await tester.pumpAndSettle();
     expect(find.text('Today'), findsWidgets);
+    expect(tester.widget<Title>(find.byType(Title)).title, 'Chopstats');
 
     await tester.tap(find.text('Settings'));
     await tester.pumpAndSettle();
@@ -88,6 +91,8 @@ void main() {
     expect(settings.appLanguage, 'zh');
     expect(find.text('今天'), findsOneWidget); // tab label, live
     expect(find.text('Today'), findsNothing);
+    expect(tester.widget<Title>(find.byType(Title)).title, '筷拍',
+        reason: "the task's title follows, live (RECENTS-1)");
 
     // And back — the switch is symmetric, not a one-way door.
     await tester.ensureVisible(find.byKey(const Key('languageRow')));
@@ -97,5 +102,6 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Today'), findsOneWidget);
     expect(find.text('今天'), findsNothing);
+    expect(tester.widget<Title>(find.byType(Title)).title, 'Chopstats');
   });
 }

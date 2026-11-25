@@ -12,6 +12,7 @@ void main() {
         error: 'PlatformException(-25308)', onRetry: () async => attempts++));
     expect(find.text('Chopstats could not start.'), findsOneWidget);
     expect(find.text('Retry'), findsOneWidget);
+    expect(tester.widget<Title>(find.byType(Title)).title, 'Chopstats');
     expect(find.text('PlatformException(-25308)'), findsOneWidget,
         reason: 'the raw error stays, as a secondary line');
 
@@ -36,6 +37,8 @@ void main() {
     expect(find.text('PlatformException(-25308)'), findsOneWidget);
     expect(find.textContaining('CalorieTracker'), findsNothing);
     expect(find.text('Retry'), findsNothing);
+    // The task's title, which Android's Recents shows (RECENTS-1).
+    expect(tester.widget<Title>(find.byType(Title)).title, '筷拍');
   });
 
   testWidgets('no retry callback: no button, nothing to call',
