@@ -669,6 +669,35 @@ void main() {
     });
   });
 
+  // Edit meal's note (Correct with a note, owner 2026-11-24): the shell
+  // hands the app engine's executor — the kept-alive one on Android
+  // (di.dart) — to Today and to History, whose editors offer the note
+  // only with it. usual: s.usualFoods stays Today's last argument.
+  group('Edit meal note', () {
+    test('Today and History get the executor as the note corrector', () {
+      final app = _source('lib/ui/app.dart');
+      final today = _call(app, 'TodayScreen(');
+      expect(today, _wired(r'noteCorrector: noteCorrectorOf\(s\.executor\),'));
+      expect(today, _wired(r'usual: s\.usualFoods\)'));
+      final history = _call(app, 'HistoryScreen(');
+      expect(history,
+          _wired(r'noteCorrector: noteCorrectorOf\(s\.executor\)\)'));
+    });
+
+    test('History hands it to the day, and Today and the day to the editor',
+        () {
+      expect(_call(_source('lib/ui/screens/history_screen.dart'),
+              'DayDetailScreen('),
+          _wired(r'noteCorrector: widget\.noteCorrector,'));
+      for (final screen in ['today_screen.dart', 'day_detail_screen.dart']) {
+        expect(
+            _call(_source('lib/ui/screens/$screen'), 'MealEditorScreen('),
+            _wired(r'noteCorrector: widget\.noteCorrector,'),
+            reason: screen);
+      }
+    });
+  });
+
   group('lib/ui/app.dart (the resume catch-up)', () {
     test('is foregroundCatchUp, stopping on iOS once the app is left', () {
       final resume = _body(

@@ -12,6 +12,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:calorie_tracker/core/ai_consent.dart'
     show aiConsentWordingVersion, allAiConsentRoutes;
 import 'package:calorie_tracker/core/contracts.dart';
+import 'package:calorie_tracker/core/meal_correction.dart'
+    show MealCorrectionInput, MealNoChange;
 import 'package:calorie_tracker/core/server_transport.dart'
     show
         serverAddressRefused,
@@ -98,8 +100,28 @@ class FakeAnalyzer implements AnalyzerService {
   }
 }
 
-class FakeExecutor implements NlExecutor {
+class FakeExecutor implements NlExecutor, MealNoteCorrector {
   List<NlReply> nextReplies = const [NlReply('ok')];
+
+  /// A note in Edit meal: what [noteRefusal] answers (null: a note can be
+  /// sent), what [correctMeal] answers, every note sent with the meal it
+  /// was about, and a hook awaited before answering (a request in flight).
+  String? noteRefusalText;
+  MealNoteOutcome nextNoteOutcome =
+      const MealNoteOutcome(reply: MealNoChange(''));
+  final List<(MealCorrectionInput, String)> correctedNotes = [];
+  Future<void> Function()? onCorrect;
+
+  @override
+  String? noteRefusal() => noteRefusalText;
+
+  @override
+  Future<MealNoteOutcome> correctMeal(
+      MealCorrectionInput meal, String note) async {
+    correctedNotes.add((meal, note));
+    if (onCorrect != null) await onCorrect!();
+    return nextNoteOutcome;
+  }
   final List<String> handledTexts = [];
   final List<List<int>> confirmedDeletes = [];
   String confirmResult = 'Deleted.';

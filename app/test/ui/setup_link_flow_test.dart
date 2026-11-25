@@ -3,6 +3,8 @@
 // the server configured. Malformed links are refused with a message.
 import 'dart:async';
 
+import 'package:calorie_tracker/core/ai_consent.dart'
+    show aiConsentMealNoteVersion;
 import 'package:calorie_tracker/core/server_transport.dart';
 import 'package:calorie_tracker/core/setup_link.dart'
     show setupLinkRepeatWindow;
@@ -61,6 +63,12 @@ void main() {
     expect(find.textContaining('AI: Claude (server)'), findsOneWidget);
     expect(find.textContaining(': claude'), findsNothing);
     expect(find.textContaining('Plan'), findsNothing);
+    // Confirming is the consent, recorded under the current text: the
+    // dialog lists what that text adds, the Edit meal note.
+    expect(
+        find.textContaining('recent meals and a note you send in Edit meal '
+            '(with that meal) to Anthropic'),
+        findsOneWidget);
     expect(settings.serverBaseUrl, isNot('https://10.0.0.7'),
         reason: 'nothing changes before confirmation');
 
@@ -76,6 +84,9 @@ void main() {
     expect(settings.serverSetups, [('claude', 'https://10.0.0.7', key)]);
     expect(settings.updateCalls, 0);
     expect(settings.aiConsentWrites, [('server:claude', true)]);
+    expect(settings.aiConsentVersion('server:claude'),
+        greaterThanOrEqualTo(aiConsentMealNoteVersion),
+        reason: 'the first note asks nothing more');
     await links.close();
   });
 
@@ -100,6 +111,8 @@ void main() {
     expect(find.textContaining('AI：你服务器上的 GLM'), findsOneWidget);
     expect(find.textContaining('：glm'), findsNothing);
     expect(find.textContaining('套餐'), findsNothing);
+    expect(find.textContaining('以及你在「编辑这一餐」里发送的说明（连同那一餐）'),
+        findsOneWidget);
 
     await tester.tap(find.byKey(const Key('setupLinkConfirm')));
     await tester.pumpAndSettle();

@@ -29,11 +29,12 @@ import 'fakes.dart';
 /// The nl fake plus a failure reason, the way the real analyzers report it.
 class ExplainingAnalyzer extends FakeAnalyzer implements TextIntentExplainer {
   String? nextError;
+  bool nextNotJson = false;
 
   @override
   Future<TextIntentOutcome> textIntentOutcome(String prompt) async {
     lastPrompt = prompt;
-    return TextIntentOutcome(next, error: nextError);
+    return TextIntentOutcome(next, error: nextError, notJson: nextNotJson);
   }
 }
 
@@ -210,6 +211,19 @@ void main() {
       }
     });
 
+    // Only a note in Edit meal calls such an answer unusable
+    // (meal_correction_executor_test): here spec §4 step 4 stands.
+    test('an answer in prose keeps the spec §4 step 4 wording', () async {
+      analyzer
+        ..next = null
+        ..nextError = null
+        ..nextNotJson = true;
+      expect((await zh().handleText('x')).single.text, '❌ 联系 AI 失败，请重试。');
+      expect((await zh().describeMeal('一碗米饭')).error, '❌ 联系 AI 失败，请重试。');
+      expect((await en().handleText('x')).single.text,
+          '❌ Error contacting AI. Please try again.');
+    });
+
     test('a reply that parsed still runs, whatever the error field says',
         () async {
       analyzer
@@ -293,6 +307,55 @@ void main() {
           'GenerateRequestsPerDayPerProjectPerModel-FreeTier"}}',
           429));
       expect(s.isQuotaPaused, isTrue);
+    });
+
+    test('an answer in prose or a bare value says so; a failed request '
+        'and a parsed reply do not', () async {
+      String chat(String content) => jsonEncode({
+            'choices': [
+              {
+                'message': {'role': 'assistant', 'content': content}
+              }
+            ]
+          });
+      final s = await _settings(AiProvider.qwen);
+      Future<TextIntentOutcome> qwen(http.Response r) =>
+          (createQwenAnalyzer(s, client: MockClient((_) async => r))
+                  as TextIntentExplainer)
+              .textIntentOutcome('p');
+      for (final content in ['Sorry, which meal?', '"just a string"', '42']) {
+        final out = await qwen(http.Response(chat(content), 200));
+        expect(out.json, isNull, reason: content);
+        expect(out.notJson, isTrue, reason: content);
+        expect(out.error, isNull, reason: content);
+      }
+      expect((await qwen(http.Response(chat('{"intent": "chat"}'), 200)))
+          .notJson, isFalse);
+      expect((await qwen(http.Response('{"error":{"code":"x"}}', 500)))
+          .notJson, isFalse);
+
+      final g = await _settings(AiProvider.gemini);
+      Future<TextIntentOutcome> gemini(String text) => GeminiAnalyzer(g,
+              client: MockClient((_) async => http.Response(
+                  jsonEncode({
+                    'candidates': [
+                      {
+                        'content': {
+                          'parts': [
+                            {'text': text}
+                          ]
+                        }
+                      }
+                    ]
+                  }),
+                  200)))
+          .textIntentOutcome('p');
+      for (final text in ['Sorry, which meal?', 'true']) {
+        final out = await gemini(text);
+        expect(out.json, isNull, reason: text);
+        expect(out.notJson, isTrue, reason: text);
+      }
+      expect((await gemini('[{"intent": "chat"}]')).notJson, isFalse);
     });
 
     test('a parsed reply carries no error', () async {

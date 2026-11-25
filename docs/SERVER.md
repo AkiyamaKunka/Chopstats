@@ -389,7 +389,7 @@ The security shape is deliberate:
 
 - Plan credentials live only in the server's `.env`. The phone holds one upload key and nothing else. An app build is a shipping container, and nothing subscription-shaped is ever baked into it.
 - For a photo, the phone cannot supply the analysis prompt. The server composes its own. The phone supplies only data for it: a bounded dietary-profile appendix, that day's meal summaries, plus the day before's for a photo taken before 4 a.m., and the choice of plan, model, effort and reply language. A caller-authored prompt would be an instruction channel into a CLI.
-- A text request (Describe a meal, Fix or delete a meal) does carry its prompt from the phone. That endpoint runs the CLI with tools off.
+- A text request (Describe a meal, Fix or delete a meal, a note in Edit meal) does carry its prompt from the phone. That endpoint runs the CLI with tools off.
 - Replies carry an `analyzed_by` receipt and the app refuses a mismatch, so the wrong plan can never silently pay.
 - When the subscription token expires, the app drives the server's official OAuth re-connect from the phone. The secret never travels.
 
@@ -406,7 +406,7 @@ phone owns its own database.
 | --- | --- |
 | `POST /api/auth_check` | Free readiness probe: validates the key and reports which analysis backends are available, plus a `features` map of the newer contracts this server speaks (`estimate_confidence`, `restaurant_lookup`, `lookup_jobs`; an older server omits it and the app treats every feature as off). Never spends a CLI run. |
 | `POST /api/analyze_photo` | Analyze one photo. The server composes the prompt from its own `shared/` copy — the phone may contribute only a bounded dietary-profile appendix, never the prompt itself. |
-| `POST /api/text_intent` | Natural-language intent parsing for corrections and text-described meals. |
+| `POST /api/text_intent` | Natural-language intent parsing for corrections and text-described meals, and per-meal note corrections from Edit meal (the phone composes the prompt; nothing changes on the server). |
 | `POST /api/restaurant_lookup` | Queue a published-nutrition lookup for chain-restaurant items (off unless `CLAUDE_LOOKUP_ENABLED=1`). Structured fields only; `202 {job_id}` or `200` from the 24 h cache. |
 | `POST /api/restaurant_lookup/status` | `{job_id}` → `queued` / `running` / `done` (with the result) / `failed` / `unknown`. |
 | `POST /api/claude_auth/start` / `complete` / `cancel` | Phone-initiated OAuth re-connect for the server's Claude subscription. The PKCE verifier and token never leave the server. |

@@ -52,14 +52,32 @@ const Set<String> aiRoutesInMainlandChina = {
 /// - 1: the original text.
 /// - 2: a photo taken before 4 a.m. also carries the day before's meals
 ///   (B14, run 7).
+/// - 3: a note typed in Edit meal goes with that meal's description, foods
+///   and numbers, and the meal's earlier notes (owner 2026-11-24).
 ///
-/// When the text changes what is sent, bump this: the app shell then asks
-/// once more for a grant from an older version (ui/ai_consent.dart
-/// askAiConsentUpdate), and the new data waits for that answer.
-const int aiConsentWordingVersion = 2;
+/// When the text changes what is sent, bump this. A grant from an older
+/// version is then asked once more before the new data goes: by the app
+/// shell at launch for a change to what goes on its own
+/// ([aiConsentShellAskVersion]; ui/ai_consent.dart askAiConsentUpdate), or
+/// at the deliberate send the change adds (ui/ai_consent.dart
+/// ensureMealNoteConsent). The new data waits for that answer.
+const int aiConsentWordingVersion = 3;
 
 /// The first [aiConsentWordingVersion] that says a photo taken before
 /// 04:00 also carries the previous day's meals. A grant from before it
 /// keeps exactly what it agreed to: that day's meals only
 /// (AppSettings.previousDayLeftoverContext → PhotoPipeline).
 const int aiConsentPreviousDayVersion = 2;
+
+/// The first [aiConsentWordingVersion] that lists a note typed in Edit
+/// meal. A grant from before it is asked once more at the first note send
+/// (ui/ai_consent.dart ensureMealNoteConsent); nothing else it sends
+/// changes.
+const int aiConsentMealNoteVersion = 3;
+
+/// The newest consent text the app shell asks an older grant about at
+/// launch (ui/ai_consent.dart aiConsentUpdateNeeded): the B14 text, which
+/// changed what an automatic photo carries. A text that only adds a
+/// deliberate send — version 3, the Edit meal note — is asked about at
+/// that send instead, so a user who never sends one is not interrupted.
+const int aiConsentShellAskVersion = 2;

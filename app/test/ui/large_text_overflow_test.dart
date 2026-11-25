@@ -35,6 +35,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:calorie_tracker/core/contracts.dart';
+import 'package:calorie_tracker/core/meal_correction.dart' show kUserNotesKey;
 import 'package:calorie_tracker/l10n/app_localizations.dart';
 import 'package:calorie_tracker/services/assist/clients/lookup_client.dart'
     show LookupRecipient, LookupSupport;
@@ -399,6 +400,60 @@ void main() {
             await tester.pumpAndSettle();
             expect(tester.takeException(), isNull);
             expectLabelsUncut(tester, field);
+          }
+        });
+
+        // Correct with a note, the form's last block: its header, field
+        // (label and hint), footer and button, and the notes kept on the
+        // meal read at AX5 with nothing overflowing.
+        testWidgets('$lang: meal editor note section reads in full', (
+          tester,
+        ) async {
+          final meal = itemizedMeal();
+          final dao = FakeDao()
+            ..seed(Meal(
+                id: meal.id,
+                date: meal.date,
+                time: meal.time,
+                timestamp: meal.timestamp,
+                source: meal.source,
+                imageHash: meal.imageHash,
+                analysis: {
+                  ...meal.analysis,
+                  kUserNotesKey: [
+                    {
+                      'text': 'only half the rice, and no sauce on the side',
+                      'at': '2026-10-01T12:00:00.000Z',
+                    },
+                  ],
+                }));
+          await pumpAt(
+            tester,
+            lang,
+            MealEditorScreen(
+                dao: dao,
+                meal: dao.meals.first,
+                now: clock,
+                settings: FakeSettings(),
+                noteCorrector: FakeExecutor()),
+          );
+          final scrollable = find.byType(Scrollable).first;
+          for (final k in const [
+            'mealNoteHeader',
+            'mealNoteField',
+            'mealNoteFooter',
+            'mealNoteSend',
+            'mealNoteSaved0',
+          ]) {
+            await tester.scrollUntilVisible(find.byKey(Key(k)), 200,
+                scrollable: scrollable);
+            await tester.pumpAndSettle();
+            expect(tester.takeException(), isNull, reason: k);
+            expect(tester.getRect(find.byKey(Key(k))).right,
+                lessThanOrEqualTo(390), reason: k);
+            if (k == 'mealNoteField') {
+              expectLabelsUncut(tester, find.byKey(Key(k)));
+            }
           }
         });
 

@@ -550,7 +550,7 @@ void main() {
     dao.put(lateDinner());
     analyzer.nextPhotoOutcome = AnalysisOutcome(
         analysis: _leftoverReply(), isFood: true, wall: Duration.zero);
-    // Allowed under the consent text that says so (aiConsentWordingVersion 2).
+    // Allowed under the consent text that says so (aiConsentPreviousDayVersion).
     final out = await PhotoPipeline(
             dao: dao,
             analyzer: analyzer,

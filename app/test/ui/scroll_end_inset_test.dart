@@ -12,6 +12,7 @@
 // edge to edge.
 
 import 'package:calorie_tracker/core/contracts.dart';
+import 'package:calorie_tracker/core/meal_correction.dart' show kUserNotesKey;
 import 'package:calorie_tracker/l10n/app_localizations_en.dart';
 import 'package:calorie_tracker/services/photo/coverage.dart';
 import 'package:calorie_tracker/ui/diagnostics.dart';
@@ -238,6 +239,39 @@ final List<_Case> _cases = [
         ]));
       await tester.pumpWidget(MaterialApp(
           home: MealEditorScreen(dao: dao, meal: dao.meals.first)));
+      await tester.pumpAndSettle();
+    },
+    cells: null,
+  ),
+  (
+    // The note's section is the form's last block, with the notes kept on
+    // the meal last of all.
+    name: 'Edit meal with a note',
+    open: (tester) async {
+      final meal = foodMeal(id: 1, date: '2026-11-20', items: [
+        for (var i = 0; i < 6; i++) foodItem('Item $i', 100),
+      ]);
+      final dao = FakeDao()
+        ..seed(Meal(
+            id: meal.id,
+            date: meal.date,
+            time: meal.time,
+            timestamp: meal.timestamp,
+            source: meal.source,
+            imageHash: meal.imageHash,
+            analysis: {
+              ...meal.analysis,
+              kUserNotesKey: [
+                {'text': 'only half the rice', 'at': '2026-11-20T12:00:00Z'},
+                {'text': 'add a fried egg', 'at': '2026-11-20T12:05:00Z'},
+              ],
+            }));
+      await tester.pumpWidget(MaterialApp(
+          home: MealEditorScreen(
+              dao: dao,
+              meal: dao.meals.first,
+              settings: FakeSettings(),
+              noteCorrector: FakeExecutor())));
       await tester.pumpAndSettle();
     },
     cells: null,

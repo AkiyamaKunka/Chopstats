@@ -265,4 +265,47 @@ void main() {
           reason: 'the disclosure is laid out at full height, not squeezed');
     });
   }
+
+  // The Edit meal note's question to a version-1 grant: two lines of what
+  // is new (B14, then the note), the camera-roll notice and the full text,
+  // with Allow reachable and the text readable at AX5 on a 320 pt phone.
+  for (final locale in const [Locale('en'), Locale('zh')]) {
+    testWidgets('${locale.languageCode}: the Edit meal note question with '
+        'both new lines reads in full at AX5 on 320 pt', (tester) async {
+      final settings = FakeSettings(
+          apiKey: 'k', watcherEnabled: true, watcherDisclosureSeen: true)
+        ..aiConsentVersions = {};
+      await pumpApp(
+          tester,
+          Scaffold(
+            body: Builder(
+              builder: (context) => TextButton(
+                key: const Key('open'),
+                onPressed: () => ensureMealNoteConsent(context, settings),
+                child: const Text('open'),
+              ),
+            ),
+          ),
+          size: const Size(320, 568),
+          locale: locale,
+          scale: _ax5);
+      await tester.tap(find.byKey(const Key('open')));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      final dialog = find.byKey(const Key('mealNoteConsentDialog'));
+      expect(tester.widget<AlertDialog>(dialog).scrollable, isTrue);
+      expect(_hittable(tester, find.byKey(const Key('mealNoteConsentAllow'))),
+          isTrue);
+      final body = find.descendant(
+          of: dialog,
+          matching: find.byWidgetPredicate(
+              (w) => w is Text && (w.data ?? '').length > 400));
+      final scrollable =
+          find.descendant(of: dialog, matching: find.byType(Scrollable));
+      await tester.dragUntilVisible(
+          body.first, scrollable.first, const Offset(0, -80));
+      expect(tester.getRect(body.first).height, greaterThan(400),
+          reason: 'laid out at full height, not squeezed');
+    });
+  }
 }

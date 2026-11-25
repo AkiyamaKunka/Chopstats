@@ -215,7 +215,7 @@ bool _githubTagMatches(String pattern, String tag) {
 /// "Effective date:" line must say the same. Whoever merges a branch that
 /// changes the policy sets both to the merge date (docs/RELEASING.md § 6.8);
 /// this pin can only check that they agree, not that the date is new.
-const kPolicyEffectiveDate = '2026-11-21';
+const kPolicyEffectiveDate = '2026-11-24';
 
 /// x.y.z against x.y.z, number by number (1.10.0 is above 1.9.0).
 int _compareVersions(String a, String b) {
@@ -789,7 +789,10 @@ void main() {
       // upload key lane (android/legacy-key-host, #78, 2026-11-21) changed
       // it again: a Server upload key saved without its server address is
       // removed with Remove this key, its field being empty; if it merges
-      // on a later day, set both to that day too.
+      // on a later day, set both to that day too. The Edit meal note
+      // (feat/meal-note-correction, 2026-11-24) changed it again: what a
+      // note sends and that the notes are kept with the meal; it merges
+      // after the 1.8.0 prep, so set both to its merge day then.
       expect(
           RegExp(r'^Effective date: (\S+)$', multiLine: true)
               .allMatches(policy)
@@ -1057,6 +1060,62 @@ void main() {
       expect(zh, contains('• 你为描述一餐输入的文字\n'));
       expect(zh, contains('• 你为修正餐食输入的文字，连同最近 7 天的餐食'));
     });
+
+    // The Edit meal note (owner 2026-11-24): the policy and the consent
+    // text say what a note sends — the new note, that meal's earlier notes,
+    // its description, foods and numbers; no photo, date, time or other
+    // meal — that the notes are kept with the meal (exports and backups
+    // included) until removed or the meal is deleted, and that an older
+    // grant is asked once more at the first note.
+    test('an Edit meal note: what is sent, what is kept, asked first', () {
+      final flat = policy.replaceAll(RegExp(r'\s+'), ' ');
+      for (final sentence in [
+        'A meal you corrected with a note in **Edit meal** (*Correct with a '
+            'note*) keeps the notes you sent about it, each with when you '
+            'sent it.',
+        "included in your exports and your phone's backups (and in iCloud "
+            'Backup on iPhone), until you remove them in Edit meal or '
+            'delete the meal.',
+        'your note, the notes you sent about that meal before (marked as '
+            'already applied, so they are not applied again), and that one '
+            "meal's description and foods with their calorie, protein, "
+            'carbohydrate and fat estimates, as the editor shows them. No '
+            'photo, no date or time, and no other meal is sent.',
+        '**A note in Edit meal** sends what you typed, the notes you sent '
+            'about that meal before, and its description, foods and numbers '
+            '— no photo, no date or time, and no other meal.',
+        // Before the first note, not at it: a version-1 grant is asked at
+        // launch, with the note's line too, and not again at its first note.
+        'If you allowed AI analysis before notes in Edit meal were added, '
+            'the app asks you once more before your first note is sent, and '
+            'the note goes only after you allow it.',
+        '会保存你为它发送过的说明，以及每条的发送时间。',
+        '并包含在导出文件和手机的备份中（iPhone 上也包括「iCloud 备份」），'
+            '直到你在编辑页里删除它们，或删除这一餐。',
+        '你写的说明、你以前为这一餐发送过的说明（标明已经应用，不会再次应用），'
+            '以及编辑页上显示的这一餐的描述、食物和各自的热量、蛋白质、碳水、脂肪'
+            '估算。不发送照片、日期或时间，也不发送其他餐食。',
+        '**编辑这一餐里的说明**会发送你输入的文字、你以前为这一餐发送过的说明，'
+            '以及这一餐的描述、食物和数值，不发送照片、日期或时间，也不发送其他餐食。',
+        '如果你在加入「编辑这一餐」的说明修正之前就已允许 AI 分析，在你第一次发送说明'
+            '之前，应用会再询问你一次；你允许之后才会发送。',
+      ]) {
+        expect(flat, contains(sentence), reason: sentence);
+      }
+      expect(
+          AppLocalizationsEn().aiConsentBody('X'),
+          contains('• a note you type in Edit meal to correct a meal, with '
+              "that meal's description, foods and numbers and its earlier "
+              'notes (kept with the meal)\n'));
+      expect(
+          AppLocalizationsZh().aiConsentBody('X'),
+          contains('• 你在「编辑这一餐」里为修正一餐写的说明，连同这一餐的描述、'
+              '食物、数值和之前的说明（说明会随这一餐保存）\n'));
+      // No "From version" sentence: the feature is described additively,
+      // and release.yml's Android version gate is unaffected.
+      expect(flat, isNot(contains('From version 1.8')));
+      expect(flat, isNot(contains('从 1.8')));
+    });
   });
   group('Google Play listing (app/android/store/metadata)', () {
     const locales = ['en-US', 'zh-CN'];
@@ -1197,6 +1256,12 @@ void main() {
       expect(text, contains('a specific user-initiated action'));
       expect(text,
           contains("a prominent in-app disclosure and the user's consent"));
+      // Every user action that sends is named, the Edit meal note too.
+      expect(
+          text,
+          contains('picking or sharing a photo, tapping Describe, Fix, '
+              'Leftovers or Test This Provider, or Correct with AI in *Edit '
+              'meal*.'));
     });
   });
 

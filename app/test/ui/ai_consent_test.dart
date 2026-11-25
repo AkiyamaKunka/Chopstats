@@ -12,6 +12,8 @@ import 'package:calorie_tracker/l10n/app_localizations.dart';
 import 'package:calorie_tracker/l10n/app_localizations_en.dart';
 import 'package:calorie_tracker/l10n/app_localizations_zh.dart';
 import 'package:calorie_tracker/services/photo/coverage.dart';
+import 'package:calorie_tracker/core/ai_consent.dart'
+    show aiConsentWordingVersion;
 import 'package:calorie_tracker/ui/ai_consent.dart';
 import 'package:calorie_tracker/ui/app.dart';
 import 'package:calorie_tracker/ui/photo_pipeline.dart';
@@ -150,6 +152,26 @@ void main() {
       expect(t, contains('leftover photos'));
       expect(t, contains('never receives'));
       expect(t, isNot(contains('mainland China')));
+    });
+
+    // Wording version 3 (owner 2026-11-24): a note typed in Edit meal goes
+    // with that one meal's description, foods and numbers, and the notes
+    // kept on it — right after the Fix bullet, in both languages.
+    test('lists the Edit meal note after the Fix bullet', () {
+      expect(
+          en.aiConsentBody('X'),
+          contains('• what you type to fix a meal, with your meals from the '
+              'last 7 days\n• a note you type in Edit meal to correct a '
+              "meal, with that meal's description, foods and numbers and its "
+              'earlier notes (kept with the meal)\n\nChopstats has no '
+              'server of its own'));
+      expect(
+          zh.aiConsentBody('X'),
+          contains('• 你为修正餐食输入的文字，连同最近 7 天的餐食\n'
+              '• 你在「编辑这一餐」里为修正一餐写的说明，连同这一餐的描述、食物、数值和'
+              '之前的说明（说明会随这一餐保存）\n\n筷拍没有自己的服务器'));
+      expect(aiConsentWordingVersion, 3,
+          reason: 'a change to what the text says is sent bumps the version');
     });
 
     test('a server plan names the server AND the company behind it', () {
@@ -1469,7 +1491,9 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.textContaining('ByteDance Volcengine (Doubao)'),
         findsOneWidget);
-    expect(find.textContaining('meal descriptions and recent meals'),
+    expect(
+        find.textContaining('meal descriptions, recent meals and a note you '
+            'send in Edit meal'),
         findsOneWidget);
     // This confirmation is the consent: it says where the plan's company
     // processes the data, as the consent dialog does (PRIVACY.md).

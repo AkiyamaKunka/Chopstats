@@ -1,6 +1,6 @@
 # Chopstats · 筷拍 — Privacy Policy
 
-Effective date: 2026-11-21
+Effective date: 2026-11-24
 
 [English](#english) · [中文](#中文)
 
@@ -73,6 +73,12 @@ children.
   day), as described under "What is sent, and to whom". Which foods you hid
   from **My usual foods** and which offers you turned down are kept with
   the app's settings as short codes, not food names.
+- A meal you corrected with a note in **Edit meal** (*Correct with a
+  note*) keeps the notes you sent about it, each with when you sent it.
+  They are part of the meal: listed in Edit meal, sent again with that
+  meal's next note (see "What is sent, and to whom"), and included in your
+  exports and your phone's backups (and in iCloud Backup on iPhone), until
+  you remove them in Edit meal or delete the meal.
 
 The app contains no analytics, no crash reporting, no advertising and no
 tracking SDK, and it does not use your data to track you across apps or
@@ -155,6 +161,13 @@ HTTPS connection.
   the last two log a weight or an activity): your text, today's date, and
   the descriptions, items, dates, times and calorie estimates of your meals
   from the last 7 days so the AI can find the meal you mean.
+- *Correct a meal with a note* (in **Edit meal**, for example "only half
+  the rice" or "add a fried egg"): your note, the notes you sent about that
+  meal before (marked as already applied, so they are not applied again),
+  and that one meal's description and foods with their calorie, protein,
+  carbohydrate and fat estimates, as the editor shows them. No photo, no
+  date or time, and no other meal is sent. The answer fills the editor;
+  nothing is saved until you tap **Save**.
 
 The connection check in Settings contacts only the selected service (or
 your server) and sends a fixed test message and a built-in test image, plus
@@ -319,7 +332,9 @@ server holding it, Chopstats copies it to **your own iCloud Drive**.
 ### Deleting your data
 
 Delete meals inside the app (My usual foods and your usual numbers are
-worked out from them, so they change with them), use
+worked out from them, so they change with them), remove a note you sent
+about a meal in its Edit meal and tap **Save** (deleting the meal deletes
+its notes too), use
 **Clear learned places** (Settings › Restaurant nutrition; on Android
 **Clear saved lookup answers**) to delete the places the restaurant lookup
 learned and its saved answers, or uninstall the app to delete what it
@@ -363,6 +378,9 @@ What that recipient receives:
   meals.
 - **Fix or delete a meal** sends what you typed, today's date and your
   meals from the last 7 days.
+- **A note in Edit meal** sends what you typed, the notes you sent about
+  that meal before, and its description, foods and numbers — no photo, no
+  date or time, and no other meal.
 - **Restaurant nutrition lookup**, only if you turn it on, sends chain and
   food names as described under *Restaurant nutrition lookup* above, and
   asks for its own consent first.
@@ -372,7 +390,9 @@ the app asks in a dialog that names the company and lists what is sent;
 nothing is sent to it until you tap **Allow**. Another provider, or
 another AI on your server, is a new recipient and is asked about again.
 Confirming a setup link for your own server counts as allowing it, and
-the link's dialog says so.
+the link's dialog says so. If you allowed AI analysis before notes in Edit
+meal were added, the app asks you once more before your first note is
+sent, and the note goes only after you allow it.
 
 **Withdrawing consent.** Settings › **Stop Sharing with …** (followed by
 the recipient's name) stops all sending to that recipient and turns off
@@ -419,6 +439,7 @@ date. Questions: see *Who we are* above, or open an issue at
 - 每一条用照片记录的餐食都会保存一条照片如何拍摄的简短说明：是否来自 Meta 眼镜、是怎样识别出来的，照片是否带有位置、位置的精度，以及定位时间与拍摄时间相差多久——绝不记录位置本身——还有一个由拍摄时间和相机生成的简短代码，用来识别同一次拍摄的两份副本。与上面的 Meta 眼镜记录不同，这条说明是餐食的一部分：会包含在导出文件和手机的备份中。
 - 仅当你开启「**餐厅营养**」查询时：你确认过或标记为不对的餐厅，以及你用「不是餐厅的」标记过的地点（每个都按约 100 米的范围保存，最长 180 天；只在会使用照片位置的 iPhone 上才有）、还在等待结果的查询、保存的查询结果（找到连锁店公布数值的最长保存一年，其他的最长 30 天；每条都记录最后一次使用的时间，空间不够时先删除最久没用的；你拒绝过的会被标记，之后只作为建议）、哪些被更新的餐你还没有打开过，以及最近 20 次查询决定的记录（只有结果代码和热量数字）。这些不会进入手机的备份，也不会被导出。设置中的「**清除已记住的地点**」会删除这些地点、保存的查询结果和还在等待的查询。在不保存地点的 Android 上，「**清除保存的查询结果**」会删除保存的查询结果和还在等待的查询。
 - 「**我常吃的**」和「**你平时的数值**」都是在手机上根据你最近 90 天记录的餐食算出来的：哪些食物你常吃，以及你自己为某种食物设定的数值（在编辑页里，或点按「**采用**」）。这一餐会在该食物上保存一个小标记，说明数值是你设定的，以及你改过名的食物最初由 AI 给出的名称。算出这些内容不会发送任何东西：不调用 AI，也不查询。用它们记录或修改的餐食之后和其他餐食一样：当天你再记录照片时（第二天凌晨 4 点前拍的照片也一样），它的简短摘要会一起发送，见「发送了什么、发给谁」。你在「我常吃的」里隐藏了哪些食物、拒绝过哪些建议，会以简短代码（不是食物名称）和设置一起保存。
+- 你在「**编辑这一餐**」里用说明修正过的餐食（「**用一句话修正**」），会保存你为它发送过的说明，以及每条的发送时间。这些说明是餐食的一部分：会显示在编辑页里，在这一餐下一次发送说明时一起发送（见「发送了什么、发给谁」），并包含在导出文件和手机的备份中（iPhone 上也包括「iCloud 备份」），直到你在编辑页里删除它们，或删除这一餐。
 
 应用不包含任何统计分析、崩溃上报、广告或追踪 SDK，也不会利用你的数据在其他应用或网站之间追踪你。
 
@@ -448,6 +469,7 @@ date. Questions: see *Who we are* above, or open an issue at
 
 - *文字描述一餐*（例如「我吃了一碗面」）：你输入的文字和今天的日期，不发送其他餐食。
 - *修改或删除某餐*（例如「那碗面其实是烧鸭饭」、「删掉午饭」、「我体重 72 公斤」或「跑 5 公里消耗了 450 千卡」；后两句会记录一次体重或一项活动）：你输入的文字、今天的日期，以及最近 7 天餐食的描述、食物、日期、时间和热量估算，便于 AI 找到你指的那一餐。
+- *在「编辑这一餐」里用一句话修正*（例如「米饭只吃了一半」或「加一个煎蛋」）：你写的说明、你以前为这一餐发送过的说明（标明已经应用，不会再次应用），以及编辑页上显示的这一餐的描述、食物和各自的热量、蛋白质、碳水、脂肪估算。不发送照片、日期或时间，也不发送其他餐食。AI 的结果会填进编辑页，你点「**保存**」之前不会保存。
 
 设置中的连接检测只会访问所选服务（或你的服务器），发送一条固定的测试消息和一张内置的测试图片；如果你填写了饮食档案，它会随测试图片一起发送。不会发送你的任何照片或餐食。
 
@@ -493,7 +515,7 @@ date. Questions: see *Who we are* above, or open an issue at
 
 ### 删除数据
 
-在应用内删除餐食（「我常吃的」和你平时的数值都根据餐食算出，会随之改变），用「**清除已记住的地点**」（设置 › 餐厅营养；Android 上是「**清除保存的查询结果**」）删除餐厅查询记住的地点和保存的查询结果，或卸载应用以删除它在手机上保存的数据。iOS 可能会在应用删除后仍把 API Key 留在钥匙串中，所以如果也要删除它们，请先在 设置 › AI 服务 里清除你填写的每一个 Key（以及「你自己的服务器」里的「**服务器上传密钥**」；如果那里显示密钥「保存时没有记下服务器地址」，它的输入框是空的，请改点下面的「**删除此密钥**」）。在 iPhone 上，可以在 设置 › 你的数据 里删除 iCloud 备份（关闭「iCloud 备份」时也会询问），或在「文件」App 的 iCloud 云盘 › Chopstats 里删除；卸载应用不会删除它。你导出的文件、你自己备份中的副本，以及已经发送给你所选 AI 服务的内容，分别由它们现在所在的位置（你的文件、你的备份或该服务商的政策）决定。
+在应用内删除餐食（「我常吃的」和你平时的数值都根据餐食算出，会随之改变），在这一餐的编辑页里删除你为它发送过的说明后点「**保存**」（删除这一餐也会删除它的说明），用「**清除已记住的地点**」（设置 › 餐厅营养；Android 上是「**清除保存的查询结果**」）删除餐厅查询记住的地点和保存的查询结果，或卸载应用以删除它在手机上保存的数据。iOS 可能会在应用删除后仍把 API Key 留在钥匙串中，所以如果也要删除它们，请先在 设置 › AI 服务 里清除你填写的每一个 Key（以及「你自己的服务器」里的「**服务器上传密钥**」；如果那里显示密钥「保存时没有记下服务器地址」，它的输入框是空的，请改点下面的「**删除此密钥**」）。在 iPhone 上，可以在 设置 › 你的数据 里删除 iCloud 备份（关闭「iCloud 备份」时也会询问），或在「文件」App 的 iCloud 云盘 › Chopstats 里删除；卸载应用不会删除它。你导出的文件、你自己备份中的副本，以及已经发送给你所选 AI 服务的内容，分别由它们现在所在的位置（你的文件、你的备份或该服务商的政策）决定。
 
 ### 第三方与你的同意
 
@@ -508,9 +530,10 @@ date. Questions: see *Who we are* above, or open an issue at
 - **剩菜照片**会附带它对应的那一餐。
 - **文字描述一餐**只发送你输入的文字和今天的日期，不发送其他餐食。
 - **修改或删除某餐**会发送你输入的文字、今天的日期和最近 7 天的餐食。
+- **编辑这一餐里的说明**会发送你输入的文字、你以前为这一餐发送过的说明，以及这一餐的描述、食物和数值，不发送照片、日期或时间，也不发送其他餐食。
 - **餐厅营养查询**只有在你开启后才会使用，会按上文「**餐厅营养查询**」所述发送连锁店和食物名称，并会先单独征得你的同意。
 
-**先征得同意**。第一次向某个接收方发送任何内容之前，应用会弹出对话框，写明公司名称和要发送的内容；在你点「**允许**」之前，不会向它发送任何内容。换用其他服务商，或换用你服务器上的其他 AI，都算新的接收方，会再次询问。确认你自己服务器的设置链接即表示同意，链接的对话框里也会写明。
+**先征得同意**。第一次向某个接收方发送任何内容之前，应用会弹出对话框，写明公司名称和要发送的内容；在你点「**允许**」之前，不会向它发送任何内容。换用其他服务商，或换用你服务器上的其他 AI，都算新的接收方，会再次询问。确认你自己服务器的设置链接即表示同意，链接的对话框里也会写明。如果你在加入「编辑这一餐」的说明修正之前就已允许 AI 分析，在你第一次发送说明之前，应用会再询问你一次；你允许之后才会发送。
 
 **撤回同意**。设置 › **停止发送给 …**（后面是接收方的名称）会停止向该接收方发送任何内容，并关闭「监控相册」；如果餐厅营养查询也是发给这个接收方，查询也会一并关闭（待处理的查询会被丢弃）；之后再向它发送任何内容（包括查询）前，应用都会重新询问。已经记录的餐食仍保留在你的手机上。已经发送出去的内容，应用无法收回：它们按该服务商自己的规定保存（或保存在你自己的服务器上）。
 

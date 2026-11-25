@@ -35,6 +35,7 @@ class DayDetailScreen extends StatefulWidget {
     this.mealInUse,
     this.restaurantAssist,
     this.settings,
+    this.noteCorrector,
     this.revealMealId,
   });
 
@@ -52,6 +53,10 @@ class DayDetailScreen extends StatefulWidget {
   /// its mode and consent; null in tests.
   final RestaurantAssistControls? restaurantAssist;
   final SettingsStore? settings;
+
+  /// Handed to the editor: its note ("Correct with a note"); null shows
+  /// none.
+  final MealNoteCorrector? noteCorrector;
 
   /// A meal of this day the user asked to see (the shell's reveal,
   /// ui/meal_reveal.dart): brought on screen and briefly ringed once the
@@ -117,6 +122,7 @@ class _DayDetailScreenState extends State<DayDetailScreen>
         inUse: widget.mealInUse,
         assist: widget.restaurantAssist,
         settings: widget.settings,
+        noteCorrector: widget.noteCorrector,
         mealsChanged: mealsChangedSignal,
       ),
     ));

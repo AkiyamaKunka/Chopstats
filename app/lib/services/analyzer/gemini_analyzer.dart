@@ -544,7 +544,7 @@ class GeminiAnalyzer implements AnalyzerService, TextIntentExplainer {
     try {
       parsed = parseAiJson(text);
     } on FormatException {
-      return const TextIntentOutcome(null);
+      return const TextIntentOutcome(null, notJson: true); // prose
     }
     if (parsed is Map) {
       return TextIntentOutcome(Map<String, dynamic>.from(parsed));
@@ -554,7 +554,8 @@ class GeminiAnalyzer implements AnalyzerService, TextIntentExplainer {
     // treats a map with no recognized single intent and a non-empty actions
     // list exactly like a bare array.
     if (parsed is List) return TextIntentOutcome({'actions': parsed});
-    return const TextIntentOutcome(null); // scalar JSON: unusable response
+    // Scalar JSON: an unusable response.
+    return const TextIntentOutcome(null, notJson: true);
   }
 
   @override

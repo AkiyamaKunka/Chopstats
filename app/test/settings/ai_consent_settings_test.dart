@@ -122,10 +122,12 @@ void main() {
   // photo taken before 4 a.m. also carries the day before's meals), so each
   // grant remembers the text it was given under.
   group('the consent text a grant was given under', () {
-    test('the current text is version 2 and is what sends the previous '
-        'day', () {
-      expect(aiConsentWordingVersion, 2);
+    test('the current text is version 3: version 2 sends the previous day, '
+        'version 3 the Edit meal note, and the shell asks only up to 2', () {
+      expect(aiConsentWordingVersion, 3);
       expect(aiConsentPreviousDayVersion, 2);
+      expect(aiConsentMealNoteVersion, 3);
+      expect(aiConsentShellAskVersion, 2);
     });
 
     test('a new grant records the current text, across a reload', () async {
@@ -133,8 +135,8 @@ void main() {
       expect(s.aiConsentVersion('gemini'), 0, reason: 'not allowed');
       await s.setAiConsent('gemini', granted: true);
       expect(s.aiConsentVersion('gemini'), aiConsentWordingVersion);
-      expect(prefs.getStringList(_kVersions), ['gemini=2']);
-      expect((await _reload()).aiConsentVersion('gemini'), 2);
+      expect(prefs.getStringList(_kVersions), ['gemini=3']);
+      expect((await _reload()).aiConsentVersion('gemini'), 3);
       expect(s.previousDayLeftoverContext, isTrue);
     });
 
@@ -150,7 +152,7 @@ void main() {
           reason: 'reading writes nothing');
       // Allowing it again (the update question) records the new text.
       await s.setAiConsent('gemini', granted: true);
-      expect(s.aiConsentVersion('gemini'), 2);
+      expect(s.aiConsentVersion('gemini'), 3);
       expect(s.aiConsentVersion('server:claude'), 1, reason: 'per recipient');
       expect(s.previousDayLeftoverContext, isTrue);
     });
@@ -169,7 +171,7 @@ void main() {
       expect(bg.previousDayLeftoverContext, isFalse,
           reason: 'the background snapshot until it re-reads');
       await bg.reloadAiConsent();
-      expect(bg.aiConsentVersion('gemini'), 2);
+      expect(bg.aiConsentVersion('gemini'), 3);
       expect(bg.previousDayLeftoverContext, isTrue);
       // And Stop Sharing in the open app takes both away again.
       await app.setAiConsent('gemini', granted: false);
@@ -205,7 +207,7 @@ void main() {
       expect(prefs.getStringList(_kDeclined), isEmpty);
       expect(s.previousDayLeftoverContext, isFalse);
       await s.setAiConsent('gemini', granted: true);
-      expect(s.aiConsentVersion('gemini'), 2);
+      expect(s.aiConsentVersion('gemini'), 3);
       expect(s.previousDayLeftoverContext, isTrue);
     });
 
@@ -224,8 +226,23 @@ void main() {
       expect(s.aiConsentVersion('gemini'), 1);
       expect(s.previousDayLeftoverContext, isFalse);
       expect(prefs.getStringList(_kRoutes), ['gemini', 'openai']);
-      expect(prefs.getStringList(_kDeclined), ['gemini=2']);
+      expect(prefs.getStringList(_kDeclined), ['gemini=3']);
       expect((await _reload()).aiConsentUpdateDeclined('gemini'), isTrue);
+    });
+
+    // The Edit meal note (version 3) is asked about at its own send, never
+    // by the shell (aiConsentShellAskVersion 2): a Not now the shell got
+    // for the B14 text, stored as 2 by the version before this one, still
+    // silences the shell, and nothing here says the note's text was
+    // answered.
+    test('a Not now to the B14 question (stored as 2) still silences the '
+        'shell', () async {
+      final (s, _, _) = await freshSettings(initial: {
+        _kRoutes: ['gemini'],
+        _kDeclined: ['gemini=2'],
+      });
+      expect(s.aiConsentVersion('gemini'), 1);
+      expect(s.aiConsentUpdateDeclined('gemini'), isTrue);
     });
 
     test('an answer to an older update does not silence a newer one',

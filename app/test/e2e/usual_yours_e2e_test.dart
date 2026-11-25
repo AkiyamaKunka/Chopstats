@@ -13,10 +13,14 @@
 //     preview                            an unedited describe-preview row
 //   a meal typed in by hand              a correction on the Fix screen
 //   Use                                  a model reply that claims a mark
-//                                        a name given to the model's totals
-//                                        Use on a kcal-only record
+//   a number changed after a note's      a name given to the model's totals
+//     correction in Edit meal            Use on a kcal-only record
 //                                        a re-log of a meal that was never
 //                                          the owner's
+//                                        a note's correction in Edit meal
+//                                          (the AI's numbers), saved as is
+//
+// (The two Edit meal note rows are their own shorter story, below.)
 //
 // Then the whole log is exported and imported onto a second, empty phone:
 // the marks and the re-logs arrive, and nothing is trusted there that was
@@ -660,5 +664,131 @@ void main() {
         l.usualItemLine('Greek yogurt', '140', '180'));
     expect(chipOf(barThere), findsNothing);
     expect(chipOf(bagelThere), findsNothing);
+  });
+
+  // Correct with a note (Edit meal): the numbers a note's correction fills
+  // in are the AI's — saved as they are, they teach nothing; a number the
+  // owner changes after it is theirs and teaches. Through the real
+  // executor, prompt and parser (the scripted model answers the patch).
+  testWidgets('a note in Edit meal: the AI\'s numbers teach nothing; a '
+      'number changed after them teaches', (tester) async {
+    final l = copyFor(const Locale('en'));
+    final phone = await Phone.boot(DateTime(2026, 10, 5, 12, 0));
+    addTearDown(phone.shutDown);
+
+    Future<int> photoLands(Map<String, dynamic> reply) async {
+      final id = await phone.photo(reply);
+      await tester.pumpAndSettle();
+      return id;
+    }
+
+    Finder card(int id) => find.byKey(ValueKey('meal$id'));
+    Finder chipOf(int id) => find.descendant(
+        of: card(id), matching: find.byKey(const Key('usualChip')));
+
+    Future<void> correctWithNote(
+        int id, String title, String note, Map<String, dynamic> reply) async {
+      await tester.tap(
+          find.descendant(of: card(id), matching: find.text(title)));
+      await tester.pumpAndSettle();
+      expect(find.byType(MealEditorScreen), findsOneWidget);
+      phone.ai.nextText = reply;
+      await tester.scrollUntilVisible(
+          find.byKey(const Key('mealNoteField')), 200,
+          scrollable: find
+              .descendant(
+                  of: find.byType(MealEditorScreen),
+                  matching: find.byType(Scrollable))
+              .first);
+      await tester.enterText(find.byKey(const Key('mealNoteField')), note);
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('mealNoteSend')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('mealNoteChanges')), findsOneWidget);
+      expect(phone.ai.lastPrompt, contains('"new_note":"$note"'));
+    }
+
+    Future<void> save() async {
+      await tester.tap(find.byKey(const Key('saveMealButton')));
+      await tester.pumpAndSettle();
+      expect(find.byType(MealEditorScreen), findsNothing);
+    }
+
+    await pumpApp(tester, phone);
+
+    // 12:00 Ramen; the note says it was a small bowl, and it is saved so.
+    final ramen = await photoLands(aiSays(
+        [foodItem('Ramen', 600, p: 25, c: 70, f: 22)],
+        description: 'Ramen'));
+    await correctWithNote(ramen, 'Ramen', 'it was a small bowl', {
+      'status': 'corrected',
+      'reason': 'A small bowl.',
+      'changed': [
+        {
+          'id': 0,
+          'estimated_calories': 450,
+          'protein_g': 19,
+          'carbs_g': 52,
+          'fat_g': 16
+        },
+      ],
+    });
+    await save();
+    expect(await phone.item(ramen), foodItem('Ramen', 450, p: 19, c: 52, f: 16),
+        reason: 'no mark: the numbers are the AI\'s');
+    expect((await phone.analysis(ramen))['user_notes'], [
+      {
+        'text': 'it was a small bowl',
+        'at': DateTime(2026, 10, 5, 12, 0).toUtc().toIso8601String(),
+      },
+    ]);
+
+    // 19:00 Dumplings; the note's numbers, then the owner's own kcal.
+    phone.now = DateTime(2026, 10, 5, 19, 0);
+    final dumplings = await photoLands(aiSays(
+        [foodItem('Dumplings', 400, p: 18, c: 40, f: 16)],
+        description: 'Dumplings'));
+    await correctWithNote(dumplings, 'Dumplings', 'there were ten, not eight', {
+      'status': 'corrected',
+      'changed': [
+        {
+          'id': 0,
+          'estimated_calories': 500,
+          'protein_g': 22,
+          'carbs_g': 50,
+          'fat_g': 20
+        },
+      ],
+    });
+    await tester.enterText(find.byKey(const Key('itemCal0')), '520');
+    await tester.pump();
+    await save();
+    expect((await phone.item(dumplings))['user'], {
+      'set': true,
+      'at': usualStamp(phone.now),
+      'n': [520, 22, 50, 20],
+      'qty': 1,
+    });
+
+    // The next day: Ramen again is offered nothing; Dumplings again is
+    // offered the owner's 520.
+    await dismissSnackBar(tester);
+    phone.now = DateTime(2026, 10, 6, 12, 0);
+    await reopen(tester);
+    final ramen2 = await photoLands(aiSays(
+        [foodItem('Ramen', 600, p: 25, c: 70, f: 22)],
+        description: 'Ramen'));
+    expect(chipOf(ramen2), findsNothing);
+    final dumplings2 = await photoLands(aiSays(
+        [foodItem('Dumplings', 400, p: 18, c: 40, f: 16)],
+        description: 'Dumplings'));
+    expect(chipOf(dumplings2), findsOneWidget);
+    expect(
+        tester
+            .widget<Text>(find.descendant(
+                of: chipOf(dumplings2),
+                matching: find.byKey(const Key('usualChipText'))))
+            .data,
+        l.usualItemLine('Dumplings', '400', '520'));
   });
 }

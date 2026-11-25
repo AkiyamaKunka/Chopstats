@@ -374,14 +374,24 @@ void main() {
       // The rows just above it are the screen's own (its fields).
       expect(_offColour(shot, 2200, 2274, _chrome(theme)), greaterThan(0));
 
-      // The end of the scroll: Add item, the last row, ends above the band.
+      // The end of the scroll: the last control ends above the band —
+      // Correct with AI, the note's button, since the shell's executor
+      // corrects a meal from a note (it was Add item before).
       final scroll = tester.state<ScrollableState>(find
           .descendant(
               of: find.byType(MealEditorScreen),
               matching: find.byType(Scrollable))
           .first);
-      scroll.position.jumpTo(scroll.position.maxScrollExtent);
-      await tester.pumpAndSettle();
+      // The list estimates its end until it has laid out its last child
+      // (the note's block, one child): jump until the end holds.
+      for (var end = -1.0; end != scroll.position.maxScrollExtent;) {
+        end = scroll.position.maxScrollExtent;
+        scroll.position.jumpTo(end);
+        await tester.pumpAndSettle();
+      }
+      expect(find.byKey(const Key('mealNoteSend')), findsOneWidget);
+      expect(tester.getRect(find.byKey(const Key('mealNoteSend'))).bottom,
+          lessThanOrEqualTo(barTop));
       expect(tester.getRect(find.byKey(const Key('addItemRow'))).bottom,
           lessThanOrEqualTo(barTop));
     });

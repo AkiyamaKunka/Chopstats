@@ -40,19 +40,33 @@
 /// .accept); Keep AI estimate writes nothing. Saving marks the rows whose
 /// numbers the user changed as theirs (meal_edit_logic.dart), and a
 /// describe preview starts without any mark its model wrote.
+///
+/// Correct with a note (owner 2026-11-24; a stored meal opened from Today
+/// or History, any date): the user types what was different, and Correct
+/// with AI sends the note with the meal as the form shows it and its
+/// earlier notes — text only, never the photo (core/meal_correction.dart,
+/// through MealNoteCorrector). It writes nothing: the answer (a patch)
+/// fills the form as unsaved edits, a card lists every change with Undo,
+/// and Save stays the only write, the same compare-and-set. While the AI
+/// answers the form is read-only and Save waits; Stop drops the answer.
+/// The notes of the corrections the saved form still holds are kept with
+/// the meal (analysis.user_notes) and listed here, each removable; a later
+/// note sends them again as already applied.
 library;
 
 import 'dart:convert' show jsonEncode;
-import 'dart:math' show min;
+import 'dart:math' show max, min;
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show RenderAbstractViewport;
 import 'package:url_launcher/url_launcher.dart' as launcher;
 
 import '../../core/coerce.dart'
     show addCalendarDays, finiteAnalysis, isFoodTruthy, normalizeImageHash;
 import '../../core/contracts.dart';
+import '../../core/meal_correction.dart';
 import '../../core/restaurant_assist_logic.dart'
     show acceptAssistSuggestion, dropAssistClaims, normalizeSourceUrl;
 import '../../services/assist/meal_assist.dart'
@@ -68,17 +82,20 @@ import '../../services/photo/filename_dates.dart'
     show captureWallClock, exifWallAndOffset;
 import '../../services/photo/glasses.dart'
     show captureAnalysis, isMetaGlassesAnalysis;
+import '../../core/server_transport.dart' show serverAddressRefused;
 import '../../services/usual/usual_foods.dart';
+import '../ai_consent.dart' show ensureMealNoteConsent;
 import '../assist_lookup_text.dart';
 import '../app_formats.dart';
 import '../assist_view.dart';
-import '../format.dart' show formatKcal, isoDate;
+import '../format.dart' show formatKcal, formatOneDecimal, isoDate;
 import '../l10n.dart';
 import '../large_text.dart';
 import '../meal_edit_logic.dart';
 import '../meal_in_use.dart';
+import '../provider_names.dart' show providerDisplayLabel;
 import '../restaurant_assist_controls.dart';
-import '../services.dart' show SettingsStore;
+import '../services.dart' show SettingsStore, serverKeyForOtherAddress;
 import '../widgets/assist_source_card.dart';
 import '../widgets/chain_picker_sheet.dart';
 import '../widgets/glasses_badge.dart';
@@ -87,10 +104,14 @@ import '../widgets/restaurant_consent_sheet.dart'
     show restaurantManualLookupChoice;
 import '../widgets/macro_chart.dart';
 import '../widgets/small_spinner.dart';
+import '../theme/app_dialog.dart';
 import '../theme/app_theme.dart' show AppButtonStyles;
+import '../theme/tokens.dart' show AppMotion, AppThemeContext;
 import '../widgets/discard_guard.dart';
 import '../widgets/pickers.dart';
-import 'package:flutter/services.dart' show FilteringTextInputFormatter;
+import '../widgets/reply_note.dart';
+import 'package:flutter/services.dart'
+    show FilteringTextInputFormatter, LengthLimitingTextInputFormatter;
 
 class MealEditorScreen extends StatefulWidget {
   const MealEditorScreen({
@@ -110,9 +131,15 @@ class MealEditorScreen extends StatefulWidget {
     this.assistPollInterval = kAssistPollInterval,
     this.usual,
     this.mealsChanged,
+    this.noteCorrector,
   });
 
   final MealsDao dao;
+
+  /// Correct with a note (a stored meal with [settings]): sends the note
+  /// with the meal as the form shows it. Null shows no note (a new meal,
+  /// the describe preview, a refused photo, Photo Coverage, tests).
+  final MealNoteCorrector? noteCorrector;
 
   /// "The meal list changed" (refresh_signal.dart mealsChangedSignal): an
   /// Undo on the app's snackbar (usual foods, the restaurant lookup) can
@@ -181,7 +208,8 @@ class MealEditorScreen extends StatefulWidget {
   State<MealEditorScreen> createState() => _MealEditorScreenState();
 }
 
-class _MealEditorScreenState extends State<MealEditorScreen> {
+class _MealEditorScreenState extends State<MealEditorScreen>
+    with WidgetsBindingObserver {
   late MealDraft _draft;
   late final TextEditingController _desc;
   late final TextEditingController _cal;
@@ -245,6 +273,65 @@ class _MealEditorScreenState extends State<MealEditorScreen> {
   /// Use my numbers or Keep AI estimate is being written.
   bool _usualBusy = false;
 
+  // ── Correct with a note ──
+
+  /// The note being typed (Correct with a note).
+  final TextEditingController _note = TextEditingController();
+
+  /// The note field's focus: gaining it brings Correct with AI into view
+  /// ([_revealNote]).
+  final FocusNode _noteFocus = FocusNode(debugLabel: 'mealNote');
+
+  /// The note's checks and consent question are open: the cards' meals
+  /// signal is caught up when they end ([_refreshBasis]).
+  bool _noteAsking = false;
+
+  /// The note's request is in flight: the form is read-only and Save
+  /// waits, as for the cards' own writes.
+  bool _correcting = false;
+
+  /// Bumped by every send and by Stop: an answer to an older one is
+  /// dropped.
+  int _noteGen = 0;
+
+  /// The last answer that changed nothing, or a refusal, on the page.
+  String? _noteReply;
+
+  /// The note section's header: what an answer scrolls to the top.
+  final GlobalKey _noteHeaderKey = GlobalKey();
+
+  /// Each note that filled the form this visit, oldest first: what Undo
+  /// steps back through, and the notes Save keeps ([_notesToSave]).
+  final List<_NoteStep> _noteSteps = [];
+  int _noteStepIds = 0;
+
+  /// The notes kept on the meal as loaded (analysis.user_notes, oldest
+  /// first), and the ones the user removed this visit (by position): an
+  /// unsaved change until Save.
+  List<MealNote> _storedNotes = const [];
+  final Set<int> _removedNotes = {};
+
+  /// What the last build showed: a note typed (Send enabled, back asks)
+  /// and Undo offered.
+  bool _shownNoteTyped = false;
+  bool _shownNoteUndo = false;
+
+  /// The note's field with its footer and Correct with AI (one block),
+  /// the button itself, and Save, as laid out ([_revealNote]).
+  final GlobalKey _noteBlockBox = GlobalKey();
+  final GlobalKey _noteSendBox = GlobalKey();
+  final GlobalKey _saveButtonBox = GlobalKey();
+
+  /// The answer under the button, as laid out: the reply line, and the
+  /// card of what the last note changed ([_scrollNoteIntoView]).
+  final GlobalKey _noteReplyBox = GlobalKey();
+  final GlobalKey _noteCardBox = GlobalKey();
+
+  /// The keyboard's height at the last metrics change, and a reveal already
+  /// waiting for the frame ([_scheduleNoteReveal]).
+  double _lastBottomInset = 0;
+  bool _noteRevealScheduled = false;
+
   @override
   void initState() {
     super.initState();
@@ -302,6 +389,12 @@ class _MealEditorScreenState extends State<MealEditorScreen> {
       c.addListener(_watchDirty);
     }
     _meal = meal;
+    _storedNotes = readUserNotes(meal?.analysis);
+    _note.addListener(_watchDirty);
+    _noteFocus.addListener(() {
+      if (_noteFocus.hasFocus) _scheduleNoteReveal();
+    });
+    WidgetsBinding.instance.addObserver(this);
     // What the form opened with, a new meal's included: a back gesture
     // asks before it drops anything typed since ([_unsaved]).
     _loadedSignature = _signature();
@@ -331,11 +424,12 @@ class _MealEditorScreenState extends State<MealEditorScreen> {
   /// Undo tapped on the snackbar over the editor). The row is read again
   /// ([_refreshBasis]): an untouched form shows the meal as stored, a
   /// typed-over one gets the save's conflict, an unchanged row only
-  /// renews the basis. Skipped while a save or one of the cards' writes
-  /// is under way: each reads the row again itself when it is done.
+  /// renews the basis. Skipped while a save, one of the cards' writes or
+  /// a note is under way: each reads the row again itself when it is done.
   void _onMealsChanged() {
     if (!mounted || _meal == null) return;
     if (_saving || _usualBusy || _assistBusy || _lookingUp) return;
+    if (_correcting || _noteAsking) return;
     _refreshBasis();
   }
 
@@ -353,11 +447,17 @@ class _MealEditorScreenState extends State<MealEditorScreen> {
   }
 
   /// A text edit that makes the form dirty (or clean again) rebuilds it:
-  /// the cards' buttons wait while there is unsaved typing, and a back
-  /// gesture asks before it drops it.
+  /// the cards' buttons wait while there is unsaved typing, a back gesture
+  /// asks before it drops it, the note's Send waits for a note, and Undo
+  /// goes once the form no longer shows what the note did.
   void _watchDirty() {
     if (_loading || !mounted) return;
-    if (_dirty != _shownDirty || _unsaved != _shownUnsaved) setState(() {});
+    if (_dirty != _shownDirty ||
+        _unsaved != _shownUnsaved ||
+        _noteTyped != _shownNoteTyped ||
+        _noteUndoAvailable != _shownNoteUndo) {
+      setState(() {});
+    }
   }
 
   /// A copy of [analysis] without the assist block, published flags and
@@ -424,7 +524,7 @@ class _MealEditorScreenState extends State<MealEditorScreen> {
       _basisStale = true;
     } else if (_sameBasis(snap.meal, shown)) {
       _draft.expectedRaw = snap.rawAnalysis;
-    } else if (!_saving && _signature() == _loadedSignature) {
+    } else if (!_saving && !_formChanged) {
       _load(snap);
       setState(() {});
     } else {
@@ -433,10 +533,31 @@ class _MealEditorScreenState extends State<MealEditorScreen> {
   }
 
   /// The form, rebuilt from [snap]: the draft, every field and the item
-  /// rows, with [snap]'s raw text as the save's basis.
+  /// rows, with [snap]'s raw text as the save's basis. The notes this
+  /// visit filled the form with are gone with the older form; the last
+  /// one goes back into an empty note field, to be sent again. A note in
+  /// the field now counts as unsent ([_noteUnsent]): the meal shown holds
+  /// nothing of it, so Save asks first.
   void _load(MealSnapshot snap) {
     _meal = snap.meal;
-    final fresh = MealDraft.fromMeal(snap.meal)..expectedRaw = snap.rawAnalysis;
+    _showDraft(
+        MealDraft.fromMeal(snap.meal)..expectedRaw = snap.rawAnalysis);
+    _basisStale = false;
+    _loadedSignature = _signature();
+    _storedNotes = readUserNotes(snap.meal.analysis);
+    _removedNotes.clear();
+    if (_noteSteps.isNotEmpty) {
+      if (_note.text.trim().isEmpty) _note.text = _noteSteps.last.note;
+      _noteSteps.clear();
+    }
+    _answeredNotes.clear();
+    _refreshUsual();
+  }
+
+  /// Shows [draft] in the form: every field and the item rows, rebuilt
+  /// ([_load]'s field half). The basis, the loaded signature and [_meal]
+  /// stay: what it shows counts as unsaved typing.
+  void _showDraft(MealDraft draft) {
     for (final row in _itemCtrls) {
       row.name.dispose();
       row.cal.dispose();
@@ -452,21 +573,18 @@ class _MealEditorScreenState extends State<MealEditorScreen> {
     // form read the new kcal over the old macros, and Save wrote them.
     _loading = true;
     try {
-      _desc.text = fresh.description;
-      _cal.text = fresh.calories;
-      _pro.text = fresh.protein;
-      _carb.text = fresh.carbs;
-      _fat.text = fresh.fat;
+      _desc.text = draft.description;
+      _cal.text = draft.calories;
+      _pro.text = draft.protein;
+      _carb.text = draft.carbs;
+      _fat.text = draft.fat;
     } finally {
       _loading = false;
     }
-    _draft = fresh;
-    for (final it in fresh.items) {
+    _draft = draft;
+    for (final it in draft.items) {
       _itemCtrls.add(_controllersFor(it));
     }
-    _basisStale = false;
-    _loadedSignature = _signature();
-    _refreshUsual();
   }
 
   ({TextEditingController name, TextEditingController cal,
@@ -536,9 +654,11 @@ class _MealEditorScreenState extends State<MealEditorScreen> {
     widget.mealsChanged?.removeListener(_onMealsChanged);
     _hold?.release();
     _scroll.dispose();
-    for (final c in [_desc, _cal, _pro, _carb, _fat]) {
+    for (final c in [_desc, _cal, _pro, _carb, _fat, _note]) {
       c.dispose();
     }
+    _noteFocus.dispose();
+    WidgetsBinding.instance.removeObserver(this);
     for (final row in _itemCtrls) {
       row.name.dispose();
       row.cal.dispose();
@@ -577,7 +697,12 @@ class _MealEditorScreenState extends State<MealEditorScreen> {
   }
 
   Future<void> _save() async {
-    if (_saving) return;
+    // Not while a note is being answered: a save now would drop the answer
+    // in silence (the button is disabled meanwhile too).
+    if (_saving || _correcting) return;
+    // A note typed and never sent: a save never sends it, so say so first.
+    if (_noteUnsent && await _confirmUnsentNote() != true) return;
+    if (!mounted || _saving || _correcting) return;
     // The open-time read decides what this save compares against: wait for
     // it (milliseconds). Landing now, a newer row no longer replaces the
     // form — the user pressed Save on what they saw — it is a conflict.
@@ -596,19 +721,7 @@ class _MealEditorScreenState extends State<MealEditorScreen> {
     _harvest();
     final errors = _draft.validate(context.l10n);
     if (errors.isNotEmpty) {
-      setState(() => _errors = errors);
-      // The error card is the FIRST list child while Save is a pinned FAB:
-      // on a scrolled form the rejection would be invisible and Save would
-      // look like a dead button. Say it where the finger is, then scroll.
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(errors.length == 1
-              ? errors.single
-              : context.l10n.editorErrsNeedFixing(errors.length))));
-      if (_scroll.hasClients) {
-        await _scroll.animateTo(0,
-            duration: const Duration(milliseconds: 250),
-            curve: Curves.easeOut);
-      }
+      await _showErrors(errors);
       return;
     }
     setState(() {
@@ -617,8 +730,10 @@ class _MealEditorScreenState extends State<MealEditorScreen> {
     });
     try {
       // The marks of the rows changed here (usual foods §3.1) carry the
-      // editor's clock.
-      final analysis = _draft.toAnalysis(now: (widget.now ?? DateTime.now)());
+      // editor's clock. The meal's notes change only when this visit
+      // changed them ([_notesToSave]).
+      final analysis = _draft.toAnalysis(
+          now: (widget.now ?? DateTime.now)(), notes: _notesToSave());
       if (widget.isNew) {
         final photo = widget.fromPhoto;
         // How the photo was taken (design G2a), from the intake's reading
@@ -696,6 +811,23 @@ class _MealEditorScreenState extends State<MealEditorScreen> {
     }
   }
 
+  /// The form's [errors], shown as Save shows them: the error card, a
+  /// snackbar where the finger is, and a scroll to the top.
+  Future<void> _showErrors(List<String> errors) async {
+    setState(() => _errors = errors);
+    // The error card is the FIRST list child while Save is a pinned FAB:
+    // on a scrolled form the rejection would be invisible and Save would
+    // look like a dead button. Say it where the finger is, then scroll.
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(errors.length == 1
+            ? errors.single
+            : context.l10n.editorErrsNeedFixing(errors.length))));
+    if (_scroll.hasClients) {
+      await _scroll.animateTo(0,
+          duration: const Duration(milliseconds: 250), curve: Curves.easeOut);
+    }
+  }
+
   /// The compare-and-set save of a stored meal (design R6a). False — nothing
   /// written — when the row changed since the form was loaded, is gone, or
   /// the basis could not be read.
@@ -764,13 +896,19 @@ class _MealEditorScreenState extends State<MealEditorScreen> {
 
   // ── The restaurant source card (design R7b) ──
 
+  /// The form changed since the last load: something typed or picked, a
+  /// note's correction, or a kept note removed.
+  bool get _formChanged =>
+      _signature() != _loadedSignature || _removedNotes.isNotEmpty;
+
   /// The form shows something the user typed since the last load.
-  bool get _dirty => _meal != null && _signature() != _loadedSignature;
+  bool get _dirty => _meal != null && _formChanged;
 
   /// Like [_dirty], for a new meal too (manual entry, a describe preview,
   /// a refused photo): something typed or picked since the editor opened
-  /// or last loaded. A back gesture asks before it drops that.
-  bool get _unsaved => _signature() != _loadedSignature;
+  /// or last loaded, or a note typed. A back gesture asks before it drops
+  /// that.
+  bool get _unsaved => _formChanged || _noteTyped;
 
   /// One of the cards' own writes is running: a lookup the user started
   /// (polled for up to [kAssistPollWindow] on the owner's server), an
@@ -779,7 +917,10 @@ class _MealEditorScreenState extends State<MealEditorScreen> {
   /// lookup's write land under it, nothing was said or shown, and the
   /// next Save answered "This meal was just updated" and threw the typing
   /// away.
-  bool get _formLocked => _lookingUp || _assistBusy || _usualBusy;
+  /// A note's request in flight locks it the same way: its answer fills
+  /// the form, so typing meanwhile would be thrown away.
+  bool get _formLocked =>
+      _lookingUp || _assistBusy || _usualBusy || _correcting;
 
   bool get _assistOn =>
       widget.settings != null && widget.settings!.restaurantAssist != 'off';
@@ -843,7 +984,9 @@ class _MealEditorScreenState extends State<MealEditorScreen> {
     final meal = _meal;
     final offer = _usualOffer;
     if (usual == null || meal == null || offer == null) return;
-    if (_usualBusy || _assistBusy || _saving || _lookingUp) return;
+    if (_usualBusy || _assistBusy || _saving || _lookingUp || _correcting) {
+      return;
+    }
     final l = context.l10n;
     if (_dirty) {
       _say(l.assistEditFirst, key: const Key('assistEditFirstSnack'));
@@ -923,7 +1066,7 @@ class _MealEditorScreenState extends State<MealEditorScreen> {
     if (offer == null || widget.usual == null || _meal == null) return null;
     return UsualOfferCard(
       offer: offer,
-      busy: _usualBusy || _assistBusy || _saving || _lookingUp,
+      busy: _usualBusy || _assistBusy || _saving || _lookingUp || _correcting,
       editFirst: dirty,
       onUse: _useUsual,
       onKeepAi: _keepAi,
@@ -931,8 +1074,8 @@ class _MealEditorScreenState extends State<MealEditorScreen> {
   }
 
   /// The meal changed under an answer: say so, show the meal as it is now.
-  Future<void> _assistConflict() async {
-    _say(context.l10n.editorSaveConflict, key: const Key('assistConflict'));
+  Future<void> _assistConflict({Key key = const Key('assistConflict')}) async {
+    _say(context.l10n.editorSaveConflict, key: key);
     final MealSnapshot? snap;
     try {
       snap = await widget.dao.mealSnapshot(_meal!.id);
@@ -955,7 +1098,7 @@ class _MealEditorScreenState extends State<MealEditorScreen> {
     final meal = _meal;
     final act = widget.assist?.act;
     if (meal == null || act == null) return;
-    if (_assistBusy || _saving || _lookingUp) return;
+    if (_assistBusy || _saving || _lookingUp || _correcting) return;
     final l = context.l10n;
     if (_dirty) {
       _say(l.assistEditFirst, key: const Key('assistEditFirstSnack'));
@@ -1082,7 +1225,13 @@ class _MealEditorScreenState extends State<MealEditorScreen> {
     final settings = widget.settings;
     final lookupNow = assist?.lookupNow;
     if (meal == null || assist == null || settings == null) return;
-    if (lookupNow == null || _lookingUp || _assistBusy || _saving) return;
+    if (lookupNow == null ||
+        _lookingUp ||
+        _assistBusy ||
+        _saving ||
+        _correcting) {
+      return;
+    }
     final l = context.l10n;
     if (_dirty) {
       _say(l.assistEditFirst, key: const Key('assistEditFirstSnack'));
@@ -1209,7 +1358,7 @@ class _MealEditorScreenState extends State<MealEditorScreen> {
     return AssistSourceCard(
       key: const Key('editorAssistCard'),
       view: view,
-      busy: _assistBusy || _saving,
+      busy: _assistBusy || _saving || _correcting,
       lookingUp: _lookingUp,
       editFirst: _dirty,
       onUseEstimate: answer(AssistUserAction.useEstimate),
@@ -1227,6 +1376,692 @@ class _MealEditorScreenState extends State<MealEditorScreen> {
       onSearchAgain: canLookUp ? () => _lookUp(fresh: true) : null,
       onOpenSource: _openSource,
     );
+  }
+
+  // ── Correct with a note (core/meal_correction.dart) ──
+
+  /// The note is offered on a stored meal, opened with the settings and a
+  /// corrector (Today and History › day): never on a new meal.
+  bool get _noteOffered =>
+      !widget.isNew &&
+      widget.settings != null &&
+      widget.noteCorrector != null &&
+      _meal != null;
+
+  bool get _noteTyped => _note.text.trim().isNotEmpty;
+
+  /// The notes, as sent ([cleanMealNote]), whose last send about the form
+  /// shown the AI answered with no change or with a question: the answer
+  /// is on the page, so one still in the field was dealt with. A note
+  /// whose request was stopped, failed or came back unusable, or whose
+  /// correction was undone, is not here. Cleared when the form is
+  /// reloaded ([_load]).
+  final Set<String> _answeredNotes = {};
+
+  /// What the editor itself last put in the note field: nothing after a
+  /// fill, the note an Undo put back. A field still holding it holds
+  /// nothing typed since ([_undoNote]).
+  String _notePutBack = '';
+
+  /// A note in the field that no answer dealt with — never sent, or sent
+  /// and stopped, failed, unusable or undone: Save asks first, so it is
+  /// never dropped in silence.
+  bool get _noteUnsent =>
+      _noteOffered &&
+      _noteTyped &&
+      !_answeredNotes.contains(cleanMealNote(_note.text));
+
+  /// Something else is under way: no note starts.
+  bool get _noteBusy =>
+      _saving ||
+      _assistBusy ||
+      _usualBusy ||
+      _lookingUp ||
+      _correcting ||
+      _noteAsking;
+
+  /// Undo is offered while the form shows exactly what the last note left
+  /// (so it never throws away typing done since) and is not locked.
+  bool get _noteUndoAvailable =>
+      _noteSteps.isNotEmpty &&
+      !_formLocked &&
+      _signature() == _noteSteps.last.afterSignature;
+
+  /// Whether the form still holds a change [step] made (call after
+  /// [_harvest]).
+  bool _holds(_NoteStep step) => _draft.holdsNote(step.id,
+      removed: step.removed,
+      removedFrom: step.before,
+      descBefore: step.descBefore,
+      totalsBefore: step.totalsBefore);
+
+  /// The notes a correction is sent with as already applied: the kept
+  /// ones the user did not remove, then this visit's whose changes the
+  /// form still holds, oldest first (call after [_harvest]).
+  List<String> _earlierNotes() => [
+        for (var i = 0; i < _storedNotes.length; i++)
+          if (!_removedNotes.contains(i)) _storedNotes[i].text,
+        for (final s in _noteSteps)
+          if (_holds(s)) s.note,
+      ];
+
+  /// The meal's notes this save writes, or null to keep them as stored:
+  /// the kept ones the user did not remove, then those of this visit's
+  /// corrections the saved form still holds (one undone in the form, or
+  /// never answered with a usable correction, is not kept). Call after
+  /// [_harvest].
+  List<MealNote>? _notesToSave() {
+    if (_meal == null) return null;
+    final held = [
+      for (final s in _noteSteps)
+        if (_holds(s)) MealNote(s.note, s.sentAt),
+    ];
+    if (held.isEmpty && _removedNotes.isEmpty) return null;
+    return [
+      for (var i = 0; i < _storedNotes.length; i++)
+        if (!_removedNotes.contains(i)) _storedNotes[i],
+      ...held,
+    ];
+  }
+
+  /// Save with a note no answer put into the form ([_noteUnsent]): Keep
+  /// editing (false) or Save anyway (true). Its title says the note is not
+  /// in the meal yet, never that it was not sent: after Stop, an error, an
+  /// answer that could not be used, or Undo, it was (review, 2026-11-24).
+  Future<bool?> _confirmUnsentNote() => showDialog<bool>(
+        context: context,
+        builder: (ctx) {
+          final l = ctx.l10n;
+          return appAlertDialog(
+            key: const Key('mealNoteUnsentDialog'),
+            title: Text(l.mealNoteUnsentTitle),
+            content: Text(l.mealNoteUnsentBody),
+            actions: [
+              TextButton(
+                  key: const Key('mealNoteUnsentKeep'),
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: Text(l.discardChangesKeep)),
+              FilledButton(
+                  key: const Key('mealNoteUnsentSave'),
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: Text(l.mealNoteUnsentSave)),
+            ],
+          );
+        },
+      );
+
+  /// After the frame, scrolls the note's section to the top of the form,
+  /// so its field, the button and the answer under them (a reply or the
+  /// card of changes) show together. Brought to the bottom edge instead,
+  /// the card's last lines sat under the Save button (device check,
+  /// 2026-11-24), and with the keyboard up an answer would land under it.
+  /// Where the header down to the answer's end is taller than the list
+  /// shows above Save (the largest text sizes: the field and its footer
+  /// fill the screen), the answer's own top goes to the top instead: the
+  /// header there left the answer below the fold (iPhone check at AX5,
+  /// 2026-11-24).
+  void _scrollNoteIntoView() {
+    WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _revealNoteAnswer(tries: _revealTries));
+  }
+
+  /// How often [_revealNoteAnswer] moves the list to lay the answer out.
+  static const int _revealTries = 3;
+
+  /// [_scrollNoteIntoView]'s scroll, once the answer is laid out. Where it
+  /// is not, it lies past what the list built: under a block taller than
+  /// the screen (the largest text sizes), or the form was scrolled away
+  /// while the AI answered. The list jumps — the header to the top first,
+  /// then to where the answer starts (the block's end), or to the form's
+  /// end — and measures again. With the header not laid out, it is far
+  /// above: the answer goes to the top.
+  void _revealNoteAnswer({required int tries}) {
+    if (!mounted || !_scroll.hasClients) return;
+    final header = _noteHeaderKey.currentContext;
+    final answer =
+        (_noteReply != null ? _noteReplyBox : _noteCardBox).currentContext;
+    if (answer == null && tries > 0) {
+      final block = _noteBlockBox.currentContext?.findRenderObject();
+      final viewport =
+          block == null ? null : RenderAbstractViewport.maybeOf(block);
+      if (header != null && tries == _revealTries) {
+        Scrollable.ensureVisible(header);
+      } else if (block is RenderBox &&
+          block.attached &&
+          block.hasSize &&
+          viewport != null) {
+        _scroll.jumpTo(min(
+            viewport.getOffsetToReveal(block, 0).offset + block.size.height,
+            _scroll.position.maxScrollExtent));
+      } else {
+        _scroll.jumpTo(_scroll.position.maxScrollExtent);
+      }
+      WidgetsBinding.instance.addPostFrameCallback(
+          (_) => _revealNoteAnswer(tries: tries - 1));
+      return;
+    }
+    final target = answer == null ||
+            (header != null && _fitsAboveSave(header, answer))
+        ? header
+        : answer;
+    if (target == null) return;
+    Scrollable.ensureVisible(target,
+        duration: AppMotion.of(context, AppMotion.standard),
+        curve: AppMotion.curve);
+  }
+
+  /// Whether the form from [from]'s top down to [to]'s end fits the
+  /// height the list shows above the Save button. True when either is not
+  /// laid out: the header alone is brought into view then, as before.
+  bool _fitsAboveSave(BuildContext from, BuildContext to) {
+    final a = from.findRenderObject();
+    final b = to.findRenderObject();
+    if (a is! RenderBox || b is! RenderBox) return true;
+    if (!a.attached || !b.attached || !b.hasSize || !_scroll.hasClients) {
+      return true;
+    }
+    final viewport = RenderAbstractViewport.maybeOf(a);
+    if (viewport == null) return true;
+    final span = viewport.getOffsetToReveal(b, 0).offset +
+        b.size.height -
+        viewport.getOffsetToReveal(a, 0).offset;
+    return span <= _scroll.position.viewportDimension - _saveBand(viewport);
+  }
+
+  /// How far the Save button reaches up into the list from the list's
+  /// bottom edge, measured where it floats: its height and the gap under
+  /// it; 0 while it is not laid out. Over the keyboard that gap is
+  /// [kFloatingActionButtonMargin]. With no keyboard up, an iPhone with a
+  /// home indicator lifts Save by that inset too (50 pt in all), and so
+  /// does a snack bar: a fixed margin left the 34 pt out, and an answer
+  /// ending there went to the top with its last line under Save (iPhone
+  /// check at AX1, 2026-11-24).
+  double _saveBand(RenderObject? list) {
+    final save = _saveButtonBox.currentContext?.findRenderObject();
+    if (list is! RenderBox ||
+        !list.attached ||
+        !list.hasSize ||
+        save is! RenderBox ||
+        !save.attached ||
+        !save.hasSize) {
+      return 0;
+    }
+    final bottom = list.localToGlobal(Offset(0, list.size.height)).dy;
+    return max(0.0, bottom - save.localToGlobal(Offset.zero).dy);
+  }
+
+  /// An answer that changed nothing, or a refusal: on the page, under the
+  /// button, until the next send.
+  void _showNoteReply(String text) {
+    setState(() => _noteReply = text);
+    _scrollNoteIntoView();
+  }
+
+  /// Correct with AI: the note and the meal as the form shows it go to
+  /// the AI; the answer fills the form. In order: the form must be one a
+  /// Save could write; what cannot be sent is said with no model call and
+  /// no question; then the consent (an older grant is asked once more,
+  /// ensureMealNoteConsent); then the send, with the form locked. Nothing
+  /// is written here.
+  Future<void> _sendNote() async {
+    final corrector = widget.noteCorrector;
+    final settings = widget.settings;
+    final meal = _meal;
+    if (!_noteOffered || corrector == null || settings == null) return;
+    if (meal == null || !_noteTyped || _noteBusy) return;
+    final l = context.l10n;
+    // The open-time read decides whether the form is the stored meal's
+    // (milliseconds).
+    final basis = _basisRead;
+    if (basis != null) {
+      setState(() => _noteAsking = true);
+      try {
+        await basis;
+      } finally {
+        if (mounted) setState(() => _noteAsking = false);
+      }
+      if (!mounted || !identical(meal, _meal)) return;
+    }
+    // Typed over a newer meal: the save's conflict; nothing is sent.
+    if (_basisStale) {
+      await _conflict();
+      return;
+    }
+    // Only a form a Save could write is sent (the editor's own bounds).
+    _harvest();
+    final errors = _draft.validate(l);
+    if (errors.isNotEmpty) {
+      await _showErrors(errors);
+      return;
+    }
+    if (_errors.isNotEmpty) setState(() => _errors = const []);
+    // What cannot be sent: said on the page, before any question.
+    final refusal = corrector.noteRefusal() ??
+        (settings.provider == 'server' &&
+                serverAddressRefused(settings.serverBaseUrl)
+            ? '❌ ${l.errServerNeedsHttps}'
+            : serverKeyForOtherAddress(settings)
+                ? '❌ ${l.errServerKeyOtherHost}'
+                : null);
+    if (refusal != null) {
+      _showNoteReply(refusal);
+      return;
+    }
+    setState(() {
+      _noteAsking = true;
+      _noteReply = null;
+    });
+    final bool allowed;
+    try {
+      allowed = await ensureMealNoteConsent(context, settings);
+    } finally {
+      if (mounted) setState(() => _noteAsking = false);
+    }
+    if (!mounted) return;
+    if (!allowed) {
+      // Not now: nothing was sent (it said so); a meals signal skipped
+      // while the question was open is caught up.
+      _refreshBasis();
+      return;
+    }
+    if (!identical(meal, _meal) || !_noteTyped || _noteBusy) return;
+    if (_basisStale) {
+      await _conflict();
+      return;
+    }
+    _harvest();
+    final note = cleanMealNote(_note.text);
+    final input = _draft.correctionInput(earlierNotes: _earlierNotes());
+    final before = _draft.copy();
+    final gen = ++_noteGen;
+    final sentAt = (widget.now ?? DateTime.now)().toUtc().toIso8601String();
+    // Dealt with again only by this send's own answer ([_answeredNotes]).
+    _answeredNotes.remove(note);
+    setState(() {
+      _correcting = true;
+      _noteReply = null;
+    });
+    // The form is read-only now; a field left focused would bring the
+    // keyboard back up when the answer lands. Until then the note's field
+    // takes no focus at all ([_noteSection]).
+    FocusManager.instance.primaryFocus?.unfocus();
+    MealNoteOutcome outcome;
+    try {
+      outcome = await corrector.correctMeal(input, note);
+    } catch (_) {
+      outcome = MealNoteOutcome(error: l.nlErrorContactingAi);
+    }
+    // Stopped, or the editor closed: the answer is dropped.
+    if (!mounted || gen != _noteGen) return;
+    // The row once more, the form still locked: a meal that changed while
+    // the AI answered is never filled over.
+    await _readBasis();
+    if (!mounted || gen != _noteGen) return;
+    _dropFieldFocus();
+    setState(() => _correcting = false);
+    if (!identical(meal, _meal) || _basisStale) {
+      await _assistConflict(key: const Key('mealNoteConflict'));
+      return;
+    }
+    switch (outcome.reply) {
+      case null:
+        _showNoteReply(outcome.error ?? l.nlErrorContactingAi);
+      // The AI read the note and said so on the page: Save does not ask
+      // about it ([_noteUnsent]), and keeps no note for it.
+      case MealUnclear(reply: final question):
+        _answeredNotes.add(note);
+        _showNoteReply(l.mealNoteUnclear(question));
+      case MealNoChange(reply: final said):
+        _answeredNotes.add(note);
+        _showNoteReply(
+            said.isEmpty ? l.mealNoteNoChangeBare : l.mealNoteNoChange(said));
+      case MealReplyUnusable(emptiesMeal: final empties):
+        _showNoteReply(empties ? l.mealNoteEmpties : l.mealNoteUnusable);
+      case MealCorrected(proposal: final proposal):
+        _applyCorrection(proposal,
+            input: input, before: before, note: note, sentAt: sentAt);
+    }
+  }
+
+  /// A usable answer fills the form as unsaved edits (nothing is written):
+  /// one Undo step, the note field cleared, and the card listing every
+  /// change brought into view.
+  void _applyCorrection(MealCorrectionProposal proposal,
+      {required MealCorrectionInput input,
+      required MealDraft before,
+      required String note,
+      required String sentAt}) {
+    final id = ++_noteStepIds;
+    _showDraft(_draft.withCorrection(proposal, step: id));
+    final step = _NoteStep(
+      id: id,
+      note: note,
+      sentAt: sentAt,
+      before: before,
+      diff: mealCorrectionDiff(input, proposal),
+      removed: proposal.removed,
+      descBefore: proposal.description == null ? null : input.description,
+      totalsBefore: input.items.isEmpty && proposal.totals != null
+          ? [before.calories, before.protein, before.carbs, before.fat]
+          : null,
+      afterSignature: _signature(),
+    );
+    _note.clear();
+    _notePutBack = '';
+    setState(() {
+      _noteSteps.add(step);
+      _noteReply = null;
+    });
+    _scrollNoteIntoView();
+  }
+
+  /// Undo: the form exactly as it was before the last note, and the note
+  /// field as it was before that send: the note back in it, unsent again,
+  /// so Save asks before it drops it ([_noteUnsent]). A note typed since
+  /// is never written over. Offered only while the form shows what the
+  /// note left ([_noteUndoAvailable]).
+  void _undoNote() {
+    if (!_noteUndoAvailable) return;
+    final step = _noteSteps.removeLast();
+    _showDraft(step.before.copy()..expectedRaw = _draft.expectedRaw);
+    if (!_noteTyped || _note.text == _notePutBack) {
+      _note.text = step.note;
+      _notePutBack = _note.text;
+      _answeredNotes.remove(step.note);
+    }
+    setState(() {});
+  }
+
+  /// Stop: the answer is no longer waited for (a late one is dropped) and
+  /// the form unlocks; nothing was written. The request itself is not
+  /// cancelled, and the note stays in the field, unsent ([_noteUnsent]).
+  void _stopNote() {
+    if (!_correcting) return;
+    _noteGen++;
+    _dropFieldFocus();
+    setState(() => _correcting = false);
+    _refreshBasis();
+  }
+
+  /// A field of the form tapped while a note's request ran: it took the
+  /// focus (read-only, so no keyboard) and, as the form unlocks, would
+  /// bring the keyboard up over what just landed — an answer, a refusal,
+  /// an error (iPhone check, 2026-11-24). The focus goes instead: nothing
+  /// could be typed meanwhile. Focus anywhere else (a dialog's, a
+  /// button's) stays.
+  void _dropFieldFocus() {
+    final node = FocusManager.instance.primaryFocus;
+    final at = node?.context;
+    if (node == null || at == null || !at.mounted) return;
+    if (at.findAncestorStateOfType<EditableTextState>() == null) return;
+    if (at.findAncestorStateOfType<_MealEditorScreenState>() != this) return;
+    node.unfocus();
+  }
+
+  @override
+  void didChangeMetrics() {
+    if (!mounted) return;
+    final view = View.maybeOf(context);
+    if (view == null) return;
+    final inset = view.viewInsets.bottom;
+    // The keyboard coming up (frame by frame) on the note.
+    if (inset > _lastBottomInset && _noteFocus.hasFocus) _scheduleNoteReveal();
+    _lastBottomInset = inset;
+  }
+
+  /// [_revealNote] after the frame, once however many asked for it.
+  void _scheduleNoteReveal() {
+    if (_noteRevealScheduled) return;
+    _noteRevealScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _noteRevealScheduled = false;
+      _revealNote();
+    });
+  }
+
+  /// The note field has focus (and the keyboard is coming up): Correct with
+  /// AI shows too, above the keyboard and clear of Save, and so does a
+  /// reply under it (the AI's question being answered) where it fits. The
+  /// field's own reveal is its caret's line and 120 pt under it, and the
+  /// button sat half under the keyboard, under Save at larger text (device
+  /// check, 2026-11-24). From the field's top down to the button, or the
+  /// reply, and past Save, when that fits what the keyboard leaves;
+  /// otherwise (2x on a 6.1-inch phone, AX5) the field's top goes to the
+  /// top, so the note's start stays in view and the rest scrolls. Measured
+  /// inside the block: as the keyboard shrinks the list, the field can lie
+  /// past what the list lays out, kept only for its focus, where it has no
+  /// place on screen.
+  void _revealNote({bool again = false}) {
+    if (!mounted || !_noteFocus.hasFocus || !_scroll.hasClients) return;
+    RenderBox? box(GlobalKey key) {
+      final o = key.currentContext?.findRenderObject();
+      return o is RenderBox && o.attached && o.hasSize ? o : null;
+    }
+
+    final block = box(_noteBlockBox);
+    final send = box(_noteSendBox);
+    if (block == null || send == null) return;
+    // The floated label sits half above the field's box.
+    const above = 12.0;
+    final room = _scroll.position.viewportDimension;
+    // Save where it floats: over the keyboard, or with none up (a
+    // hardware keyboard) over the home indicator.
+    final save = _saveBand(RenderAbstractViewport.maybeOf(block));
+    // The button's bottom, and a little air so it does not sit on the
+    // keyboard.
+    var end = send
+            .localToGlobal(Offset(0, send.size.height), ancestor: block)
+            .dy +
+        8;
+    // A reply under the button (the AI's question, an answer it could not
+    // use) is what the user types after: down to its end too, where that
+    // fits. Brought only to the button, the reply sat under Save and the
+    // keyboard (iPhone check, 2026-11-24).
+    final reply = _noteReply == null ? null : box(_noteReplyBox);
+    if (reply != null) {
+      final replyEnd = reply.localToGlobal(Offset(0, reply.size.height)).dy -
+          block.localToGlobal(Offset.zero).dy +
+          8;
+      if (above + replyEnd + save <= room) end = replyEnd;
+    }
+    block.showOnScreen(
+        rect: Rect.fromLTRB(
+            0, -above, block.size.width, min(end + save, room - above)));
+    // A reply the list has not laid out: the keyboard came up at once,
+    // with the field far under it. Once more after the frame that brings
+    // the button up, with the reply right under it.
+    if (_noteReply != null && reply == null && !again) {
+      WidgetsBinding.instance
+        ..addPostFrameCallback((_) => _revealNote(again: true))
+        ..scheduleFrame();
+    }
+  }
+
+  /// A kept note removed: an unsaved change until Save (Back asks).
+  void _removeStoredNote(int index) {
+    if (_formLocked || _saving) return;
+    setState(() => _removedNotes.add(index));
+  }
+
+  /// The note's section, the form's last block: header, field, what goes
+  /// where, Correct with AI (or the request's progress with Stop), the
+  /// last answer that changed nothing, the card of what the last note
+  /// changed, and the notes kept on the meal.
+  List<Widget> _noteSection(ThemeData theme) {
+    final l = context.l10n;
+    final settings = widget.settings!;
+    final provider =
+        providerDisplayLabel(l, settings.provider, settings.serverBackend);
+    final muted = theme.textTheme.bodySmall
+        ?.copyWith(color: context.colors.secondaryLabel);
+    final locked = _formLocked;
+    final reply = _noteReply;
+    final kept = [
+      for (var i = 0; i < _storedNotes.length; i++)
+        if (!_removedNotes.contains(i)) i,
+    ];
+    final now = (widget.now ?? DateTime.now)();
+    return [
+      const SizedBox(height: 24),
+      Semantics(
+        key: _noteHeaderKey,
+        header: true,
+        child: Text(l.mealNoteHeader,
+            key: const Key('mealNoteHeader'),
+            style: theme.textTheme.titleSmall),
+      ),
+      SizedBox(height: _gapAboveField(context, 8)),
+      // The field, what goes where, and Correct with AI: one child of the
+      // list, so the button is laid out whenever the field is
+      // ([_revealNote]).
+      Column(
+        key: _noteBlockBox,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // The field, the footer and the button are each their own node
+          // for a screen reader. In one list child with no boundary, the
+          // field's node read the footer as its label and held the button.
+          Semantics(
+            container: true,
+            child: TextField(
+              key: const Key('mealNoteField'),
+              controller: _note,
+              focusNode: _noteFocus,
+              readOnly: locked || _noteAsking,
+              // While the AI answers, a tap takes no focus: focused, the
+              // field would bring the keyboard up over the answer as it
+              // lands ([_dropFieldFocus] for the form's other fields).
+              canRequestFocus: !_correcting,
+              minLines: 2,
+              maxLines: isLargeText(context) ? null : 4,
+              textCapitalization: TextCapitalization.sentences,
+              textInputAction: TextInputAction.send,
+              onSubmitted: (_) => _sendNote(),
+              inputFormatters: [
+                LengthLimitingTextInputFormatter(kMealNoteMaxChars)
+              ],
+              // The caret's line and 120 pt under it; with the keyboard
+              // up, the button under the footer too ([_revealNote]).
+              scrollPadding: const EdgeInsets.fromLTRB(20, 20, 20, 120),
+              decoration: InputDecoration(
+                labelText: l.mealNoteLabel,
+                hintText: l.mealNoteHint,
+                border: const OutlineInputBorder(),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Semantics(
+            container: true,
+            child: Text(l.mealNoteFooter(provider),
+                key: const Key('mealNoteFooter'), style: muted),
+          ),
+          const SizedBox(height: 12),
+          if (_correcting)
+            Semantics(
+              liveRegion: true,
+              container: true,
+              child: Wrap(
+                key: const Key('mealNoteAsking'),
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 8,
+                runSpacing: 4,
+                children: [
+                  const SmallSpinner(),
+                  Text(l.mealNoteAsking(provider)),
+                  TextButton(
+                      key: const Key('mealNoteStop'),
+                      onPressed: _stopNote,
+                      child: Text(l.mealNoteStop)),
+                ],
+              ),
+            )
+          else
+            // Start-aligned: the extended Save button covers it only at
+            // large text, and then not with the keyboard up where there is
+            // room ([_revealNote]).
+            Align(
+              alignment: AlignmentDirectional.centerStart,
+              child: KeyedSubtree(
+                key: _noteSendBox,
+                child: FilledButton.tonalIcon(
+                  key: const Key('mealNoteSend'),
+                  onPressed: _noteTyped && !locked && !_saving && !_noteAsking
+                      ? _sendNote
+                      : null,
+                  icon: const Icon(Icons.auto_fix_high_outlined),
+                  label: Text(l.mealNoteSend),
+                ),
+              ),
+            ),
+        ],
+      ),
+      if (reply != null && !_correcting)
+        Padding(
+          key: _noteReplyBox,
+          padding: const EdgeInsets.only(top: 12),
+          child: ReplyNote(
+              key: const Key('mealNoteReplyNote'),
+              message: reply,
+              textKey: const Key('mealNoteReply')),
+        ),
+      if (_noteSteps.isNotEmpty)
+        Padding(
+          key: _noteCardBox,
+          padding: const EdgeInsets.only(top: 12),
+          child: _NoteChangesCard(
+              step: _noteSteps.last,
+              onUndo: _noteUndoAvailable ? _undoNote : null),
+        ),
+      if (kept.isNotEmpty) ...[
+        const SizedBox(height: 20),
+        Semantics(
+          header: true,
+          child: Text(l.mealNoteSavedHeader,
+              key: const Key('mealNoteSavedHeader'),
+              style: theme.textTheme.titleSmall),
+        ),
+        for (final i in kept)
+          Padding(
+            key: Key('mealNoteSaved$i'),
+            padding: const EdgeInsets.only(top: 4),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: MergeSemantics(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (DateTime.tryParse(_storedNotes[i].at)
+                              case final at?)
+                            Text(
+                                AppFormats.shortDate(
+                                    context, isoDate(at.toLocal()),
+                                    now: now),
+                                style: muted),
+                          Text(_storedNotes[i].text,
+                              key: Key('mealNoteSavedText$i')),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                IconButton(
+                  key: Key('mealNoteRemove$i'),
+                  tooltip: l.mealNoteRemoveLabel,
+                  icon: const Icon(Icons.close),
+                  onPressed: locked || _saving
+                      ? null
+                      : () => _removeStoredNote(i),
+                ),
+              ],
+            ),
+          ),
+      ],
+    ];
   }
 
   Future<void> _delete() async {
@@ -1334,6 +2169,8 @@ class _MealEditorScreenState extends State<MealEditorScreen> {
     final assistCard = _assistSection();
     _shownDirty = _dirty;
     _shownUnsaved = _unsaved;
+    _shownNoteTyped = _noteTyped;
+    _shownNoteUndo = _noteUndoAvailable;
     final locked = _formLocked;
     final usualCard = _usualSection(_shownDirty);
     // Back asks first while something is unsaved; Save, Delete and the
@@ -1550,15 +2387,30 @@ class _MealEditorScreenState extends State<MealEditorScreen> {
                 label: Text(context.l10n.editorAddItem),
               ),
             ),
+            // Last, inside the Save button's clearance: the description stays
+            // the first field and the meal's own numbers first on screen.
+            if (_noteOffered) ..._noteSection(theme),
           ],
         ),
-        floatingActionButton: FloatingActionButton.extended(
-          key: const Key('saveMealButton'),
-          onPressed: _saving ? null : _save,
-          icon: _saving
-              ? const SmallSpinner(size: 18)
-              : const Icon(Icons.check),
-          label: Text(widget.isNew ? context.l10n.editorAdd : context.l10n.save),
+        floatingActionButton: KeyedSubtree(
+          key: _saveButtonBox,
+          child: FloatingActionButton.extended(
+            key: const Key('saveMealButton'),
+            onPressed: _saving || _correcting ? null : _save,
+            // Waiting for a note's answer, Save is drawn as unavailable, as
+            // the other controls the request locks are (a FAB's own look
+            // does not change without onPressed).
+            backgroundColor: _correcting ? context.colors.fill : null,
+            foregroundColor: _correcting
+                ? context.colors.label.withValues(alpha: 0.38)
+                : null,
+            disabledElevation: _correcting ? 0 : null,
+            icon: _saving
+                ? const SmallSpinner(size: 18)
+                : const Icon(Icons.check),
+            label:
+                Text(widget.isNew ? context.l10n.editorAdd : context.l10n.save),
+          ),
         ),
       ),
     );
@@ -1728,4 +2580,140 @@ class _ItemRow extends StatelessWidget {
           ],
         ),
       );
+}
+
+/// One note that filled the form this visit: what Undo restores, the
+/// card's lines, and what tells whether the saved form still holds it
+/// (MealDraft.holdsNote).
+class _NoteStep {
+  _NoteStep({
+    required this.id,
+    required this.note,
+    required this.sentAt,
+    required this.before,
+    required this.diff,
+    required this.removed,
+    required this.descBefore,
+    required this.totalsBefore,
+    required this.afterSignature,
+  });
+
+  final int id;
+
+  /// As sent (cleanMealNote), and when (ISO-8601 UTC).
+  final String note;
+  final String sentAt;
+
+  /// The form right before the note was sent.
+  final MealDraft before;
+  final MealCorrectionDiff diff;
+
+  /// The foods it removed: positions among [before]'s filled rows.
+  final Set<int> removed;
+
+  /// The description before, when the note changed it.
+  final String? descBefore;
+
+  /// A row-less meal's four total texts before, when the note changed
+  /// them.
+  final List<String>? totalsBefore;
+
+  /// The form's signature right after the fill: Undo is offered while it
+  /// still reads so.
+  final String afterSignature;
+}
+
+/// "Changed from your note — not saved yet": what the last note changed,
+/// for the user to check before Save, with Undo while the form still
+/// shows exactly that. A live region: it appears after a round trip.
+class _NoteChangesCard extends StatelessWidget {
+  const _NoteChangesCard({required this.step, this.onUndo});
+
+  final _NoteStep step;
+  final VoidCallback? onUndo;
+
+  /// Food lines shown before "and N more changes".
+  static const int _maxFoodLines = 6;
+
+  @override
+  Widget build(BuildContext context) {
+    final l = context.l10n;
+    final theme = Theme.of(context);
+    final d = step.diff;
+    String line(MealCorrectionLine x) => switch (x.kind) {
+          MealCorrectionLineKind.changed => l.mealNoteItemChanged(
+              x.name, formatKcal(x.kcalBefore), formatKcal(x.kcalAfter)),
+          MealCorrectionLineKind.renamed => l.mealNoteItemRenamed(
+              x.name,
+              x.newName ?? x.name,
+              formatKcal(x.kcalBefore),
+              formatKcal(x.kcalAfter)),
+          MealCorrectionLineKind.added =>
+            l.mealNoteItemAdded(x.name, formatKcal(x.kcalAfter)),
+          MealCorrectionLineKind.removed =>
+            l.mealNoteItemRemoved(x.name, formatKcal(x.kcalBefore)),
+        };
+    final shown = d.lines.take(_maxFoodLines).toList();
+    final more = d.lines.length - shown.length;
+    final macros = [
+      (l.macroProtein, d.totalsBefore.protein, d.totalsAfter.protein),
+      (l.macroCarbs, d.totalsBefore.carbs, d.totalsAfter.carbs),
+      (l.macroFat, d.totalsBefore.fat, d.totalsAfter.fat),
+    ];
+    final descBefore = d.descBefore;
+    final descAfter = d.descAfter;
+    return Semantics(
+      liveRegion: true,
+      container: true,
+      child: Card(
+        key: const Key('mealNoteChanges'),
+        margin: EdgeInsets.zero,
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(l.mealNoteChangedTitle, style: theme.textTheme.titleSmall),
+              const SizedBox(height: 6),
+              Text(l.mealNoteYourNote(step.note),
+                  key: const Key('mealNoteYourNote')),
+              if (descBefore != null && descAfter != null)
+                Text(l.mealNoteDescChange(descBefore, descAfter),
+                    key: const Key('mealNoteDescChange')),
+              Text(
+                  l.mealNoteTotalChange(formatKcal(d.totalsBefore.calories),
+                      formatKcal(d.totalsAfter.calories)),
+                  key: const Key('mealNoteTotalChange')),
+              for (final (name, before, after) in macros)
+                if ((after - before).abs() >= 0.05)
+                  Text(l.mealNoteMacroChange(name, formatOneDecimal(before),
+                      formatOneDecimal(after))),
+              for (final x in shown) Text(line(x)),
+              if (more > 0) Text(l.mealNoteMoreChanges(more)),
+              if (d.unchangedCount > 0)
+                Text(l.mealNoteUnchangedCount(d.unchangedCount),
+                    key: const Key('mealNoteUnchanged')),
+              if (d.reason.isNotEmpty)
+                Text('💬 ${d.reason}', key: const Key('mealNoteReason')),
+              const SizedBox(height: 6),
+              Text(l.mealNoteCheckThenSave),
+              if (onUndo != null)
+                Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: TextButton(
+                    key: const Key('mealNoteUndo'),
+                    onPressed: onUndo,
+                    // Read as what it undoes, not a bare "Undo".
+                    child: Semantics(
+                      label: l.mealNoteUndoLabel,
+                      child: ExcludeSemantics(child: Text(l.assistUndo)),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }

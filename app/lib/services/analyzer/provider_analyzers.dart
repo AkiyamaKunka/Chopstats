@@ -464,7 +464,7 @@ abstract class _HttpVisionAnalyzer
     try {
       parsed = parseAiJson(text);
     } on FormatException {
-      return const TextIntentOutcome(null);
+      return const TextIntentOutcome(null, notJson: true); // prose
     }
     if (parsed is Map) {
       return TextIntentOutcome(Map<String, dynamic>.from(parsed));
@@ -472,7 +472,7 @@ abstract class _HttpVisionAnalyzer
     if (parsed is List) {
       return TextIntentOutcome({'actions': parsed}); // §4.1 bare-array rule
     }
-    return const TextIntentOutcome(null);
+    return const TextIntentOutcome(null, notJson: true); // a bare value
   }
 
   @override

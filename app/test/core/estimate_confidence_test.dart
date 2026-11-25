@@ -15,6 +15,8 @@ import 'dart:convert';
 import 'package:calorie_tracker/core/coerce.dart';
 import 'package:calorie_tracker/core/contracts.dart';
 import 'package:calorie_tracker/core/leftover_logic.dart';
+import 'package:calorie_tracker/core/meal_correction.dart'
+    show composeMealCorrectionRequest;
 import 'package:calorie_tracker/core/prompts.dart';
 import 'package:calorie_tracker/core/shared_generated.dart';
 import 'package:calorie_tracker/services/nl/executor.dart' show buildMealsList;
@@ -330,6 +332,11 @@ void main() {
           'published': true,
         }
       ],
+      // The notes kept on a meal corrected in Edit meal: only that meal's
+      // next note sends them (as earlier notes, given by the editor).
+      'user_notes': [
+        {'text': 'half the guacamole', 'at': '2026-11-24T12:00:00.000Z'},
+      ],
     };
     const forbidden = [
       'estimate_confidence',
@@ -345,6 +352,8 @@ void main() {
       'Chipotle',
       'chipotle',
       'meta_glasses',
+      'user_notes',
+      'guacamole',
     ];
     void expectClean(String text) {
       for (final w in forbidden) {
@@ -363,6 +372,21 @@ void main() {
       final out = compactOriginalAnalysis(rich);
       expect(out, contains('Burrito bowl'));
       expectClean(out);
+    });
+
+    test("a note in Edit meal: the request and the whole prompt", () {
+      final input = MealDraft.fromMeal(const Meal(
+              id: 1,
+              date: '2026-10-23',
+              time: '12:30 PM',
+              timestamp: '2026-10-23T12:30:00',
+              source: 'photo',
+              analysis: rich))
+          .correctionInput();
+      final request = composeMealCorrectionRequest(input, 'only half');
+      expect(request, contains('Burrito bowl'));
+      expectClean(request);
+      expectClean(mealCorrectionPrompt(request));
     });
 
     test('buildMealsList (the chat prompt)', () {

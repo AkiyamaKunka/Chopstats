@@ -315,7 +315,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String aiConsentBody(String recipient) {
-    return 'Chopstats estimates calories with an AI service. If you allow it, Chopstats sends the following to $recipient:\n• each photo you log, with your dietary profile and a short summary of the other meals logged that day (for a photo taken before 4 a.m., the day before too)\n• leftover photos, with the meal they belong to\n• what you type to describe a meal\n• what you type to fix a meal, with your meals from the last 7 days\n\nChopstats has no server of its own, and its developer never receives any of this. The AI company\'s own privacy policy and terms apply to what it receives. Nothing is sent until you allow it, and you can stop at any time in Settings.';
+    return 'Chopstats estimates calories with an AI service. If you allow it, Chopstats sends the following to $recipient:\n• each photo you log, with your dietary profile and a short summary of the other meals logged that day (for a photo taken before 4 a.m., the day before too)\n• leftover photos, with the meal they belong to\n• what you type to describe a meal\n• what you type to fix a meal, with your meals from the last 7 days\n• a note you type in Edit meal to correct a meal, with that meal\'s description, foods and numbers and its earlier notes (kept with the meal)\n\nChopstats has no server of its own, and its developer never receives any of this. The AI company\'s own privacy policy and terms apply to what it receives. Nothing is sent until you allow it, and you can stop at any time in Settings.';
   }
 
   @override
@@ -2263,7 +2263,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String setupLinkSharing(String company) {
-    return 'The server passes your photos, dietary profile, meal descriptions and recent meals to $company. Confirming allows that; you can stop it in Settings.';
+    return 'The server passes your photos, dietary profile, meal descriptions, recent meals and a note you send in Edit meal (with that meal) to $company. Confirming allows that; you can stop it in Settings.';
   }
 
   @override
@@ -4047,4 +4047,148 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get mealGroupSummaryBody => 'Tap to see them';
+
+  @override
+  String get mealNoteHeader => 'Correct with a note';
+
+  @override
+  String get mealNoteLabel => 'Your note';
+
+  @override
+  String get mealNoteHint =>
+      'What was different? e.g. \"only half the rice\" or \"add a fried egg\"';
+
+  @override
+  String mealNoteFooter(String provider) {
+    return 'Your note and this meal\'s description, foods, numbers and earlier notes go to $provider. Nothing is saved until you tap Save.';
+  }
+
+  @override
+  String get mealNoteSend => 'Correct with AI';
+
+  @override
+  String mealNoteAsking(String provider) {
+    return 'Asking $provider…';
+  }
+
+  @override
+  String get mealNoteStop => 'Stop';
+
+  @override
+  String get mealNoteChangedTitle => 'Changed from your note — not saved yet';
+
+  @override
+  String mealNoteYourNote(String note) {
+    return 'Your note: $note';
+  }
+
+  @override
+  String mealNoteDescChange(String before, String after) {
+    return 'Meal: $before → $after';
+  }
+
+  @override
+  String mealNoteTotalChange(String before, String after) {
+    return 'Total: $before → $after kcal';
+  }
+
+  @override
+  String mealNoteMacroChange(String macro, String before, String after) {
+    return '$macro: $before → $after g';
+  }
+
+  @override
+  String mealNoteItemChanged(String name, String kcalBefore, String kcalAfter) {
+    return '$name: $kcalBefore → $kcalAfter kcal';
+  }
+
+  @override
+  String mealNoteItemRenamed(
+    String before,
+    String after,
+    String kcalBefore,
+    String kcalAfter,
+  ) {
+    return '$before → $after: $kcalBefore → $kcalAfter kcal';
+  }
+
+  @override
+  String mealNoteItemAdded(String name, String kcal) {
+    return 'Added $name, $kcal kcal';
+  }
+
+  @override
+  String mealNoteItemRemoved(String name, String kcal) {
+    return 'Removed $name, $kcal kcal';
+  }
+
+  @override
+  String mealNoteMoreChanges(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'and $count more changes',
+      one: 'and 1 more change',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String mealNoteUnchangedCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count other foods unchanged',
+      one: '1 other food unchanged',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get mealNoteCheckThenSave => 'Check the numbers above, then tap Save.';
+
+  @override
+  String get mealNoteUndoLabel => 'Undo the changes from your note';
+
+  @override
+  String mealNoteUnclear(String reply) {
+    return 'Nothing changed yet. The AI asks: $reply';
+  }
+
+  @override
+  String mealNoteNoChange(String reply) {
+    return 'Nothing changed. The AI says: $reply';
+  }
+
+  @override
+  String get mealNoteNoChangeBare =>
+      'The AI found nothing to change in this meal.';
+
+  @override
+  String get mealNoteUnusable =>
+      '❌ The AI\'s answer could not be used, so nothing changed. Try saying it another way.';
+
+  @override
+  String get mealNoteEmpties =>
+      '❌ The AI\'s answer would leave this meal empty, so nothing changed. To remove the meal, use Delete meal.';
+
+  @override
+  String get mealNoteUnsentTitle => 'Your note isn\'t in this meal yet';
+
+  @override
+  String get mealNoteUnsentBody =>
+      'Save keeps the numbers shown. To use your note, tap Correct with AI first.';
+
+  @override
+  String get mealNoteUnsentSave => 'Save anyway';
+
+  @override
+  String get mealNoteSavedHeader => 'Notes on this meal';
+
+  @override
+  String get mealNoteRemoveLabel => 'Remove this note';
+
+  @override
+  String get aiConsentUpdateLeadMealNote =>
+      'New: in Edit meal you can tell the AI what was different about a meal. Your note goes with that meal\'s description, foods and numbers and its earlier notes, and only when you tap Correct with AI. Not now sends no note.';
 }

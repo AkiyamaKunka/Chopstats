@@ -7,7 +7,7 @@ import 'dart:io' show File, Platform;
 
 import '../core/ai_consent.dart' show aiConsentRoute, aiRoutesInMainlandChina;
 import '../core/app_channel.dart' show photoLibraryInBuild;
-import '../core/contracts.dart' show Meal;
+import '../core/contracts.dart' show Meal, noteCorrectorOf;
 import '../core/setup_link.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
@@ -1070,6 +1070,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
                 mealInUse: s.mealInUse,
                 restaurantAssist: s.restaurantAssist,
                 settings: s.settings,
+                noteCorrector: noteCorrectorOf(s.executor),
                 usual: s.usualFoods),
             HistoryScreen(
                 key: _historyKey,
@@ -1077,7 +1078,8 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
                 thumbs: s.thumbs,
                 mealInUse: s.mealInUse,
                 restaurantAssist: s.restaurantAssist,
-                settings: s.settings),
+                settings: s.settings,
+                noteCorrector: noteCorrectorOf(s.executor)),
             BodyScreen(key: _bodyKey, dao: s.dao, settings: s.settings),
             SettingsScreen(
               settings: s.settings,

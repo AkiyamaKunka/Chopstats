@@ -10,6 +10,7 @@ library;
 import 'dart:convert';
 
 import 'coerce.dart';
+import 'meal_correction.dart' show keepUserNotes, kUserNotesKey;
 import 'shared_generated.dart';
 
 /// The compact original-analysis JSON embedded in the prompt: whitelisted
@@ -274,10 +275,14 @@ LeftoverResult? applyLeftover(
       'note': modelOut['note'] is String ? modelOut['note'] : null,
       // The pre-deduction snapshot future applications re-base on. Taken
       // from the CURRENT base (not `current`) so a re-application keeps
-      // the true original, and stripped of any nested leftover block.
+      // the true original, and stripped of any nested leftover block. And
+      // of the meal's notes (core/meal_correction.dart): they stay on the
+      // meal itself (`...current`), and nothing reads them here, so a copy
+      // would only outlive the user removing them in Edit meal — in the
+      // row, its exports and its backups.
       'original': {
         for (final e in base.entries)
-          if (e.key != 'leftover') e.key: e.value,
+          if (e.key != 'leftover' && e.key != kUserNotesKey) e.key: e.value,
       },
     },
   };
@@ -305,6 +310,11 @@ LeftoverResult? applyLeftover(
 /// a total still equal to `applied_total`. That is the [leftoverBase]
 /// staleness rule — a chat or editor fix made after the deduction is the
 /// user's newer truth and must never be overwritten by the undo.
+///
+/// The meal's notes (`user_notes`, core/meal_correction.dart) are taken
+/// from [current], never from [before]: an Edit meal save after the
+/// deduction may have kept or removed some, and the undo is about the
+/// deduction only.
 Map<String, dynamic>? revertedLeftover(Map<String, dynamic> current,
     {required Map<String, dynamic> applied,
     required Map<String, dynamic> before}) {
@@ -321,7 +331,24 @@ Map<String, dynamic>? revertedLeftover(Map<String, dynamic> current,
       safeNumber(stamped) != safeNumber(current['total_calories'])) {
     return null;
   }
-  return Map<String, dynamic>.from(before);
+  return keepUserNotes(Map<String, dynamic>.from(before), current);
+}
+
+/// [analysis] without a copy of the meal's notes in its leftover
+/// snapshot (`leftover.original`), in place; the block and the snapshot
+/// are copied, never edited where the loaded meal shares them.
+/// [applyLeftover] keeps no such copy; a snapshot written before it did
+/// (a build of the Edit meal note before 2026-11-24, or a meal imported
+/// from one) loses it when the editor's Save changes the notes, so a note
+/// the user removes is gone from the whole row.
+void dropLeftoverSnapshotNotes(Map<String, dynamic> analysis) {
+  final block = analysis['leftover'];
+  if (block is! Map) return;
+  final original = block['original'];
+  if (original is! Map || !original.containsKey(kUserNotesKey)) return;
+  analysis['leftover'] = Map<String, dynamic>.from(block)
+    ..['original'] =
+        (Map<String, dynamic>.from(original)..remove(kUserNotesKey));
 }
 
 /// Python-truthiness for same_meal, defaulting TRUE when absent — a model

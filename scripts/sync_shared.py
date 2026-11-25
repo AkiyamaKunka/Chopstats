@@ -25,6 +25,11 @@ Encoding rules:
     compact JSON text (the exact string a --json-schema flag or an API
     request carries), and the US chain table as data (a list of dicts in
     Python, a const list of SharedChain in Dart).
+  - The meal-correction prompt (a note typed in Edit meal) keeps its single
+    <<REQUEST_JSON>> token too: the app composes it (core/meal_correction.dart)
+    and sends it through the text-intent seam, so the own server receives it
+    as a phone-written prompt on /api/text_intent and composes nothing. The
+    Python constant exists for parity only; no server code reads it.
 """
 import json
 import sys
@@ -76,23 +81,33 @@ def load_sources():
     return food, text, leftover, constants
 
 
+def _check_data_block(name, prompt):
+    """The composed request is spliced in at exactly one place, inside the
+    only <data> block, at the very end of the prompt."""
+    if prompt.count("<<REQUEST_JSON>>") != 1:
+        raise SystemExit("%s needs exactly one <<REQUEST_JSON>>" % name)
+    if prompt.count("<data>") != 1 or prompt.count("</data>") != 1:
+        raise SystemExit("%s needs exactly one <data> block" % name)
+    if not prompt.endswith("<data>\n<<REQUEST_JSON>>\n</data>\n"):
+        raise SystemExit("%s must end with the <data> block" % name)
+
+
+def load_meal_correction_source():
+    """The prompt for a note typed in Edit meal (a correction of ONE meal),
+    checked for the same data-block shape as the lookup prompt."""
+    prompt = (SHARED / "prompts" / "meal_correction_prompt.txt").read_text(
+        encoding="utf-8")
+    _check_data_block("meal_correction_prompt.txt", prompt)
+    return prompt
+
+
 def load_lookup_sources():
     """The restaurant-lookup prompt, its response schema and the US chain
     table, each checked for the shape both composers rely on."""
     prompt = (SHARED / "prompts" / "restaurant_lookup_prompt.txt").read_text(
         encoding="utf-8"
     )
-    # The composed request is spliced in at exactly one place, inside the
-    # only <data> block, at the very end of the prompt.
-    if prompt.count("<<REQUEST_JSON>>") != 1:
-        raise SystemExit(
-            "restaurant_lookup_prompt.txt needs exactly one <<REQUEST_JSON>>")
-    if prompt.count("<data>") != 1 or prompt.count("</data>") != 1:
-        raise SystemExit(
-            "restaurant_lookup_prompt.txt needs exactly one <data> block")
-    if not prompt.endswith("<data>\n<<REQUEST_JSON>>\n</data>\n"):
-        raise SystemExit(
-            "restaurant_lookup_prompt.txt must end with the <data> block")
+    _check_data_block("restaurant_lookup_prompt.txt", prompt)
 
     schema = json.loads(
         (SHARED / "prompts" / "restaurant_lookup_schema.json").read_text(
@@ -123,7 +138,7 @@ def load_lookup_sources():
     return prompt, schema_text, str(table["as_of"]), out
 
 
-def python_binding(food, text, leftover, constants, lookup):
+def python_binding(food, text, leftover, constants, lookup, correction):
     fmt = text.replace("{", "{{").replace("}", "}}")
     for token in TOKENS:
         fmt = fmt.replace("<<%s>>" % token, "{%s}" % token.lower())
@@ -156,6 +171,11 @@ def python_binding(food, text, leftover, constants, lookup):
     for c in chains:
         lines.append("    %r," % (c,))
     lines.append("]")
+    lines.append("")
+    lines.append("# A note typed in Edit meal (shared/prompts/meal_correction_prompt.txt).")
+    lines.append("# The app composes and sends it through /api/text_intent; kept here")
+    lines.append("# with its <<REQUEST_JSON>> token for parity only.")
+    lines.append("MEAL_CORRECTION_PROMPT = %r" % correction)
     lines.append("")
     return "\n".join(lines)
 
@@ -215,7 +235,7 @@ def _dart_lookup_lines(lookup, dart_str):
     return lines
 
 
-def dart_binding(food, text, leftover, constants, lookup):
+def dart_binding(food, text, leftover, constants, lookup, correction):
     def dart_str(s):
         return "'''\n%s'''" % s.replace("\\", "\\\\").replace("$", "\\$").replace("'''", "\\'\\'\\'")
 
@@ -259,6 +279,14 @@ def dart_binding(food, text, leftover, constants, lookup):
     lines.append("    .replaceAll('<<MEALS_LIST>>', mealsList)")
     lines.append("    .replaceAll('<<USER_MESSAGE>>', userMessage);")
     lines.append("")
+    lines.append("/// The prompt for a note typed in Edit meal: one meal, a patch back.")
+    lines.append("const String sharedMealCorrectionTemplate = %s;" % dart_str(correction))
+    lines.append("")
+    lines.append("/// [sharedMealCorrectionTemplate] with the composed request in its data")
+    lines.append("/// block (core/meal_correction.dart composeMealCorrectionRequest).")
+    lines.append("String sharedMealCorrectionPrompt({required String requestJson}) =>")
+    lines.append("    sharedMealCorrectionTemplate.replaceAll('<<REQUEST_JSON>>', requestJson);")
+    lines.append("")
     lines.append("abstract final class SharedConstants {")
     for key, value in constants.items():
         typ = "bool" if isinstance(value, bool) else (
@@ -275,8 +303,11 @@ def main():
     check = "--check" in sys.argv
     food, text, leftover, constants = load_sources()
     lookup = load_lookup_sources()
-    outputs = {PY_OUT: python_binding(food, text, leftover, constants, lookup),
-               DART_OUT: dart_binding(food, text, leftover, constants, lookup)}
+    correction = load_meal_correction_source()
+    outputs = {PY_OUT: python_binding(food, text, leftover, constants, lookup,
+                                      correction),
+               DART_OUT: dart_binding(food, text, leftover, constants, lookup,
+                                      correction)}
     stale = []
     for path, content in outputs.items():
         current = path.read_text(encoding="utf-8") if path.exists() else None

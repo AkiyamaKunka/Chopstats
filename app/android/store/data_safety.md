@@ -96,9 +96,9 @@ Tick exactly these five types. For each one the answers are the same:
 | Category › Type | What leaves the phone, and when |
 |---|---|
 | **Photos and videos › Photos** | Each photo the user picks or shares into the app, and a leftover photo, goes to the AI service the user chose, re-encoded with its embedded metadata (time, camera, location) removed. |
-| **Health and fitness › Health info** | Meal descriptions, food names, portions, calories and macros (a photo carries a short summary of the day's other meals; *Fix or delete a meal* carries the last 7 days of meals), the dietary profile the user wrote (sent with every photo), and a weight the user types into *Fix or delete a meal*. |
+| **Health and fitness › Health info** | Meal descriptions, food names, portions, calories and macros (a photo carries a short summary of the day's other meals; *Fix or delete a meal* carries the last 7 days of meals; a note in *Edit meal* carries that one meal), the dietary profile the user wrote (sent with every photo), and a weight the user types into *Fix or delete a meal*. |
 | **Health and fitness › Fitness info** | A workout the user types into *Fix or delete a meal* (for example "burned 450 calories on my 5 km run"); the app then logs it as an activity. No stored workout, step or weight record is attached to any request by the app itself. |
-| **App activity › Other user-generated content** | The free text typed into *Describe a meal* and *Fix or delete a meal*. Google reserves this type for content no other type covers, so it overlaps Health info and Fitness info; ticking it as well is harmless and matches what users type. |
+| **App activity › Other user-generated content** | The free text typed into *Describe a meal*, *Fix or delete a meal* and a note in *Edit meal* (with that meal's earlier notes). Google reserves this type for content no other type covers, so it overlaps Health info and Fitness info; ticking it as well is harmless and matches what users type. |
 | **Location › Approximate location** | Only when the user turns on **Restaurant nutrition** lookups (off by default; needs the user's own server or an Anthropic or OpenRouter key): each lookup carries the country code `US`, which the app infers on the phone from the time zone and region setting (a meal outside the US is not looked up at all). Google counts an inferred location of a city or larger area as approximate location. Android never reads a photo's position, and no GPS coordinate is ever sent. |
 
 Everything else: **not collected**.
@@ -137,7 +137,7 @@ country from Android first. That is a code change, not a form choice.
 - Photos and typed requests go to the AI service **the user set up with
   their own API key** (or their own server), right after a **specific
   user action**: picking or sharing a photo, tapping Describe, Fix,
-  Leftovers or Test This Provider.
+  Leftovers or Test This Provider, or Correct with AI in *Edit meal*.
 - Before the first send to a recipient the app shows a **consent
   dialog** that names the company, lists what is sent, and offers
   **Allow** / **Not now**; *Stop Sharing with …* in Settings withdraws

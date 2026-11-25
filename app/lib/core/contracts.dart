@@ -8,6 +8,8 @@ library;
 
 import 'dart:typed_data';
 
+import 'meal_correction.dart' show MealCorrectionInput, MealCorrectionReply;
+
 /// The `source` column's vocabulary. These strings are WIRE VALUES: they
 /// are persisted in `meals.source` / `photo_ingestions.source`, exported by
 /// exportJson, and MATCHED IN SQL — the reclaim sweep releases only
@@ -521,9 +523,15 @@ abstract class AnalyzerService {
 /// `classifyAnalysisError` reads it), or null when the cause is unknown or
 /// the reply simply would not parse.
 class TextIntentOutcome {
-  const TextIntentOutcome(this.json, {this.error});
+  const TextIntentOutcome(this.json, {this.error, this.notJson = false});
   final Map<String, dynamic>? json;
   final String? error;
+
+  /// The AI did answer, but with no JSON object or array: prose, or a
+  /// bare value. The request itself went through. A note in Edit meal
+  /// says the answer could not be used; Fix meals and Describe keep spec
+  /// §4 step 4's wording for it.
+  final bool notJson;
 }
 
 /// Optional companion to [AnalyzerService.textIntent] for analyzers that can
@@ -547,6 +555,37 @@ Future<TextIntentOutcome> askTextIntent(
   }
   return TextIntentOutcome(await analyzer.textIntent(prompt));
 }
+
+/// The answer to a note typed in Edit meal ([MealNoteCorrector]): the
+/// AI's [reply] read as a patch (core/meal_correction.dart), or [error],
+/// a line for the user (a missing key, a refused request, a failed call).
+class MealNoteOutcome {
+  const MealNoteOutcome({this.reply, this.error});
+  final MealCorrectionReply? reply;
+  final String? error;
+}
+
+/// Corrects ONE stored meal from a note (Edit meal). A companion to
+/// [NlExecutor] rather than a member, so the executors and test fakes
+/// that do not offer it keep compiling; the editor shows the note only
+/// when it is given one ([noteCorrectorOf]).
+///
+/// It writes nothing: the answer fills the editor's form, and the user's
+/// Save is the only write. It never throws.
+abstract interface class MealNoteCorrector {
+  /// Why no note can be sent right now (the quota pause, no key, no
+  /// server), in the words Fix meals uses; null when one can. Makes no
+  /// model call.
+  String? noteRefusal();
+
+  /// Sends [note] about [meal] (the form as shown, and the meal's earlier
+  /// notes) and reads the answer.
+  Future<MealNoteOutcome> correctMeal(MealCorrectionInput meal, String note);
+}
+
+/// [executor] as a [MealNoteCorrector], or null when it is not one.
+MealNoteCorrector? noteCorrectorOf(Object? executor) =>
+    executor is MealNoteCorrector ? executor : null;
 
 /// What a [AnalyzerService.probeKey] learned about the credential.
 enum KeyProbeResult {

@@ -119,6 +119,54 @@ void main() {
       expect(registry.isInUse(1), isFalse);
     });
 
+    // Correct with a note: the meal stays held while the AI answers (the
+    // assist leaves it alone), and closing the editor mid-request lets go.
+    testWidgets('held through a note request; closing mid-request lets go',
+        (tester) async {
+      tester.view.physicalSize = const Size(1200, 3600);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      final registry = MealInUseRegistry();
+      final dao = FakeDao()..seed(_meal(1, 'Soymilk'));
+      final gate = Completer<void>();
+      final executor = FakeExecutor()..onCorrect = () => gate.future;
+      await tester.pumpWidget(MaterialApp(
+        home: Builder(
+          builder: (context) => TextButton(
+            onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => MealEditorScreen(
+                    dao: dao,
+                    meal: dao.meals.first,
+                    inUse: registry,
+                    settings: FakeSettings(),
+                    noteCorrector: executor))),
+            child: const Text('open'),
+          ),
+        ),
+      ));
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+          find.byKey(const Key('mealNoteField')), 'only half');
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('mealNoteSend')));
+      await tester.pump();
+      expect(executor.correctedNotes, hasLength(1));
+      expect(registry.isInUse(1), isTrue, reason: 'held while it answers');
+      await tester.pageBack();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.tap(find.byKey(const Key('discardChangesDiscard')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(find.byType(MealEditorScreen), findsNothing);
+      expect(registry.isInUse(1), isFalse);
+      gate.complete();
+      await tester.pumpAndSettle();
+      expect(registry.isInUse(1), isFalse);
+      expect(dao.fieldUpdates, isEmpty);
+    });
+
     testWidgets('a NEW meal in the editor holds nothing', (tester) async {
       final registry = MealInUseRegistry();
       await tester.pumpWidget(MaterialApp(
@@ -142,6 +190,12 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byType(MealEditorScreen), findsOneWidget);
       expect(registry.isInUse(1), isTrue, reason: 'Today → editor');
+      expect(
+          tester
+              .widget<MealEditorScreen>(find.byType(MealEditorScreen))
+              .noteCorrector,
+          isNotNull,
+          reason: 'Today hands the editor its note');
       await tester.pageBack();
       await tester.pumpAndSettle();
       expect(registry.isInUse(1), isFalse);
@@ -155,6 +209,12 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byType(MealEditorScreen), findsOneWidget);
       expect(registry.isInUse(1), isTrue, reason: 'History → day → editor');
+      expect(
+          tester
+              .widget<MealEditorScreen>(find.byType(MealEditorScreen))
+              .noteCorrector,
+          isNotNull,
+          reason: 'History › day hands the editor its note');
       await tester.pageBack();
       await tester.pumpAndSettle();
       expect(registry.isInUse(1), isFalse);

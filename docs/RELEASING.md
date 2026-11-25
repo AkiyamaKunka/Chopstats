@@ -335,12 +335,13 @@ When merging #22 after this PR:
 - **Never hand-merge the generated `app_localizations*.dart`.** Take
   either side, then run `flutter gen-l10n` in `app/`.
 - `app/test/ui/usual_copy_test.dart` pins the number of keys in each ARB
-  file: 809 on `main` since #22 merged, 976 on the iCloud Backup branch
+  file: 809 on `main` since #22 merged, 1007 on the iCloud Backup branch
   merged with #33, the review-171 fixes, the Android photos, privacy,
   background and ui lanes, the Play channel, the Android
   look-and-defaults branch, the Android lows lane, the legacy upload
-  key lane, the refused-share lane, the Android View-after-share lane
-  and the Android meal-cards group lane (`feat/icloud-backup`
+  key lane, the refused-share lane, the Android View-after-share lane,
+  the Android meal-cards group lane and the Edit meal note lane
+  (`feat/icloud-backup`
   adds 72 `backup*` and `import*` keys, #33's source-link label 1, the
   Test AI provider page's three `diagStatus*` check states 3, the Body
   tab's three failure lines 3, the coverage window slider's screen-reader
@@ -363,7 +364,9 @@ When merging #22 after this PR:
   lane's `mealViewAction` 1 (the View on a shared photo's snackbar), the
   Android meal-cards group lane's `mealGroupSummaryTitle` and
   `mealGroupSummaryBody` 2 (the summary over two or more Logged meals
-  cards), none shared;
+  cards), the Edit meal note lane's 31 (`mealNote*`: the note section,
+  its changes card and replies, the unsent-note question and the notes
+  kept on a meal; and `aiConsentUpdateLeadMealNote`), none shared;
   review r171 deleted
   `bodyEmptyHintImperial`, the same text as `bodyEmptyHint`). If either
   side adds keys before both merge, change the number in that test to the
@@ -607,12 +610,14 @@ All done; this is what each one is and where it lives.
    not). The dialog names the company, lists what goes with a photo
    (dietary profile, a summary of that day's other meals, plus the day
    before's for a photo taken before 4 a.m.), with *Describe
-   a meal* (the text only) and with *Fix or delete a meal* (the last 7
-   days of meals), and says where DeepSeek, Qwen,
+   a meal* (the text only), with *Fix or delete a meal* (the last 7
+   days of meals) and with a note in *Edit meal* (that one meal's
+   description, foods, numbers and earlier notes), and says where DeepSeek, Qwen,
    Doubao, GLM and the GLM/Doubao plans process data (mainland China). It
    is asked:
    - before a picked photo's bytes are read, before Describe/Fix a meal,
-     Leftovers, *Test This Provider* and Photo Coverage *Log all / Retry*;
+     Leftovers, *Test This Provider*, Photo Coverage *Log all / Retry* and
+     a note in *Edit meal* (*Correct with AI*);
    - for a photo shared into the app, which is held until answered (Not
      now drops it and says so);
    - when *Watch Camera Roll* is turned on (with the camera-roll notice),
@@ -643,7 +648,19 @@ All done; this is what each one is and where it lives.
    waits for its answer). Allow records version 2 and the previous day is
    sent from then on; Not now is remembered and changes nothing else (the
    watcher keeps logging under the old grant). Any new grant (a new
-   recipient, or Allow after *Stop Sharing*) records version 2.
+   recipient, or Allow after *Stop Sharing*) records the current version.
+   Version 3 (the Edit meal note, 2026-11-24) lists a note typed in *Edit
+   meal*, sent with that meal's description, foods, numbers and earlier
+   notes. It changes nothing a photo carries, so the shell still asks only
+   grants below `aiConsentShellAskVersion` (2): a version-1 grant is asked
+   once at launch with both lines (the previous day, then the note), and a
+   Not now it gave the B14 question (stored as 2) still silences it. A
+   grant below 3 is asked once more at its first note
+   (`ensureMealNoteConsent`, the same update title, the note's line
+   leading): Allow records 3 and the note goes; Not now sends nothing and
+   is asked again at the next note. A new grant records 3, a setup link's
+   too (its dialog lists the note). The note's line says only that Not
+   now sends no note: at launch Not now keeps the older grant.
 5. **Share extension purpose string** — **done.** The extension links
    Photos.framework (`receive_sharing_intent`'s `PHAsset` lookup), and the
    ITMS-90683 scan runs per bundle, so its `Info.plist` and en/zh-Hans
@@ -782,13 +799,15 @@ or to a server the user runs. What leaves the phone, and to whom:
   4 a.m. (up to five);
 - ***Fix or delete a meal*** sends the typed text with the last 7 days of
   meals; ***Describe a meal*** sends only the text and today's date; a
-  leftover photo goes with the meal it belongs to;
+  leftover photo goes with the meal it belongs to; a note in ***Edit
+  meal*** sends the typed note with that one meal's description, foods,
+  numbers and earlier notes (no photo);
 - **through the user's own server** the same data goes to the server,
   which passes it to the AI company of its plan (Anthropic, Zhipu or
   Volcengine).
 
-So health data goes to the API provider with every photo and every Fix
-request, not only through a self-hosted server. Two answers were
+So health data goes to the API provider with every photo, every Fix
+request and every Edit meal note, not only through a self-hosted server. Two answers were
 defensible:
 
 - A — *Data Not Collected*: true under Apple's literal definition (no
@@ -800,9 +819,9 @@ defensible:
 | Data type (answer B) | Collected? | Linked to the user | Tracking | Purpose |
 |---|---|---|---|---|
 | Photos or Videos | Yes — sent to the user-selected AI provider for analysis; not retained by the developer | No | No | App Functionality |
-| Health & Fitness → **Health** (meal calories and macros, and the dietary profile, which the app attaches itself) | Yes — with every photo and every Fix request, to the same provider | No | No | App Functionality |
-| User Content → **Other User Content** (what the user types into *Describe a meal* and *Fix or delete a meal*: meal descriptions and corrections, and also a weight or a workout typed into Fix, such as "I weigh 72 kg" or "burned 450 calories on my 5 km run", which the app then logs as a weight or an activity) | Yes — to the same provider | No | No | App Functionality |
-| Health & Fitness → Fitness | **No** — the app attaches no stored workout, step or weight record to any request (a photo carries that day's meals, plus the day before's when taken before 4 a.m.; Fix the last 7 days of meals); a workout the user types goes only as that typed text, declared above as Other User Content; the Garmin fetch from the user's own server sends only a date | | | |
+| Health & Fitness → **Health** (meal calories and macros, and the dietary profile, which the app attaches itself) | Yes — with every photo, every Fix request and every Edit meal note, to the same provider | No | No | App Functionality |
+| User Content → **Other User Content** (what the user types into *Describe a meal* and *Fix or delete a meal*, and a note in *Edit meal*: meal descriptions and corrections, and also a weight or a workout typed into Fix, such as "I weigh 72 kg" or "burned 450 calories on my 5 km run", which the app then logs as a weight or an activity) | Yes — to the same provider | No | No | App Functionality |
+| Health & Fitness → Fitness | **No** — the app attaches no stored workout, step or weight record to any request (a photo carries that day's meals, plus the day before's when taken before 4 a.m.; Fix the last 7 days of meals; an Edit meal note that one meal); a workout the user types goes only as that typed text, declared above as Other User Content; the Garmin fetch from the user's own server sends only a date | | | |
 | Everything else (contacts, location, identifiers, diagnostics, usage) | No | | | |
 
 The rule behind the rows: what the app attaches by itself is declared as

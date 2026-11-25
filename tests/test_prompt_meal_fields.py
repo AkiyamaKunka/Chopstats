@@ -12,9 +12,11 @@ What these tests pin:
     guess") that keep background text from posing as an item's brand;
   * the zh reply-language directive keeps the enums in English and copies
     brand / order_merchant as printed;
-  * the leftover and text-intent prompts do not ask for them;
+  * the leftover, text-intent and meal-correction prompts do not ask for
+    them;
   * the server's recent-meal and leftover whitelists never forward them
-    (nor the app-side assist/capture blocks) into a CLI prompt.
+    (nor the app-side assist/capture blocks, nor the notes the app keeps
+    on a meal corrected in Edit meal, `user_notes`) into a CLI prompt.
 """
 import json
 from pathlib import Path
@@ -147,10 +149,29 @@ def test_zh_directive_names_the_enums_and_the_printed_fields():
 
 def test_leftover_and_text_prompts_do_not_ask_for_them():
     for template in (shared_generated.LEFTOVER_PROMPT_TEMPLATE,
-                     shared_generated.TEXT_HANDLER_PROMPT_TEMPLATE):
+                     shared_generated.TEXT_HANDLER_PROMPT_TEMPLATE,
+                     shared_generated.MEAL_CORRECTION_PROMPT):
         for key in ("estimate_confidence", "restaurant_context",
                     "portion_state", "order_merchant"):
             assert key not in template, key
+
+
+def test_the_meal_correction_prompt_asks_for_no_stored_key():
+    # The Edit meal note's prompt (the app composes it and sends it through
+    # /api/text_intent) names only the request's own keys: none of the
+    # item context keys, the app-side blocks or the kept notes' key.
+    template = shared_generated.MEAL_CORRECTION_PROMPT
+    for word in ("brand", "qty", "unit", "assist", "capture", "published",
+                 "user_notes"):
+        assert word not in template, word
+    assert template.count("<<REQUEST_JSON>>") == 1
+    assert template.endswith("<data>\n<<REQUEST_JSON>>\n</data>\n")
+    # The earlier notes are context only, never applied again.
+    flat = " ".join(template.split())
+    assert '"earlier_notes_already_applied"' in flat
+    assert "ALREADY APPLIED" in flat
+    assert "Never apply an earlier note again" in flat
+    assert '"new_note": the ONE new note. It is the only thing to apply.' in flat
 
 
 RICH = {
@@ -170,9 +191,12 @@ RICH = {
         "name": "Burrito bowl (~600 g)", "estimated_calories": 900,
         "brand": "Chipotle", "qty": 1, "unit": "bowl", "published": True,
     }],
+    "user_notes": [{"text": "only half the rice, Chipotle bowl",
+                    "at": "2026-11-24T12:00:00.000Z"}],
 }
 
-FORBIDDEN = NEW_KEYS + ("assist", "capture", "published", "Chipotle")
+FORBIDDEN = NEW_KEYS + ("assist", "capture", "published", "Chipotle",
+                        "user_notes", "half the rice")
 
 
 def _assert_clean(obj):
