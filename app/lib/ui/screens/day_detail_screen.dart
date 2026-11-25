@@ -172,11 +172,13 @@ class _DayDetailScreenState extends State<DayDetailScreen>
                     onRefresh: _load,
                     child: ListView(
                       physics: const AlwaysScrollableScrollPhysics(),
-                      padding: const EdgeInsets.fromLTRB(
+                      // The + button floats above the system's bottom
+                      // inset (the 3-button bar): the clearance is over it.
+                      padding: EdgeInsets.fromLTRB(
                           AppSpace.gutter,
                           AppSpace.s12,
                           AppSpace.gutter,
-                          AppSpace.fabClearance),
+                          AppSpace.fabClearanceOf(context)),
                       children: [
                         // The day's total, its meal count and what it was
                         // made of, as one card (the bare headline over a
