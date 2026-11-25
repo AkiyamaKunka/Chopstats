@@ -5,6 +5,8 @@
 /// the real delegate + locale wiring in app.dart.
 library;
 
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -104,4 +106,69 @@ void main() {
     expect(find.text('今天'), findsNothing);
     expect(tester.widget<Title>(find.byType(Title)).title, 'Chopstats');
   });
+
+  testWidgets('a Traditional-Chinese phone gets the Chinese app, titled 筷拍',
+      (tester) async {
+    // Flutter gives zh-Hant-TW the app's one Chinese (Locale('zh')).
+    tester.platformDispatcher.localesTestValue = const [
+      Locale.fromSubtags(
+          languageCode: 'zh', scriptCode: 'Hant', countryCode: 'TW'),
+    ];
+    addTearDown(tester.platformDispatcher.clearLocalesTestValue);
+    await tester.pumpWidget(CalorieTrackerApp(services: makeServices()));
+    await tester.pumpAndSettle();
+    expect(find.text('今天'), findsWidgets);
+    expect(tester.widget<Title>(find.byType(Title)).title, '筷拍');
+  });
+
+  // Android's Recents names the app "<launcher label> <task title>" when
+  // the two differ. The label follows the phone's language from res/, the
+  // title the app's language (appTitleFor), so they must agree in every
+  // language res/ names. Android does not give a Traditional-script phone
+  // (zh-Hant: Taiwan, Hong Kong, Macau) values-zh, while Flutter gives it
+  // the app's Chinese: without values-b+zh+Hant, Recents read "Chopstats
+  // 筷拍" there (RECENTS-TW-1, 2026-11-24).
+  test('every launcher label is the task title in its language', () {
+    final labels = <String, String>{};
+    for (final dir in Directory('android/app/src/main/res')
+        .listSync()
+        .whereType<Directory>()) {
+      final folder = dir.uri.pathSegments.lastWhere((s) => s.isNotEmpty);
+      final strings = File('${dir.path}/strings.xml');
+      if (!folder.startsWith('values') || !strings.existsSync()) continue;
+      final m = RegExp(r'<string name="app_name">([^<]*)</string>')
+          .firstMatch(strings.readAsStringSync());
+      if (m != null) labels[folder] = m.group(1)!;
+    }
+    expect(labels.keys,
+        containsAll(['values', 'values-zh', 'values-b+zh+Hant']));
+    for (final MapEntry(key: folder, value: label) in labels.entries) {
+      expect(appTitleFor(_resLocale(folder)), label, reason: folder);
+    }
+    // And the phones each folder serves, as Flutter resolves them.
+    expect(appTitleFor(const Locale('en', 'US')), labels['values']);
+    expect(appTitleFor(const Locale('zh', 'CN')), labels['values-zh']);
+    expect(
+        appTitleFor(const Locale.fromSubtags(
+            languageCode: 'zh', scriptCode: 'Hant', countryCode: 'HK')),
+        labels['values-b+zh+Hant']);
+  });
+}
+
+/// The locale an Android res folder names: values (the default, English
+/// here), values-zh, values-zh-rTW, values-b+zh+Hant.
+Locale _resLocale(String folder) {
+  if (folder == 'values') return const Locale('en');
+  final q = folder.substring('values-'.length);
+  if (q.startsWith('b+')) {
+    final parts = q.substring(2).split('+');
+    return Locale.fromSubtags(
+        languageCode: parts.first,
+        scriptCode: parts.skip(1).where((p) => p.length == 4).firstOrNull,
+        countryCode: parts.skip(1).where((p) => p.length != 4).firstOrNull);
+  }
+  final parts = q.split('-r');
+  return Locale.fromSubtags(
+      languageCode: parts.first,
+      countryCode: parts.length > 1 ? parts[1] : null);
 }

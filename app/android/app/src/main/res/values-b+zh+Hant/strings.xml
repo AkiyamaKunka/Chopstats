@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Traditional-script phones (zh-Hant: Taiwan, Hong Kong, Macau).
+         Android does not give them values-zh, so their launcher read
+         "Chopstats", while the app shows them its Chinese and titles its
+         task 筷拍: Recents named it twice, "Chopstats 筷拍" (RECENTS-TW-1,
+         2026-11-24). 筷拍 is written the same in both scripts. -->
+    <string name="app_name">筷拍</string>
+</resources>

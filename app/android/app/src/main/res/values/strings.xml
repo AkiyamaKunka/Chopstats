@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- Launcher label. The Chinese name 筷拍 (chopsticks + snap) lives in
-         values-zh; the label follows the SYSTEM language. -->
+         values-zh and, for Traditional-script phones, which values-zh does
+         not reach, values-b+zh+Hant; the label follows the SYSTEM language.
+         It must be the task's title in each (appTitleFor, l10n_test). -->
     <string name="app_name">Chopstats</string>
 </resources>
