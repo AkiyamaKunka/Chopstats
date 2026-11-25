@@ -3,8 +3,8 @@
 Paste-ready answers for **Play Console › Monitor and improve › Policy and
 programs › App content**, written
 2026-11-13 for the first Google Play release (planned then as 1.7.0; it
-is the newest Android release at the time of the first upload: 1.7.2
-since `android-v1.7.2` went out on 2026-11-24, `docs/RELEASING.md`
+is the newest Android release at the time of the first upload: 1.8.0
+since `android-v1.8.0` went out on 2026-11-25, `docs/RELEASING.md`
 § 6.3), with the owner's
 decisions of that day: no broad photo access on Play (decision 1),
 `http://` servers refused (decision 2), one signing key for Play and the

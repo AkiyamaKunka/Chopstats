@@ -236,7 +236,7 @@ Rules for this file:
 
 ## Android
 
-筷拍没有上架 Google Play。最新的 Android 版本 1.7.2 放在 [Releases 页面](https://github.com/AkiyamaKunka/Chopstats/releases/tag/android-v1.7.2)上，是一个 APK（Android 的安装文件）：`Chopstats-v1.7.2-b210-arm64-v8a.apk`，约 22 MB。它由本仓库的发布流程从打上 `android-v1.7.2` 标签的提交构建并签名，比本页介绍的 App Store 上的 iPhone 版更新。
+筷拍没有上架 Google Play。最新的 Android 版本 1.8.0 放在 [Releases 页面](https://github.com/AkiyamaKunka/Chopstats/releases/tag/android-v1.8.0)上，是一个 APK（Android 的安装文件）：`Chopstats-v1.8.0-b213-arm64-v8a.apk`，约 22 MB。它由本仓库的发布流程从打上 `android-v1.8.0` 标签的提交构建并签名，比本页介绍的 App Store 上的 iPhone 版更新。它已经可以[用一句话修正一餐](#即将推出)。
 
 - **只适用于 arm64 手机**：32 位处理器的手机会拒绝安装。
 - **需要你自己安装**：Android 会要求你允许从浏览器或文件管理器安装应用。应用不会自动更新，新版本发布后，请从 Releases 页面安装新的 APK。
