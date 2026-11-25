@@ -3389,8 +3389,11 @@ void main() {
     expect(
         File('${_appRoot().path}/lib/ui/app.dart').readAsStringSync(),
         contains("supportedLocales: const [Locale('en'), Locale('zh')]"));
-    // The launcher name in Chinese (values/ is English).
+    // The launcher name in Chinese (values/ is English), on Simplified and
+    // Traditional phones (l10n_test checks it is the task's title).
     expect(File('$main/res/values-zh/strings.xml').existsSync(), isTrue);
+    expect(File('$main/res/values-b+zh+Hant/strings.xml').existsSync(),
+        isTrue);
     expect(
         _kotlinCode(_intakeRules()),
         contains('val APP_LANGUAGES = '
