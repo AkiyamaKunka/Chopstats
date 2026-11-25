@@ -106,7 +106,7 @@ import '../widgets/macro_chart.dart';
 import '../widgets/small_spinner.dart';
 import '../theme/app_dialog.dart';
 import '../theme/app_theme.dart' show AppButtonStyles;
-import '../theme/tokens.dart' show AppMotion, AppThemeContext;
+import '../theme/tokens.dart' show AppMotion, AppSpace, AppThemeContext;
 import '../widgets/discard_guard.dart';
 import '../widgets/pickers.dart';
 import '../widgets/reply_note.dart';
@@ -2196,8 +2196,11 @@ class _MealEditorScreenState extends State<MealEditorScreen>
         body: ListView(
           controller: _scroll,
           // Room for the first field's floated label at large text: it was
-          // clipped under the app bar at AX5.
-          padding: EdgeInsets.fromLTRB(16, _gapAboveField(context, 8), 16, 96),
+          // clipped under the app bar at AX5. At the end, Save's clearance
+          // over the system's bottom inset: Save floats above the 3-button
+          // bar, and the note section's end lay under it.
+          padding: EdgeInsets.fromLTRB(16, _gapAboveField(context, 8), 16,
+              AppSpace.fabClearanceOf(context)),
           children: [
             if (_errors.isNotEmpty)
               Card(

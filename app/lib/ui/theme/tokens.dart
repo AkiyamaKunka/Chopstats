@@ -696,6 +696,17 @@ abstract final class AppSpace {
 
   /// Room left under content for the floating action button.
   static const double fabClearance = 96;
+
+  /// [fabClearance] over the system's bottom inset, for a list under a
+  /// floating button on a page with no tab bar (Edit meal, a day's page).
+  /// The button floats above that inset (Android's 3-button bar, its
+  /// gesture handle, the iPhone's home indicator) while the list runs under
+  /// it: with the bare clearance, Edit meal's last note and an answer's end
+  /// lay 18 dp under Save with 3-button navigation (device check,
+  /// 2026-11-24). With the keyboard up the inset is 0 (the keyboard covers
+  /// it) and the button floats over the keyboard: the bare clearance again.
+  static double fabClearanceOf(BuildContext context) =>
+      fabClearance + MediaQuery.paddingOf(context).bottom;
   static const double dialogInset = 24;
   static const double tabBarHeight = 56;
 
