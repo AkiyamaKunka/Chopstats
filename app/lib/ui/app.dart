@@ -237,6 +237,14 @@ class _SystemNavBarStyleState extends State<_SystemNavBarStyle> {
   }
 }
 
+/// The app's name in [locale]: 筷拍 in Chinese, Chopstats otherwise, as
+/// the launcher shows it (Android res/values-zh/strings.xml, iPhone
+/// zh-Hans InfoPlist.strings). It is the task's title, which Android's
+/// Recents and app switcher show beside the launcher label: fixed English,
+/// a Chinese phone read "筷拍 Chopstats" there (RECENTS-1, 2026-11-24).
+String appTitleFor(Locale locale) =>
+    locale.languageCode == 'zh' ? '筷拍' : 'Chopstats';
+
 class CalorieTrackerApp extends StatefulWidget {
   final UiServices services;
   final GlobalKey<ScaffoldMessengerState>? messengerKey;
@@ -292,7 +300,9 @@ class _CalorieTrackerAppState extends State<CalorieTrackerApp> {
               .languageCode ==
           'zh';
       return MaterialApp(
-          title: 'Chopstats',
+          // In the app's language, and again when it changes (appTitleFor).
+          onGenerateTitle: (context) =>
+              appTitleFor(Localizations.localeOf(context)),
           scaffoldMessengerKey: messengerKey,
           // iOS: bounce, no glow indicator. Android: stretch overscroll.
           scrollBehavior: appScrollBehavior(defaultTargetPlatform),
@@ -1298,7 +1308,7 @@ class _StartupErrorAppState extends State<StartupErrorApp>
     final zh =
         WidgetsBinding.instance.platformDispatcher.locale.languageCode == 'zh';
     return MaterialApp(
-      title: 'Chopstats',
+      title: appTitleFor(WidgetsBinding.instance.platformDispatcher.locale),
       theme: AppTheme.build(Brightness.light, cjk: zh),
       darkTheme: AppTheme.build(Brightness.dark, cjk: zh),
       themeMode: ThemeMode.system,
