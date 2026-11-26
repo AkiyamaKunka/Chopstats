@@ -15,9 +15,10 @@ Lines tied to a release. Re-read them when a new App Store version ships:
    features lead that list without a version tag. If a "New in" line comes
    back, drop it and its tags when that version is no longer the newest.
 2. The caption under the hero slide names the version the screens show:
-   1.6, until the slides are shot again from 1.8.0 (docs/readme/src/
-   README.md, "Slides tied to a release"). Until then it also says that
-   1.8 looks different.
+   1.8, since the slides were shot again from 1.8.0 (docs/readme/src/
+   README.md, "Slides tied to a release"). When a version changes the look
+   before the slides are shot again, the caption keeps the old version and
+   says the new one looks different.
 3. "Coming next" listed what was on main but not in the App Store version.
    1.8.0 shipped all three of its items (the native iOS look, iCloud Backup
    and Correct with a note): they moved into "What else it does" and "More
@@ -48,19 +49,18 @@ The slides:
    languages, and update the alt text and the caption in both READMEs. The
    README shows 01-hero, 02-how, 03-control and 10-privacy; the other
    rendered slides stay in the folders, unused here.
-2. Every phone on a slide is a screenshot of version 1.6.0 with demo data.
-   1.8.0 changed the look, so they are due to be shot again; 01-hero's
-   "Log stays on your phone" chip and 10-privacy's headline and diagram
-   leave out iCloud Backup (docs/readme/src/README.md, "Slides tied to a
-   release").
-3. The burrito bowl's meal card on slide 02 names Chipotle (demo data). The
-   trademark line under "License" says Chopstats is not affiliated with the
-   restaurants named.
-4. Under each slide: a heading, one or two sentences and its fine print, so
+2. Every phone on these four slides is a screenshot of version 1.8.0 with
+   demo data (the App Store screenshots' demo file), its status bar left
+   out. Since iCloud Backup copies the log to the user's own iCloud Drive,
+   no slide says the log stays on the phone: 01-hero's chip says the
+   developer never sees your log, and 10-privacy's diagram includes iCloud
+   Drive (docs/readme/src/README.md, "Slides tied to a release"). The other
+   rendered slides still show 1.6.0.
+3. Under each slide: a heading, one or two sentences and its fine print, so
    the page still reads without the pictures. Keep the slide headings
    unique, because they become anchors. These anchors are linked: get-started,
    what-it-costs, privacy, android, for-developers and build-from-source.
-5. The food photos are from Unsplash. docs/readme/CREDITS.md names each one,
+4. The food photos are from Unsplash. docs/readme/CREDITS.md names each one,
    and the first line under "License" credits the photographers.
 
 The download badge and the second language:
@@ -102,7 +102,7 @@ You need a key from the AI service you choose. Google Gemini, the default, has a
 
 [Get started](#get-started) · [What it costs](#what-it-costs) · [Privacy](#privacy) · [Android](#android)
 
-<sub>Screens of version 1.6, with demo data; version 1.8 has a refreshed iOS look. Food photos from Unsplash, credited at the end.</sub>
+<sub>Screens of version 1.8, with demo data. Food photos from Unsplash, credited at the end.</sub>
 
 </div>
 
@@ -125,14 +125,14 @@ Take meal photos the way you already do, then pick one in Chopstats or share it 
 <br>
 
 <p align="center">
-  <img src="docs/readme/slides/03-control.jpg" width="100%" alt="See the guess. Change any number. Every food shows the portion your AI assumed, so a wrong guess is easy to spot. Edit calories, protein, carbs or fat, or type a fix in plain words. Didn't finish? Photograph the leftovers. The Edit meal screen with one food row magnified: Grilled chicken breast (~140 g), 225 kcal, 42 g protein, 0 g carbs, 5 g fat, each in an editable field. Beside it, a typed fix: “the salad had no dressing”.">
+  <img src="docs/readme/slides/03-control.jpg" width="100%" alt="See the guess. Change any number. Every food shows the portion your AI assumed, so a wrong guess is easy to spot. Edit calories, protein, carbs or fat, or type a fix in plain words. Didn't finish? Photograph the leftovers. The Edit meal screen with one food row magnified: Grilled chicken breast (~130 g), 215 kcal, 40 g protein, 0 g carbs, 5 g fat, each in an editable field. Beside it, a typed fix: “the salad had no dressing”.">
 </p>
 
 <div align="center">
 
 ### Numbers you control
 
-Every food shows the portion your AI assumed, such as "Grilled chicken breast (~140 g)", so a wrong guess is easy to spot. Change any number, or type a fix in plain words, such as "the salad had no dressing".
+Every food shows the portion your AI assumed, such as "Grilled chicken breast (~130 g)", so a wrong guess is easy to spot. Change any number, or type a fix in plain words, such as "the salad had no dressing".
 
 <sub>Didn't finish? Photograph what is left under Today › Log › Leftovers, and the meal shrinks to what you ate. The app asks the AI to read a nutrition label or printed weight before it estimates by eye. Estimates can be wrong, and nobody has measured this app's accuracy.</sub>
 
@@ -141,7 +141,7 @@ Every food shows the portion your AI assumed, such as "Grilled chicken breast (~
 <br>
 
 <p align="center">
-  <img src="docs/readme/slides/10-privacy.jpg" width="100%" alt="Your log stays on your phone. No account, no ads, no tracking. The developer receives none of your data. A diagram: on your iPhone are your meal log, weight and measurements, settings, and your API key in the iOS Keychain. An arrow labelled “The photo or text you log, plus the context it needs” leads to your AI provider, or your own server, whose terms apply. A dotted line labelled Nothing leads to a dashed box: Chopstats server: none. No analytics. No ads. Above, the Settings rows AI Provider (Claude) and Stop Sharing with Claude, labelled Stop any time. Restaurant nutrition, if you turn it on, has its own recipients; the privacy policy lists them.">
+  <img src="docs/readme/slides/10-privacy.jpg" width="100%" alt="The developer never sees your log. No account, no ads, no tracking. What you log goes to the AI you pick, and a backup to your own iCloud Drive. A diagram: on your iPhone are your meal log, weight and measurements, settings, and your API key in the iOS Keychain. An arrow labelled “The photo or text you log, plus the context it needs” leads to your AI provider, or your own server, whose terms apply. A second arrow, labelled “iCloud Backup copies your log, never your API key”, leads to your iCloud Drive: on by default, after a notice. A dotted line labelled Nothing leads to a dashed box: Chopstats server: none. No analytics. No ads. Above, the Settings rows AI Provider (Gemini) and Stop Sharing with Gemini, labelled Stop any time. Restaurant nutrition, if you turn it on, has its own recipients; the privacy policy lists them.">
 </p>
 
 <div align="center">

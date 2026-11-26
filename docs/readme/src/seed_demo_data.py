@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Seed a simulator's Chopstats 1.6.0 install with DEMO data for the README.
+"""Seed a simulator's Chopstats install with DEMO data for the README (the 1.6.0 shots).
 
 Usage: seed_demo_data.py <en|zh> <app data container> <db.dart path> <photos dir>
 
@@ -66,7 +66,7 @@ THUMBS = {k: thumb(k) for k in CROPS}
 
 # ---------------------------------------------------------------- schema
 src = open(db_dart, encoding="utf-8").read()
-start = src.index("const List<String> kSchemaDdl = [")
+start = re.search(r"(?:const|final) List<String> kSchemaDdl = \[", src).start()  # 1.6.0 | 1.8.0
 block = src[start:src.index("];", start)]
 ddl = re.findall(r"'''(.*?)'''|'(CREATE INDEX[^']*)'", block, re.S)
 stmts = [a or b for a, b in ddl]
@@ -84,7 +84,7 @@ for stale in ("ct_debug_tab",):
 db = sqlite3.connect(dbp)
 for s in stmts:
     db.execute(s)
-db.execute("PRAGMA user_version = 3")
+db.execute("PRAGMA user_version = 3")  # a later app adds its own tables on open (onUpgrade)
 
 
 def item(name, kcal, p, c, f):

@@ -15,10 +15,10 @@ Rules for this file:
    the line. An opening ** right before 「 must start the line or follow a
    space. So a bold label ends before its colon ("**标签**：正文"), and a
    control name in the middle of a sentence gets 「」 and no bold.
-3. The slides are in docs/readme/zh/slides/ and show version 1.6.0 in Chinese,
-   with Chinese demo data (the dumplings, the yogurt bowl). Each slide's alt
-   text and caption describe the Chinese slide, so they are not word-for-word
-   translations of README.md.
+3. The slides are in docs/readme/zh/slides/ and show version 1.8.0 in Chinese,
+   with Chinese demo data (the yogurt bowl's meal card and its Edit meal
+   screen). Each slide's alt text and caption describe the Chinese slide, so
+   they are not word-for-word translations of README.md.
 4. docs/PRIVACY.md has a Chinese half, linked here as docs/PRIVACY.md#中文.
    The other linked documents are in English only, and the text says so
    with （英文） after the link, or once at the top of 写给开发者.
@@ -62,7 +62,7 @@ Rules for this file:
 
 [开始使用](#开始使用) · [费用](#费用) · [隐私](#隐私) · [Android](#android)
 
-<sub>截图来自 1.6 版本，内容为演示数据；1.8 版本换上了焕新的 iOS 外观。食物照片来自 Unsplash，致谢见页尾。</sub>
+<sub>截图来自 1.8 版本，内容为演示数据。食物照片来自 Unsplash，致谢见页尾。</sub>
 
 </div>
 
@@ -85,14 +85,14 @@ Rules for this file:
 <br>
 
 <p align="center">
-  <img src="docs/readme/zh/slides/03-control.jpg" width="100%" alt="分量写明白，数字随你改。每样食物都写明 AI 假设的分量，估错了一眼就能看出来。改数字：热量、蛋白质、碳水、脂肪都能改；或者打一句话，让 AI 帮你改；没吃完？拍下剩菜，扣掉没吃的部分。「编辑这一餐」页面，其中一行被放大：希腊酸奶（~200 克），150 千卡、蛋白质 20 克、碳水 8 克、脂肪 4 克，每个数字都可以改。旁边是一句打字修改：「那份沙拉其实没放酱」。">
+  <img src="docs/readme/zh/slides/03-control.jpg" width="100%" alt="分量写明白，数字随你改。每样食物都写明 AI 假设的分量，估错了一眼就能看出来。改数字：热量、蛋白质、碳水、脂肪都能改；或者打一句话，让 AI 帮你改；没吃完？拍下剩菜，扣掉没吃的部分。「编辑这一餐」页面，其中一行被放大：原味希腊酸奶（约200克），146 千卡、蛋白质 20 克、碳水 8 克、脂肪 4 克，每个数字都可以改。旁边是一句打字修改：「那份沙拉其实没放酱」。">
 </p>
 
 <div align="center">
 
 ### 数字由你掌握
 
-每样食物都写明 AI 假设的分量，例如“希腊酸奶（~200 克）”，估错了一眼就能看出来。每个数字都可以改，也可以直接打一句修改，例如「那份沙拉其实没放酱」。
+每样食物都写明 AI 假设的分量，例如“原味希腊酸奶（约200克）”，估错了一眼就能看出来。每个数字都可以改，也可以直接打一句修改，例如「那份沙拉其实没放酱」。
 
 <sub>没吃完？在「今天 › 记录 › 记录剩菜」里拍下剩下的部分，这一餐会减为你实际吃掉的量。应用要求 AI 先读营养成分表或印出来的重量，再凭目测估算。估算可能有误，这款应用的准确度没有人测量过。</sub>
 
@@ -101,7 +101,7 @@ Rules for this file:
 <br>
 
 <p align="center">
-  <img src="docs/readme/zh/slides/10-privacy.jpg" width="100%" alt="饮食记录保存在你的手机上。无需账户，没有广告，不做追踪。开发者收不到你的任何数据。示意图：你的 iPhone 上有你的饮食记录、体重和围度、设置，以及存在 iOS 钥匙串里的 API Key。一条箭头标着“你记录的照片或文字，以及必要的上下文”，指向你选的 AI 服务商或者你自己的服务器，以它的条款为准。一条虚线标着“什么都不发”，指向虚线框：筷拍服务器：没有，没有统计分析，没有广告。上方是「设置」里的「AI 服务」（Claude）和「停止发送给 Claude」，标注“随时可以停下”。「餐厅营养」打开后另有接收方，详见隐私政策。">
+  <img src="docs/readme/zh/slides/10-privacy.jpg" width="100%" alt="饮食记录，开发者看不到。无需账户，没有广告，不做追踪。你记录的内容会发给你选的 AI，备份存进你自己的 iCloud 云盘。示意图：你的 iPhone 上有你的饮食记录、体重和围度、设置，以及存在 iOS 钥匙串里的 API Key。一条箭头标着“你记录的照片或文字，以及必要的上下文”，指向你选的 AI 服务商或者你自己的服务器，以它的条款为准。另一条箭头标着“「iCloud 备份」复制你的记录，不含 API Key”，指向你自己的 iCloud 云盘：默认开启，会先显示一条说明。一条虚线标着“什么都不发”，指向虚线框：筷拍服务器：没有，没有统计分析，没有广告。上方是「设置」里的「AI 服务」（Gemini）和「停止发送给 Gemini」，标注“随时可以停下”。「餐厅营养」打开后另有接收方，详见隐私政策。">
 </p>
 
 <div align="center">
