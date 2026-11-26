@@ -47,15 +47,25 @@ def test_reserve_existence_check_uses_the_hash_index(monkeypatch, tmp_path):
 
 def test_reserve_stays_fast_as_history_grows(monkeypatch, tmp_path):
     """Absolute smoke: reserving a new hash against a large table is cheap
-    (index-backed), well under any user-perceptible threshold."""
+    (index-backed), well under any user-perceptible threshold.
+
+    The best of five reservations is timed, not one: each is a write
+    transaction that ends in an fsync, and on a shared CI runner, under
+    coverage tracing, one of them alone took 321 ms (PR #105's run). A
+    reservation that is really slow is slow every time; the index itself
+    is pinned by the EXPLAIN test above."""
     import time
 
     _seed(monkeypatch, tmp_path, 2000)
-    novel = "f" * 32
-    start = time.perf_counter()
-    assert database.reserve_photo_hash(CHAT, novel, "t") is True
-    elapsed_ms = (time.perf_counter() - start) * 1000
-    assert elapsed_ms < 200, f"reserve took {elapsed_ms:.1f}ms against 2000 rows"
+    times_ms = []
+    for i in range(5):
+        novel = f"{0xf0 + i:02x}" * 16  # 32 hex digits, not among the seeded hashes
+        start = time.perf_counter()
+        assert database.reserve_photo_hash(CHAT, novel, "t") is True
+        times_ms.append((time.perf_counter() - start) * 1000)
+    assert min(times_ms) < 200, (
+        "reserve took " + ", ".join(f"{t:.1f}" for t in times_ms)
+        + " ms against 2000 rows")
 
 
 def test_get_meals_window_query_uses_the_date_index(monkeypatch, tmp_path):
