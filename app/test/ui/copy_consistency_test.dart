@@ -310,6 +310,10 @@ void main() {
         en.backupRowDelete,
         en.importChooseFile,
         en.serverKeyRemoveKept,
+        // Correct with a note (1.8.0, § 12 step 6).
+        en.mealNoteHeader,
+        en.mealNoteSend,
+        en.mealNoteRemoveLabel,
       ]) {
         expect(support, isNot(contains(label)), reason: label);
       }
@@ -333,6 +337,12 @@ void main() {
         en.serverKeyRemoveKept,
         en.serverUploadKeyLabel,
         en.subPageTitle,
+        // Step 6, Correct with a note.
+        en.mealNoteHeader,
+        en.mealNoteSend,
+        en.mealNoteRemoveLabel,
+        en.editorTitleEdit,
+        en.save,
       ]) {
         expect(s12, contains(label), reason: label);
       }

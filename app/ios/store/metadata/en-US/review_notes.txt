@@ -2,12 +2,13 @@ Chopstats is a bring-your-own-key calorie tracker. It has no accounts and
 no backend of ours. The user pastes an API key for an AI provider they
 already pay for (Google Gemini, OpenAI, Anthropic, xAI, OpenRouter,
 DeepSeek, Alibaba Qwen, ByteDance Doubao, Zhipu GLM); that provider
-receives each photo being analyzed (with the user's dietary profile and
-a short summary of the day's meals) and returns a nutrition estimate.
-Before anything is sent to a provider for the first time, the app asks
-for permission in a dialog that names the company and what is sent;
-Settings › "Stop Sharing with …" withdraws it. Everything else stays on
-the phone in a local database, unless the restaurant lookup is on.
+receives each photo being analyzed (with the user's dietary profile and a
+short summary of the day's meals) and returns a nutrition estimate. Before
+anything is sent to a provider for the first time, the app asks for
+permission in a dialog that names the company and what is sent; Settings ›
+"Stop Sharing with …" withdraws it. Meal text the user types goes to the
+same provider; everything else stays on the phone in a local database,
+apart from iCloud Backup and the restaurant lookup (below).
 
 To test: a fresh install opens on Settings. Tap AI Provider › API Key;
 Google Gemini is already selected; paste the key below into "Gemini
@@ -33,31 +34,35 @@ app: there are no in-app purchases, and this option unlocks nothing. The
 bitewise://setup link fills in that server's address and key after a
 confirmation dialog.
 
-New in 1.6.0
+From 1.6.0: "Log" › "My usual foods" logs a frequent meal again, with no
+AI and nothing sent. Restaurant nutrition (Settings, off by default) needs
+an Anthropic or OpenRouter key or the user's own server, so it is grayed
+out with the demo key; a lookup sends chain and food names with amounts,
+never the photo or its location, and "Use location" makes one Apple MapKit
+query from the phone, with no location permission. "Meta glasses photos":
+the app does not connect to glasses; a glasses photo with no food found on
+the phone is not sent.
 
-"Log" › "My usual foods" lists meals logged on at least 2 of the last 90
-days; tapping one logs it again, with no AI and nothing sent. To see it:
-"Log" › "Enter manually", type Oatmeal in "What was it?" and 350 in
-"Calories", pick yesterday with the date button, tap "Add". Repeat for the
-day before, then open the list.
+New in 1.8.0
 
-Settings › Restaurant nutrition › "Lookups" (off by default) needs the
-user's own server or an Anthropic or OpenRouter key; with the demo key it
-is grayed out ("Not available with Gemini yet.") and no lookup can be
-tested. A consent sheet names the recipient first. For a photo meal from a
-US chain, the recipient gets chain and food names with amounts and
-searches the web for the chain's published nutrition. To see the sheet
-with no key: API Key › "Anthropic Claude", then "Lookups" › "When unsure".
-"Use location" there lets the app read a restaurant or takeout photo's
-location from the photo library, check on the phone that it is in the US
-and, for a restaurant meal, query Apple MapKit once per lookup. There is
-no location permission. Only Apple gets the coordinates; the AI service
-gets at most nearby chain names. Confirming or rejecting a result keeps
-that spot on the phone, rounded to about 100 m.
+iCloud Backup (Settings › Your Data, on by default) copies meals, weight,
+measurements, workouts and meal pictures to the user's own iCloud Drive.
+We run no server and cannot read it; API keys and settings are never in
+it. The app does not use HealthKit. Signed in to iCloud, launch shows
+"iCloud Backup is on" (Keep On / Turn Off) and nothing uploads before an
+answer. To see it: log a meal, tap "Back Up Now" (the first can take a
+minute), open Files › iCloud Drive › Chopstats. A reinstall offers
+"Restore your meals?" (Not Now skips it). Signed out, the line under the
+switch asks to sign in to iCloud.
 
-"Meta glasses photos" (Settings › Photos, on by default): the app does not
-connect to glasses. With Watch Camera Roll on, a photo it recognizes as
-saved by the Meta AI app is checked for food on the phone and not sent if
-none is found.
+Correct with a note: tap a meal on Today; at the end of Edit meal, under
+"Correct with a note", type e.g. "only half the rice" and tap "Correct
+with AI" (works with the demo key, photo or manual meal). Sent: the note
+plus that meal's text, foods, numbers and earlier notes; no photo. The
+answer fills the form; nothing is saved until "Save"; notes stay with the
+meal.
+
+Photos taken before 4 a.m. also carry the day before's meals; older
+installs are asked again first ("What Chopstats sends has changed").
 
 Demo key (Gemini, capped, revoked after review): <key>
