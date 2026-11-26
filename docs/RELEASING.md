@@ -926,10 +926,11 @@ App Store or Play data type. The saved lookup answers never leave the
 phone either, and Location stays *No*. The answer stays **B**.
 
 **iCloud Backup** (iPhone, from 1.8.0; § 11) does not change the answer
-either: it stays **B**, and the backup adds no data type. It copies the
-meal record, the notes kept on meals, weight, measurements, workouts,
-activities, the fitness profile and the meal pictures into the user's
-own iCloud Drive with Apple's file APIs. Neither the developer nor any
+either: it stays **B**, and the backup adds no data type. It copies
+everything an export holds (the meal record with the notes kept on
+meals, the processed-photo list, weight, measurements, workouts,
+activities and the fitness profile) and the meal pictures into the
+user's own iCloud Drive with Apple's file APIs. Neither the developer nor any
 partner code can read that folder, so under the definition above it is
 not collected: Apple holds it under the user's iCloud terms, as with
 MapKit above. So Fitness and Identifiers stay *No*, although workouts
@@ -1001,9 +1002,9 @@ step. Revisit if the app is ever published with a developer-run service.
   > short summary of the day's meals) and returns a nutrition estimate. Before
   > anything is sent to a provider for the first time, the app asks for
   > permission in a dialog that names the company and what is sent; Settings ›
-  > "Stop Sharing with …" withdraws it. Everything else stays on the phone in
-  > a local database, apart from iCloud Backup and the restaurant lookup
-  > (below).
+  > "Stop Sharing with …" withdraws it. Meal text the user types goes to the
+  > same provider; everything else stays on the phone in a local database,
+  > apart from iCloud Backup and the restaurant lookup (below).
   >
   > To test: a fresh install opens on Settings. Tap AI Provider › API Key;
   > Google Gemini is already selected; paste the key below into "Gemini
@@ -1041,14 +1042,14 @@ step. Revisit if the app is ever published with a developer-run service.
   > New in 1.8.0
   >
   > iCloud Backup (Settings › Your Data, on by default) copies meals, weight,
-  > measurements, workouts and meal pictures to the user's own iCloud Drive (a
-  > Chopstats folder in Files). We run no server and cannot read it; API keys
-  > and settings are never in it. Signed in to iCloud, launch shows "iCloud
-  > Backup is on" (Keep On / Turn Off) and nothing uploads before an answer.
-  > To see it: log a meal, tap "Back Up Now" (the first can take a minute),
-  > open Files › iCloud Drive › Chopstats. A reinstall offers "Restore your
-  > meals?" (Not Now skips it). Signed out, the line under the switch asks to
-  > sign in to iCloud.
+  > measurements, workouts and meal pictures to the user's own iCloud Drive.
+  > We run no server and cannot read it; API keys and settings are never in
+  > it. The app does not use HealthKit. Signed in to iCloud, launch shows
+  > "iCloud Backup is on" (Keep On / Turn Off) and nothing uploads before an
+  > answer. To see it: log a meal, tap "Back Up Now" (the first can take a
+  > minute), open Files › iCloud Drive › Chopstats. A reinstall offers
+  > "Restore your meals?" (Not Now skips it). Signed out, the line under the
+  > switch asks to sign in to iCloud.
   >
   > Correct with a note: tap a meal on Today; at the end of Edit meal, under
   > "Correct with a note", type e.g. "only half the rice" and tap "Correct
@@ -2358,6 +2359,16 @@ on `feat/icloud-backup`:
   folder level). The ShareExtension gets nothing. To ship without iCloud,
   revert that one commit.
 
+**App Review guideline 5.1.3(ii)** says apps "may not store personal
+health information in iCloud". It sits in 5.1.3 (*Health and Health
+Research*), whose rules are about HealthKit, health records and health
+research; Chopstats uses no HealthKit, and the review notes say so
+(§ 4.4). If App Review still cites it for iCloud Backup, the choice is
+the owner's: ship with the backup off by default (`kCloudBackupDefaultOn`
+in `lib/services/backup/backup_format.dart`; What's New, the description
+and the review notes then drop "on by default"), or ship without iCloud
+(revert Part B).
+
 ### 11.1 Owner steps (Apple Developer website), before any device test
 
 1. **Certificates, Identifiers & Profiles → Identifiers → +** → *iCloud
@@ -2470,7 +2481,7 @@ hotfix such as 1.6.1, which has none of this.) The labels are the app's on
 `app_en.arb`, and checks that `SUPPORT.md` does not name them yet; drop
 that check ("names no 1.7.0 control …") in the same PR. If 1.7.0 ships
 without Part B (§ 11), leave out the iCloud Backup text (steps 1, 3
-and 4) and keep steps 2 and 5.
+and 4) and keep steps 2, 5 and 6.
 
 1. **Intro**: "your meal log stays on your phone" becomes "your meal log
    stays on your phone (and, with iCloud Backup, in your own iCloud
@@ -2508,10 +2519,11 @@ and 4) and keep steps 2 and 5.
    In *What it does*, the bullet on fixing a meal becomes: "open a meal to
    edit its items and numbers, or, under **Correct with a note**, tell
    your AI what was different (such as "only half the rice") and tap
-   **Correct with AI**; nothing changes until you tap **Save**. Or use
-   *Fix or delete a meal* …". Under *Your data*, after deleting a meal:
-   "Deleting a meal also deletes the notes you sent about it. To remove
-   one note, tap **Remove this note** next to it in **Edit meal**, then
+   **Correct with AI**; the answer fills in the numbers, and nothing is
+   saved until you tap **Save**. Or use *Fix or delete a meal* …". Under
+   *Your data*, after deleting a meal: "Deleting a meal also deletes the
+   notes you sent about it. To remove one note, tap the × next to it in
+   **Edit meal** (VoiceOver calls it **Remove this note**), then
    **Save**." (`docs/PRIVACY.md` describes the notes kept on a meal.)
 
 The README has its own list (*Lines tied to a release*, in its maintainer

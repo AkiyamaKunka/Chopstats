@@ -6,9 +6,9 @@ receives each photo being analyzed (with the user's dietary profile and a
 short summary of the day's meals) and returns a nutrition estimate. Before
 anything is sent to a provider for the first time, the app asks for
 permission in a dialog that names the company and what is sent; Settings ›
-"Stop Sharing with …" withdraws it. Everything else stays on the phone in
-a local database, apart from iCloud Backup and the restaurant lookup
-(below).
+"Stop Sharing with …" withdraws it. Meal text the user types goes to the
+same provider; everything else stays on the phone in a local database,
+apart from iCloud Backup and the restaurant lookup (below).
 
 To test: a fresh install opens on Settings. Tap AI Provider › API Key;
 Google Gemini is already selected; paste the key below into "Gemini
@@ -46,14 +46,14 @@ the phone is not sent.
 New in 1.8.0
 
 iCloud Backup (Settings › Your Data, on by default) copies meals, weight,
-measurements, workouts and meal pictures to the user's own iCloud Drive (a
-Chopstats folder in Files). We run no server and cannot read it; API keys
-and settings are never in it. Signed in to iCloud, launch shows "iCloud
-Backup is on" (Keep On / Turn Off) and nothing uploads before an answer.
-To see it: log a meal, tap "Back Up Now" (the first can take a minute),
-open Files › iCloud Drive › Chopstats. A reinstall offers "Restore your
-meals?" (Not Now skips it). Signed out, the line under the switch asks to
-sign in to iCloud.
+measurements, workouts and meal pictures to the user's own iCloud Drive.
+We run no server and cannot read it; API keys and settings are never in
+it. The app does not use HealthKit. Signed in to iCloud, launch shows
+"iCloud Backup is on" (Keep On / Turn Off) and nothing uploads before an
+answer. To see it: log a meal, tap "Back Up Now" (the first can take a
+minute), open Files › iCloud Drive › Chopstats. A reinstall offers
+"Restore your meals?" (Not Now skips it). Signed out, the line under the
+switch asks to sign in to iCloud.
 
 Correct with a note: tap a meal on Today; at the end of Edit meal, under
 "Correct with a note", type e.g. "only half the rice" and tap "Correct

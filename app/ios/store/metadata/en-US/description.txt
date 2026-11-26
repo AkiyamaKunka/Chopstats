@@ -27,7 +27,7 @@ Paste an API key from Google Gemini, OpenAI, Anthropic, xAI, OpenRouter, DeepSee
 YOUR DATA STAYS WITH YOU
 • No sign-up and no account. Chopstats has no backend, and the developer receives none of your data.
 • Your meals, weight and settings are stored on your phone. API keys are kept in the iOS Keychain.
-• iCloud Backup (on by default, after a notice) copies your log and meal pictures to your own iCloud Drive, so they come back after a reinstall or on a new iPhone. API keys are never included.
+• A backup in your own iCloud Drive (on by default, after a notice) keeps your log and meal pictures, so they come back after a reinstall or on a new iPhone. API keys are never included.
 • Apart from that backup, data leaves your phone only to reach the AI service you chose (or your own server, if you set one up): the photo or text being analyzed, plus the context it needs, such as your dietary profile, the day's other meals or the meal you are correcting. The copy of a photo that is sent has its embedded metadata, such as location, removed. The one exception is Restaurant nutrition, if you turn it on: lookups go to that AI service's web search, and a restaurant photo's location (read on your phone, never sent to the AI service) can go to Apple Maps to find nearby restaurants. The privacy policy lists exactly what is sent.
 • With Watch Camera Roll on, every new photo, including ones that are not food, is sent to that AI service so it can tell whether it is a meal. iOS decides when background scans run, and opening the app catches up. You can turn it off at any time.
 • No ads, no analytics and no tracking. Export your data, meal pictures included, to a file whenever you like.
