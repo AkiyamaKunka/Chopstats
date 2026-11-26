@@ -65,8 +65,12 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  String burnLine(WidgetTester tester) =>
-      tester.widget<Text>(find.byKey(const Key('garminBurnLine'))).data!;
+  /// What the line reads (zh draws it through a span:
+  /// lib/ui/unit_text.dart).
+  String burnLine(WidgetTester tester) {
+    final line = tester.widget<Text>(find.byKey(const Key('garminBurnLine')));
+    return line.data ?? line.textSpan!.toPlainText();
+  }
 
   testWidgets('a burn > 0 on a fed day draws the line with the net math',
       (tester) async {

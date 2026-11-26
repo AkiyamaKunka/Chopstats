@@ -15,7 +15,9 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../l10n.dart';
 import '../theme/tokens.dart';
+import '../unit_text.dart';
 
 class ReplyNote extends StatelessWidget {
   const ReplyNote({super.key, required this.message, this.textKey});
@@ -64,7 +66,7 @@ class ReplyNote extends StatelessWidget {
                 const SizedBox(width: AppSpace.s8),
               ],
               Expanded(
-                child: Text(message,
+                child: unitText(context.l10n, message,
                     key: textKey,
                     style: Theme.of(context)
                         .textTheme

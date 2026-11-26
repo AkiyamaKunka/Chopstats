@@ -23,6 +23,7 @@ import '../../services/photo/photo_changes.dart'
 import '../backup_sheets.dart' show backupSizeLabel;
 import '../diagnostics.dart';
 import '../l10n.dart';
+import '../unit_text.dart';
 import '../restaurant_assist_controls.dart' show RestaurantLookupsDiagnostics;
 import '../theme/tokens.dart' show AppThemeContext;
 import '../widgets/grouped.dart' show scrollEndInset;
@@ -425,14 +426,15 @@ class _RestaurantLookups extends StatelessWidget {
             key: const Key('diagRestaurantToday'),
             style: theme.textTheme.bodyMedium),
         const SizedBox(height: 4),
-        Text(
+        unitText(
+            l,
             newestFirst.isEmpty
                 ? l.diagRestaurantNone
                 : l.diagRestaurantIntro,
             style: muted),
         for (final e in newestFirst) ...[
           const SizedBox(height: 4),
-          Text(restaurantDecisionLine(l, e),
+          unitText(l, restaurantDecisionLine(l, e),
               style: theme.textTheme.bodySmall),
         ],
       ],

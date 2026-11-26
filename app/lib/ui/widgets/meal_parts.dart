@@ -7,6 +7,7 @@ library;
 import 'package:flutter/material.dart';
 
 import '../l10n.dart';
+import '../unit_text.dart';
 import '../large_text.dart';
 import '../theme/tokens.dart';
 
@@ -189,7 +190,8 @@ class MealChip extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.symmetric(
             horizontal: AppSpace.chipH, vertical: AppSpace.chipV),
-        child: Text(
+        child: unitText(
+          context.l10n,
           label,
           style: AppNumerals.of(context).chip.copyWith(
               color: emphasized ? colors.onAccent : colors.label),

@@ -20,6 +20,7 @@ import 'package:flutter/material.dart';
 import '../../services/usual/usual_foods.dart';
 import '../format.dart' show formatKcal, formatOneDecimal;
 import '../l10n.dart';
+import '../unit_text.dart';
 import '../theme/tokens.dart';
 import 'grouped.dart' show GroupedCard;
 
@@ -94,7 +95,8 @@ class UsualOfferCard extends StatelessWidget {
           ),
           for (final item in offer.items) ...[
             const SizedBox(height: AppSpace.s8),
-            Text(
+            unitText(
+              l,
               usualItemText(l, item, item.name),
               key: Key('usualOfferItem${item.index}'),
               style: theme.textTheme.bodyMedium?.copyWith(color: colors.label),
@@ -205,7 +207,8 @@ void showUsualUsedSnack(
       key: const Key('usualUsedSnack'),
       duration: kUsualUndoSnackDuration,
       persist: usualUndoPersists(messenger),
-      content: Text(
+      content: unitText(
+        l,
         before == after
             ? l.usualUsedSnackSame
             : l.usualUsedSnack(before, after),

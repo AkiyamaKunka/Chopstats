@@ -37,6 +37,7 @@ import '../../services/photo/system_photo_picker.dart';
 import '../ai_consent.dart';
 import '../format.dart';
 import '../l10n.dart';
+import '../unit_text.dart';
 import '../large_text.dart';
 import '../meal_in_use.dart';
 import '../services.dart';
@@ -378,7 +379,8 @@ class _LeftoverScreenState extends State<LeftoverScreen> {
                     fallback: ctx.l10n.nlUnnamedMeal),
                 style: Theme.of(ctx).textTheme.titleSmall),
             const SizedBox(height: 8),
-            Text(
+            unitText(
+                ctx.l10n,
                 ctx.l10n.leftoverResultLine(
                     '$pct', '${baseKcal - newKcal}', '$newKcal'),
                 key: const Key('leftoverResultLine')),
@@ -393,7 +395,8 @@ class _LeftoverScreenState extends State<LeftoverScreen> {
               // A meal is deleted with this Save: the danger colour, as
               // the chat's delete warning. The indigo (tertiary) it had is
               // 4.05:1 on the dark dialog, under the 4.5:1 text needs.
-              Text(
+              unitText(
+                  ctx.l10n,
                   ctx.l10n
                       .leftoverDupRemoved(formatKcal(duplicateKcal)),
                   key: const Key('leftoverDupLine'),
@@ -537,7 +540,7 @@ class _LeftoverScreenState extends State<LeftoverScreen> {
   void _snack(String text) {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(text)));
+        .showSnackBar(SnackBar(content: unitText(context.l10n, text)));
   }
 
   num safeCal(Meal m) => safeNumber(m.analysis['total_calories']);
@@ -828,7 +831,8 @@ class _MealPickRow extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 2),
-                Text(
+                unitText(
+                  context.l10n,
                   detail,
                   style: theme.textTheme.bodyMedium
                       ?.copyWith(color: theme.colorScheme.onSurfaceVariant),

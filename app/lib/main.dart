@@ -11,6 +11,8 @@ import 'package:sqflite/sqflite.dart' show DatabaseException;
 
 import 'ui/app.dart';
 import 'ui/di.dart';
+import 'ui/l10n.dart';
+import 'ui/unit_text.dart';
 import 'ui/widgets/usual_offer_card.dart' show usualSnackClosing;
 
 final GlobalKey<ScaffoldMessengerState> messengerKey =
@@ -266,9 +268,13 @@ bool _flushSnackbars() {
   // needs to know when its snackbar is on screen.
   final watched = action != null && (s.offerChanges != null || s.givesWay);
   late final _Shown handed;
+  // In the app language of the screen it shows on: a number keeps its
+  // unit in Chinese ('已记录：… —— 约 485 千卡').
+  final Widget text =
+      Builder(builder: (context) => unitText(context.l10n, s.message));
   final Widget content = watched
-      ? _OnScreen(onShown: () => _onScreen(handed), child: Text(s.message))
-      : Text(s.message);
+      ? _OnScreen(onShown: () => _onScreen(handed), child: text)
+      : text;
   final controller = messenger.showSnackBar(action == null
       ? SnackBar(content: content)
       : SnackBar(

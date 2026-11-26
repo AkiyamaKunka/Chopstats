@@ -23,6 +23,7 @@ import '../ai_consent.dart';
 import '../outcome_text.dart';
 import '../photo_pipeline.dart';
 import '../l10n.dart';
+import '../unit_text.dart';
 import '../large_text.dart';
 import '../theme/app_dialog.dart';
 import '../theme/tokens.dart';
@@ -559,7 +560,7 @@ class _AddPhotoScreenState extends State<AddPhotoScreen> {
           // A share's note (share intake), never a picked photo's verdict.
           PhotoOutcomeKind.refusedFiles => l.outcomeFailed,
         }),
-        content: Text(hint == null ? body : '$body\n\n$hint'),
+        content: unitText(l, hint == null ? body : '$body\n\n$hint'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop('ok'),

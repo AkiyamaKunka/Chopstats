@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 
 import '../core/contracts.dart';
 import 'l10n.dart';
+import 'unit_text.dart';
 import 'theme/app_dialog.dart';
 import 'theme/app_theme.dart' show AppButtonStyles;
 import 'theme/tokens.dart';
@@ -38,13 +39,13 @@ Future<bool> presentNlReplies(
     } else if (!reply.applied && onNotApplied != null) {
       onNotApplied(reply);
     } else if (reply.text.length <= 120) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(reply.text)));
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: unitText(context.l10n, reply.text)));
     } else {
       await showDialog<void>(
         context: context,
         builder: (ctx) => appAlertDialog(
-          content: Text(reply.text),
+          content: unitText(ctx.l10n, reply.text),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(ctx).pop(),
@@ -84,7 +85,7 @@ Future<bool> showDeleteConfirmation(
           if (reply.pendingDeleteLabels.isEmpty && reply.text.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(bottom: AppSpace.s8),
-              child: Text(reply.text),
+              child: unitText(ctx.l10n, reply.text),
             ),
           for (final label in reply.pendingDeleteLabels)
             Padding(

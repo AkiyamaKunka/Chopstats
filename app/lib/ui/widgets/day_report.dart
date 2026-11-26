@@ -30,6 +30,7 @@ import '../../core/coerce.dart';
 import '../../core/contracts.dart';
 import '../format.dart';
 import '../l10n.dart';
+import '../unit_text.dart';
 import '../meal_edit_logic.dart' show isRealIsoDate;
 import '../theme/app_theme.dart';
 import 'calorie_ring.dart';
@@ -122,7 +123,7 @@ class DayReportCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 12),
-              Text(l.kcalAmount(formatKcal(totals.cal)),
+              unitText(l, l.kcalAmount(formatKcal(totals.cal)),
                   key: const Key('reportTotal'),
                   style: AppNumerals.of(context)
                       .large
@@ -269,7 +270,8 @@ class DayReportCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 6),
-            Text(
+            unitText(
+              l,
               '~${l.kcalAmount(displayTotalCalories(a))} · '
               '${l.macroProteinShort} ${displayMacro(a, 'total_protein_g')}g · '
               '${l.macroCarbsShort} ${displayMacro(a, 'total_carbs_g')}g · '
@@ -282,7 +284,8 @@ class DayReportCard extends StatelessWidget {
                 Padding(
                   padding: const EdgeInsets.only(top: 2),
                   // The meal cards' own item line (zh: a full-width colon).
-                  child: Text(
+                  child: unitText(
+                    l,
                     '• ${l.mealItemLine('${item['name'] ?? '?'}', l.kcalAmount(displayItemCalories(item['estimated_calories'])))}',
                     style: quiet,
                   ),

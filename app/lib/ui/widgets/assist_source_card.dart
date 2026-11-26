@@ -35,6 +35,7 @@ import 'package:flutter/material.dart';
 import '../assist_view.dart';
 import '../format.dart' show formatKcal, formatOneDecimal;
 import '../l10n.dart';
+import '../unit_text.dart';
 import 'small_spinner.dart';
 
 class AssistSourceCard extends StatelessWidget {
@@ -453,9 +454,9 @@ class _ItemLines extends StatelessWidget {
           Text(item.menuItem, style: theme.textTheme.titleSmall),
         if (detail.isNotEmpty) Text(detail, style: muted),
         if (numbers.isNotEmpty)
-          Text('$numbers$qty', style: theme.textTheme.bodyMedium),
+          unitText(l, '$numbers$qty', style: theme.textTheme.bodyMedium),
         if (sizes != null)
-          Text(sizes, key: const Key('assistSizes'), style: muted),
+          unitText(l, sizes, key: const Key('assistSizes'), style: muted),
       ],
     );
   }

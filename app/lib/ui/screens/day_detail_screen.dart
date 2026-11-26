@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import '../../core/contracts.dart';
 import '../format.dart';
 import '../l10n.dart';
+import '../unit_text.dart';
 import '../large_text.dart';
 import '../meal_in_use.dart';
 import '../meal_thumbs.dart';
@@ -190,7 +191,8 @@ class _DayDetailScreenState extends State<DayDetailScreen>
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
+                              unitText(
+                                  context.l10n,
                                   '~${context.l10n.kcalAmount(formatKcal(totals.cal))}',
                                   key: const Key('dayTotalKcal'),
                                   style: AppNumerals.of(context).large.copyWith(
