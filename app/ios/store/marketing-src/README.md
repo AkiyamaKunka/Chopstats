@@ -148,7 +148,12 @@ Watch Camera Roll sends new photos without asking again).
    full bars (`xcrun simctl status_bar … override`); light mode except
    `06_trend`; the device language is set with `simctl spawn … defaults write
    "Apple Global Domain" AppleLanguages` / `AppleLocale` (en_US, zh_CN) and a
-   reboot of that simulator.
+   reboot of that simulator. The en captures use 12-hour time (24-Hour Time
+   off), as a US iPhone does: in English the app follows the phone's 24-Hour
+   Time, so a meal reads "8:04 AM", not "08:04" (the Chinese screens ignore
+   that setting). Check with `simctl spawn … defaults read -g
+   AppleICUForce24HourTime` (the 1.8.0 maker's new simulator had it on), set
+   it with `defaults write -g AppleICUForce24HourTime -bool false` and reboot.
 2. Made-up demo data only:
    `python3 scripts/play_screenshots.py demo-file en-US --today <capture day> --out …`
    (and `zh-CN`), copied into the simulator's Files › On My iPhone and imported
@@ -182,11 +187,11 @@ Watch Camera Roll sends new photos without asking again).
 The 6.9-inch set (1320×2868) is the one built here. Apple's specification page,
 as read for the 1.8.0 listing on 2026-11-25, lists at least one screenshot for
 the 6.3-inch "medium Dynamic Island" class (1206×2622) as required and the
-6.9-inch class as optional, while `docs/RELEASING.md` (2026-10-25) says the
-reverse. Version
-1.6.0 went through review with a 6.3-inch set only, and the 1.6.1 draft
-carries both classes, so 1.8.0 carries both too: `--medium` writes 1206×2622
-copies (same aspect within 0.1 %) to `../screenshots-marketing-medium/`.
+6.9-inch class as optional, while `docs/RELEASING.md` said the reverse on
+2026-10-25. Version 1.6.0 went through review with a 6.3-inch set only, and
+the 1.6.1 draft carries both classes, so 1.8.0 carries both too: `--medium`
+writes 1206×2622 copies (same aspect within 0.1 %) to
+`../screenshots-marketing-medium/`.
 
 ## Credits
 

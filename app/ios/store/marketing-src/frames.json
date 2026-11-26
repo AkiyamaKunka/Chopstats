@@ -248,7 +248,7 @@
                 "box": [
                   96,
                   685,
-                  1203,
+                  1223,
                   773
                 ],
                 "pad": 14,
@@ -313,7 +313,7 @@
                 "box": [
                   96,
                   685,
-                  1203,
+                  1223,
                   773
                 ],
                 "pad": 14,
@@ -357,7 +357,7 @@
     },
     {
       "id": "04_usual_foods",
-      "notes": "My usual foods. facts §2: meals logged on at least 2 of the last 90 days; tap to log again with no photo and no AI; nothing is sent. Every row's kcal/macros equal the demo file's item sums (Mapo tofu with rice 590 = 330+260, P23 C67 F24). EN shows 'Around this time' (captured about 21:35, near the demo's dinners); ZH, captured later, has no such header. The touch point sits on blank row space, not on text.",
+      "notes": "My usual foods. facts §2: meals logged on at least 2 of the last 90 days; tap to log again with no photo and no AI; nothing is sent. Every row's kcal/macros equal the demo file's item sums (Mapo tofu with rice 590 = 330+260, P23 C67 F24). Neither language shows 'Around this time' (that header needs a meal logged within 2 h of the capture's clock on 2 of the last 30 days; EN was captured about 22:34, ZH about 21:42), so both lists start with the yogurt bowl logged today at 08:04 (EN in 12-hour form, 'Logged today at 8:04 AM', as on a US iPhone). EN crop ends in the white gap above the Hummus row's divider. The touch point sits on blank row space, not on text.",
       "en": {
         "headline": [
           "Your usual foods,",
@@ -374,12 +374,12 @@
               0,
               200,
               1320,
-              2420
+              2458
             ],
             "touches": [
               [
-                940,
-                530
+                990,
+                537
               ]
             ]
           }
