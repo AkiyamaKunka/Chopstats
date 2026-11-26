@@ -153,7 +153,8 @@ Watch Camera Roll sends new photos without asking again).
    Time, so a meal reads "8:04 AM", not "08:04" (the Chinese screens ignore
    that setting). Check with `simctl spawn … defaults read -g
    AppleICUForce24HourTime` (the 1.8.0 maker's new simulator had it on), set
-   it with `defaults write -g AppleICUForce24HourTime -bool false` and reboot.
+   it with `simctl spawn … defaults write -g AppleICUForce24HourTime -bool
+   false` (without `simctl spawn` it changes the Mac's own setting) and reboot.
 2. Made-up demo data only:
    `python3 scripts/play_screenshots.py demo-file en-US --today <capture day> --out …`
    (and `zh-CN`), copied into the simulator's Files › On My iPhone and imported
@@ -186,9 +187,9 @@ Watch Camera Roll sends new photos without asking again).
 
 The 6.9-inch set (1320×2868) is the one built here. Apple's specification page,
 as read for the 1.8.0 listing on 2026-11-25, lists at least one screenshot for
-the 6.3-inch "medium Dynamic Island" class (1206×2622) as required and the
-6.9-inch class as optional, while `docs/RELEASING.md` said the reverse on
-2026-10-25. Version 1.6.0 went through review with a 6.3-inch set only, and
+the 6.3-inch "medium Dynamic Island" class (1206×2622) as required; the
+6.9-inch class is accepted, and without it Apple needs the 6.5-inch Face ID
+class (`docs/RELEASING.md` § 4.4; it said the reverse on 2026-10-25). Version 1.6.0 went through review with a 6.3-inch set only, and
 the 1.6.1 draft carries both classes, so 1.8.0 carries both too: `--medium`
 writes 1206×2622 copies (same aspect within 0.1 %) to
 `../screenshots-marketing-medium/`.
