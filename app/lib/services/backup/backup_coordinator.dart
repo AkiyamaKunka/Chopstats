@@ -495,7 +495,14 @@ class BackupCoordinator {
         _set(BackupState.unavailable);
         return null;
       case CloudState.ok:
-        break;
+        // iCloud is there again: a status that said it is not no longer
+        // holds. The look that then asks the notice or offers a restore
+        // sets no status of its own, and a return after it starts no run,
+        // so without this "Sign in to iCloud…" would stay behind them.
+        final was = _status.value.state;
+        if (was == BackupState.noAccount || was == BackupState.unavailable) {
+          _status.value = _statusFromPrefs().copyWith(restorable: _restorable);
+        }
     }
     if (cloud.accountChanged) {
       // Another iCloud account: nothing this install knew about the old
@@ -665,6 +672,9 @@ class BackupCoordinator {
     if (bg && !_prefs.noticeSeen) return _set(BackupState.needsNotice); // G1
     if (!uiEngine && !isValidInstallId(_prefs.installId)) return _skip(); // G8
     final me = await _identity(background: bg); // G7
+    // Turned off while iCloud answered (Turn Off on the notice, or the
+    // switch): this run stops here and says so.
+    if (!_prefs.enabled) return _set(BackupState.off);
     if (me == null) return _status.value.state;
     if (!_prefs.noticeSeen) return _set(BackupState.needsNotice); // G1
     final pause = _prefs.paused;

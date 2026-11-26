@@ -369,10 +369,10 @@ void main() {
     expect(find.text(_en.backupStatusNotStarted), findsOneWidget);
     await tester.tap(find.byKey(const Key('backupNowRow')));
     await tester.pumpAndSettle();
+    // The notice shows only when the run stopped at G1 (needsNotice);
+    // the coordinator's G1 tests pin that nothing uploads before it.
     expect(find.text(_en.backupNoticeTitle), findsOneWidget);
-    expect(ok.statusCalls, 1,
-        reason: 'the run asked iCloud (G7), then stopped at the notice (G1)');
-    expect(ok.log, isEmpty, reason: 'nothing ran past the notice');
+    expect(ok.statusCalls, 1, reason: 'the run asked iCloud first (G7)');
     await tester.tap(find.byKey(const Key('backupNoticeKeep')));
     await tester.pumpAndSettle();
     expect(prefs.getBool(BackupPrefs.kNoticeSeen), isTrue);
