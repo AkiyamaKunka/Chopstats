@@ -358,9 +358,10 @@ void main() {
     // Nothing uploads before the notice (G1); dismissed at launch, it is
     // only asked again at the next one. (Made in the test's zone: its runs
     // are awaited here.)
+    final ok = FakeCloudTransport();
     final b = BackupCoordinator(
         dao: dao,
-        transport: cloud,
+        transport: ok,
         prefs: prefs,
         tempDir: () async => Directory.systemTemp);
     addTearDown(b.stop);
@@ -369,13 +370,35 @@ void main() {
     await tester.tap(find.byKey(const Key('backupNowRow')));
     await tester.pumpAndSettle();
     expect(find.text(_en.backupNoticeTitle), findsOneWidget);
-    expect(cloud.statusCalls, 0, reason: 'nothing ran past the notice');
+    expect(ok.statusCalls, 1,
+        reason: 'the run asked iCloud (G7), then stopped at the notice (G1)');
+    expect(ok.log, isEmpty, reason: 'nothing ran past the notice');
     await tester.tap(find.byKey(const Key('backupNoticeKeep')));
     await tester.pumpAndSettle();
     expect(prefs.getBool(BackupPrefs.kNoticeSeen), isTrue);
     expect(prefs.getBool(BackupPrefs.kEnabled), isTrue);
-    expect(cloud.statusCalls, 2,
+    expect(ok.statusCalls, 3,
         reason: 'the run Keep On starts, then the Back Up Now asked for');
+  });
+
+  testWidgets('Back Up Now without iCloud, before the notice: no notice '
+      'saying iCloud Backup is on, and the status and footer say nothing is '
+      'copied (IOS-180 B1)', (tester) async {
+    final b = BackupCoordinator(
+        dao: dao,
+        transport: cloud, // iCloud Drive not available for the app
+        prefs: prefs,
+        tempDir: () async => Directory.systemTemp);
+    addTearDown(b.stop);
+    await pump(tester, b: b);
+    await tester.tap(find.byKey(const Key('backupNowRow')));
+    await tester.pumpAndSettle();
+    expect(find.text(_en.backupNoticeTitle), findsNothing);
+    expect(find.text(_en.backupStatusUnavailable), findsOneWidget);
+    expect(find.text(_en.backupStatusNotStarted), findsNothing);
+    expect(footerOf(tester), contains(_en.backupICloudFooterOff));
+    expect(prefs.getBool(BackupPrefs.kNoticeSeen), isNull);
+    expect(cloud.log, isEmpty);
   });
 
   testWidgets('the notice: Keep On records the answer', (tester) async {

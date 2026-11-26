@@ -655,10 +655,18 @@ class BackupCoordinator {
     final bg = r.background;
     await _prefs.reload();
     if (!_prefs.enabled) return _set(BackupState.off);
-    if (!_prefs.noticeSeen) return _set(BackupState.needsNotice); // G1
+    // G1 (nothing uploads before the notice) comes after G7 in the
+    // foreground, so the status says why nothing is copied. Without iCloud
+    // (no account, or iCloud Drive off for the app) it says to sign in, not
+    // "Not started yet" over the footer that promises the meals come back
+    // after a reinstall, and Back Up Now asks no notice that says iCloud
+    // Backup is on (IOS-180 B1). The launch's look asks iCloud before the
+    // notice too. A background run asks iCloud nothing before the notice.
+    if (bg && !_prefs.noticeSeen) return _set(BackupState.needsNotice); // G1
     if (!uiEngine && !isValidInstallId(_prefs.installId)) return _skip(); // G8
     final me = await _identity(background: bg); // G7
     if (me == null) return _status.value.state;
+    if (!_prefs.noticeSeen) return _set(BackupState.needsNotice); // G1
     final pause = _prefs.paused;
     if (pause == BackupPause.missing && !r.allowMissing) {
       return _set(BackupState.missing);

@@ -170,6 +170,32 @@ void main() {
       expect(cloud.files, isEmpty);
     });
 
+    test('without iCloud, before the notice, the status says so and Back '
+        'Up Now asks no notice (IOS-180 B1)', () async {
+      await seed(dao, '2026-11-10');
+      cloud.state = CloudState.noAccount;
+      expect(await run(), BackupState.noAccount);
+      // Settings › Back Up Now asks the notice only on needsNotice
+      // (data_section.dart): the notice says iCloud Backup is on.
+      expect(await c.backUpNow(), BackupState.noAccount);
+      cloud.state = CloudState.unavailable;
+      expect(await c.backUpNow(), BackupState.unavailable);
+      expect(c.status.value.state, BackupState.unavailable);
+      expect(prefs.getBool(BackupPrefs.kNoticeSeen), isNull);
+      expect(cloud.files, isEmpty);
+      // Signed in: the notice comes first, as before.
+      cloud.state = CloudState.ok;
+      expect(await c.backUpNow(), BackupState.needsNotice);
+      expect(cloud.files, isEmpty);
+    });
+
+    test('a background run asks iCloud nothing before the notice', () async {
+      await seed(dao, '2026-11-10');
+      expect(await run(background: true), BackupState.needsNotice);
+      expect(cloud.statusCalls, 0);
+      expect(cloud.files, isEmpty);
+    });
+
     test('Turn Off on the notice turns it off and never asks again',
         () async {
       await c.answerNotice(keepOn: false);
@@ -1134,7 +1160,56 @@ void main() {
         await Future<void>.delayed(const Duration(milliseconds: 5));
       }
       expect(c.prompt.value, isNull);
-      expect(cloud.statusCalls, calls, reason: 'no second look');
+      expect(cloud.statusCalls, calls + 1,
+          reason: 'no second look: only the return\'s run asks iCloud (G7 '
+              'comes before G1 in the foreground)');
+    });
+
+    test('without iCloud a return to the app, a change and an import keep '
+        'saying so, never "Not started yet"; signed in, the next return '
+        'asks the notice (IOS-180 B1)', () async {
+      Future<void> until(bool Function() done) async {
+        for (var i = 0; i < 400 && !done(); i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 5));
+        }
+      }
+
+      /// The rest of a run that already asked iCloud (real SQLite answers
+      /// from another isolate).
+      Future<void> settle() async {
+        for (var i = 0; i < 40; i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 5));
+        }
+      }
+
+      await seed(dao, '2026-11-10');
+      cloud.state = CloudState.noAccount;
+      await c.start();
+      await c.holdsCatchUp();
+      expect(c.status.value.state, BackupState.noAccount);
+      expect(c.prompt.value, isNull, reason: 'no notice without iCloud');
+      // The return: its look ends undecided, then its run (the change
+      // counter was never backed up). Each asks iCloud.
+      var calls = cloud.statusCalls;
+      leaveAndReturn();
+      await until(() => cloud.statusCalls >= calls + 2);
+      await settle();
+      expect(cloud.statusCalls, calls + 2);
+      expect(c.status.value.state, BackupState.noAccount);
+      calls = cloud.statusCalls;
+      c.afterImport();
+      await until(() => cloud.statusCalls > calls);
+      await settle();
+      expect(c.status.value.state, BackupState.noAccount);
+      expect(await run(), BackupState.noAccount, reason: 'a change');
+      expect(c.prompt.value, isNull);
+      expect(prefs.getBool(BackupPrefs.kNoticeSeen), isNull);
+      expect(cloud.files, isEmpty);
+      cloud.state = CloudState.ok;
+      leaveAndReturn();
+      await c.holdsCatchUp();
+      await until(() => c.prompt.value != null);
+      expect(c.prompt.value, isA<NoticePrompt>());
     });
   });
 
