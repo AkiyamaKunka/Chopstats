@@ -2246,9 +2246,11 @@ class _MealEditorScreenState extends State<MealEditorScreen>
               controller: _desc,
               readOnly: locked,
               textCapitalization: TextCapitalization.sentences,
-              // Wraps at large text ('Pan-fried du' at AX5); still one line
-              // of content with a Done key.
-              maxLines: isLargeText(context) ? null : 1,
+              // Wraps at every text size instead of cutting off ('Pan-fried
+              // du' at AX5; an AI description runs past one line at the
+              // default size too). Still one paragraph with a Done key: the
+              // text keyboard, no newline. A short one stays one line high.
+              maxLines: null,
               keyboardType: TextInputType.text,
               textInputAction: TextInputAction.done,
               inputFormatters: [FilteringTextInputFormatter.singleLineFormatter],
@@ -2527,8 +2529,10 @@ class _ItemRow extends StatelessWidget {
                   child: TextField(
                     key: Key('itemName$index'),
                     controller: ctrls.name,
-                    // Wraps at large text, as the description does.
-                    maxLines: isLargeText(context) ? null : 1,
+                    // Wraps at every size, as the description does: the AI
+                    // ends a name with the portion it assumed ('(~170 g)'),
+                    // and one line cut that off first.
+                    maxLines: null,
                     keyboardType: TextInputType.text,
                     textInputAction: TextInputAction.done,
                     inputFormatters: [
