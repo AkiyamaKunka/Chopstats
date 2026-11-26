@@ -238,7 +238,7 @@
           },
           {
             "title": "估算",
-            "text": "AI 识别每样食物，估算热量、蛋白质、碳水和脂肪。",
+            "text": "AI 识别每样食物，<br>估算热量、蛋白质、碳水和脂肪。",
             "screen": "$screens/zh/01_today.png",
             "hl": [
               [
@@ -345,7 +345,7 @@
             "label": "AI 假设的分量"
           }
         ],
-        "html": "<div class=\"bubble\" style=\"left:706px;top:640px\"><div class=\"zlabel muted\"><i></i>或者直接打一句</div><br><div class=\"bt\">「那份沙拉其实没放酱」</div></div>"
+        "html": "<div class=\"bubble\" style=\"left:706px;top:640px\"><div class=\"zlabel muted\"><i></i>或者直接打一句</div><br><div class=\"bt\">「酸奶其实是脱脂的」</div></div>"
       }
     },
     {
@@ -356,7 +356,7 @@
       "en": {
         "eyebrow": "Privacy",
         "headline": "The developer<br><em>never sees your log.</em>",
-        "sub": "No account, no ads, no tracking. What you log goes to the AI you pick, and a backup to your own iCloud Drive.",
+        "sub": "No account, no ads, no tracking. The photos and text you log go to the AI you pick, and a backup of your log to your own iCloud Drive.",
         "zooms": [
           {
             "src": "$screens/en/11_settings_ai.png",
@@ -462,7 +462,7 @@
       "zh": {
         "eyebrow": "隐私",
         "headline": "饮食记录，<em>开发者看不到。</em>",
-        "sub": "无需账户，没有广告，不做追踪。<br>你记录的内容会发给你选的 AI，备份存进你自己的 iCloud 云盘。",
+        "sub": "无需账户，没有广告，不做追踪。<br>你记录的照片和文字会发给你选的 AI，<br>记录的备份存进你自己的 iCloud 云盘。",
         "zooms": [
           {
             "src": "$screens/zh/11_settings_ai.png",

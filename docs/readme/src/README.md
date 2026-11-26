@@ -109,25 +109,29 @@ that are all background, so it never cuts through text.
 ## Slides tied to a release
 
 Since 2026-11-13 the README shows only `01-hero`, `02-how`, `03-control` and
-`10-privacy`. The items below for `06-usual`, `07-restaurant`, `09-glasses`
-and `13-next` matter only if one of those slides goes back on the page.
+`10-privacy`. The items below for `06-usual`, `07-restaurant` and
+`09-glasses` matter only if one of those slides goes back on the page.
 
-- `01-hero`, `02-how`, `03-control`, `10-privacy` and the social preview
-  show 1.8.0, the App Store version, in both languages: its native iOS
-  look (large titles, a solid **+ Log** button, a tab bar without the
-  pill) on the Today screen (`01-hero`, `02-how`), Edit meal (`02-how`,
-  `03-control`) and the Settings rows that `10-privacy` crops, shot as
-  described under Screenshots. The footer says "Version 1.8 · demo data"
-  (`deck.json`'s default `note`, and `01-hero`'s own `cnote`), and the
-  README's hero caption names 1.8. When an App Store version changes the
-  look, all five need new captures, and their footers and the caption the
-  new version.
+- `01-hero`, `02-how`, `03-control` and `10-privacy` (in both languages)
+  and the social preview (English only) show 1.8.0, the App Store
+  version, in its native iOS look: the Today screen's large title and
+  meal cards (`01-hero`, `02-how`, the social preview), Edit meal
+  (`02-how`, `03-control`) and the Settings rows that `10-privacy` crops,
+  shot as described under Screenshots. Neither the tab bar nor the
+  **+ Log** button is in frame. The four slides' footer says
+  "Version 1.8 · demo data" (`deck.json`'s default `note`, and
+  `01-hero`'s own `cnote`); the social preview's says "Demo data", and
+  the README's hero caption names 1.8. When an App Store version changes
+  the look, all five need new captures, and the four footers and the
+  caption the new version.
 - iCloud Backup (on by default in 1.8.0, after a notice) copies the log to
   the user's own iCloud Drive, so no slide says the log stays on the
   phone. `01-hero`'s chip says "Developer never sees your log"
   (开发者看不到你的记录). `10-privacy` says "The developer never sees your
-  log." (饮食记录，开发者看不到。) and that what you log goes to the AI
-  you pick, and a backup to your own iCloud Drive; its diagram has a
+  log." (饮食记录，开发者看不到。) and that the photos and text you log
+  go to the AI you pick, and a backup of your log to your own iCloud
+  Drive (weight, measurements and meals entered by number send nothing
+  to the AI, so the slide does not say "what you log"); its diagram has a
   second arrow, "iCloud Backup copies your log, never your API key", to
   your iCloud Drive, "On by default, after a notice." These follow
   docs/PRIVACY.md (*What is sent, and to whom*, *iCloud Backup*): check
@@ -140,13 +144,13 @@ and `13-next` matter only if one of those slides goes back on the page.
 - `06-usual`, `07-restaurant` and `09-glasses` carry the "New in 1.6" pill,
   which goes if one of them comes back: 1.6 is no longer the newest
   version.
-- `13-next` showed what was on `main` but not in the App Store build (the
-  native iOS look, iCloud Backup). The first App Store version built from
-  `main` after 1.6.0, 1.8.0 (the iPhone skips 1.7.0, 1.7.1 and 1.7.2, and
-  a 1.6.x hotfix has neither feature; docs/RELEASING.md § 6.6), shipped
-  both, and they went into the README's lists (What else it does, More
-  features), not onto a slide. `13-next` is out of date: keep it off the
-  page.
+- `13-next` ("Coming next") showed what was on `main` but not in the App
+  Store build (the native iOS look, iCloud Backup). It has no entry in
+  `deck.json`, and its leftover HTML pages are gone from `html/`. The
+  first App Store version built from `main` after 1.6.0, 1.8.0 (the iPhone
+  skips 1.7.0, 1.7.1 and 1.7.2, and a 1.6.x hotfix has neither feature;
+  docs/RELEASING.md § 6.6), shipped both, and they went into the README's
+  lists (What else it does, More features), not onto a slide.
 - `07-restaurant` shows Chipotle's published numbers as demo data, with
   "not affiliated" in the footer. All calorie, protein, carb and fat values
   match Chipotle's US nutrition PDF (July 2022); the 1.6.0 shots show the
