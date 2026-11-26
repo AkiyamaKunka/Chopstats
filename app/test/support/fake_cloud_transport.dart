@@ -14,6 +14,7 @@
 /// one).
 library;
 
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -78,10 +79,22 @@ class FakeCloudTransport implements BackupTransport {
   void put(String path, String text) =>
       files[path] = Uint8List.fromList(text.codeUnits);
 
+  /// When set, status() waits for it after counting the call (a test acts
+  /// while a run waits for iCloud); [statusEntered] completes as it starts
+  /// waiting.
+  Completer<void>? statusGate;
+  Completer<void>? statusEntered;
+
   @override
   Future<CloudStatus> status() async {
     statusCalls++;
     calls.add('status');
+    final gate = statusGate;
+    if (gate != null) {
+      final entered = statusEntered;
+      if (entered != null && !entered.isCompleted) entered.complete();
+      await gate.future;
+    }
     final changed = accountChangedOnce;
     accountChangedOnce = false;
     return CloudStatus(state, accountChanged: changed);
