@@ -821,7 +821,7 @@ defensible:
 | Photos or Videos | Yes — sent to the user-selected AI provider for analysis; not retained by the developer | No | No | App Functionality |
 | Health & Fitness → **Health** (meal calories and macros, and the dietary profile, which the app attaches itself) | Yes — with every photo, every Fix request and every Edit meal note, to the same provider | No | No | App Functionality |
 | User Content → **Other User Content** (what the user types into *Describe a meal* and *Fix or delete a meal*, and a note in *Edit meal*: meal descriptions and corrections, and also a weight or a workout typed into Fix, such as "I weigh 72 kg" or "burned 450 calories on my 5 km run", which the app then logs as a weight or an activity) | Yes — to the same provider | No | No | App Functionality |
-| Health & Fitness → Fitness | **No** — the app attaches no stored workout, step or weight record to any request (a photo carries that day's meals, plus the day before's when taken before 4 a.m.; Fix the last 7 days of meals; an Edit meal note that one meal); a workout the user types goes only as that typed text, declared above as Other User Content; the Garmin fetch from the user's own server sends only a date | | | |
+| Health & Fitness → Fitness | **No** — the app attaches no stored workout, step or weight record to any request (a photo carries that day's meals, plus the day before's when taken before 4 a.m.; Fix the last 7 days of meals; an Edit meal note that one meal); a workout the user types goes only as that typed text, declared above as Other User Content; the Garmin fetch from the user's own server sends only a date; iCloud Backup's copy goes to the user's own iCloud, which only Apple holds (see *iCloud Backup* below) | | | |
 | Everything else (contacts, location, identifiers, diagnostics, usage) | No | | | |
 
 The rule behind the rows: what the app attaches by itself is declared as
@@ -925,6 +925,18 @@ on the phone from the meal log and make no network call, so they add no
 App Store or Play data type. The saved lookup answers never leave the
 phone either, and Location stays *No*. The answer stays **B**.
 
+**iCloud Backup** (iPhone, from 1.8.0; § 11) does not change the answer
+either: it stays **B**, and the backup adds no data type. It copies the
+meal record, the notes kept on meals, weight, measurements, workouts,
+activities, the fitness profile and the meal pictures into the user's
+own iCloud Drive with Apple's file APIs. Neither the developer nor any
+partner code can read that folder, so under the definition above it is
+not collected: Apple holds it under the user's iCloud terms, as with
+MapKit above. So Fitness and Identifiers stay *No*, although workouts
+and a random install id now leave the phone, for the user's own iCloud.
+The Runner's privacy manifest is unchanged: `CloudFiles.swift` reads no
+file timestamps.
+
 `docs/PRIVACY.md` (§ *Restaurant nutrition lookup*, English and 中文) is
 the user-facing text for all of this; keep it, the consent sheet
 (`app/lib/ui/widgets/restaurant_consent_sheet.dart`) and these answers in
@@ -944,15 +956,17 @@ step. Revisit if the app is ever published with a developer-run service.
   Android, APK or Telegram mentions; no accuracy claims about the calorie
   numbers.
 - **Screenshots**: App Store Connect → Screenshot specifications has the
-  current list (checked 2026-10-25). For an app that runs on iPhone the
-  **large** set is required: iPhone 6.9-inch (1320×2868, 1290×2796 or
-  1260×2736 portrait), or 6.5-inch (1284×2778 or 1242×2688) when no 6.9-inch
-  set is given; the medium Dynamic Island class (1206×2622 / 1179×2556) is
-  optional and scaled from the large set. Take them on an **iPhone 17 Pro
-  Max** simulator you create yourself (1320×2868; never another agent's
-  device), PNG or JPEG without alpha; the iPhone 17 Pro simulator gives
-  1206×2622, which does not fit the required slot. No iPad screenshots (the
-  app is iPhone-only, § 1.7.2). Both languages if you localise the listing.
+  current list (re-read 2026-11-25; on 2026-10-25 it read the other way
+  round). For an app that runs on iPhone the **medium** Dynamic Island set
+  is required: "At least one screenshot for iPhone with Dynamic Island
+  (medium display)", 1206×2622 or 1179×2556 portrait. The large Dynamic
+  Island class (6.9-inch: 1320×2868, 1290×2796 or 1260×2736) is accepted,
+  and without it Apple needs the 6.5-inch Face ID class (1284×2778 or
+  1242×2688). Upload both, as the 1.6.1 draft has: render on an **iPhone
+  17 Pro Max** simulator you create yourself (1320×2868; never another
+  agent's device) and make the 1206×2622 copies with
+  `render_store.py --medium`, PNG or JPEG without alpha. No iPad
+  screenshots (the app is iPhone-only, § 1.7.2). Both languages if you localise the listing.
   From April 2027, builds made with the iOS 27.1 SDK or later also need
   iPhone Duo screenshots (§ 2 SDK note).
 - **App icon**: the 1024×1024 asset is already in `Runner/Assets.xcassets`
@@ -983,12 +997,13 @@ step. Revisit if the app is ever published with a developer-run service.
   > no backend of ours. The user pastes an API key for an AI provider they
   > already pay for (Google Gemini, OpenAI, Anthropic, xAI, OpenRouter,
   > DeepSeek, Alibaba Qwen, ByteDance Doubao, Zhipu GLM); that provider
-  > receives each photo being analyzed (with the user's dietary profile and
-  > a short summary of the day's meals) and returns a nutrition estimate.
-  > Before anything is sent to a provider for the first time, the app asks
-  > for permission in a dialog that names the company and what is sent;
-  > Settings › "Stop Sharing with …" withdraws it. Everything else stays on
-  > the phone in a local database, unless the restaurant lookup is on.
+  > receives each photo being analyzed (with the user's dietary profile and a
+  > short summary of the day's meals) and returns a nutrition estimate. Before
+  > anything is sent to a provider for the first time, the app asks for
+  > permission in a dialog that names the company and what is sent; Settings ›
+  > "Stop Sharing with …" withdraws it. Everything else stays on the phone in
+  > a local database, apart from iCloud Backup and the restaurant lookup
+  > (below).
   >
   > To test: a fresh install opens on Settings. Tap AI Provider › API Key;
   > Google Gemini is already selected; paste the key below into "Gemini
@@ -1014,32 +1029,36 @@ step. Revisit if the app is ever published with a developer-run service.
   > bitewise://setup link fills in that server's address and key after a
   > confirmation dialog.
   >
-  > New in 1.6.0
+  > From 1.6.0: "Log" › "My usual foods" logs a frequent meal again, with no
+  > AI and nothing sent. Restaurant nutrition (Settings, off by default) needs
+  > an Anthropic or OpenRouter key or the user's own server, so it is grayed
+  > out with the demo key; a lookup sends chain and food names with amounts,
+  > never the photo or its location, and "Use location" makes one Apple MapKit
+  > query from the phone, with no location permission. "Meta glasses photos":
+  > the app does not connect to glasses; a glasses photo with no food found on
+  > the phone is not sent.
   >
-  > "Log" › "My usual foods" lists meals logged on at least 2 of the last 90
-  > days; tapping one logs it again, with no AI and nothing sent. To see it:
-  > "Log" › "Enter manually", type Oatmeal in "What was it?" and 350 in
-  > "Calories", pick yesterday with the date button, tap "Add". Repeat for the
-  > day before, then open the list.
+  > New in 1.8.0
   >
-  > Settings › Restaurant nutrition › "Lookups" (off by default) needs the
-  > user's own server or an Anthropic or OpenRouter key; with the demo key it
-  > is grayed out ("Not available with Gemini yet.") and no lookup can be
-  > tested. A consent sheet names the recipient first. For a photo meal from a
-  > US chain, the recipient gets chain and food names with amounts and
-  > searches the web for the chain's published nutrition. To see the sheet
-  > with no key: API Key › "Anthropic Claude", then "Lookups" › "When unsure".
-  > "Use location" there lets the app read a restaurant or takeout photo's
-  > location from the photo library, check on the phone that it is in the US
-  > and, for a restaurant meal, query Apple MapKit once per lookup. There is
-  > no location permission. Only Apple gets the coordinates; the AI service
-  > gets at most nearby chain names. Confirming or rejecting a result keeps
-  > that spot on the phone, rounded to about 100 m.
+  > iCloud Backup (Settings › Your Data, on by default) copies meals, weight,
+  > measurements, workouts and meal pictures to the user's own iCloud Drive (a
+  > Chopstats folder in Files). We run no server and cannot read it; API keys
+  > and settings are never in it. Signed in to iCloud, launch shows "iCloud
+  > Backup is on" (Keep On / Turn Off) and nothing uploads before an answer.
+  > To see it: log a meal, tap "Back Up Now" (the first can take a minute),
+  > open Files › iCloud Drive › Chopstats. A reinstall offers "Restore your
+  > meals?" (Not Now skips it). Signed out, the line under the switch asks to
+  > sign in to iCloud.
   >
-  > "Meta glasses photos" (Settings › Photos, on by default): the app does not
-  > connect to glasses. With Watch Camera Roll on, a photo it recognizes as
-  > saved by the Meta AI app is checked for food on the phone and not sent if
-  > none is found.
+  > Correct with a note: tap a meal on Today; at the end of Edit meal, under
+  > "Correct with a note", type e.g. "only half the rice" and tap "Correct
+  > with AI" (works with the demo key, photo or manual meal). Sent: the note
+  > plus that meal's text, foods, numbers and earlier notes; no photo. The
+  > answer fills the form; nothing is saved until "Save"; notes stay with the
+  > meal.
+  >
+  > Photos taken before 4 a.m. also carry the day before's meals; older
+  > installs are asked again first ("What Chopstats sends has changed").
   >
   > Demo key (Gemini, capped, revoked after review): <key>
 
@@ -1839,7 +1858,14 @@ own branch, below), and `v1.7.0`, `v1.7.1` and `v1.7.2` stay unused.
 That run also builds Android again, with a higher build number: it puts
 that APK on the `v1.8.0` release and, with `PLAY_SERVICE_ACCOUNT_JSON`
 set, sends the bundle to the internal track. Both are harmless (an
-upgrade for anyone who installs them).
+upgrade for anyone who installs them). This is the one exception to "a
+version that a GitHub release already holds is not built again under its
+name": the iPhone version must match pubspec, so the tag's Android build
+carries `android-v1.8.0`'s name. It holds only while it behaves as
+`android-v1.8.0` does, so code that changes Android merges after the tag
+(the iPhone-only fix of PR #103 may land before it: the backup
+coordinator never runs on Android). Edit that release's notes to say it
+is the same app as `android-v1.8.0`.
 
 **Pubspec and the versions the policy names.** The privacy policy dates
 changes by version ("From version X.Y.Z"), and every build opens it from
@@ -2339,8 +2365,11 @@ on `feat/icloud-backup`:
    `iCloud.dev.calorietracker.calorieTracker` → Register. (A container id
    can never be deleted or reused; this one matches the code.)
 2. **Identifiers → App IDs → `dev.calorietracker.calorieTracker`** → tick
-   **iCloud** (*Include CloudKit support* is not needed; iCloud Documents
-   is what the app uses) → **Configure** → select the container → Save →
+   **iCloud** with *Include CloudKit support (requires Xcode 6)*: the
+   other choice, *Compatible with Xcode 5*, cannot hold a container, and
+   the app uses iCloud Documents in that container, no CloudKit database
+   (2026-11-25, the owner's setup) → **Configure** → select the container
+   → Save →
    confirm that the profiles become invalid. Leave the ShareExtension's
    App ID alone.
 3. **Profiles** → the App Store profile for
@@ -2475,6 +2504,15 @@ and 4) and keep steps 2 and 5.
    that page says a key was *Saved without its server address*, its field
    is empty, so tap **Remove this key** under it instead)". In 1.6.0 the
    field always shows the key, so clearing it is enough there.
+6. **Correct with a note** (1.8.0), which the page does not mention yet.
+   In *What it does*, the bullet on fixing a meal becomes: "open a meal to
+   edit its items and numbers, or, under **Correct with a note**, tell
+   your AI what was different (such as "only half the rice") and tap
+   **Correct with AI**; nothing changes until you tap **Save**. Or use
+   *Fix or delete a meal* …". Under *Your data*, after deleting a meal:
+   "Deleting a meal also deletes the notes you sent about it. To remove
+   one note, tap **Remove this note** next to it in **Edit meal**, then
+   **Save**." (`docs/PRIVACY.md` describes the notes kept on a meal.)
 
 The README has its own list (*Lines tied to a release*, in its maintainer
 notes; go through all of it, for README.zh-CN.md too) and so do the slides

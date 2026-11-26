@@ -3,14 +3,14 @@ Chopstats · 筷拍 turns your food photos into calorie and macro estimates usin
 HOW IT WORKS
 • Take meal photos the way you already do. Pick one from your recent photos, share it from the Photos app, or turn on Watch Camera Roll and new food photos are logged for you.
 • The photo goes to the AI provider you picked. It names the dishes, states the portion it assumed (for example "Steamed rice (~150 g)") and estimates calories, protein, carbs and fat.
-• Every number can be changed. Open a meal to edit its items and numbers, or just type a fix such as "the noodles were roast duck rice".
+• Every number can be changed. Open a meal to edit its items and numbers, or add a note such as "only half the rice" and your AI fills in the new numbers for you to check and save.
 
 LOG IT YOUR WAY
 • From a photo
 • Describe a meal in any language: "two eggs and toast with butter" or "一碗牛肉面加一个鸡蛋"
 • Enter the numbers yourself, no AI needed
 • My usual foods: the meals you logged on at least 2 of the last 90 days. Tap one to log it again, with no photo and no AI
-• Leftovers: photograph what is left and the meal shrinks to what you actually ate
+• Leftovers: photograph what is left and the meal shrinks to what you ate
 • Restaurant nutrition, off by default: for a photo meal eaten in the US at a chain restaurant, your AI service can look up the nutrition the chain publishes. It needs your own server or an Anthropic or OpenRouter key
 • Add a dietary profile (for example "vegetarian" or "home cooking, light oil") that the AI reads with every photo
 
@@ -24,12 +24,13 @@ SEE YOUR DAY AND YOUR TREND
 BRING YOUR OWN AI
 Paste an API key from Google Gemini, OpenAI, Anthropic, xAI, OpenRouter, DeepSeek, Alibaba Qwen, ByteDance Doubao or Zhipu GLM. You pay the provider directly for what you use, and some offer a free tier. A one-tap test tells you whether your key, network and quota work. Advanced users can route analysis through a server they run themselves.
 
-YOUR DATA STAYS ON YOUR PHONE
+YOUR DATA STAYS WITH YOU
 • No sign-up and no account. Chopstats has no backend, and the developer receives none of your data.
 • Your meals, weight and settings are stored on your phone. API keys are kept in the iOS Keychain.
-• Data leaves your phone only to reach the AI service you chose (or your own server, if you set one up): the photo or text being analyzed, plus the context it needs, such as your dietary profile or recent meal names when you ask for a fix. The copy of a photo that is sent has its embedded metadata, such as location, removed. The one exception is Restaurant nutrition, if you turn it on: lookups go to that AI service's web search, and a restaurant photo's location (read on your phone, never sent to the AI service) can go to Apple Maps to find nearby restaurants. The privacy policy lists exactly what is sent.
-• With Watch Camera Roll on, every new photo, including ones that are not food, is sent to that AI service so it can tell whether it is a meal. iOS decides when background scans run (usually a few times a day), and opening the app catches up. You can turn it off at any time.
-• No ads, no analytics and no tracking. Export your data to a file whenever you like.
+• iCloud Backup (on by default, after a notice) copies your log and meal pictures to your own iCloud Drive, so they come back after a reinstall or on a new iPhone. API keys are never included.
+• Apart from that backup, data leaves your phone only to reach the AI service you chose (or your own server, if you set one up): the photo or text being analyzed, plus the context it needs, such as your dietary profile, the day's other meals or the meal you are correcting. The copy of a photo that is sent has its embedded metadata, such as location, removed. The one exception is Restaurant nutrition, if you turn it on: lookups go to that AI service's web search, and a restaurant photo's location (read on your phone, never sent to the AI service) can go to Apple Maps to find nearby restaurants. The privacy policy lists exactly what is sent.
+• With Watch Camera Roll on, every new photo, including ones that are not food, is sent to that AI service so it can tell whether it is a meal. iOS decides when background scans run, and opening the app catches up. You can turn it off at any time.
+• No ads, no analytics and no tracking. Export your data, meal pictures included, to a file whenever you like.
 • Open source.
 
 Available in English and Simplified Chinese.
