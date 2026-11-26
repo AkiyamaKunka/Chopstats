@@ -24,8 +24,10 @@ Lines tied to a release. Re-read them when a new App Store version ships:
    because the policy on main may already describe the next version.
 5. "Android" names the newest GitHub release, its APK file and its size.
    Update them with each release (docs/RELEASING.md § 6.6, step 5). Today
-   that is android-v1.7.2. Its Meta glasses sentence is true from 1.7.1,
-   the first version in which the switch starts off on Android.
+   that is android-v1.8.0. Its Meta glasses sentence is true from 1.7.1,
+   the first version in which the switch starts off on Android. Its note
+   sentence is true from 1.8.0 and points to "Coming next": drop it when
+   Correct with a note leaves that list (item 3).
 6. "For developers" names the tag the App Store version was built from. Its
    two test counts are dated lower bounds.
 7. "What it costs": the sentence about Gemini's free tier and what Google may
@@ -267,7 +269,7 @@ Export your data to a file at any time. The [privacy policy](docs/PRIVACY.md) ha
 
 ## Android
 
-Chopstats is not on Google Play. The newest Android version, 1.7.2, is on the [Releases page](https://github.com/AkiyamaKunka/Chopstats/releases/tag/android-v1.7.2) as an APK, the Android install file: `Chopstats-v1.7.2-b210-arm64-v8a.apk`, about 22 MB. This repository's release workflow built and signed it from the commit tagged `android-v1.7.2`. It is newer than the iPhone app in the App Store, which this page describes.
+Chopstats is not on Google Play. The newest Android version, 1.8.0, is on the [Releases page](https://github.com/AkiyamaKunka/Chopstats/releases/tag/android-v1.8.0) as an APK, the Android install file: `Chopstats-v1.8.0-b213-arm64-v8a.apk`, about 22 MB. This repository's release workflow built and signed it from the commit tagged `android-v1.8.0`. It is newer than the iPhone app in the App Store, which this page describes. It can already [correct a meal with a note](#coming-next).
 
 - **arm64 phones only.** A phone with a 32-bit processor refuses it.
 - **You install it yourself.** Android asks you to allow installs from your browser or file manager. The app does not update itself: install the next APK from the Releases page when one comes out.
