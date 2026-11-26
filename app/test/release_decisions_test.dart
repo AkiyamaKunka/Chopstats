@@ -2016,8 +2016,10 @@ void main() {
     // for "1.7.0" to ship on the App Store, which the iPhone skips. The
     // 1.7.2 prep (2026-11-23): it skips 1.7.1 too, so they waited for
     // 1.7.2. The 1.8.0 prep (2026-11-24): it skips 1.7.2 too, so they wait
-    // for 1.8.0.
-    test('the slide and screenshot notes wait for 1.8.0, not 1.7.0, 1.7.1 '
+    // for 1.8.0. The 1.8.0 screenshots (2026-11-25): the captioned set was
+    // re-shot on 1.8.0, so the screenshot note now says the set shows 1.8.0
+    // instead of waiting for it.
+    test('the slide and screenshot notes name 1.8.0, not 1.7.0, 1.7.1 '
         'or 1.7.2', () {
       String flatRepo(String path) =>
           _readRepo(path).replaceAll(RegExp(r'\s+'), ' ');
@@ -2036,8 +2038,10 @@ void main() {
       expect(shots, isNot(contains('(1.7.2, the native iOS design')));
       expect(
           shots,
-          contains('(1.8.0, the native iOS design; the iPhone skips 1.7.0, '
-              '1.7.1 and 1.7.2) needs new captures first'));
+          contains('This set shows **1.8.0** (the native iOS design; the '
+              'iPhone skips 1.7.0, 1.7.1 and 1.7.2).'));
+      expect(shots, contains('built from real **1.8.0** screens'));
+      expect(shots, isNot(contains('built from real **1.6.0** screens')));
     });
 
     // The 1.7.2 prep (decided on 2026-11-23 on the owner's delegation, as

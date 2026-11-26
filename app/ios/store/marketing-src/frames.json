@@ -1,5 +1,5 @@
 {
-  "about": "Captioned App Store screenshots for Chopstats 1.6.x (the 1.6 UI). Rendered by render_store.py; rules and re-render steps in README.md. Coordinates in rings/touches/chips are SOURCE pixels of the 1320x2868 capture; crops are [x0, y0, x1, y1] in the same pixels. headline and sub are lists of explicit lines.",
+  "about": "Captioned App Store screenshots for Chopstats 1.8.0 (the native iOS design). Rendered by render_store.py; rules and re-render steps in README.md. Coordinates in rings/touches/chips are SOURCE pixels of the 1320x2868 capture; crops are [x0, y0, x1, y1] in the same pixels. headline and sub are lists of explicit lines.",
   "defaults": {
     "theme": "light",
     "headline_px": {
@@ -23,7 +23,7 @@
   "frames": [
     {
       "id": "01_snap_get_numbers",
-      "notes": "Promise: photo to numbers. facts §2 Photo logging (the AI names dishes, states the assumed portion, estimates kcal/P/C/F). The arrow lands on the meal card of that photo (not on the day total, which would read as the photo's calories). Photo: Unsplash License (photos/CREDITS.md). Numbers: ~360 = 150+25+185 kcal, P25 C40 F11 (EN and ZH).",
+      "notes": "Promise: photo to numbers. facts §2 Photo logging (the AI names dishes, states the assumed portion, estimates kcal/P/C/F). The arrow lands on the meal card of that photo (not on the day total, which would read as the photo's calories). Photo: Unsplash License (photos/CREDITS.md); the card's picture is the app's own thumbnail of the same photo (docs/readme/photos/yogurt-bowl.jpg, the demo file). Numbers: ~388 = 146+212+30 kcal, P26 C40 F14 (EN and ZH, scripts/play_screenshots.py demo-file). Crop = the card's own edges.",
       "en": {
         "headline": [
           "Snap a meal.",
@@ -52,12 +52,12 @@
             "src": "screens/en/01_today.png",
             "crop": [
               48,
-              1386,
+              1323,
               1272,
-              1890
+              1845
             ],
             "scale": 0.934641,
-            "radius": 46
+            "radius": 52
           }
         ]
       },
@@ -89,72 +89,69 @@
             "src": "screens/zh/01_today.png",
             "crop": [
               48,
-              1386,
+              1323,
               1272,
-              1890
+              1845
             ],
             "scale": 0.934641,
-            "radius": 46
+            "radius": 52
           }
         ]
       }
     },
     {
-      "id": "02_edit_any_number",
-      "notes": "See the guess, change it. facts §2 (portion shown; every number can be changed: totals and item fields are text fields in meal_editor_screen.dart, read-only only while a lookup runs). EN 632 = 225+115+150+60+75+7, P58 C19 F34, 38/12/50 %. ZH 360 = 150+25+185, 28/45/28 %.",
+      "id": "02_correct_with_note",
+      "notes": "Correct with a note (new in 1.8.0; the caption does not say so). facts: Edit meal > Correct with a note sends the note with this meal's description, foods and numbers to the AI the user set up; the answer only fills the form and the card 'Changed from your note — not saved yet' lists the changes; nothing is written until Save (meal_editor_screen.dart). Two slices of ONE state of the editor (yesterday's Chicken curry with rice, demo data): the meal's new total, macro bar and items after the answer, then the card, scrolled. The footer between them names the recipient ('Claude (server)': the capture used a fake own server, never a real key), so it is left out and frame 03 can show Gemini. The answer came from a copy of the QA rig's fake own server (stdlib Python on 127.0.0.1, not in the repo) whose canned answer was reworded like a real model's (portion in the name, a plain reason line). Numbers: 640 -> 510 (curry 380 + rice 260 -> 130), P 33 -> 30.5, C 71 -> 42.5, F 23; rice ~200 g -> ~100 g. EN note typed 'only half the rice'; ZH note typed 米饭只吃了一半 (XCUITest typeText).",
       "en": {
         "headline": [
-          "See the portion.",
-          "<em>Edit</em> any number."
+          "Not quite right?",
+          "Say what <em>changed.</em>"
         ],
         "sub": [
-          "Each food shows the portion your AI assumed."
+          "Type a note. Your AI fills in new",
+          "numbers; you check them, then save."
         ],
         "stage": [
           {
             "type": "screen",
-            "src": "screens/en/05_meal_editor.png",
+            "src": "screens/en/05b_meal_note_top.png",
             "crop": [
               0,
-              216,
+              1140,
               1320,
-              2273
+              2178
+            ]
+          },
+          {
+            "type": "gap",
+            "h": 72
+          },
+          {
+            "type": "screen",
+            "src": "screens/en/05b_meal_note_changes.png",
+            "crop": [
+              0,
+              1590,
+              1320,
+              2512
             ],
             "rings": [
               {
                 "box": [
-                  642,
-                  1656,
-                  833,
-                  1700
+                  48,
+                  1623,
+                  1272,
+                  2478
                 ],
-                "pad": [
-                  12,
-                  14,
-                  12,
-                  6
-                ],
-                "chip": {
-                  "text": "Assumed portion",
-                  "at": [
-                    492,
-                    1554
-                  ]
-                }
+                "pad": 14
               }
-            ],
-            "touches": [
-              [
-                330,
-                942
-              ]
             ],
             "chips": [
               {
-                "text": "Tap to change",
+                "text": "Your note",
                 "at": [
-                  690,
-                  942
+                  1000,
+                  1790
                 ]
               }
             ]
@@ -163,52 +160,54 @@
       },
       "zh": {
         "headline": [
-          "分量写明白",
-          "数字<em>随你改</em>"
+          "估得不对<span class=\"hang\">？</span>",
+          "<em>一句话</em>改好"
         ],
         "sub": [
-          "每样食物都写明 AI 假设的分量"
+          "写一句说明，AI 填好新数值，",
+          "你核对后再保存"
         ],
         "stage": [
           {
             "type": "screen",
-            "src": "screens/zh/05_meal_editor.png",
+            "src": "screens/zh/05b_meal_note_top.png",
             "crop": [
               0,
-              216,
+              1140,
               1320,
-              2461
+              2178
+            ]
+          },
+          {
+            "type": "gap",
+            "h": 72
+          },
+          {
+            "type": "screen",
+            "src": "screens/zh/05b_meal_note_changes.png",
+            "crop": [
+              0,
+              1590,
+              1320,
+              2512
             ],
             "rings": [
               {
                 "box": [
-                  332,
-                  1844,
-                  554,
-                  1889
+                  48,
+                  1623,
+                  1272,
+                  2478
                 ],
-                "pad": 14,
-                "chip": {
-                  "text": "AI 假设的分量",
-                  "at": [
-                    470,
-                    1744
-                  ]
-                }
+                "pad": 14
               }
-            ],
-            "touches": [
-              [
-                330,
-                1134
-              ]
             ],
             "chips": [
               {
-                "text": "点一下就能改",
+                "text": "你的说明",
                 "at": [
-                  660,
-                  1134
+                  1000,
+                  1786
                 ]
               }
             ]
@@ -218,7 +217,7 @@
     },
     {
       "id": "03_your_ai_your_key",
-      "notes": "Your AI, no Chopstats account. facts §3 (nine providers with your own key, or your own server), §5 (no sign-up or account; key in the iOS Keychain). The ring is on the AI Provider row (the provider you picked). The crop ends above the Settings footer: the footer says the key is 'stored only on this phone', which is not accurate (the Keychain item comes back with a phone backup), so the frame neither rings nor shows it (owner OK 2026-11-13, replaced in the 1.6.1 draft). The provider list (12) is NOT used: it shows 'free tier' / VPN notes. The provider card is cropped above its footer (no billing line). Check rows name no provider (no third-party marks in added text).",
+      "notes": "Your AI, no Chopstats account. facts §3 (nine providers with your own key, or your own server), §5 (no sign-up or account; key in the iOS Keychain). Settings with Gemini picked (a placeholder key 'demo-key-not-real' was typed so the first-run card is gone, as on a set-up phone; nothing was sent with it). The ring is on the AI Provider row. Both crops end above their footers: Settings' footer says the key is 'stored only on this phone' (not accurate: the Keychain item comes back with a phone backup; owner OK 2026-11-13), and the AI Provider page's footer has 'free tier' / 'charge' (no pricing terms). The API Key provider list is NOT used: it shows 'free tier' / VPN notes. Check rows name no provider (no third-party marks in added text). The large titles show the native iOS design.",
       "deco": {
         "d": 1640,
         "t": 76,
@@ -237,20 +236,20 @@
         "stage": [
           {
             "type": "screen",
-            "src": "screens/en/11_settings_watch_camera_roll_glasses.png",
+            "src": "screens/en/11_settings_ai.png",
             "crop": [
               0,
-              690,
+              300,
               1320,
-              1062
+              822
             ],
             "rings": [
               {
                 "box": [
                   96,
-                  805,
-                  1210,
-                  893
+                  685,
+                  1223,
+                  773
                 ],
                 "pad": 14,
                 "chip": {
@@ -263,16 +262,16 @@
           },
           {
             "type": "gap",
-            "h": 132
+            "h": 110
           },
           {
             "type": "screen",
             "src": "screens/en/15_ai_provider_connection.png",
             "crop": [
               0,
-              690,
+              300,
               1320,
-              1036
+              944
             ]
           },
           {
@@ -302,20 +301,20 @@
         "stage": [
           {
             "type": "screen",
-            "src": "screens/zh/11a_settings_top_welcome.png",
+            "src": "screens/zh/11_settings_ai.png",
             "crop": [
               0,
-              1206,
+              300,
               1320,
-              1585
+              818
             ],
             "rings": [
               {
                 "box": [
                   96,
-                  1328,
-                  1210,
-                  1414
+                  685,
+                  1223,
+                  773
                 ],
                 "pad": 14,
                 "chip": {
@@ -328,16 +327,16 @@
           },
           {
             "type": "gap",
-            "h": 132
+            "h": 110
           },
           {
             "type": "screen",
             "src": "screens/zh/15_ai_provider_connection.png",
             "crop": [
               0,
-              690,
+              300,
               1320,
-              1036
+              942
             ]
           },
           {
@@ -358,7 +357,7 @@
     },
     {
       "id": "04_usual_foods",
-      "notes": "My usual foods (new in 1.6). facts §2: meals logged on at least 2 of the last 90 days; tap to log again with no photo and no AI; nothing is sent. Every row's kcal/macros equal the seed's item sums.",
+      "notes": "My usual foods. facts §2: meals logged on at least 2 of the last 90 days; tap to log again with no photo and no AI; nothing is sent. Every row's kcal/macros equal the demo file's item sums (Mapo tofu with rice 590 = 330+260, P23 C67 F24). Neither language shows 'Around this time' (that header needs a meal logged within 2 h of the capture's clock on 2 of the last 30 days; EN was captured about 22:34, ZH about 21:42), so both lists start with the yogurt bowl logged today at 08:04 (EN in 12-hour form, 'Logged today at 8:04 AM', as on a US iPhone). EN crop ends in the white gap above the Hummus row's divider. The touch point sits on blank row space, not on text.",
       "en": {
         "headline": [
           "Your usual foods,",
@@ -373,14 +372,14 @@
             "src": "screens/en/10_usual_foods.png",
             "crop": [
               0,
-              208,
+              200,
               1320,
-              2320
+              2458
             ],
             "touches": [
               [
-                930,
-                840
+                990,
+                537
               ]
             ]
           }
@@ -400,65 +399,15 @@
             "src": "screens/zh/10_usual_foods.png",
             "crop": [
               0,
-              208,
+              200,
               1320,
-              2248
+              2390
             ],
             "touches": [
               [
-                975,
-                840
+                1000,
+                470
               ]
-            ]
-          }
-        ]
-      }
-    },
-    {
-      "id": "05_restaurant_numbers",
-      "notes": "Restaurant nutrition (new in 1.6). facts §2/§8.9: off by default, US chain meals only, needs your own server, an Anthropic key or an OpenRouter key; uses the numbers the chain publishes. 180/210/130/80/20 = 620, P48 C83 F14 (checked against the chain's calculator 2026-11-11). No stock photo here: the Unsplash bowl is not the chain's food.",
-      "en": {
-        "pill": "Off by default",
-        "headline": [
-          "Use the chain's",
-          "<em>own numbers</em>"
-        ],
-        "sub": [
-          "For US chain meals.",
-          "Needs a supported AI provider."
-        ],
-        "stage": [
-          {
-            "type": "screen",
-            "src": "screens/en/03_restaurant_source_card.png",
-            "crop": [
-              0,
-              344,
-              1320,
-              2206
-            ]
-          }
-        ]
-      },
-      "zh": {
-        "pill": "默认关闭",
-        "headline": [
-          "连锁餐厅<span class=\"hang\">？</span>",
-          "用它<em>公布的数值</em>"
-        ],
-        "sub": [
-          "仅限美国连锁餐厅，",
-          "需要支持此功能的 AI 服务"
-        ],
-        "stage": [
-          {
-            "type": "screen",
-            "src": "screens/zh/03_restaurant_source_card.png",
-            "crop": [
-              0,
-              346,
-              1320,
-              2048
             ]
           }
         ]
@@ -467,7 +416,7 @@
     {
       "id": "06_trend",
       "theme": "dark",
-      "notes": "History and Body, dark mode. facts §2 (30-day History chart with average; Body weight trend plus waist/chest/hip). EN avg ~1,577, 170.0 lb (▼0.8); ZH avg ~1,589, 77.1 kg (▼0.1).",
+      "notes": "History and Body, dark mode. facts §2 (30-day History chart with average; Body weight trend plus waist/chest/hip). Demo file: avg ~1,863 kcal/day (EN and ZH); EN 161.4 lb on Nov 25 (down 0.4), waist 33.3 / chest 38.5 / hip 39.0 in; ZH 73.2 kg (down 0.2), 84.6 / 97.9 / 99 cm.",
       "en": {
         "headline": [
           "See the <em>trend</em>,",
@@ -483,24 +432,24 @@
             "src": "screens/en/22_dark_history.png",
             "crop": [
               0,
-              644,
+              540,
               1320,
-              1282
+              1280
             ],
             "tag": "History"
           },
           {
             "type": "gap",
-            "h": 96
+            "h": 72
           },
           {
             "type": "screen",
             "src": "screens/en/23_dark_body.png",
             "crop": [
               0,
-              608,
+              505,
               1320,
-              2056
+              2020
             ],
             "tag": "Body"
           }
@@ -521,24 +470,24 @@
             "src": "screens/zh/22_dark_history.png",
             "crop": [
               0,
-              644,
+              545,
               1320,
-              1282
+              1275
             ],
             "tag": "历史"
           },
           {
             "type": "gap",
-            "h": 96
+            "h": 72
           },
           {
             "type": "screen",
             "src": "screens/zh/23_dark_body.png",
             "crop": [
               0,
-              608,
+              510,
               1320,
-              2056
+              2012
             ],
             "tag": "身体"
           }
@@ -547,7 +496,7 @@
     },
     {
       "id": "07_log_your_way",
-      "notes": "Log a meal sheet (1.6 rows) over the dimmed Today, as the app shows it. facts §2: Describe a meal in any language; Enter manually needs no AI; My usual foods needs no AI. EN starts below the dimmed burrito card so no chain name shows here. Crop ends above the sheet's footer, whose 1.6.0 examples still number meals.",
+      "notes": "Log a meal sheet over the dimmed Today, as the app shows it. facts §2: Describe a meal in any language; Enter manually needs no AI; My usual foods needs no AI. Today was scrolled (about 145 pt EN, 127 pt ZH) so the dimmed yogurt card shows whole above the sheet: no text is cut by the sheet's edge. The rings are on the rows' own values (no AI / any language / no AI). The sheet's footer examples name no meal number in 1.8.0, so the crop keeps them.",
       "en": {
         "headline": [
           "Photo, words,",
@@ -563,17 +512,17 @@
             "src": "screens/en/09_log_sheet.png",
             "crop": [
               0,
-              1120,
+              868,
               1320,
-              2652
+              2740
             ],
             "rings": [
               {
                 "box": [
-                  1027,
-                  1970,
-                  1140,
-                  2004
+                  1034,
+                  1917,
+                  1143,
+                  1954
                 ],
                 "pad": [
                   12,
@@ -582,10 +531,10 @@
               },
               {
                 "box": [
-                  830,
-                  2238,
-                  1141,
-                  2282
+                  845,
+                  2181,
+                  1145,
+                  2229
                 ],
                 "pad": [
                   12,
@@ -594,10 +543,10 @@
               },
               {
                 "box": [
-                  1027,
-                  2375,
-                  1140,
-                  2409
+                  1034,
+                  2316,
+                  1143,
+                  2353
                 ],
                 "pad": [
                   12,
@@ -623,17 +572,17 @@
             "src": "screens/zh/09_log_sheet.png",
             "crop": [
               0,
-              1130,
+              925,
               1320,
-              2652
+              2740
             ],
             "rings": [
               {
                 "box": [
-                  984,
-                  1966,
-                  1140,
-                  2008
+                  982,
+                  1967,
+                  1141,
+                  2012
                 ],
                 "pad": [
                   12,
@@ -642,9 +591,9 @@
               },
               {
                 "box": [
-                  945,
-                  2234,
-                  1140,
+                  940,
+                  2231,
+                  1143,
                   2278
                 ],
                 "pad": [
@@ -654,10 +603,10 @@
               },
               {
                 "box": [
-                  984,
-                  2371,
-                  1140,
-                  2413
+                  982,
+                  2366,
+                  1141,
+                  2411
                 ],
                 "pad": [
                   12,
@@ -671,11 +620,11 @@
     },
     {
       "id": "08_privacy",
-      "notes": "Privacy. facts §5: log stays on the phone; no ads, no analytics/tracking SDK; open source (MIT); the app asks first and names the company; Chopstats has no backend and the developer receives none of your data. Both languages show the log itself (day detail, 07) plus CSS check rows. The English consent-dialog version was dropped on 2026-11-11 (the Watch Camera Roll dialog read against the headline). ZH says 保存在, not 只留在.",
+      "notes": "Privacy, new captions for 1.8.0: iCloud Backup is on by default, so 'Your log stays on your phone' is no longer the whole truth. facts §5: no ads, no analytics/tracking SDK; open source (MIT); the app asks first and names the company; Chopstats has no backend and the developer receives none of your data; iCloud Backup copies the log to the user's own iCloud Drive (API keys never included). Added text says 'your own cloud drive', never iCloud (an Apple mark). The picture is the day log (today's day page: ~1,896 kcal = 388+587+130+791, 4 meals) plus CSS check rows.",
       "en": {
         "headline": [
-          "Your log stays",
-          "on <em>your phone</em>"
+          "We never see",
+          "<em>your meals.</em>"
         ],
         "sub": [
           "No ads. No tracking. Open source."
@@ -686,9 +635,9 @@
             "src": "screens/en/07_day_detail.png",
             "crop": [
               0,
-              212,
+              330,
               1320,
-              1808
+              1886
             ]
           },
           {
@@ -701,7 +650,7 @@
             "rows": [
               "No Chopstats account",
               "Nothing is sent until you allow it",
-              "The developer gets none of your data"
+              "Backups stay in your own cloud drive"
             ]
           }
         ]
@@ -709,7 +658,7 @@
       "zh": {
         "headline": [
           "饮食记录",
-          "保存在<em>你的手机上</em>"
+          "开发者<em>看不到</em>"
         ],
         "sub": [
           "没有广告，不做追踪，代码公开"
@@ -720,9 +669,9 @@
             "src": "screens/zh/07_day_detail.png",
             "crop": [
               0,
-              212,
+              330,
               1320,
-              1808
+              2018
             ]
           },
           {
@@ -735,7 +684,7 @@
             "rows": [
               "无需注册筷拍账户",
               "未经你同意，不发送任何内容",
-              "开发者收不到你的任何数据"
+              "备份存在你自己的云盘里"
             ]
           }
         ]
