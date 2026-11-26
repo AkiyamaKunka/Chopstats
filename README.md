@@ -158,7 +158,7 @@ Your meals, weight and settings stay on your phone, and the developer receives n
 
 ## What else it does
 
-- **iCloud Backup** (on by default, after a notice). Your meals and their pictures, weight, measurements and workouts are copied to a Chopstats folder in your own iCloud Drive, so they come back after a reinstall or on a new iPhone signed in to the same iCloud account. Nothing is uploaded until you answer the notice. API keys are never in it, and the developer receives nothing. Turn it off under Settings › Your Data.
+- **iCloud Backup** (on by default, after a notice). Everything an export holds, meal pictures included, is copied to a Chopstats folder in your own iCloud Drive, so they come back after a reinstall or on a new iPhone signed in to the same iCloud account. Nothing is uploaded until you answer the notice. API keys are never in it, and the developer receives nothing. Turn it off under Settings › Your Data.
 - **Correct a meal with a note.** In Edit meal, tell your AI what was different, such as "only half the rice" or "add a fried egg", and tap Correct with AI. The answer fills in the foods and numbers, and nothing is saved until you tap Save. Your note goes with that meal's description, foods, numbers and earlier notes, never its photo, and it stays with the meal.
 - **My usual foods.** Meals you logged on at least 2 of the last 90 days wait under Today › Log › My usual foods. Tap one to log it again: no photo, no AI, nothing sent. If you set a food's numbers yourself, the app may offer them as Your usual numbers on later photos of it; nothing changes until you tap Use my numbers.
 - **Restaurant nutrition** (off by default). For a meal photo from a US chain restaurant, your AI can look up the nutrition the chain publishes and use it in place of its own estimate. The meal names its source, and you can undo the change or tap Wrong restaurant. US meals only, from a built-in list of 403 chains. Needs an Anthropic or OpenRouter key, or your own server on the Claude plan; not available with Gemini yet. Your AI's numbers are replaced only when the chain's own website publishes them and the match is clear; otherwise, and always with your own server, you get a suggestion. The published serving may not match what you ate.
@@ -189,7 +189,7 @@ Everything here is in the App Store version.
 - **Drinks.** The app asks the AI to log coffee, tea, juice, soda, bubble tea, shakes and beer, and to skip plain water.
 - **Orders, receipts and labels.** The app also asks the AI to log a takeout order confirmation, a receipt or a nutrition label by reading its text. How well this works depends on the AI you chose.
 - **Dietary profile.** Write a line such as "vegetarian" or "home cooking, light oil", and the AI reads it with every photo.
-- **Leftovers, two ways.** If your AI recognizes the remains of a meal you logged earlier that day, the app reduces that meal and adds no second one. You can also pick the meal and the leftover photo yourself under **Today › Log › Leftovers**, for meals from today and yesterday.
+- **Leftovers, two ways.** If your AI recognizes the remains of a meal you logged earlier that day (or, for a photo taken before 4 a.m., the day before), the app reduces that meal and adds no second one. You can also pick the meal and the leftover photo yourself under **Today › Log › Leftovers**, for meals from today and yesterday.
 - **Fixes in your own words.** Under **Today › Log › Fix or delete a meal**, type "the noodles were roast duck rice" or "delete the coffee I just logged". The app always asks you to confirm before it deletes a meal.
 - **Notes on a meal.** **Edit meal** lists the notes you sent to correct that meal, and a later correction sends them again, marked as already applied. To remove one, tap the × next to it, then **Save**.
 - **Foods you stopped eating.** In **My usual foods**, **Hide from this list** takes one off the list.
@@ -215,9 +215,9 @@ Everything here is in the App Store version.
 
 - **Test This Provider.** Six checks in order: configuration, network, key and account credit, text analysis, photo analysis and quota. Each one says what is wrong and what to do next.
 - **Free-tier limits.** When Gemini's free tier reaches its daily limit, the app pauses analysis, keeps new photos and retries them later.
-- **Export.** **Settings › Your Data › Export Data** writes one JSON file with your meals and their pictures, weight, body measurements, workouts, activities and fitness profile, plus the list of processed photos. Settings, the dietary profile and API keys are not in the file.
-- **Import.** On another phone, open **Import Data** and tap **Choose File…** to pick the file (a full export with its pictures is too big for the clipboard), paste a small export's text, or tap **Import from clipboard**. Import adds what is missing and never duplicates meals that are already there; pictures are added to meals that have none.
-- **Restoring from iCloud Backup.** After a reinstall, or on a new iPhone signed in to the same iCloud account, the app offers to restore the backup. Restoring adds what is missing and removes nothing from the phone. Turning the **iCloud Backup** switch off asks whether to **Keep the Backup in iCloud** or **Delete It…**.
+- **Export.** **Settings › Your Data › Export Data…** writes one JSON file with your meals and their pictures, weight, body measurements, workouts, activities and fitness profile, plus the list of processed photos. Settings, the dietary profile and API keys are not in the file.
+- **Import.** On another phone, open **Import Data…** and tap **Choose File…** to pick the file (a full export with its pictures is too big for the clipboard), paste a small export's text, or tap **Import from clipboard**. Import adds what is missing and never duplicates meals that are already there; pictures are added to meals that have none.
+- **Restoring from iCloud Backup.** After a reinstall, or on a new iPhone signed in to the same iCloud account, the app offers to restore the backup. Restoring merges: it removes nothing from the phone and does not bring back a photo meal you deleted on it. Goals, units and API keys are not restored. Turning the **iCloud Backup** switch off asks whether to **Keep the Backup in iCloud** or **Delete It…**.
 
 </details>
 
@@ -282,7 +282,7 @@ Chopstats is not on Google Play. The newest Android version, 1.8.0, is on the [R
 
 - **arm64 phones only.** A phone with a 32-bit processor refuses it.
 - **You install it yourself.** Android asks you to allow installs from your browser or file manager. The app does not update itself: install the next APK from the Releases page when one comes out.
-- **Coming from the 1.4.0 preview?** That August 2026 build is still named Bitewise. It sends photos with their embedded metadata, which includes the location if your camera recorded it, and it asks no permission first. Android cannot install this APK over it. Export your log in the old app, uninstall it, install this APK, then open **Settings › Your Data › Import Data**.
+- **Coming from the 1.4.0 preview?** That August 2026 build is still named Bitewise. It sends photos with their embedded metadata, which includes the location if your camera recorded it, and it asks no permission first. Android cannot install this APK over it. Export your log in the old app, uninstall it, install this APK, then open **Settings › Your Data › Import Data…**.
 - **A few things differ from iPhone.** Restaurant nutrition looks up printed brands only and never reads where a photo was taken. Meta glasses photos are not checked for food on the phone, so Watch Camera Roll leaves them out until you turn on **Meta glasses photos** (Settings › Photos). There is no iCloud Backup: Android's own backup applies, and you can export a file. The screenshots on this page are from an iPhone.
 
 Developers can also [build the app from source](#build-from-source).

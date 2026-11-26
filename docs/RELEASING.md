@@ -1802,8 +1802,7 @@ read 2026-11-13):
   rollout (for example 20%, then 100%).
 
 **An Android-only version (decision 4).** release.yml runs both lanes on
-any `v*` tag, and the iOS lane stops until the iCloud container exists
-(§ 11.1). So Android goes first without a `v*` tag. Android 1.7.0 went
+any `v*` tag, so an Android-only version goes out without one. Android 1.7.0 went
 out this way on 2026-11-19 (`android-v1.7.0`, build 207, GitHub only).
 Android 1.7.1 followed on 2026-11-22 (`android-v1.7.1`, build 209 from
 run 9, GitHub only). Android 1.7.2 followed on 2026-11-24
