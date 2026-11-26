@@ -2361,13 +2361,36 @@ on `feat/icloud-backup`:
 
 **App Review guideline 5.1.3(ii)** says apps "may not store personal
 health information in iCloud". It sits in 5.1.3 (*Health and Health
-Research*), whose rules are about HealthKit, health records and health
-research; Chopstats uses no HealthKit, and the review notes say so
-(§ 4.4). If App Review still cites it for iCloud Backup, the choice is
-the owner's: ship with the backup off by default (`kCloudBackupDefaultOn`
-in `lib/services/backup/backup_format.dart`; What's New, the description
-and the review notes then drop "on by default"), or ship without iCloud
-(revert Part B).
+Research*); Chopstats uses no HealthKit, and the review notes say so
+(§ 4.4). What was found on 2026-11-25 (Apple's pages and archives, the
+developer forums, App Store listings):
+
+- The literal rule reaches Chopstats. Since the 2016 rewrite the sentence
+  names no framework (its 2014 original, 27.3, applied only to apps using
+  HealthKit; Apple said the 2016 rewrite changed no rule). The Developer
+  Program License Agreement, § 3.3.3(D), also bars sensitive health
+  information in iCloud, the iCloud Storage APIs (documents and files, so
+  an iCloud Drive folder) and CloudKit without Apple's written permission,
+  in HIPAA terms. The App Privacy label already calls meal data Health,
+  so do not argue that it is not health data.
+- In practice the risk looks low: no published rejection under 5.1.3(ii)
+  or 27.3 for a user's own data in iCloud in ten years, and approved
+  calorie, weight and workout apps say openly that they keep it in iCloud
+  (for example Calory, whose listing says the entries are stored in the
+  user's own iCloud; Foodnoms; Body Mass). App Review's one public answer on the forums (July 2026)
+  only offered a consultation.
+- If App Review cites it, reply in App Store Connect before any appeal,
+  with facts: Chopstats has no server and no HealthKit; iCloud Backup
+  keeps the user's own entries in their own iCloud Drive so they survive
+  a reinstall; the developer never receives them; the notice and the
+  switch turn it off. Ask whether an off-by-default switch would be
+  acceptable. If App Review insists, ship without iCloud: draft PR #109
+  (branch `ios/no-icloud-fallback`) reverts Part B and is kept ready.
+  Off by default (`kCloudBackupDefaultOn` in
+  `lib/services/backup/backup_format.dart`) alone is unlikely to satisfy a
+  reviewer who cited the rule, since a user who turns it on still stores
+  the data in iCloud. Either way the choice is the owner's, and What's
+  New, the description and the review notes change with it.
 
 ### 11.1 Owner steps (Apple Developer website), before any device test
 
