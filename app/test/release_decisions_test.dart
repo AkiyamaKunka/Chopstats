@@ -274,6 +274,11 @@ const _kAndroidReleases = [
   (version: '1.8.0', build: 213, day: '2026-11-25', plus: 12, sha: '83e95ea1'),
 ];
 
+/// The iPhone version in the App Store, which the READMEs and
+/// docs/SUPPORT.md describe: 1.8.0 since its release day, when the docs PR
+/// that says so merged.
+const _kAppStoreVersion = '1.8.0';
+
 /// "a", "a and b", "a, b and c".
 String _andList(List<String> items) => items.length == 1
     ? items.single
@@ -1755,14 +1760,21 @@ void main() {
           s6,
           contains('so no build of `main` may be named below the newest '
               'version it names'));
+      // § 8's note waited for the first tag from main since 1.6.0, v1.8.0,
+      // and § 12 for that version to reach the App Store. Since 1.8.0 is
+      // live, § 8 says what every tag from main needs, and § 12 records the
+      // day its text went onto the support page.
+      expect(flat,
+          isNot(contains('Before the first tag from `main` since 1.6.0')));
       expect(
           flat,
-          contains('Before the first tag from `main` since 1.6.0, '
-              '`v$version`'));
+          contains('Every tag from `main` builds with the iCloud container '
+              'of § 11, set up for 1.8.0'));
       expect(
           flat,
-          contains('means the first App Store version built from `main` '
-              'after 1.6.0, now $version, not a 1.6.x hotfix'));
+          contains('1.8.0, the first App Store version built from `main` '
+              'after 1.6.0 (the iPhone skips 1.7.0, 1.7.1 and 1.7.2, § 6.6), '
+              'was the first'));
       // § 6.3 names the hotfix branch; § 6.6 says what its tag does.
       expect(
           s6,
@@ -2027,11 +2039,14 @@ void main() {
       expect(slides, isNot(contains('When 1.7.0 ships')));
       expect(slides, isNot(contains('(1.7.1: the iPhone skips')));
       expect(slides, isNot(contains('(1.7.2: the iPhone skips')));
+      // 1.8.0 in the App Store: the slide note no longer waits for it.
       expect(
           slides,
-          contains('When the first App Store version built from `main` '
-              'after 1.6.0 ships (1.8.0: the iPhone skips 1.7.0, 1.7.1 and '
-              '1.7.2, and a 1.6.x hotfix has neither feature'));
+          contains('The first App Store version built from `main` after '
+              '1.6.0, 1.8.0 (the iPhone skips 1.7.0, 1.7.1 and 1.7.2, and a '
+              '1.6.x hotfix has neither feature; docs/RELEASING.md § 6.6), '
+              'shipped both'));
+      expect(slides, isNot(contains('When the first App Store version')));
       final shots = flatRepo('app/ios/store/marketing-src/README.md');
       expect(shots, isNot(contains('(1.7.0, the native iOS design)')));
       expect(shots, isNot(contains('(1.7.1, the native iOS design')));
@@ -2311,45 +2326,54 @@ void main() {
       ]) {
         expect(zh, contains(fact), reason: fact);
       }
-      // The note sentence (true from 1.8.0) points to Coming next, which
-      // lists the feature until the App Store version has it: the sentence
-      // and its link stay in the Android section while the bullet does and
-      // go with it, and README.md's maintainer note 5 keeps its rule while
-      // the sentence stays. A guard that ran only while the exact sentence
-      // was there let the sentence go, or its link die, with the bullet
-      // still listed.
-      for (final (path, text, sentence, anchor, bullet, heading) in [
+      // The note sentence (true from 1.8.0) pointed to Coming next while
+      // the feature waited there for the App Store version. iPhone 1.8.0
+      // has it, so the feature moved into What else it does, Coming next
+      // (which listed nothing else) went, the sentence and its link went
+      // with them, and README.md's maintainer note 5 no longer keeps their
+      // rule. While the newest Android release holds the App Store version,
+      // the section calls it the same version, not a newer one; and it
+      // names iCloud Backup among the things Android lacks, now that the
+      // page describes it. A link to Coming next needs the section.
+      for (final (path, text, sentence, anchor, heading, same, newer, backup)
+          in [
         (
           'README.md',
           en,
-          'It can already [correct a meal with a note](#coming-next).',
+          'It can already [correct a meal with a note]',
           '](#coming-next)',
-          '- **Correct a meal with a note.**',
-          '## Coming next'
+          '## Coming next',
+          'It is the same version as the iPhone app in the App Store, which '
+              'this page describes.',
+          'It is newer than the iPhone app in the App Store',
+          'There is no iCloud Backup',
         ),
         (
           'README.zh-CN.md',
           zh,
-          '它已经可以[用一句话修正一餐](#即将推出)。',
+          '它已经可以[用一句话修正一餐]',
           '](#即将推出)',
-          '- **用一句话修正一餐**：',
-          '## 即将推出'
+          '## 即将推出',
+          '和本页介绍的 App Store 上的 iPhone 版是同一个版本。',
+          '比本页介绍的 App Store 上的 iPhone 版更新',
+          '没有「iCloud 备份」',
         ),
       ]) {
         final at = text.indexOf('## Android ');
         expect(at, greaterThanOrEqualTo(0), reason: '$path: ## Android');
         final section = text.substring(at, text.indexOf(' ## ', at + 1));
-        final listed = text.contains(bullet);
-        expect(section.contains(sentence), listed, reason: '$path: $sentence');
-        expect(section.contains(anchor), listed, reason: '$path: $anchor');
-        if (listed) expect(text, contains(heading), reason: '$path: $heading');
+        expect(section, isNot(contains(sentence)), reason: '$path: $sentence');
+        final sameAsStore = newest.version == _kAppStoreVersion;
+        expect(section.contains(same), sameAsStore, reason: '$path: $same');
+        if (sameAsStore) {
+          expect(section, isNot(contains(newer)), reason: '$path: $newer');
+        }
+        expect(section, contains(backup), reason: '$path: $backup');
+        if (text.contains(anchor)) {
+          expect(text, contains(heading), reason: '$path: $anchor');
+        }
       }
-      expect(
-          en.contains('Its note sentence is true from 1.8.0 and points to '
-              '"Coming next": drop it when Correct with a note leaves that '
-              'list (item 3).'),
-          en.contains('It can already [correct a meal with a note]'
-              '(#coming-next).'),
+      expect(en, isNot(contains('Its note sentence is true from 1.8.0')),
           reason: "README.md's maintainer note 5");
       // The READMEs name no other Android release: every tag and APK they
       // give is the newest's.

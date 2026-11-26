@@ -45,7 +45,7 @@ iPhone 17 Pro Max simulator, status bar at 9:41, in light mode except the
 `_dark_` ones. They are not committed; re-shoot them when the
 App Store look changes.
 
-1. Build the app at the release tag (for example `v1.6.0`) for the
+1. Build the app at the App Store version's tag (now `v1.8.0`) for the
    simulator, with `debugShowCheckedModeBanner: false` in
    `app/lib/ui/app.dart`, and install it.
 2. Close the app and seed demo data, once per language:
@@ -81,15 +81,29 @@ Since 2026-11-13 the README shows only `01-hero`, `02-how`, `03-control` and
 and `13-next` matter only if one of those slides goes back on the page.
 
 - `01-hero`, `02-how` and every slide with a phone: screenshots of 1.6.0.
-  The footer says "Version 1.6 · demo data".
-- `06-usual`, `07-restaurant` and `09-glasses` carry the "New in 1.6" pill.
-  Drop it once 1.6 is no longer the newest version.
-- `13-next` shows what is on `main` but not in the App Store build (the
-  native iOS look, iCloud Backup). It has no screenshots and no date. When
-  the first App Store version built from `main` after 1.6.0 ships (1.8.0:
-  the iPhone skips 1.7.0, 1.7.1 and 1.7.2, and a 1.6.x hotfix has neither
-  feature; docs/RELEASING.md § 6.6), its features go into the README's
-  list (What else it does), not onto a slide.
+  The footer says "Version 1.6 · demo data" (`deck.json`'s default `note`,
+  and `01-hero`'s own `cnote`). The App Store version is 1.8.0, whose
+  native iOS look (large titles, a solid **+ Log** button, a tab bar
+  without the pill) no 1.6.0 screen shows, so all four slides on the
+  README need new captures from `v1.8.0`, in both languages: the Today
+  screen (`01-hero`, `02-how`), Edit meal (`02-how`, `03-control`) and the
+  Settings rows that `10-privacy` crops. Their footers then say 1.8, and
+  the README's hero caption names 1.8.
+- Two of them also need new words, not only new screens, because iCloud
+  Backup (on by default in 1.8.0, after a notice) copies the log to the
+  user's own iCloud Drive: `01-hero`'s chip "Log stays on your phone"
+  (记录留在手机上) and `10-privacy`, whose headline says the log stays on
+  the phone and whose diagram has no iCloud Drive.
+- `06-usual`, `07-restaurant` and `09-glasses` carry the "New in 1.6" pill,
+  which goes if one of them comes back: 1.6 is no longer the newest
+  version.
+- `13-next` showed what was on `main` but not in the App Store build (the
+  native iOS look, iCloud Backup). The first App Store version built from
+  `main` after 1.6.0, 1.8.0 (the iPhone skips 1.7.0, 1.7.1 and 1.7.2, and
+  a 1.6.x hotfix has neither feature; docs/RELEASING.md § 6.6), shipped
+  both, and they went into the README's lists (What else it does, More
+  features), not onto a slide. `13-next` is out of date: keep it off the
+  page.
 - `07-restaurant` shows Chipotle's published numbers as demo data, with
   "not affiliated" in the footer. All calorie, protein, carb and fat values
   match Chipotle's US nutrition PDF (July 2022); the 1.6.0 shots show the

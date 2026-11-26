@@ -385,6 +385,7 @@ When merging #22 after this PR:
   and the own-server bullet on what the phone supplies (当天的餐食摘要).
   Use the wording `docs/SERVER.md` already has: "that day's meal
   summaries, plus the day before's for a photo taken before 4 a.m.".
+  Done when 1.8.0, the first App Store version with run 7, was live.
 
 **After #22, one restyle commit:** **done 2026-11-11** on branch
 `chore/usual-foods-run7-kit` (from `main` at 2b85014, a few small
@@ -1919,7 +1920,9 @@ notes, and leave the README's Android section on the newest Android
 release. Keep that branch's own `release.yml`: `main`'s would stop its
 Android job (the branch has no `kRequireHttpsServer`), and its offset
 200 would number the APK above 213, so Android would install 1.6.1
-(database schema 3) over 1.7.x or 1.8.0 (schema 4).
+(database schema 3) over 1.7.x or 1.8.0 (schema 4). All of this is moot
+once 1.8.0 is in the App Store, since a 1.6.x would be below the live
+version; what happens to `release/1.6.1` and PR #86 is the owner's call.
 
 **Developer verification and the GitHub APK.** Because the package
 shipped as GitHub APKs before it existed on Play, Play Console may ask,
@@ -2137,13 +2140,12 @@ the README, not this page.
 
 ## 8. Running a release (cheat sheet)
 
-(Before the first tag from `main` since 1.6.0, `v1.8.0` (the iPhone
-skips 1.7.0, 1.7.1 and 1.7.2, § 6.6): § 11, the iCloud container, or the
-iOS lane stops at "Check the Runner profile allows the iCloud
-container". Once that version is in the App Store: § 12, the support
-page, whose "1.7.0" means it. A 1.6.x hotfix is tagged on its own branch
-and needs neither: § 6.6, *A 1.6.x hotfix*. An Android-only version goes
-first without a `v*` tag: § 6.6.)
+(Every tag from `main` builds with the iCloud container of § 11, set up
+for 1.8.0: if the Runner profile loses it, the iOS lane stops at "Check
+the Runner profile allows the iCloud container". On the day a new App
+Store version is live: § 12, the support page, and the README's and the
+slides' release lists it names. An Android-only version goes first
+without a `v*` tag: § 6.6.)
 
 ```bash
 # 1. in the shipping PR: app/pubspec.yaml  version: 1.8.0+12   (the +N is for hand builds only;
@@ -2338,7 +2340,7 @@ raw file instead of its base64 text. Re-create it with `base64 -i <file>`.
 
 ---
 
-## 11. iCloud container (1.7.0 iCloud Backup)
+## 11. iCloud container (iCloud Backup, from 1.8.0)
 
 iCloud Backup writes the meal record into the user's **own** iCloud Drive
 (a *Chopstats* folder they see in the Files app). The code is split in two
@@ -2491,65 +2493,23 @@ phone, with Part B and § 11.1 done:
 
 ---
 
-## 12. When 1.7.0 ships: the support page
+## 12. The support page
 
 `docs/SUPPORT.md` is the support URL of both store listings, so, like the
-README, it describes the version in the App Store (1.6.0 today). What only
-`main` has is written here instead and goes onto the page in a PR once
-1.7.0 is in the App Store. (The iPhone skips 1.7.0, 1.7.1 and 1.7.2,
-§ 6.6: "1.7.0" in this section and in the test named below means the
-first App Store version built from `main` after 1.6.0, now 1.8.0, not a 1.6.x
-hotfix such as 1.6.1, which has none of this.) The labels are the app's on
-`main`: `app/test/ui/copy_consistency_test.dart` checks them against
-`app_en.arb`, and checks that `SUPPORT.md` does not name them yet; drop
-that check ("names no 1.7.0 control …") in the same PR. If 1.7.0 ships
-without Part B (§ 11), leave out the iCloud Backup text (steps 1, 3
-and 4) and keep steps 2, 5 and 6.
-
-1. **Intro**: "your meal log stays on your phone" becomes "your meal log
-   stays on your phone (and, with iCloud Backup, in your own iCloud
-   Drive)".
-2. **Export and import**, under *Your data*: Settings › Your Data ›
-   **Export Data…** "saves your meals and their pictures, weight, body
-   measurements, workouts and activities, fitness profile and the list of
-   processed photos to a file you can share or keep (API keys are not
-   included)": an export now carries the meal pictures, with the data a
-   camera can embed in them removed. The Import sentence becomes:
-   "**Import Data…** restores it: tap **Choose File…** and pick the file
-   (a full export with its pictures is too big for the clipboard), paste a
-   small export's text, or tap **Import from clipboard**. Meals already
-   here are kept, and pictures are added to meals that have none."
-3. **A new bullet after Export**: "**iCloud Backup** (Settings › Your
-   Data): on by default, after a notice; nothing is uploaded before you
-   answer it. It copies everything an export holds, the meal pictures
-   included, to a *Chopstats* folder in your own iCloud Drive, and after
-   a reinstall, or on a new iPhone with the same Apple Account, Chopstats
-   offers to restore the backup. API keys are never included, and the
-   developer receives nothing. Turning the **iCloud Backup** switch off
-   asks whether to **Keep the Backup in iCloud** or **Delete It…**."
-4. **Delete everything** gains, after the backups sentence: "The copy
-   iCloud Backup keeps in your iCloud Drive stays too. Uninstalling does
-   not delete it: delete it in Settings › Your Data (turning **iCloud
-   Backup** off offers **Delete It…**; with the switch already off, tap
-   **Delete iCloud Backup…**), or in the Files app under iCloud Drive ›
-   Chopstats."
-5. **Delete everything**'s Keychain sentence ends as `docs/PRIVACY.md`'s
-   does: "(and the **Server upload key** under *Your own server*; when
-   that page says a key was *Saved without its server address*, its field
-   is empty, so tap **Remove this key** under it instead)". In 1.6.0 the
-   field always shows the key, so clearing it is enough there.
-6. **Correct with a note** (1.8.0), which the page does not mention yet.
-   In *What it does*, the bullet on fixing a meal becomes: "open a meal to
-   edit its items and numbers, or, under **Correct with a note**, tell
-   your AI what was different (such as "only half the rice") and tap
-   **Correct with AI**; the answer fills in the numbers, and nothing is
-   saved until you tap **Save**. Or use *Fix or delete a meal* …". Under
-   *Your data*, after deleting a meal: "Deleting a meal also deletes the
-   notes you sent about it. To remove one note, tap the × next to it in
-   **Edit meal** (VoiceOver calls it **Remove this note**), then
-   **Save**." (`docs/PRIVACY.md` describes the notes kept on a meal.)
+README, it describes the version in the App Store. What only `main` has
+goes onto the page on the day an App Store version that has it is live,
+in one docs PR with the README. 1.8.0, the first App Store version built
+from `main` after 1.6.0 (the iPhone skips 1.7.0, 1.7.1 and 1.7.2, § 6.6),
+was the first: its text waited in this section until 1.8.0 was live, and
+the page has it since. That is iCloud Backup (in the intro, as a bullet
+after *Export* and under *Delete everything*), the meal pictures in an
+export and **Choose File…** for an import, **Remove this key** for an
+upload key *Saved without its server address*, and *Correct with a note*,
+with how to remove a note. `app/test/ui/copy_consistency_test.dart`
+checks that the page names these controls as `app_en.arb` spells them,
+that its export list names every table an export holds, and that its
+iCloud Backup bullet says the backup copies everything an export holds.
 
 The README has its own list (*Lines tied to a release*, in its maintainer
 notes; go through all of it, for README.zh-CN.md too) and so do the slides
-(`docs/readme/src/README.md`, *Slides tied to a release*);
-`docs/PRIVACY.md` already describes 1.7.0.
+(`docs/readme/src/README.md`, *Slides tied to a release*).

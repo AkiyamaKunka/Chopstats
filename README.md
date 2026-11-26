@@ -5,41 +5,41 @@ This page opens with four slides (hero, how it works, numbers you control,
 privacy), then a short feature list ("What else it does") and the reference
 sections. On 2026-11-13 the owner found the page too much like a slide deck
 and asked for fewer slides; four were kept. Add new features to the list,
-not as new slides. It describes the App Store version, 1.6.0. Merge a change that names a new version only
+not as new slides. It describes the App Store version, 1.8.0. Merge a change that names a new version only
 once that version is live on the App Store. "Android" is the exception: it
 describes the newest GitHub release (item 5 below).
 
 Lines tied to a release. Re-read them when a new App Store version ships:
-1. "New in 1.6": the line under the hero slide, and "new in 1.6" inside the
-   tags in "What else it does" (keep "off by default"). Drop them when 1.6
-   is no longer the newest version.
-2. The caption under the hero slide names the version the screens show.
-3. "Coming next" lists what is on main but not in the App Store version:
-   the native iOS look, iCloud Backup and Correct with a note. When they
-   ship, move them into "What else it does" and "More features", and update
-   "Privacy", because iCloud Backup copies the log to the user's own iCloud
-   Drive and a note in Edit meal is a new case in "Everything that is sent".
+1. The hero has no "New in" line. 1.6 had one, with "new in 1.6" in the
+   tags in "What else it does"; both went when 1.8.0 shipped, and 1.8.0's
+   features lead that list without a version tag. If a "New in" line comes
+   back, drop it and its tags when that version is no longer the newest.
+2. The caption under the hero slide names the version the screens show:
+   1.6, until the slides are shot again from 1.8.0 (docs/readme/src/
+   README.md, "Slides tied to a release"). Until then it also says that
+   1.8 looks different.
+3. "Coming next" listed what was on main but not in the App Store version.
+   1.8.0 shipped all three of its items (the native iOS look, iCloud Backup
+   and Correct with a note): they moved into "What else it does" and "More
+   features", "Privacy" and "Everything that is sent" gained iCloud Backup
+   and the note, and the section went, with its anchor. When main again
+   holds a feature the App Store version lacks, the section can come back
+   above "For developers"; when that feature ships, move it the same way.
 4. "Privacy" and "Everything that is sent, case by case" describe the App
    Store version. Check them against docs/PRIVACY.md at that version's tag,
    because the policy on main may already describe the next version.
 5. "Android" names the newest GitHub release, its APK file and its size.
    Update them with each release (docs/RELEASING.md § 6.6, step 5). Today
    that is android-v1.8.0. Its Meta glasses sentence is true from 1.7.1,
-   the first version in which the switch starts off on Android. Its note
-   sentence is true from 1.8.0 and points to "Coming next": drop it when
-   Correct with a note leaves that list (item 3).
+   the first version in which the switch starts off on Android. It also
+   says how that release compares with the App Store version (the same
+   version since iPhone 1.8.0; newer once an Android-only version is out),
+   and its list of differences names iCloud Backup, which Android lacks.
 6. "For developers" names the tag the App Store version was built from. Its
    two test counts are dated lower bounds.
 7. "What it costs": the sentence about Gemini's free tier and what Google may
    do with what is sent comes from Google's Gemini API pricing page, read on
    2026-11-10. Check it again when the default model or Google's terms change.
-8. "Your own server": PR #74 sends the upload key only to the server it was
-   saved for. The App Store version does not: in 1.6.0 the key follows a
-   changed address, and there is no Use this key row. When a version with
-   it is live, add this bullet after "The phone holds one upload key" here
-   and after "手机上只保存一个上传密钥" in README.zh-CN.md, in one commit:
-   - The phone sends that key only to the server it was saved for. After you change the address to another server, paste that server's key; for the same server at a new address, tap **Use this key for …** under the key field.
-   - 手机只把这个密钥发送给它所对应的服务器。把地址改成另一台服务器后，请粘贴那台服务器的密钥；如果是同一台服务器换了地址，请点「服务器上传密钥」下面的「将此密钥用于 …」。
 
 The slides:
 1. docs/readme/slides/NN-name.jpg (English) and docs/readme/zh/slides/
@@ -49,14 +49,17 @@ The slides:
    README shows 01-hero, 02-how, 03-control and 10-privacy; the other
    rendered slides stay in the folders, unused here.
 2. Every phone on a slide is a screenshot of version 1.6.0 with demo data.
+   1.8.0 changed the look, so they are due to be shot again; 01-hero's
+   "Log stays on your phone" chip and 10-privacy's headline and diagram
+   leave out iCloud Backup (docs/readme/src/README.md, "Slides tied to a
+   release").
 3. The burrito bowl's meal card on slide 02 names Chipotle (demo data). The
    trademark line under "License" says Chopstats is not affiliated with the
    restaurants named.
 4. Under each slide: a heading, one or two sentences and its fine print, so
    the page still reads without the pictures. Keep the slide headings
    unique, because they become anchors. These anchors are linked: get-started,
-   what-it-costs, privacy, android, coming-next, for-developers and
-   build-from-source.
+   what-it-costs, privacy, android, for-developers and build-from-source.
 5. The food photos are from Unsplash. docs/readme/CREDITS.md names each one,
    and the first line under "License" credits the photographers.
 
@@ -95,13 +98,11 @@ A free, open-source calorie tracker for iPhone, powered by the AI you&nbsp;choos
 
 Free · No in-app purchases · iPhone, iOS&nbsp;15 or later
 
-**New in 1.6:** My usual foods · Restaurant nutrition for US chains (off by default) · Meta glasses photos
-
 You need a key from the AI service you choose. Google Gemini, the default, has a free&nbsp;tier.
 
 [Get started](#get-started) · [What it costs](#what-it-costs) · [Privacy](#privacy) · [Android](#android)
 
-<sub>Screens of version 1.6, with demo data. Food photos from Unsplash, credited at the end.</sub>
+<sub>Screens of version 1.6, with demo data; version 1.8 has a refreshed iOS look. Food photos from Unsplash, credited at the end.</sub>
 
 </div>
 
@@ -147,9 +148,9 @@ Every food shows the portion your AI assumed, such as "Grilled chicken breast (~
 
 ### No account, no ads, no tracking
 
-Your meals, weight and settings stay on your phone, and the developer receives none of your data. The photos and text you log go to the AI provider you chose, or to your own server.
+Your meals, weight and settings stay on your phone, and the developer receives none of your data. The photos and text you log go to the AI provider you chose, or to your own server, and iCloud Backup copies your log to your own iCloud&nbsp;Drive.
 
-<sub>The app asks before it first sends anything, and Stop Sharing ends it. Watch Camera Roll sends every new photo while it is on, and Restaurant nutrition, if you turn it on, has its own recipients. Details under [Privacy](#privacy).</sub>
+<sub>The app asks before it first sends anything, and Stop Sharing ends it. Watch Camera Roll sends every new photo while it is on, and Restaurant nutrition, if you turn it on, has its own recipients. iCloud Backup is on by default, after a notice, and you can turn it off. Details under [Privacy](#privacy).</sub>
 
 </div>
 
@@ -157,10 +158,12 @@ Your meals, weight and settings stay on your phone, and the developer receives n
 
 ## What else it does
 
-- **My usual foods** (new in 1.6). Meals you logged on at least 2 of the last 90 days wait under Today › Log › My usual foods. Tap one to log it again: no photo, no AI, nothing sent. If you set a food's numbers yourself, the app may offer them as Your usual numbers on later photos of it; nothing changes until you tap Use my numbers.
-- **Restaurant nutrition** (new in 1.6, off by default). For a meal photo from a US chain restaurant, your AI can look up the nutrition the chain publishes and use it in place of its own estimate. The meal names its source, and you can undo the change or tap Wrong restaurant. US meals only, from a built-in list of 403 chains. Needs an Anthropic or OpenRouter key, or your own server on the Claude plan; not available with Gemini yet. Your AI's numbers are replaced only when the chain's own website publishes them and the match is clear; otherwise, and always with your own server, you get a suggestion. The published serving may not match what you ate.
+- **iCloud Backup** (on by default, after a notice). Your meals and their pictures, weight, measurements and workouts are copied to a Chopstats folder in your own iCloud Drive, so they come back after a reinstall or on a new iPhone signed in to the same iCloud account. Nothing is uploaded until you answer the notice. API keys are never in it, and the developer receives nothing. Turn it off under Settings › Your Data.
+- **Correct a meal with a note.** In Edit meal, tell your AI what was different, such as "only half the rice" or "add a fried egg", and tap Correct with AI. The answer fills in the foods and numbers, and nothing is saved until you tap Save. Your note goes with that meal's description, foods, numbers and earlier notes, never its photo, and it stays with the meal.
+- **My usual foods.** Meals you logged on at least 2 of the last 90 days wait under Today › Log › My usual foods. Tap one to log it again: no photo, no AI, nothing sent. If you set a food's numbers yourself, the app may offer them as Your usual numbers on later photos of it; nothing changes until you tap Use my numbers.
+- **Restaurant nutrition** (off by default). For a meal photo from a US chain restaurant, your AI can look up the nutrition the chain publishes and use it in place of its own estimate. The meal names its source, and you can undo the change or tap Wrong restaurant. US meals only, from a built-in list of 403 chains. Needs an Anthropic or OpenRouter key, or your own server on the Claude plan; not available with Gemini yet. Your AI's numbers are replaced only when the chain's own website publishes them and the match is clear; otherwise, and always with your own server, you get a suggestion. The published serving may not match what you ate.
 - **Watch Camera Roll** (off by default). New food photos are logged without opening the app. While it is on, every new photo, food or not, goes to your AI, which decides whether it shows a meal. iOS decides when background scans run, so a photo is not always logged right away; opening the app catches up. Needs full photo access and Background App Refresh. Switching it on also sends recent photos, as far back as the Backfill Lookback setting says (2 days by default).
-- **Meta glasses photos** (new in 1.6). With Watch Camera Roll on, photos that the Meta AI app saves from your glasses to your library are checked for food on your iPhone first. Photos with food go to your AI and are logged; photos without food are not sent. Chopstats does not connect to the glasses. The check can be wrong, and if it cannot run, the photo is sent like any other. Switch it off under Settings › Photos › Meta glasses photos; photos you pick or share are still sent.
+- **Meta glasses photos.** With Watch Camera Roll on, photos that the Meta AI app saves from your glasses to your library are checked for food on your iPhone first. Photos with food go to your AI and are logged; photos without food are not sent. Chopstats does not connect to the glasses. The check can be wrong, and if it cannot run, the photo is sent like any other. Switch it off under Settings › Photos › Meta glasses photos; photos you pick or share are still sent.
 - **No photo needed.** Describe a meal in words, such as "two eggs and toast with butter", in any language your AI reads; that sends your text and today's date. Or enter the numbers yourself: no AI, no key, and it works offline.
 - **Your day and your trend.** Today shows what you ate next to your typical day, which comes from your previous 7 days. History charts the last 30 days, and Body tracks your weight along with your waist, chest and hip. If you set a daily calorie goal, the daily summary notification compares your day with it.
 - **English and 简体中文.** Every screen comes in English and Simplified Chinese. Pick one under Settings › Language, or let it follow your iPhone. Not on the mainland China App Store.
@@ -188,6 +191,7 @@ Everything here is in the App Store version.
 - **Dietary profile.** Write a line such as "vegetarian" or "home cooking, light oil", and the AI reads it with every photo.
 - **Leftovers, two ways.** If your AI recognizes the remains of a meal you logged earlier that day, the app reduces that meal and adds no second one. You can also pick the meal and the leftover photo yourself under **Today › Log › Leftovers**, for meals from today and yesterday.
 - **Fixes in your own words.** Under **Today › Log › Fix or delete a meal**, type "the noodles were roast duck rice" or "delete the coffee I just logged". The app always asks you to confirm before it deletes a meal.
+- **Notes on a meal.** **Edit meal** lists the notes you sent to correct that meal, and a later correction sends them again, marked as already applied. To remove one, tap the × next to it, then **Save**.
 - **Foods you stopped eating.** In **My usual foods**, **Hide from this list** takes one off the list.
 
 **Photos**
@@ -204,14 +208,16 @@ Everything here is in the App Store version.
 - **Calorie goal and daily summary.** One notification a day, at the time you set, compares the day with your calorie goal. If you set no goal, it compares the day with your typical day, which the app works out from your previous 7 days. You can turn it off.
 - **Metric or imperial units.** The English interface can show weight and body measurements in pounds and inches.
 - **Your day as one image.** The app turns today into one image that you can share.
+- **A native iOS look.** Every screen uses Apple's system colors and text styles, and the app follows Increase Contrast.
 - **Light and dark mode.** The app follows your phone's setting.
 
 **Your AI and your data**
 
 - **Test This Provider.** Six checks in order: configuration, network, key and account credit, text analysis, photo analysis and quota. Each one says what is wrong and what to do next.
 - **Free-tier limits.** When Gemini's free tier reaches its daily limit, the app pauses analysis, keeps new photos and retries them later.
-- **Export.** **Settings › Your Data › Export Data** writes one JSON file with your meals, weight and body measurements, plus the list of processed photos. Settings, the dietary profile, thumbnails and API keys are not in the file.
-- **Import.** On another phone, open **Import Data** and paste the file's text, or tap **Import from clipboard**. Import adds what is missing and never duplicates meals that are already there.
+- **Export.** **Settings › Your Data › Export Data** writes one JSON file with your meals and their pictures, weight, body measurements, workouts, activities and fitness profile, plus the list of processed photos. Settings, the dietary profile and API keys are not in the file.
+- **Import.** On another phone, open **Import Data** and tap **Choose File…** to pick the file (a full export with its pictures is too big for the clipboard), paste a small export's text, or tap **Import from clipboard**. Import adds what is missing and never duplicates meals that are already there; pictures are added to meals that have none.
+- **Restoring from iCloud Backup.** After a reinstall, or on a new iPhone signed in to the same iCloud account, the app offers to restore the backup. Restoring adds what is missing and removes nothing from the phone. Turning the **iCloud Backup** switch off asks whether to **Keep the Backup in iCloud** or **Delete It…**.
 
 </details>
 
@@ -235,31 +241,34 @@ The app is free, and nothing is sold inside it. The estimates come from an AI pr
 
 ## Privacy
 
-Your meals, weight and settings stay on your phone. The app contains no code for usage statistics, crash reports or ads. The code is public, so anyone can check these claims.
+Your meals, weight and settings stay on your phone, and iCloud Backup, on by default, copies your log to your own iCloud Drive. The app contains no code for usage statistics, crash reports or ads. The code is public, so anyone can check these claims.
 
-The photos and text that the AI analyzes go to your AI provider, or to your own server if you run one. The app adds the context the AI needs, such as your dietary profile or a short summary of that day's other meals.
+The photos and text that the AI analyzes go to your AI provider, or to your own server if you run one. The app adds the context the AI needs, such as your dietary profile or a short summary of that day's other meals, plus the day before's for a photo taken before 4 a.m.
 
+- **iCloud Backup goes to your own iCloud Drive.** It is on by default, after a notice: nothing is uploaded until you answer it. It holds what an export holds, meal pictures included, and never your API keys or settings. Apple keeps it in your iCloud account, and the developer cannot see it. Turn it off under **Settings › Your Data**, and keep the copy or delete it.
 - **Photos travel without location.** The copy the app sends has no location or other hidden details (metadata).
 - **Watch Camera Roll sends every new photo while it is on.** That includes photos that are not food. On iPhone, Meta glasses photos are checked for food on the phone first, and one with no food in it is not sent.
 - **Restaurant nutrition has its own recipients.** It is off by default and asks permission on its own screen, which names who receives lookups.
-- **The app asks first.** Before it first sends anything to a provider, a dialog names the company and lists what is sent.
+- **The app asks first.** Before it first sends anything to a provider, a dialog names the company and lists what is sent. When that list changes, the app asks again.
 - **You can stop it.** In Settings, **Stop Sharing** ends all sending to your current provider, including photos still waiting to be sent and its restaurant lookups, and turns Watch Camera Roll off.
 - **Your provider's terms apply.** Its privacy policy covers what it does with your data. A free tier can have different terms, as [Gemini's does](#what-it-costs).
 
 <details>
 <summary><b>Everything that is sent, case by case</b></summary>
 
-This list covers the App Store version. Apart from Restaurant nutrition, the recipient is always the AI provider you chose, or your own server. Two of them pass the data on: OpenRouter sends it to the maker of the model you picked, and your own server sends it to the AI plan signed in on it.
+This list covers the App Store version. Apart from Restaurant nutrition and iCloud Backup, the recipient is always the AI provider you chose, or your own server. Two of them pass the data on: OpenRouter sends it to the maker of the model you picked, and your own server sends it to the AI plan signed in on it.
 
-- **You log a photo:** a smaller copy of it, without its location or other metadata. With it go your dietary profile, if you wrote one, and a short summary of up to five other meals from that day.
+- **You log a photo:** a smaller copy of it, without its location or other metadata. With it go your dietary profile, if you wrote one, and a short summary of up to five other meals from that day, plus the day before's for a photo taken before 4 a.m.
 - **You turn on Watch Camera Roll:** the same, for every new photo in your photo library, food or not. Switching it on also sends recent photos, as far back as the **Backfill Lookback** setting says.
 - **Watch Camera Roll meets a Meta glasses photo:** the app recognizes photos that the Meta AI app saved to your library. On iPhone, Apple's built-in image classifier first checks each one for food, on the phone, and a photo with no food in it is not sent. If the check cannot run, the photo is sent like any other. On Android there is no such check. Switch **Meta glasses photos** off to stop logging these photos automatically.
 - **You log leftovers:** the leftover photo and the meal you picked.
 - **You describe a meal:** your text and today's date.
 - **You type a fix or ask to delete a meal:** your text, today's date and your meals from the last 7 days.
+- **You correct a meal with a note:** in **Edit meal**, your note, the notes you sent about that meal before, and that one meal's description and foods with their calories, protein, carbs and fat. No photo, no date or time, and no other meal.
 - **You tap Test This Provider:** a fixed message and a built-in test image, plus your dietary profile if you wrote one. None of your photos or meals.
 - **You turn on Restaurant nutrition:** for a meal eaten in the US, up to three chain names from the app's built-in list, the food names with their amounts, the country code US and the reply language. They go to your AI service, which searches the web for the chain's published nutrition: Anthropic; or OpenRouter, which passes them to the maker of the model you picked and searches with its partner Exa; or your own server, which searches with Claude web search. No other provider gets lookups. A chain found nearby shows that you were near it. A lookup never sends the photo, its location, your dietary profile or your meal history. With **Use photo location** on, the iPhone reads where a restaurant or takeout photo was taken, and for a restaurant meal it asks Apple Maps which food places are nearby. Apple receives that location, as when you use Maps.
 - **You use your own server:** the same data goes to the server you run. While a server address is saved, the app also sends the server the date, to ask for that day's Garmin activity summary.
+- **iCloud Backup is on:** a copy of everything an export holds, meal pictures included, without the data a camera embeds in them, goes to a Chopstats folder in your own iCloud Drive. Apple keeps it under its iCloud terms. Your API keys, your server's key and address, and your settings are never in it.
 
 The app sends nothing to the developer. It keeps API keys in the iOS Keychain, the iPhone's protected store for passwords and keys. On Android it keeps them in encrypted storage backed by the Android Keystore. Your phone's own backup can include the app's data.
 
@@ -269,12 +278,12 @@ Export your data to a file at any time. The [privacy policy](docs/PRIVACY.md) ha
 
 ## Android
 
-Chopstats is not on Google Play. The newest Android version, 1.8.0, is on the [Releases page](https://github.com/AkiyamaKunka/Chopstats/releases/tag/android-v1.8.0) as an APK, the Android install file: `Chopstats-v1.8.0-b213-arm64-v8a.apk`, about 22 MB. This repository's release workflow built and signed it from the commit tagged `android-v1.8.0`. It is newer than the iPhone app in the App Store, which this page describes. It can already [correct a meal with a note](#coming-next).
+Chopstats is not on Google Play. The newest Android version, 1.8.0, is on the [Releases page](https://github.com/AkiyamaKunka/Chopstats/releases/tag/android-v1.8.0) as an APK, the Android install file: `Chopstats-v1.8.0-b213-arm64-v8a.apk`, about 22 MB. This repository's release workflow built and signed it from the commit tagged `android-v1.8.0`. It is the same version as the iPhone app in the App Store, which this page describes.
 
 - **arm64 phones only.** A phone with a 32-bit processor refuses it.
 - **You install it yourself.** Android asks you to allow installs from your browser or file manager. The app does not update itself: install the next APK from the Releases page when one comes out.
 - **Coming from the 1.4.0 preview?** That August 2026 build is still named Bitewise. It sends photos with their embedded metadata, which includes the location if your camera recorded it, and it asks no permission first. Android cannot install this APK over it. Export your log in the old app, uninstall it, install this APK, then open **Settings › Your Data › Import Data**.
-- **A few things differ from iPhone.** Restaurant nutrition looks up printed brands only and never reads where a photo was taken. Meta glasses photos are not checked for food on the phone, so Watch Camera Roll leaves them out until you turn on **Meta glasses photos** (Settings › Photos). The screenshots on this page are from an iPhone.
+- **A few things differ from iPhone.** Restaurant nutrition looks up printed brands only and never reads where a photo was taken. Meta glasses photos are not checked for food on the phone, so Watch Camera Roll leaves them out until you turn on **Meta glasses photos** (Settings › Photos). There is no iCloud Backup: Android's own backup applies, and you can export a file. The screenshots on this page are from an iPhone.
 
 Developers can also [build the app from source](#build-from-source).
 
@@ -315,17 +324,9 @@ Advanced users can also route analysis through [a server they run themselves](do
 
 Something not working? Start with **Settings › AI Provider › Test This Provider**, which names what is broken. Then see the [support page](docs/SUPPORT.md) or [open an issue](https://github.com/AkiyamaKunka/Chopstats/issues). Issues are public, so never post an API key, your photos or personal data there.
 
-## Coming next
-
-Built and in the public code on `main`, but not in the App Store version yet. None has a release date yet.
-
-- **A native iOS look.** A redesign in the iOS style.
-- **iCloud Backup.** Copies your log to your own iCloud Drive, so it survives deleting the app or moving to a new iPhone, with no account and no server of ours. It is on by default, and a notice comes first: nothing is uploaded until you answer it.
-- **Correct a meal with a note.** In Edit meal, tell the AI what was different ("only half the rice", "add a fried egg"); it re-estimates that meal, and you check the numbers before saving.
-
 ## For developers
 
-Chopstats is a Flutter app for iPhone and Android in `app/`, with an optional self-hosted Python server at the repository root. The App Store version, 1.6.0, was built from the tag [`v1.6.0`](https://github.com/AkiyamaKunka/Chopstats/tree/v1.6.0), so you can check this page against the code that shipped. `main` already holds the next version.
+Chopstats is a Flutter app for iPhone and Android in `app/`, with an optional self-hosted Python server at the repository root. The App Store version, 1.8.0, was built from the tag [`v1.8.0`](https://github.com/AkiyamaKunka/Chopstats/tree/v1.8.0), so you can check this page against the code that shipped. `main` may already be ahead of it.
 
 <p>
   <a href="https://apps.apple.com/app/id6828989410"><img src="https://img.shields.io/itunes/v/6828989410?label=version" width="96" alt="Current App Store version"></a>
@@ -368,7 +369,9 @@ The repository root holds a Python server that you run on your own machine. When
 The server runs the analysis through the Claude Code CLI. It uses the AI plan that is signed in on that server: Claude, GLM Coding Plan or Doubao Agent Plan. Check your plan's acceptable-use terms before you route app traffic through it.
 
 - The phone holds one upload key. The plan's credentials stay on the server.
-- For a photo, the server writes the analysis prompt itself. The phone supplies only data for it: your dietary profile, that day's meal summaries, and your choice of plan, model, effort and reply language.
+- The phone sends that key only to the server it was saved for. After you change the address to another server, paste that server's key; for the same server at a new address, tap **Use this key for …** under the key field.
+- The app sends nothing to an address that does not start with `https://`.
+- For a photo, the server writes the analysis prompt itself. The phone supplies only data for it: your dietary profile, that day's meal summaries, plus the day before's for a photo taken before 4 a.m., and your choice of plan, model, effort and reply language.
 - A text request carries its prompt from the phone, and the server runs it with tools off.
 - Each reply names which AI answered, and the app rejects a mismatch.
 - A setup link or QR code fills in the app's server settings after one confirmation.

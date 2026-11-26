@@ -13,10 +13,10 @@
 ///   footer bills every photo; the iCloud-off footer does not say a new
 ///   iPhone always loses the meals;
 /// - the support page (docs/SUPPORT.md, the store listings' support URL)
-///   describes the App Store version, and what only 1.7.0 has waits in
-///   docs/RELEASING.md § 12, naming the controls as the app does, saying
-///   a backup holds what an export does, and naming the README's and the
-///   slides' release lists by their headings.
+///   describes the App Store version: since 1.8.0 it names that version's
+///   controls as the app does and says a backup holds what an export does,
+///   and docs/RELEASING.md § 12 names the README's and the slides' release
+///   lists by their headings.
 library;
 
 import 'dart:convert';
@@ -263,18 +263,20 @@ void main() {
   });
 
   // Review r171: docs/SUPPORT.md is the support URL of both store listings
-  // and describes the App Store version, 1.6.0. Its export list left out
+  // and describes the App Store version. Its export list left out
   // activities (1.6.0's export has them), and "uninstall Chopstats; that
   // removes everything it stored on the phone" is not so: iOS can keep
   // Keychain items after an app is deleted. iCloud Backup, the pictures in
-  // an export and Choose File… are 1.7.0's, so their text waits in
-  // docs/RELEASING.md § 12 until 1.7.0 is in the App Store.
+  // an export, Choose File…, Remove this key and Correct with a note came
+  // with 1.8.0: their text waited in docs/RELEASING.md § 12 until 1.8.0 was
+  // in the App Store, and the page has it since, so the check that the page
+  // named none of those controls went, and these check the page itself.
   group('the support page', () {
     String flat(String path) =>
         File(path).readAsStringSync().replaceAll(RegExp(r'\s+'), ' ');
     final support = flat('../docs/SUPPORT.md');
     final releasing = flat('../docs/RELEASING.md');
-    const heading = '## 12. When 1.7.0 ships: the support page';
+    const heading = '## 12. The support page';
     // § 12 up to the next level-2 heading (" ## " once flattened).
     final s12 = () {
       final at = releasing.indexOf(heading);
@@ -283,16 +285,15 @@ void main() {
       return releasing.substring(at, next < 0 ? releasing.length : next);
     }();
 
-    /// The text of § 12 from [from] up to [to].
+    /// The page's text from [from] up to [to].
     String part(String from, String to) {
-      final at = s12.indexOf(from);
+      final at = support.indexOf(from);
       if (at < 0) return '';
-      final end = s12.indexOf(to, at);
-      return s12.substring(at, end < 0 ? s12.length : end);
+      final end = support.indexOf(to, at);
+      return support.substring(at, end < 0 ? support.length : end);
     }
 
-    test('lists what a 1.6.0 export holds, and what uninstalling leaves',
-        () {
+    test('lists what an export holds, and what uninstalling leaves', () {
       expect(support, contains('workouts and activities'));
       expect(support,
           isNot(contains('that removes everything it stored on the phone')));
@@ -304,24 +305,7 @@ void main() {
               'Provider'));
     });
 
-    test('names no 1.7.0 control before 1.7.0 is in the App Store', () {
-      for (final label in [
-        en.backupRowICloud,
-        en.backupRowDelete,
-        en.importChooseFile,
-        en.serverKeyRemoveKept,
-        // Correct with a note (1.8.0, § 12 step 6).
-        en.mealNoteHeader,
-        en.mealNoteSend,
-        en.mealNoteRemoveLabel,
-      ]) {
-        expect(support, isNot(contains(label)), reason: label);
-      }
-    });
-
-    test('RELEASING.md § 12 holds the 1.7.0 text, with the app\'s labels',
-        () {
-      expect(releasing, contains(heading));
+    test("names 1.8.0's controls as the app does", () {
       for (final label in [
         en.backupRowICloud,
         en.backupRowDelete,
@@ -337,30 +321,30 @@ void main() {
         en.serverKeyRemoveKept,
         en.serverUploadKeyLabel,
         en.subPageTitle,
-        // Step 6, Correct with a note.
+        // Correct with a note, and removing a note.
         en.mealNoteHeader,
         en.mealNoteSend,
         en.mealNoteRemoveLabel,
         en.editorTitleEdit,
         en.save,
       ]) {
-        expect(s12, contains(label), reason: label);
+        expect(support, contains(label), reason: label);
       }
       expect(en.serverKeyUnknownHostField,
           startsWith('Saved without its server address'));
-      expect(s12, contains('*Saved without its server address*'));
-      expect(s12, contains('Uninstalling does not delete it'));
-      expect(s12, contains('iCloud Drive › Chopstats'));
-      expect(s12, contains('app/test/ui/copy_consistency_test.dart'));
+      expect(support, contains('*Saved without its server address*'));
+      expect(support, contains('Uninstalling does not delete it'));
+      expect(support, contains('iCloud Drive › Chopstats'));
     });
 
-    // Review r171, second pass: step 3 said iCloud Backup copies "your
-    // meals, weight, body measurements, workouts and meal pictures", right
-    // under an export (step 2) that also holds activities, the fitness
-    // profile and the processed-photo list. A backup copies every export
-    // table (MealsDaoImpl.backupRecordTables) and the same pictures as an
-    // export (BackupFileWriter.writeFull), as docs/PRIVACY.md says.
-    test('§ 12 says iCloud Backup copies everything an export holds', () {
+    // Review r171, second pass: § 12's iCloud Backup bullet said the backup
+    // copies "your meals, weight, body measurements, workouts and meal
+    // pictures", right under an export that also holds activities, the
+    // fitness profile and the processed-photo list. A backup copies every
+    // export table (MealsDaoImpl.backupRecordTables) and the same pictures
+    // as an export (BackupFileWriter.writeFull), as docs/PRIVACY.md says.
+    // Since 1.8.0 those words are on the page, so the page is checked.
+    test('says iCloud Backup copies everything an export holds', () {
       // What the page calls each export table.
       const names = {
         'meals': 'meals',
@@ -372,23 +356,27 @@ void main() {
         'fitness_profile': 'fitness profile',
       };
       expect(names.keys, unorderedEquals(kExportTables),
-          reason: 'a new export table needs its name here and in § 12');
-      final export =
-          part('2. **Export and import**', '3. **A new bullet after Export**');
+          reason: 'a new export table needs its name here and on the page');
+      final export = part('- **Export**:', '- **iCloud Backup**');
       expect(export, isNotEmpty);
       for (final name in [...names.values, 'their pictures']) {
         expect(export, contains(name), reason: name);
       }
-      final backup =
-          part('3. **A new bullet after Export**', '4. **Delete everything**');
+      final backup = part('- **iCloud Backup**', '- **Delete a meal**');
+      expect(backup, isNotEmpty);
       expect(backup, contains('It copies everything an export holds'));
     });
 
     // Review r171, second pass: § 12 sent the releaser to "items 1–4" of
-    // the README's release-tied lines. That list has seven, and the
-    // Android release (5) and the tag under For developers (6) change with
-    // 1.7.0 too, so § 12 names each list by its heading, not by numbers.
+    // the README's release-tied lines. That list had more, and the Android
+    // release (5) and the tag under For developers (6) changed with 1.8.0
+    // too, so § 12 names each list by its heading, not by numbers. Since
+    // 1.8.0 is in the App Store, § 12 says what that day put on the page
+    // and waits for no version.
     test("§ 12 points to the README's and the slides' whole lists", () {
+      expect(releasing, contains(heading));
+      expect(releasing, isNot(contains('When 1.7.0 ships')));
+      expect(s12, contains('app/test/ui/copy_consistency_test.dart'));
       expect(flat('../README.md'),
           contains('Lines tied to a release. Re-read them when a new App '
               'Store version ships:'));

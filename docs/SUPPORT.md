@@ -3,8 +3,8 @@
 Chopstats is an iPhone app (iOS 15 or later) that turns your food photos
 into calorie and macro estimates using the AI service you choose, with
 your own API key. There is no account, and no server of ours in between:
-your meal log stays on your phone. Privacy details are in the
-[privacy policy](PRIVACY.md).
+your meal log stays on your phone (and, with iCloud Backup, in your own
+iCloud Drive). Privacy details are in the [privacy policy](PRIVACY.md).
 
 ## What it does
 
@@ -14,8 +14,11 @@ your meal log stays on your phone. Privacy details are in the
 - **Watch Camera Roll** (Settings, optional): new food photos are logged
   for you. Every new photo, including ones that are not food, is sent to
   your AI provider so it can tell whether it is a meal.
-- **Fix anything**: open a meal to edit its items and numbers, or use
-  *Fix or delete a meal* and type something like "the noodles were roast duck rice".
+- **Fix anything**: open a meal to edit its items and numbers, or, under
+  **Correct with a note**, tell your AI what was different (such as "only
+  half the rice") and tap **Correct with AI**; the answer fills in the
+  numbers, and nothing is saved until you tap **Save**. Or use *Fix or
+  delete a meal* and type something like "the noodles were roast duck rice".
 - **Leftovers**: photograph what is left and the meal shrinks to what you
   ate.
 - Today, a 30-day history, weight and body measurements, and an optional
@@ -82,19 +85,39 @@ people who run the open-source server from the app's GitHub repository
 
 ## Your data: export, delete, stop sharing
 
-- **Export**: Settings › Your Data › **Export Data…** saves your meals,
-  weight, body measurements, workouts and activities, fitness profile and
-  the list of processed photos to a file you can share or keep (API keys
-  are not included).
-  **Import Data…** restores it: paste the file's text, or tap **Import
-  from clipboard**.
-- **Delete a meal**: open it and tap the delete button.
+- **Export**: Settings › Your Data › **Export Data…** saves your meals and
+  their pictures, weight, body measurements, workouts and activities,
+  fitness profile and the list of processed photos to a file you can share
+  or keep (API keys are not included).
+  **Import Data…** restores it: tap **Choose File…** and pick the file (a
+  full export with its pictures is too big for the clipboard), paste a
+  small export's text, or tap **Import from clipboard**. Meals already
+  here are kept, and pictures are added to meals that have none.
+- **iCloud Backup** (Settings › Your Data): on by default, after a notice;
+  nothing is uploaded before you answer it. It copies everything an export
+  holds, the meal pictures included, to a *Chopstats* folder in your own
+  iCloud Drive, and after a reinstall, or on a new iPhone with the same
+  Apple Account, Chopstats offers to restore the backup. API keys are
+  never included, and the developer receives nothing. Turning the
+  **iCloud Backup** switch off asks whether to **Keep the Backup in
+  iCloud** or **Delete It…**.
+- **Delete a meal**: open it and tap the delete button. Deleting a meal
+  also deletes the notes you sent about it. To remove one note, tap the ×
+  next to it in **Edit meal** (VoiceOver calls it **Remove this note**),
+  then **Save**.
 - **Delete everything**: uninstall Chopstats; that removes your meal log,
   settings and the rest of the app's data from the phone. Your iCloud or
-  computer backups and exported files may still hold a copy. iOS can keep
-  API keys in the Keychain after an app is deleted, so to remove them too,
-  first clear each key you entered in Settings › AI Provider (and the
-  **Server upload key** under *Your own server*).
+  computer backups and exported files may still hold a copy. The copy
+  iCloud Backup keeps in your iCloud Drive stays too. Uninstalling does
+  not delete it: delete it in Settings › Your Data (turning **iCloud
+  Backup** off offers **Delete It…**; with the switch already off, tap
+  **Delete iCloud Backup…**), or in the Files app under iCloud Drive ›
+  Chopstats. iOS can keep API keys in the Keychain after an app is
+  deleted, so to remove them too, first clear each key you entered in
+  Settings › AI Provider (and the **Server upload key** under *Your own
+  server*; when that page says a key was *Saved without its server
+  address*, its field is empty, so tap **Remove this key** under it
+  instead).
 - **Stop sharing with a provider**: Settings › **Stop Sharing with …**
   stops all sending to it and turns off Watch Camera Roll (and restaurant
   lookups that go to it). What was already sent is handled under that
