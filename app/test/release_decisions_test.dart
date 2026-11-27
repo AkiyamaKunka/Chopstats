@@ -265,14 +265,52 @@ String _pubspecVersion(String pubspec) =>
 /// iPhone tag is v1.8.0, and the iPhone skips 1.7.2 too. android-v1.8.0
 /// went out from main at 1.8.0+12 on 2026-11-25 (run 13; runs 11 and 12
 /// were release candidates that QA superseded, never released), so the
-/// next Android-only version is bumped first again, and until then main's
-/// next iPhone tag stays v1.8.0, a version the iPhone does not skip.
+/// next Android-only version is bumped first again. main's next iPhone tag
+/// was v1.8.0, a version the iPhone does not skip; it went out on
+/// 2026-11-27 (_kTagReleases).
 const _kAndroidReleases = [
   (version: '1.7.0', build: 207, day: '2026-11-19', plus: 9, sha: '610df6c6'),
   (version: '1.7.1', build: 209, day: '2026-11-22', plus: 10, sha: '189f34c6'),
   (version: '1.7.2', build: 210, day: '2026-11-24', plus: 11, sha: 'c7a0e8a5'),
   (version: '1.8.0', build: 213, day: '2026-11-25', plus: 12, sha: '83e95ea1'),
 ];
+
+/// The v* GitHub Releases that a tag's Release run made from main, with
+/// that run's Android APK, oldest first: each one's version, build number
+/// (200 + its run), the day it went out (in the repo's local time) and the
+/// commit its tag is on (docs/RELEASING.md § 6.6, *The iPhone tag*).
+/// v1.8.0 (run 15, published 2026-11-27 at 16:36 CST, 22:36Z) built
+/// Android 1.8.0 again as build 215, the same Android app as
+/// android-v1.8.0's 213, and is the newest GitHub release with an Android
+/// APK, so § 6.3's first Play upload is run 15's bundle since. It is no
+/// Android-only version, so _kAndroidReleases and _iphoneSkipped leave it
+/// out. Its iOS build went to TestFlight; which build the App Store ships
+/// is known only once App Review approves (release day).
+const _kTagReleases = [
+  (version: '1.8.0', build: 215, day: '2026-11-27', sha: '7493b009'),
+];
+
+/// Every GitHub release that holds an Android APK, android-v* and v*
+/// alike, by build number: the last is the newest, whose run's bundle is
+/// § 6.3's first Play upload and whose build a new Android build clears.
+final _kApkReleases = [
+  for (final r in _kAndroidReleases)
+    (
+      tag: 'android-v${r.version}',
+      version: r.version,
+      build: r.build,
+      day: r.day,
+      sha: r.sha,
+    ),
+  for (final t in _kTagReleases)
+    (
+      tag: 'v${t.version}',
+      version: t.version,
+      build: t.build,
+      day: t.day,
+      sha: t.sha,
+    ),
+]..sort((a, b) => a.build.compareTo(b.build));
 
 /// The iPhone version in the App Store, which the READMEs and
 /// docs/SUPPORT.md describe: 1.8.0 since its release day, when the docs PR
@@ -1534,12 +1572,14 @@ void main() {
     // upload is the newest Android release's bundle, under the version it
     // was built as (§ 6.3): run 9's (android-v1.7.1, build 209) until
     // android-v1.7.2 went out, run 10's (android-v1.7.2, build 210,
-    // 2026-11-24) until android-v1.8.0 went out, and run 13's
-    // (android-v1.8.0, build 213, 2026-11-25) since. A version a GitHub
-    // release holds is not built again under its name, so § 6.6's steps
-    // name pubspec's version only while no release holds it: #87 had them
-    // call the next Android-only version X.Y.Z, pubspec's version bumped
-    // first, the 1.7.2 prep (2026-11-23) named 1.7.2 after its bump,
+    // 2026-11-24) until android-v1.8.0 went out, run 13's (android-v1.8.0,
+    // build 213, 2026-11-25) until the tag v1.8.0's release went out, and
+    // run 15's (v1.8.0, build 215, 2026-11-27) since: the newest GitHub
+    // release with an Android APK, whose users have 215. A version a
+    // GitHub release holds is not built again under its name, so § 6.6's
+    // steps name pubspec's version only while no release holds it: #87 had
+    // them call the next Android-only version X.Y.Z, pubspec's version
+    // bumped first, the 1.7.2 prep (2026-11-23) named 1.7.2 after its bump,
     // android-v1.7.2 (2026-11-24) made them say X.Y.Z again while it held
     // pubspec's 1.7.2, the 1.8.0 prep (PR #97, 2026-11-24) made the next
     // bump, so they named 1.8.0, and since android-v1.8.0 (2026-11-25)
@@ -1547,63 +1587,78 @@ void main() {
     test("what § 6 and § 8 expect from the next run is pubspec's version",
         () {
       final version = _pubspecVersion(_read('pubspec.yaml'));
-      // The newest release's run (run 13, android-v1.8.0, build 213) is
-      // history: it keeps its name after the bump, so its facts are pinned
-      // as its version, and every other build name or artifact § 6 names
-      // is pubspec's version.
+      // The newest Android-only release's run (run 13, android-v1.8.0,
+      // build 213) and the newest APK release's (run 15, v1.8.0, build 215)
+      // are history: they keep their names after the bump, so their facts
+      // are pinned as their version, and every other build name or
+      // artifact § 6 names is pubspec's version.
       final newest = _kAndroidReleases.last;
       final run = newest.build - 200;
+      // § 6.3's steps name the newest APK release's run (2026-11-27: run
+      // 15, the tag v1.8.0's, no longer run 13).
+      final apk = _kApkReleases.last;
+      final apkRun = apk.build - 200;
       Set<String?> named(RegExp re) =>
           re.allMatches(s6).map((m) => m.group(1)).toSet();
       final buildNames = named(RegExp(r'build name `(\d+\.\d+\.\d+)`'));
-      expect(buildNames, contains(newest.version));
-      expect({version, newest.version}.containsAll(buildNames), isTrue,
+      expect(buildNames, contains(apk.version));
+      expect({version, newest.version, apk.version}.containsAll(buildNames),
+          isTrue,
           reason: '$buildNames');
       final artifacts =
           named(RegExp(r'`android-(\d+\.\d+\.\d+)-(?:2xx|2\d\d)`'));
-      expect({version, newest.version}.containsAll(artifacts), isTrue,
+      expect({version, newest.version, apk.version}.containsAll(artifacts),
+          isTrue,
           reason: '$artifacts');
       expect(
           s6,
-          contains('Actions › Release › run $run. Its plan summary says '
-              'build name `${newest.version}` and build number '
-              '${newest.build} (`BUILD_NUMBER_OFFSET` 200 + run $run)'));
+          contains('Actions › Release › run $apkRun. Its plan summary says '
+              'build name `${apk.version}` and build number '
+              '${apk.build} (`BUILD_NUMBER_OFFSET` 200 + run $apkRun)'));
       // The build number GitHub users have clears the release before it.
+      // Since 2026-11-27 that is the newest APK's (v1.8.0's 215) above the
+      // APK release before it (android-v1.8.0's 213).
       final previous = _kAndroidReleases[_kAndroidReleases.length - 2];
+      final previousApk = _kApkReleases[_kApkReleases.length - 2];
       expect(
           s6,
-          contains('the build number GitHub `android-v${newest.version}` '
-              "users have, above `android-v${previous.version}`'s "
-              '${previous.build}'));
-      // The runs between the two newest releases built release candidates
-      // that were never released (runs 11 and 12, between android-v1.7.2's
-      // run 10 and android-v1.8.0's run 13). § 6.3 is the only place that
-      // says why the newest build does not follow the one before it.
-      final candidates = [
-        for (var b = previous.build + 1; b < newest.build; b++) '${b - 200}',
+          contains('the build number GitHub `${apk.tag}` users have, above '
+              "`${previousApk.tag}`'s ${previousApk.build}"));
+      // No GitHub APK came from the runs between two APK releases' runs:
+      // runs 11 and 12 built 1.8.0 release candidates that were never
+      // released (between android-v1.7.2's run 10 and android-v1.8.0's run
+      // 13), and run 14 built only an iPhone build, for TestFlight (between
+      // run 13 and v1.8.0's run 15). § 6.3 is the only place that says why
+      // the newest build does not follow the one before it.
+      final between = [
+        for (var b = previousApk.build + 1; b < apk.build; b++) '${b - 200}',
       ];
-      if (candidates.isNotEmpty) {
+      if (between.isNotEmpty) {
         expect(
             s6,
-            contains("above `android-v${previous.version}`'s "
-                '${previous.build} (runs ${_andList(candidates)} built '
-                'release candidates of ${newest.version} that were never '
-                'released)'));
+            contains("above `${previousApk.tag}`'s ${previousApk.build} "
+                '(${between.length == 1 ? 'run' : 'runs'} '
+                '${_andList(between)} built '));
       }
       expect(
           s6,
           contains('Download the artifact '
-              '`android-${newest.version}-${newest.build}`'));
-      expect(s6,
-          contains('Name the release `${newest.version} (${newest.build})`'));
+              '`android-${apk.version}-${apk.build}`'));
+      expect(
+          s6, contains('Name the release `${apk.version} (${apk.build})`'));
+      // A hand-made android-v* release's run is a lane play dispatch at its
+      // tag's commit; a v* tag's run builds both lanes from it.
+      final runFrom = apk.tag.startsWith('android-v')
+          ? 'lane `play`, from `main` at `${apk.sha}`, where the tag '
+              '`${apk.tag}` is'
+          : "the tag `${apk.tag}`'s run, both lanes, from `main` at "
+              '`${apk.sha}`';
       expect(
           s6,
-          contains('the bundle of Release run $run (lane `play`, from `main` '
-              'at `${newest.sha}`, where the tag `android-v${newest.version}` '
-              'is), build ${newest.build}, the same build number as the '
-              'GitHub APK `android-v${newest.version}` (same run, same '
-              'signer; the bundle is the Play build, without Watch Camera '
-              'Roll)'));
+          contains('the bundle of Release run $apkRun ($runFrom), build '
+              '${apk.build}, the same build number as the GitHub APK on '
+              '`${apk.tag}` (same run, same signer; the bundle is the Play '
+              'build, without Watch Camera Roll)'));
       expect(
           s6,
           contains("run $run's GitHub APK went out by hand as "
@@ -1617,14 +1672,26 @@ void main() {
           contains('GitHub APK went out by hand as `android-v1.7.1` '
               '(build 209)'));
       expect(s6, contains('`android-v1.7.0` (build 207) is already out'));
-      expect(s6, contains("the iPhone's next tag from `main` is `v$version`"));
+      // Decision 4 says main's iPhone tag is pubspec's version: next until
+      // a tag holds it, and since the tag v1.8.0 (2026-11-27), the day it
+      // was pushed.
+      final tagged = [
+        for (final t in _kTagReleases)
+          if (t.version == version) t,
+      ];
+      expect(
+          s6,
+          contains(tagged.isEmpty
+              ? "the iPhone's next tag from `main` is `v$version`"
+              : "the iPhone's next tag from `main` was `v$version`, pushed "
+                  'on ${tagged.single.day}'));
       expect(releasing,
           contains('git tag v$version && git push origin v$version'));
       expect(s6, isNot(contains('The next Android build is 1.7.1.')),
           reason: 'the bump is done (§ 6.6)');
       final android = s6.substring(
           s6.indexOf('**An Android-only version (decision 4).**'),
-          s6.indexOf('Later, when the iPhone version is ready'));
+          s6.indexOf('**The iPhone tag '));
       // Whether a GitHub release holds pubspec's version: then it is the
       // newest release's, main has not been bumped since, and the steps
       // call the next one X.Y.Z, bumped first.
@@ -1698,11 +1765,18 @@ void main() {
             reason: 'android-v${r.version} is out');
       }
       // The previous release, which the notes start from and the new
-      // build number must clear.
+      // build number must clear: since 2026-11-27 the newest APK release,
+      // v1.8.0's 215, the same Android app as android-v1.8.0's 213.
       expect(
           android,
           contains('for ${held ? 'the next one' : version} it is '
-              '`android-v${newest.version}`, build ${newest.build}'));
+              '`${apk.tag}`, build ${apk.build}'));
+      if (apk.tag != 'android-v${newest.version}') {
+        expect(
+            android,
+            contains('`${apk.tag}`, build ${apk.build}, the same Android app '
+                'as `android-v${newest.version}`, build ${newest.build}'));
+      }
       // Each release's notes started from the release before it: "for 1.7.1
       // it was `android-v1.7.0`;" (no build), then "for 1.7.2 it was
       // `android-v1.7.1`, build 209" and "for 1.8.0 it was `android-v1.7.2`,
@@ -1714,8 +1788,7 @@ void main() {
             contains(i == 1 ? '$from;' : '$from, build ${before.build}'),
             reason: r.version);
       }
-      expect(android,
-          contains("above `android-v${newest.version}`'s ${newest.build}"));
+      expect(android, contains("above `${apk.tag}`'s ${apk.build}"));
       // Decision 9 (RD-6): renewal after a stop is Android 12 and later
       // only, and the Play build runs the keep-alive's job too.
       expect(s6, contains('only on Android 12 and later, and only after a '
@@ -1744,17 +1817,49 @@ void main() {
       ]) {
         expect(flat, isNot(contains(unscoped)), reason: unscoped);
       }
-      expect(s6, contains("`main`'s next iPhone version is $version"));
-      // So do § 6.6's other sentences on that release, whether or not a
-      // GitHub release holds pubspec's version (they did at #93 and at #95
-      // alike): the tag, the v* release that run makes, and the bump's
-      // record. No test held them, at 1.7.2 or at 1.8.0 (review of #97).
-      for (final next in [
-        "tag `main` as usual with pubspec's version, `v$version`",
-        'it puts that APK on the `v$version` release',
-        "it makes `main`'s next iPhone release $version too",
-      ]) {
-        expect(s6, contains(next), reason: next);
+      // § 6.6's record of the bump names main's next iPhone release too,
+      // whether or not a GitHub release holds pubspec's version (one did at
+      // #93 and at #95 alike). No test held it, at 1.7.2 or at 1.8.0
+      // (review of #97).
+      expect(s6, contains("it makes `main`'s next iPhone release $version too"));
+      // § 6.6 said to tag main with pubspec's version, "`main`'s next
+      // iPhone version is 1.8.0", and what that run would put on the
+      // v1.8.0 release. Since the tag (2026-11-27) it records each v* tag's
+      // run instead: the tag on main, the versions the iPhone skipped
+      // before it, both lanes at one build number, and the GitHub Release
+      // with that run's APK, the same Android app as the android-v*
+      // release of its version, with notes that say so.
+      expect(s6, isNot(contains('Later, when the iPhone version is ready')));
+      for (final t in _kTagReleases) {
+        final run = t.build - 200;
+        // The android-v* release whose app the tag's run built again.
+        final same = [
+          for (final r in _kAndroidReleases)
+            if (r.version == t.version) r,
+        ];
+        expect(same, hasLength(1), reason: 'v${t.version}');
+        final android = same.single;
+        for (final fact in [
+          '**The iPhone tag `v${t.version}` (${t.day}).** `main` was tagged '
+              "as usual with pubspec's version, `v${t.version}`, at "
+              '`${t.sha}`: the iPhone ${_iphoneSkips(t.version)} never '
+              "shipped, so `main`'s next iPhone version was ${t.version}",
+          'Its run, Release run $run, built both lanes as build ${t.build} '
+              '(`BUILD_NUMBER_OFFSET` 200 + run $run).',
+          'The iOS job uploaded ${t.version} (${t.build}) to TestFlight',
+          'The GitHub Release job published *Chopstats v${t.version}* with '
+              'that APK, `Chopstats-v${t.version}-b${t.build}-arm64-v8a.apk`',
+          "and it became the repository's Latest release in place of "
+              '`android-v${android.version}`.',
+          "So run $run's bundle and APK are the same Android app as run "
+              "${android.build - 200}'s, with a higher build number",
+          "The release's notes were edited to say so: they call it the "
+              'iPhone release, and its APK the same app as '
+              '`android-v${android.version}` (build ${android.build}), built '
+              'again with build number ${t.build}.',
+        ]) {
+          expect(s6, contains(fact), reason: fact);
+        }
       }
       expect(
           s6,
@@ -1783,19 +1888,19 @@ void main() {
       expect(s6, contains('**A 1.6.x hotfix**'));
       final hotfix = s6.substring(s6.indexOf('**A 1.6.x hotfix**'));
       // The branch's own release.yml numbers a v1.6.1 build 100 + its run,
-      // a run after the newest Android release's (run 13, android-v1.8.0,
-      // since 2026-11-25), so below every Android release's build, while
-      // main's offset 200 would put it above them. Today: "That is below
+      // a run after the newest APK release's (run 13, android-v1.8.0, from
+      // 2026-11-25; run 15, the tag v1.8.0's, since 2026-11-27), so below
+      // every Android APK's build, while main's offset 200 would put it
+      // above them. Today: "That is below `v1.8.0`'s 215,
       // `android-v1.8.0`'s 213, `android-v1.7.2`'s 210, `android-v1.7.1`'s
       // 209 and `android-v1.7.0`'s 207, so Android refuses it on a phone
       // with 1.7.0, 1.7.1, 1.7.2 or 1.8.0". 1.8.0 keeps 1.7.x's database
       // schema 4, and the README's Android section names whichever release
       // is newest, no longer a 1.7.x one.
-      final newest = _kAndroidReleases.last;
-      final newestRun = newest.build - 200;
+      final apk = _kApkReleases.last;
+      final apkRun = apk.build - 200;
       final below = _andList([
-        for (final r in _kAndroidReleases.reversed)
-          "`android-v${r.version}`'s ${r.build}",
+        for (final r in _kApkReleases.reversed) "`${r.tag}`'s ${r.build}",
       ]);
       final versions = [for (final r in _kAndroidReleases) r.version];
       final onPhone = '${versions.sublist(0, versions.length - 1).join(', ')}'
@@ -1809,11 +1914,10 @@ void main() {
         'So its build is numbered 100 + its run number',
         'That is below $below, so Android refuses it on a phone with '
             '$onPhone',
-        '(${100 + newestRun + 1} or more: run $newestRun built '
-            '`android-v${newest.version}`)',
+        '(${100 + apkRun + 1} or more: run $apkRun built `${apk.tag}`)',
         "say so in that release's notes, and leave the README's Android "
             'section on the newest Android release.',
-        'and its offset 200 would number the APK above ${newest.build}, so '
+        'and its offset 200 would number the APK above ${apk.build}, so '
             'Android would install 1.6.1 (database schema 3) over 1.7.x or '
             '1.8.0 (schema 4)',
         "Keep that branch's own `release.yml`",
@@ -1831,13 +1935,11 @@ void main() {
       // is v1.8.0. android-v1.8.0 (2026-11-25) holds main's own 1.8.0,
       // which the iPhone does not skip: main's next iPhone tag stays v1.8.0
       // until the next bump, and the notes still say "1.7.0, 1.7.1 and
-      // 1.7.2".
+      // 1.7.2". The tag v1.8.0 (2026-11-27): decision 4 keeps "(1.6.0 is
+      // live)" for the release day, and § 6.6's record of the tag says what
+      // the iPhone skipped before it (pinned above, per tag).
       final skips = _iphoneSkips(version);
       expect(s6, contains('The iPhone $skips never shipped (1.6.0 is live)'));
-      expect(
-          s6,
-          contains('the iPhone $skips never shipped (1.6.0 is live), so '
-              "`main`'s next iPhone version is $version"));
       final unused =
           _andList([for (final v in _iphoneSkipped(version)) '`v$v`']);
       expect(s6, contains('$unused stay unused'));
@@ -1902,7 +2004,11 @@ void main() {
     // the owner's delegation) is dated by its PR, the 1.7.2 bump is
     // history, and the sentences that gave 1.7.2 as pubspec's version or
     // the iPhone's next one are gone, as are those that gave 1.8.0 as the
-    // next Android release.
+    // next Android release. The tag v1.8.0 (run 15) went out on 2026-11-27
+    // (pushed about 16:27 CST, 22:27Z; its release published 16:36 CST,
+    // 22:36Z): every dated mention of it gives that day, and the sentences
+    // that still had the tag, the v1.8.0 release or run 13 as § 6.3's run
+    // to come are gone.
     test('android-v1.7.0 is dated 2026-11-19, android-v1.7.1 2026-11-22, '
         'android-v1.7.2 2026-11-24 and android-v1.8.0 2026-11-25, each with '
         'its build, and each bump by its PR', () {
@@ -1920,6 +2026,21 @@ void main() {
         for (final (:date, :sentence) in dated) {
           expect(date, r.day, reason: sentence);
           expect(sentence, contains('build ${r.build}'), reason: sentence);
+        }
+      }
+      // A v* tag's release: `v1.8.0` in backticks, which `android-v1.8.0`
+      // does not contain.
+      for (final t in _kTagReleases) {
+        final tag = '`v${t.version}`';
+        final dated = [
+          for (final sentence in sentences)
+            if (sentence.contains(tag))
+              for (final d in RegExp(r'\d{4}-\d\d-\d\d').allMatches(sentence))
+                (date: d.group(0)!, sentence: sentence),
+        ];
+        expect(dated, hasLength(greaterThanOrEqualTo(3)), reason: tag);
+        for (final (:date, :sentence) in dated) {
+          expect(date, t.day, reason: sentence);
         }
       }
       expect(flat, isNot(contains('So on 2026-11-20 `version:`')));
@@ -1947,10 +2068,13 @@ void main() {
           flat,
           contains('(pubspec is 1.8.0 since PR #97; the '
               "policy's newest is 1.7.1)"));
+      // Decision 4 since the tag (2026-11-27): it was pushed, and the day
+      // the App Store has it is the release day's to add.
       expect(
           flat,
           contains('pubspec is 1.8.0 since PR #97, so the '
-              "iPhone's next tag from `main` is `v1.8.0`"));
+              "iPhone's next tag from `main` was `v1.8.0`, pushed on "
+              '2026-11-27:'));
       expect(
           flat,
           contains('(`android-v1.8.0`, build 213 from run 13, GitHub only), '
@@ -2011,6 +2135,22 @@ void main() {
         '(111 or more: run 10 built',
         'Android section on the 1.7.x release',
         'over 1.7.x (schema 4)',
+        // Made stale by the tag v1.8.0's run 15 (2026-11-27).
+        'Later, when the iPhone version is ready',
+        "the iPhone's next tag from `main` is `v1.8.0`",
+        "`main`'s next iPhone version is 1.8.0",
+        'it puts that APK on the `v1.8.0` release',
+        "Edit that release's notes to say",
+        'Since `android-v1.8.0` went out',
+        'The steps name run 13;',
+        'Actions › Release › run 13.',
+        '`android-1.8.0-213` and take',
+        'Name the release `1.8.0 (213)`',
+        '§ 6.3: run 13, build 213',
+        'as long as it is the newest Android release',
+        '(114 or more: run 13 built',
+        'number the APK above 213',
+        'for the next one it is `android-v1.8.0`',
       ]) {
         expect(flat, isNot(contains(stale)), reason: stale);
       }
@@ -2164,12 +2304,20 @@ void main() {
     // has: a new release, after a pubspec bump once a GitHub release holds
     // pubspec's version. From the 1.8.0 prep (2026-11-24) none held it, so
     // § 6.3 said that release was 1.8.0 until android-v1.8.0 was out;
-    // since android-v1.8.0 holds it, § 6.3 says to bump first.
+    // since android-v1.8.0 holds it, § 6.3 says to bump first. The tag
+    // v1.8.0 (2026-11-27): its run 15 built Android 1.8.0 again as build
+    // 215 and put that APK on the v1.8.0 release, now the newest GitHub
+    // release with an Android APK. Run 13's bundle (213) would be below
+    // what that release's users have, so § 6.3's first upload is run 15's
+    // (artifact android-1.8.0-215, release 1.8.0 (215)), the same Android
+    // app as run 13's (§ 6.6).
     test("the first Play upload is the newest Android release's bundle, "
         "1.8.0's since it went out, and nothing says a later version is out",
         () {
       final newest = _kAndroidReleases.last;
       final run = newest.build - 200;
+      final apkRelease = _kApkReleases.last;
+      final apkRun = apkRelease.build - 200;
       final version = _pubspecVersion(_read('pubspec.yaml'));
       final held = _kAndroidReleases.any((r) => r.version == version);
       final everyRelease = _andList([
@@ -2187,19 +2335,24 @@ void main() {
         'so that Play starts at the version and build number GitHub users '
             'already have: an older bundle would be a downgrade for a phone '
             'moving from the GitHub APK',
-        'Since `android-v${newest.version}` went out on ${newest.day}, that '
-            'is ${newest.version}: the bundle of Release run $run',
-        'in the artifact `android-${newest.version}-${newest.build}`, which '
+        'That release is the newest GitHub release with an Android APK, a '
+            "hand-made `android-v*` one or a `v*` tag's.",
+        'Since the `${apkRelease.tag}` release went out on '
+            '${apkRelease.day}, that is ${apkRelease.version}: the bundle of '
+            'Release run $apkRun',
+        'in the artifact '
+            '`android-${apkRelease.version}-${apkRelease.build}`, which '
             'GitHub keeps 90 days.',
-        // GitHub's expires_at for it: 2027-02-23T05:07:36Z (23:07 CST on
-        // 2027-02-22). Unlike 1.7.1's and 1.7.2's, its UTC and CST days
-        // differ, so § 6.3 gives both.
-        'GitHub deletes `android-1.8.0-213` at 05:07 UTC on 2027-02-23 '
-            "(23:07 CST on 2027-02-22), and a later release's artifact 90 "
+        // GitHub's expires_at for it: 2027-02-25T22:29:39Z (16:29 CST on
+        // 2027-02-25). Its UTC and CST days agree, unlike run 13's
+        // 2027-02-23T05:07:36Z (23:07 CST on 2027-02-22); § 6.3 gives both
+        // as it did for run 13's.
+        'GitHub deletes `android-1.8.0-215` at 22:29 UTC on 2027-02-25 '
+            "(16:29 CST on 2027-02-25), and a later release's artifact 90 "
             'days after its run.',
         '$everyRelease went out on GitHub only: there is no Play account '
             'yet (§ 6.6).',
-        'The steps name run $run; for a later release, take its run, '
+        'The steps name run $apkRun; for a later release, take its run, '
             'artifact, build number and name instead.',
         'If the artifact is gone, no run can make that bundle again, so make '
             'a new Android release (§ 6.6, steps 1 to 5; a dispatch alone '
@@ -2214,6 +2367,21 @@ void main() {
                 "Once a GitHub release holds pubspec's version ($version, "
                 "after `android-v$version`), bump pubspec first, with the "
                 "owner's OK (§ 6.6).",
+        // A v* tag's APK is on GitHub only too, while no Play account takes
+        // its run's bundle (2026-11-27: v1.8.0's).
+        for (final t in _kTagReleases)
+          "So did the APK of `v${t.version}` (build ${t.build}): its run's "
+              'Play job was skipped, with no `PLAY_SERVICE_ACCOUNT_JSON` '
+              '(§ 6.4).',
+        // Why the android-v* release's run before it no longer is the first
+        // upload, and that the two runs built one Android app.
+        if (apkRelease.tag != 'android-v${newest.version}') ...[
+          "Run $run's bundle (`android-${newest.version}-${newest.build}`, "
+              'from the run of `android-v${newest.version}`) would now be '
+              "below the APK that `${apkRelease.tag}`'s users have.",
+          "Run $apkRun's bundle and APK are the same Android app as run "
+              "$run's, with a higher build number",
+        ],
       ]) {
         expect(s63, contains(fact), reason: fact);
       }
@@ -2233,14 +2401,23 @@ void main() {
         'Android ${newest.version} followed on ${newest.day} '
             '(`android-v${newest.version}`, build ${newest.build} from run '
             '$run, GitHub only)',
+        // § 6.8's lane play run names the newest APK release's run for the
+        // first upload (2026-11-27: run 15, no longer run 13).
         'for the first upload, the run of the newest Android release '
-            'instead, § 6.3: run $run, build ${newest.build}, which built '
-            '`android-v${newest.version}`',
-        "pubspec's version at the run's commit: ${newest.version} for run "
-            '$run)',
+            'instead, § 6.3: run $apkRun, build ${apkRelease.build}, which '
+            'built `${apkRelease.tag}`',
+        "pubspec's version at the run's commit: ${apkRelease.version} for "
+            'run $apkRun)',
         "13. Done on ${newest.day}: run $run's GitHub APK went out by hand as "
             '`android-v${newest.version}` (build ${newest.build}), before any '
             "Play upload, and the README's Android section names it",
+        // Step 13 also says when the tag's release took that place.
+        for (final t in _kTagReleases)
+          "On ${t.day} the tag `v${t.version}`'s run ${t.build - 200} put "
+              'the same Android app on the `v${t.version}` release as build '
+              "${t.build} (§ 6.6), so step 9's run is run $apkRun, not run "
+              '$run, as long as that release is the newest Android release '
+              '(§ 6.3).',
         'Until the first Play upload, § 6.3 says which release\'s bundle '
             'that upload is.',
       ]) {
@@ -2393,8 +2570,14 @@ void main() {
       // 2026-11-25, nothing said 1.8.0 was): every build number, date, APK
       // name, "went out" or release link these pages give a version
       // belongs to a release out, with that release's build, and a release
-      // link names the newest.
+      // link names the newest. An APK name may also be a v* tag's release's
+      // (since 2026-11-27, v1.8.0's Chopstats-v1.8.0-b215-arm64-v8a.apk,
+      // the same Android app as android-v1.8.0's b213).
       final builds = {for (final r in _kAndroidReleases) r.version: r.build};
+      final apkBuilds = <String, Set<int>>{};
+      for (final r in _kApkReleases) {
+        (apkBuilds[r.version] ??= {}).add(r.build);
+      }
       for (final path in [
         'docs/RELEASING.md',
         'README.md',
@@ -2404,14 +2587,17 @@ void main() {
         'app/android/store/screenshots/SHOTS.md',
       ]) {
         final text = _readRepo(path).replaceAll(RegExp(r'\s+'), ' ');
-        for (final claim in [
-          RegExp(r'android-v(\d+\.\d+\.\d+)`? \((?:build |b)(\d+)'),
-          RegExp(r'Chopstats-v(\d+\.\d+\.\d+)-b(\d+)\b'),
+        for (final (claim, known) in [
+          (
+            RegExp(r'android-v(\d+\.\d+\.\d+)`? \((?:build |b)(\d+)'),
+            {for (final e in builds.entries) e.key: {e.value}},
+          ),
+          (RegExp(r'Chopstats-v(\d+\.\d+\.\d+)-b(\d+)\b'), apkBuilds),
         ]) {
           for (final m in claim.allMatches(text)) {
             final v = m.group(1)!;
-            if (builds.containsKey(v)) {
-              expect(builds[v], int.parse(m.group(2)!),
+            if (known.containsKey(v)) {
+              expect(known[v], contains(int.parse(m.group(2)!)),
                   reason: '$path: ${m.group(0)}');
             } else {
               // Not an Android release (a 1.6.x hotfix, say): fine only
