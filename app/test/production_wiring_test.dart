@@ -1418,9 +1418,18 @@ void main() {
         _wired(r'void offered\(\) \{ _offeredAt = _clock\(\); '
             r'traffic\.next\(\); \}'),
       );
+      // Review, 2026-11-28: what the photo was waiting for is still read
+      // first; the cut is now counted in the run's record between that
+      // read and the release, which awaits. The photo's own verdict, and
+      // the abandoned run's end, can come while the release waits
+      // (background_glue_test has both sequences).
       expect(
         inFlight,
         _wired(r'final cutAt = traffic\.cutOffAt; '
+            r'(//[^\n]*\n\s*)*'
+            r'final log = recorder; '
+            r'final noted = log != null && log\.photoInFlight \? '
+            r'log\.cutOff\(backgroundLeftForCut\(cutAt\)\) : null; '
             r'final assetId = await pipeline\?\.abandon\(\);'),
       );
       expect(
@@ -1446,11 +1455,14 @@ void main() {
           r'left: o\.retryable \? backgroundLeftFor\(o\) : null\);',
         ),
       );
+      // Review, 2026-11-28: said only for a photo the record shows in
+      // flight (one handed over, with no verdict counted yet); where it
+      // sits in the deadline's steps is pinned with them, above.
       expect(
         _body(glue(), 'class RunInFlight {'),
         _wired(
-          r'final noted = '
-          r'recorder\?\.cutOff\(backgroundLeftForCut\(cutAt\)\);',
+          r'final noted = log != null && log\.photoInFlight \? '
+          r'log\.cutOff\(backgroundLeftForCut\(cutAt\)\) : null;',
         ),
       );
     });

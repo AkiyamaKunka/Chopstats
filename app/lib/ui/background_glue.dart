@@ -902,11 +902,27 @@ class RunInFlight {
     // Read before the release, which awaits: an answer that lands
     // meanwhile is not what the photo was cut off at.
     final cutAt = traffic.cutOffAt;
+    // Why the photo in flight was left, for the run's record: in the
+    // entry from this call on, BEFORE the release (review, 2026-11-28).
+    // The photo's answer can land while it is being released, or on
+    // Android during the summary's re-arm after it; the abandoned run
+    // then reports the same photo "left for later" (one photo showed as
+    // two), and can run on to its own end and close the entry. The write
+    // is awaited last, behind what the next run goes by.
+    final log = recorder;
+    final noted = log != null && log.photoInFlight
+        ? log.cutOff(backgroundLeftForCut(cutAt))
+        : null;
     final assetId = await pipeline?.abandon();
-    if (assetId == null || assetId.isEmpty) return;
-    // Why it was left, for the run's record. In the entry from this call
-    // on; its write is awaited last, behind what the next run goes by.
-    final noted = recorder?.cutOff(backgroundLeftForCut(cutAt));
+    if (assetId == null || assetId.isEmpty) {
+      // Nothing was held to release. As before, nothing is said of the
+      // photo here (the pipeline was done with it, or had not reserved it
+      // yet): the count above is taken back, and the photo's own verdict,
+      // when it comes, counts as any other.
+      if (noted != null) await log?.cutWithdrawn();
+      await noted;
+      return;
+    }
     final at = _offeredAt, end = deadline;
     if (cutAt == CutOffAt.preparing &&
         at != null &&

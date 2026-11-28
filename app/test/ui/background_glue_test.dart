@@ -239,6 +239,67 @@ class _ReleaseClockDao extends FakeDao {
   }
 }
 
+/// A FakeDao whose reservation and release can each be held back: a
+/// database the open app is holding.
+class _SlowDao extends FakeDao {
+  /// While set, a reservation waits here before it is taken.
+  Completer<void>? reserveGate;
+
+  /// While set, a release waits here before it is done.
+  Completer<void>? releaseGate;
+
+  /// How many reservations and releases were asked for.
+  int reserves = 0, releases = 0;
+
+  @override
+  Future<PhotoReservationResult> reservePhotoHash(String imageHash,
+      {required String source,
+      bool reclaimDeliberate = false,
+      String assetId = '',
+      DateTime? capturedAt}) async {
+    reserves++;
+    await reserveGate?.future;
+    return super.reservePhotoHash(imageHash,
+        source: source,
+        reclaimDeliberate: reclaimDeliberate,
+        assetId: assetId,
+        capturedAt: capturedAt);
+  }
+
+  @override
+  Future<void> releasePhotoHash(String imageHash, {String? ownerStamp}) async {
+    releases++;
+    await releaseGate?.future;
+    return super.releasePhotoHash(imageHash, ownerStamp: ownerStamp);
+  }
+}
+
+/// An [EmittingIntake] whose scan, once its batch is delivered (every
+/// photo's verdict reported: [delivered]), waits for [end] before it
+/// returns: a run that has not reached its own end yet.
+class _OpenEndedIntake extends EmittingIntake {
+  final Completer<void> delivered = Completer<void>();
+  final Completer<void> end = Completer<void>();
+
+  @override
+  Future<DateTime?> backfillScan(
+      {int lookbackDays = 0,
+      DateTime? since,
+      bool Function()? shouldContinue,
+      Future<void> Function(DateTime safeFrontier)? onCovered,
+      bool newestDayFirst = false}) async {
+    final frontier = await super.backfillScan(
+        lookbackDays: lookbackDays,
+        since: since,
+        shouldContinue: shouldContinue,
+        onCovered: onCovered,
+        newestDayFirst: newestDayFirst);
+    delivered.complete();
+    await end.future;
+    return frontier;
+  }
+}
+
 /// A pipeline that answers each photo with the next scripted outcome —
 /// for outcome kinds a FakeAnalyzer cannot reach on its own.
 class _ScriptedPipeline extends PhotoPipeline {
@@ -1316,6 +1377,183 @@ void main() {
             await recorder.finish(BackgroundStop.budget);
             expect(stored().left, isEmpty);
             expect(stored().released, 0);
+          });
+
+          // Review, 2026-11-28. The cut counts the photo the deadline cut
+          // off, and that photo's own verdict can still come: while it
+          // is being released (milliseconds on iOS), or on Android during
+          // the summary's re-arm after it. Counted too, one photo showed
+          // as two left for later: released 2, {deadline: 1, other: 1}.
+          group('the photo the deadline cut off is counted once, and only '
+              'when it was left', () {
+            http.Response answer() => http.Response(
+                jsonEncode({
+                  'ok': true,
+                  'analysis': {'is_food': true, 'food_items': []},
+                }),
+                200);
+
+            /// One run with photo(1) handed to its pipeline (offered at
+            /// the run start: the full window), as runHeadlessBackfill
+            /// builds it. [server] answers the analyzer; [intake]'s scan
+            /// stays open until its `end` is completed.
+            Future<
+                ({
+                  RunInFlight inFlight,
+                  Future<bool> run,
+                  _OpenEndedIntake intake,
+                  BackgroundRunRecorder recorder,
+                })> started(
+              FakeDao dao, {
+              required http.Client server,
+              Future<String> Function(Uint8List)? hasher,
+              Future<Uint8List?> Function(Uint8List)? thumbnailer,
+              bool android = false,
+              Future<void> Function()? rearm,
+            }) async {
+              final settings = await ownServer();
+              final recorder = await begun();
+              final inFlight = RunInFlight(
+                  deadline: android ? t0.add(androidRunDeadline) : deadline,
+                  window: android ? androidSlowPhotoWindow : slowPhotoWindow,
+                  clock: () => t0,
+                  client: server)
+                ..deferred = await DeferredAssets.load(prefs)
+                ..recorder = recorder
+                ..rearm = rearm;
+              final intake = _OpenEndedIntake()..batch = [photo(1)];
+              final run = headlessBackfillWith(
+                settings: settings,
+                prefs: prefs,
+                intake: intake,
+                pipeline: () async => inFlight.pipeline = PhotoPipeline(
+                    dao: dao,
+                    analyzer: ServerAnalyzer(settings,
+                        client: inFlight.traffic, normalizer: (b) async => b),
+                    hasher: hasher ?? (b) async => md5.convert(b).toString(),
+                    thumbnailer: thumbnailer ?? (_) async => null),
+                showMealCard: (_, _, {payload}) async {},
+                clock: () => t0,
+                photoOffered: inFlight.offered,
+                deferred: inFlight.deferred,
+                recorder: recorder,
+              );
+              return (
+                inFlight: inFlight,
+                run: run,
+                intake: intake,
+                recorder: recorder,
+              );
+            }
+
+            Future<void> until(bool Function() reached, String what) async {
+              for (var i = 0; i < 500 && !reached(); i++) {
+                await Future<void>.delayed(const Duration(milliseconds: 1));
+              }
+              expect(reached(), isTrue, reason: 'never got to: $what');
+            }
+
+            test('its answer lands while it is being released: one photo '
+                'left, with what the run was waiting for', () async {
+              final dao = _SlowDao()..releaseGate = Completer<void>();
+              final reply = Completer<http.Response>();
+              var sent = false;
+              final s = await started(dao, server: MockClient((_) {
+                sent = true;
+                return reply.future;
+              }));
+              await until(() => sent, 'the request');
+              // The deadline; the release is slow (a busy database).
+              final ended = finishWithinGrant(s.run,
+                  left: Duration.zero,
+                  recorder: s.recorder,
+                  abandon: s.inFlight.abandon);
+              await until(() => dao.releases == 1, 'the release');
+              // The answer lands, and the abandoned run reports its photo.
+              reply.complete(answer());
+              await s.intake.delivered.future;
+              // Then the release ends, and the deadline's reply goes.
+              dao.releaseGate!.complete();
+              expect(await ended, isTrue);
+              s.intake.end.complete();
+              await s.run;
+              final r = stored();
+              expect((r.offered, r.analyzed, r.saved, r.released),
+                  (1, 0, 0, 1));
+              expect(r.left, {BackgroundLeft.deadline: 1});
+              expect(r.stopReason, BackgroundStop.budget);
+              expect(dao.meals, isEmpty, reason: 'a late answer is dropped');
+              expect(dao.ledger.values,
+                  isNot(contains(IngestionStatus.processing)));
+            });
+
+            // Why the cut is counted BEFORE the release: the abandoned
+            // run, hearing its photo's verdict, can run on to its own end
+            // and close the entry while the release is still waiting.
+            test('the abandoned run ends before the release does: the cut is '
+                'in its entry all the same', () async {
+              final dao = _SlowDao()..releaseGate = Completer<void>();
+              final reply = Completer<http.Response>();
+              var sent = false;
+              final s = await started(dao, server: MockClient((_) {
+                sent = true;
+                return reply.future;
+              }));
+              await until(() => sent, 'the request');
+              final ended = finishWithinGrant(s.run,
+                  left: Duration.zero,
+                  recorder: s.recorder,
+                  abandon: s.inFlight.abandon);
+              await until(() => dao.releases == 1, 'the release');
+              reply.complete(answer());
+              s.intake.end.complete();
+              expect(await s.run, isTrue);
+              expect(stored().finished, isTrue,
+                  reason: 'the run closed its own entry');
+              dao.releaseGate!.complete();
+              expect(await ended, isTrue);
+              final r = stored();
+              expect((r.offered, r.analyzed, r.saved, r.released),
+                  (1, 0, 0, 1));
+              expect(r.left, {BackgroundLeft.deadline: 1});
+            });
+
+            test('Android: its answer lands during the summary\'s re-arm, '
+                'after the cut: still one photo', () async {
+              final dao = _SlowDao();
+              final reply = Completer<http.Response>();
+              final rearming = Completer<void>(), rearmed = Completer<void>();
+              var sent = false;
+              final s = await started(dao,
+                  android: true,
+                  rearm: () {
+                    rearming.complete();
+                    return rearmed.future;
+                  },
+                  server: MockClient((_) {
+                    sent = true;
+                    return reply.future;
+                  }));
+              await until(() => sent, 'the request');
+              final ended = finishWithinGrant(s.run,
+                  left: Duration.zero,
+                  recorder: s.recorder,
+                  abandon: s.inFlight.endAtDeadline,
+                  abandonLimit: androidDeadlineWrapUp);
+              await rearming.future; // released; the re-arm is running
+              expect(s.recorder.current!.left, {BackgroundLeft.deadline: 1});
+              reply.complete(answer());
+              await s.intake.delivered.future;
+              rearmed.complete();
+              expect(await ended, isTrue);
+              s.intake.end.complete();
+              await s.run;
+              final r = stored();
+              expect((r.offered, r.analyzed, r.saved, r.released),
+                  (1, 0, 0, 1));
+              expect(r.left, {BackgroundLeft.deadline: 1});
+              expect(r.stopReason, BackgroundStop.budget);
+            });
           });
 
           // The night of 2026-11-27, as it would have gone on: three runs
