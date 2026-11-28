@@ -533,12 +533,21 @@ class BackgroundRunRecorder {
 
   /// The run's deadline has come (finishWithinGrant, before its wrap-up:
   /// the release of the photo in flight, and on Android the summary's
-  /// re-arm). From now on the entry ends as [BackgroundStop.budget],
+  /// re-arm). From now on, while the photo the deadline cut off is still
+  /// counted as left ([cutOff]), the entry ends as [BackgroundStop.budget],
   /// whoever finishes it. The run itself can, during that wrap-up: the
   /// photo the deadline cut off was its last, its verdict landed, and the
   /// run reached its own end. The entry then read "done" over a photo
   /// left because the time ran out (review, 2026-11-28). A finished entry
   /// stays as it is.
+  ///
+  /// With no such photo, the run that reaches its own end keeps its own
+  /// reason: the deadline cut off nothing, or the photo it cut off turned
+  /// out not to be left ([cutWithdrawn], or a verdict that keeps it:
+  /// [processed]). A meal saved just before an Android deadline, its
+  /// thumbnail still being made, read "Used its time; the rest waits for
+  /// the next scan." over "1 logged, 0 left for later" (review,
+  /// 2026-11-28, third round).
   void deadlineReached() => _deadlineReached = true;
   bool _deadlineReached = false;
 
@@ -548,8 +557,9 @@ class BackgroundRunRecorder {
           : r.copyWith(
               end: _clock().toUtc(),
               stage: BackgroundRunStage.done,
-              stopReason:
-                  _deadlineReached ? BackgroundStop.budget : stopReason,
+              stopReason: _deadlineReached && _cut != null
+                  ? BackgroundStop.budget
+                  : stopReason,
               watermarkAfter: watermarkAfter?.toUtc()));
 
   /// A finished entry is final: a run abandoned at the iOS deadline

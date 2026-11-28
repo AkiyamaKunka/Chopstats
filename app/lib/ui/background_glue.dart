@@ -1274,8 +1274,9 @@ Future<bool> finishWithinGrant(Future<bool> run,
   final done = Completer<bool>();
   final timer = Timer(left.isNegative ? Duration.zero : left, () {
     if (done.isCompleted) return;
-    // Out of time from here, whoever closes the entry: the run itself
-    // may, during the wrap-up below.
+    // Out of time from here, whoever closes the entry, while the photo
+    // the wrap-up below cuts off is still left: the run itself may close
+    // it during that wrap-up (BackgroundRunRecorder.deadlineReached).
     recorder.deadlineReached();
     done.complete(() async {
       if (abandon != null) {

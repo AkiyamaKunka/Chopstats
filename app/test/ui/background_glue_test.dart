@@ -1669,6 +1669,49 @@ void main() {
                   (1, 1, 1, 0));
               expect(r.left, isEmpty);
             });
+
+            // The same photo on Android, through the deadline itself. The
+            // run, its verdict counted during the summary's re-arm, reaches
+            // its own end and closes the entry. Nothing the deadline cut
+            // off was left, yet the entry read "Used its time; the rest
+            // waits for the next scan." over "1 logged, 0 left for later"
+            // (review, 2026-11-28, third round).
+            test('Android: that meal\'s verdict lands during the re-arm and '
+                'the run ends on its own: one logged, nothing left, and '
+                'the run finished', () async {
+              final dao = _SlowDao();
+              final thumb = Completer<Uint8List?>();
+              final rearming = Completer<void>(), rearmed = Completer<void>();
+              final s = await started(dao,
+                  android: true,
+                  rearm: () {
+                    rearming.complete();
+                    return rearmed.future;
+                  },
+                  server: MockClient((_) async => answer()),
+                  thumbnailer: (_) => thumb.future);
+              await until(() => dao.meals.isNotEmpty, 'the save');
+              final ended = finishWithinGrant(s.run,
+                  left: Duration.zero,
+                  recorder: s.recorder,
+                  abandon: s.inFlight.endAtDeadline,
+                  abandonLimit: androidDeadlineWrapUp);
+              await rearming.future; // released; the re-arm is running
+              expect(s.recorder.current!.left, isEmpty,
+                  reason: 'nothing held, something sent: not cut off');
+              thumb.complete(null);
+              s.intake.end.complete();
+              await s.run;
+              expect(stored().finished, isTrue,
+                  reason: 'the run closed its own entry during the re-arm');
+              rearmed.complete();
+              expect(await ended, isTrue);
+              final r = stored();
+              expect((r.offered, r.analyzed, r.saved, r.released),
+                  (1, 1, 1, 0));
+              expect(r.left, isEmpty);
+              expect(r.stopReason, BackgroundStop.done);
+            });
           });
 
           // The night of 2026-11-27, as it would have gone on: three runs

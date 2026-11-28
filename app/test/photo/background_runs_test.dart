@@ -111,8 +111,9 @@ void main() {
   // and its verdict, landing during the release, let the run reach its
   // own end. The entry read "Finished." over a photo left because the
   // time ran out; the same run read "budget" when the release was quick.
-  test('once the deadline has come, the run ends as budget whoever closes '
-      'the entry; before it, the run\'s own reason stands', () async {
+  test('once the deadline has come and cut off a photo, the run ends as '
+      'budget whoever closes the entry; before it, the run\'s own reason '
+      'stands', () async {
     final prefs = await _prefs();
     final rec = BackgroundRunRecorder(prefs, platform: 'ios', clock: () => t0);
     await rec.begin();
@@ -133,6 +134,61 @@ void main() {
     before.deadlineReached(); // too late: the entry is final
     await before.finish(BackgroundStop.budget);
     expect(before.current!.stopReason, BackgroundStop.paused);
+  });
+
+  // Review, 2026-11-28, third round. That rule also held when the photo
+  // the deadline cut off turned out not to be left: a meal saved just
+  // before an Android deadline, its thumbnail still being made, read
+  // "Used its time; the rest waits for the next scan." over "1 logged, 0
+  // left for later". Budget holds only while the cut stands.
+  test('after the deadline, a run that reaches its own end with nothing '
+      'cut off left keeps its own reason', () async {
+    Future<BackgroundRunRecorder> cut() async {
+      final rec = BackgroundRunRecorder(await _prefs(),
+          platform: 'android', clock: () => t0);
+      await rec.begin();
+      await rec.offered();
+      rec.deadlineReached();
+      await rec.cutOff(BackgroundLeft.deadline);
+      return rec;
+    }
+
+    // Nothing held and something sent (RunInFlight.abandon): the meal was
+    // saved, its thumbnail still coming. Then its verdict counts.
+    final withdrawn = await cut();
+    await withdrawn.cutWithdrawn();
+    await withdrawn.processed(saved: true, released: false);
+    await withdrawn.finish(BackgroundStop.done);
+    var r = withdrawn.current!;
+    expect((r.offered, r.analyzed, r.saved, r.released), (1, 1, 1, 0));
+    expect(r.left, isEmpty);
+    expect(r.stopReason, BackgroundStop.done, reason: 'withdrawn');
+
+    // A verdict that keeps the photo ("already logged") takes it back.
+    final kept = await cut();
+    await kept.processed(saved: false, released: false);
+    await kept.finish(BackgroundStop.done);
+    r = kept.current!;
+    expect((r.offered, r.analyzed, r.saved, r.released), (1, 1, 0, 0));
+    expect(r.left, isEmpty);
+    expect(r.stopReason, BackgroundStop.done, reason: 'kept by its verdict');
+
+    // No photo in flight (the run past its last photo): nothing cut off.
+    final tail = BackgroundRunRecorder(await _prefs(),
+        platform: 'android', clock: () => t0);
+    await tail.begin();
+    tail.deadlineReached();
+    await tail.finish(BackgroundStop.paused);
+    expect(tail.current!.stopReason, BackgroundStop.paused,
+        reason: 'nothing cut off');
+
+    // The cut stands (the photo's late answer is dropped): budget.
+    final stands = await cut();
+    await stands.processed(saved: false, released: true);
+    await stands.finish(BackgroundStop.done);
+    r = stands.current!;
+    expect(r.left, {BackgroundLeft.deadline: 1});
+    expect(r.stopReason, BackgroundStop.budget, reason: 'the cut stands');
   });
 
   test('newest first, and only the last 20 are kept', () async {
