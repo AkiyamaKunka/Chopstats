@@ -583,6 +583,12 @@ class _BackgroundRuns extends StatelessWidget {
                       l.diagBgRunCounts(r.enumerated, r.offered, r.analyzed,
                           r.saved, r.released),
                       style: muted),
+                  // iOS: listed, but not read again because a meal
+                  // already names them. Without the line the counts above
+                  // would not add up to the photos listed.
+                  if (r.alreadyLogged > 0)
+                    Text(l.diagBgRunAlreadyLogged(r.alreadyLogged),
+                        style: muted),
                   Text(
                       l.diagBgRunWatermark(_stamp(l, r.watermarkBefore),
                           _stamp(l, r.watermarkAfter)),

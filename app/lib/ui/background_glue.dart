@@ -81,13 +81,16 @@ DateTime? readStoredInstant(String? stored) =>
 /// photos created while the previous scan was running.
 ///
 /// The watermark is the newest COVERED photo's createDate (the intake's
-/// frontier), not the scan start, so every run re-reads and re-hashes each
-/// original from this hour before it until a newer photo is covered; the
-/// ledger answers them with no model call. Typically well under a second,
-/// but a very dense hour (100+ photos) can spend iOS's offer budget before
-/// a newer photo is reached; the next app open's catch-up clears it (run 7,
-/// P5). Narrowing the overlap waits for the iOS late-import pass (photo
-/// change history), which catches late arrivals the hour exists for.
+/// frontier), not the scan start, so every run lists each photo from this
+/// hour before it again until a newer photo is covered. On iOS the ones a
+/// meal already names are counted covered without a read (2026-11-28,
+/// LibraryPhotoIntake.scanSkipsLogged); every other one — a photo that
+/// was not food, failed or was deleted, and on Android the logged ones too
+/// — is re-read and re-hashed, and the ledger answers it with no model
+/// call. Typically well under a second, but a very dense hour of such
+/// photos (100+) can spend iOS's offer budget before a newer photo is
+/// reached; the next app open's catch-up clears it (run 7, P5). The hour
+/// itself is unchanged.
 const Duration backgroundScanOverlap = Duration(hours: 1);
 
 /// Periodic cadence. WorkManager's floor is 15 min; 30 keeps EMUI battery
@@ -919,7 +922,14 @@ Future<bool> _runAfterLaunch({
       intake: createPhotoIntake(settings,
           onBackfillListed: recorder.listed,
           passOver: deferred.passOver,
-          loggedAssetIds: inFlight.loggedAssetIds),
+          loggedAssetIds: inFlight.loggedAssetIds,
+          // iOS: a photo a meal already names is counted covered without
+          // a read, by the scan as by the late-import pass, so the 15 s
+          // in which this run may start a photo go to new ones. Android's
+          // run reads them as it always did (LibraryPhotoIntake
+          // .scanSkipsLogged says why).
+          scanSkipsLogged: ios,
+          onScanSkippedLogged: recorder.alreadyLogged),
       pipeline: () async => inFlight.pipeline = PhotoPipeline(
           dao: await createMealsDao(),
           // B14's previous-night candidates, under the consent that says so.

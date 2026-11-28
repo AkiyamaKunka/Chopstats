@@ -1204,15 +1204,32 @@ void main() {
       }
     });
 
-    test('the intake passes over what the run deferred too often, and the '
-        'run notes what it defers', () {
+    // 2026-11-28: the call gained two arguments. On iOS the scan counts a
+    // photo a meal already names covered without reading it (it used to be
+    // only the late-import pass that did), and the record hears how many;
+    // Android's run still reads them (scanSkipsLogged: ios, never true).
+    test('the intake passes over what the run deferred too often, skips '
+        'what a meal already names on iOS only, and the run notes what it '
+        'defers', () {
       expect(
         after(),
         _wired(
           r'intake: createPhotoIntake\(settings, onBackfillListed: '
           r'recorder\.listed, passOver: deferred\.passOver, '
-          r'loggedAssetIds: inFlight\.loggedAssetIds\)',
+          r'loggedAssetIds: inFlight\.loggedAssetIds, '
+          r'(//[^\n]*\n\s*)*'
+          r'scanSkipsLogged: ios, '
+          r'onScanSkippedLogged: recorder\.alreadyLogged\)',
         ),
+      );
+      // The app's own engine does not: its scans are as they were.
+      expect(
+        _body(
+          _source('lib/ui/di.dart'),
+          'static Future<AppServices> init(',
+          indent: '  ',
+        ),
+        isNot(contains('scanSkipsLogged')),
       );
       expect(after(), _wired(r'\n\s*deferred: deferred,'));
       expect(
@@ -1718,6 +1735,31 @@ void main() {
               as LibraryPhotoIntake;
       expect(intake.passOver, same(passOver));
       expect(intake.onBackfillListed, same(listed));
+      // 2026-11-28: off unless asked for (the app's own engine, Android).
+      expect(intake.scanSkipsLogged, isFalse);
+      expect(intake.onScanSkippedLogged, isNull);
+    },
+  );
+
+  test(
+    'createPhotoIntake hands scanSkipsLogged and its count hook to the '
+    'intake',
+    () async {
+      SharedPreferences.setMockInitialValues({});
+      final settings = await AppSettings.load(
+        prefs: await SharedPreferences.getInstance(),
+        keyStore: _Keys(),
+      );
+      void skipped(int n) {}
+      final intake =
+          createPhotoIntake(
+                settings,
+                scanSkipsLogged: true,
+                onScanSkippedLogged: skipped,
+              )
+              as LibraryPhotoIntake;
+      expect(intake.scanSkipsLogged, isTrue);
+      expect(intake.onScanSkippedLogged, same(skipped));
     },
   );
 

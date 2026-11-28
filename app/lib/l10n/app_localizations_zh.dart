@@ -1282,6 +1282,11 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
+  String diagBgRunAlreadyLogged(int count) {
+    return '之前已记录，不再读取：$count';
+  }
+
+  @override
   String diagBgRunKilled(String step) {
     return '在完成前被系统结束，最后一步：$step。';
   }

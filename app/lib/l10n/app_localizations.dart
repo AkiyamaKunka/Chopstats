@@ -2244,6 +2244,12 @@ abstract class AppLocalizations {
     int later,
   );
 
+  /// Diagnostics › Recent background scans, under the counts line (diagBgRunCounts), only when the number is above 0: photos the scan listed and did not read again because a meal already has each one as its photo. iPhone only.
+  ///
+  /// In en, this message translates to:
+  /// **'Already logged, not read again: {count}'**
+  String diagBgRunAlreadyLogged(int count);
+
   /// No description provided for @diagBgRunKilled.
   ///
   /// In en, this message translates to:

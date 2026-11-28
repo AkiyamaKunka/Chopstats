@@ -1381,6 +1381,11 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String diagBgRunAlreadyLogged(int count) {
+    return 'Already logged, not read again: $count';
+  }
+
+  @override
   String diagBgRunKilled(String step) {
     return 'Ended by the system before it finished — last step: $step.';
   }

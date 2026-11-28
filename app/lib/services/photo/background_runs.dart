@@ -75,6 +75,7 @@ class BackgroundRunRecord {
     this.analyzed = 0,
     this.saved = 0,
     this.released = 0,
+    this.alreadyLogged = 0,
     this.stopReason,
     this.watermarkBefore,
     this.watermarkAfter,
@@ -107,6 +108,13 @@ class BackgroundRunRecord {
   /// Photos left eligible for a later run: a retryable verdict, or not
   /// started because the time budget ran out.
   final int released;
+
+  /// Photos the scan counted covered without reading them, because a meal
+  /// already names each one (LibraryPhotoIntake.scanSkipsLogged, the iOS
+  /// run, 2026-11-28). In [enumerated] and in no other count: they used to
+  /// be read and processed again by every run, an hour behind the
+  /// watermark.
+  final int alreadyLogged;
   final String? stopReason;
 
   /// The watermark (UTC) when the run started, and as it last wrote it.
@@ -130,6 +138,7 @@ class BackgroundRunRecord {
     int? analyzed,
     int? saved,
     int? released,
+    int? alreadyLogged,
     String? stopReason,
     DateTime? watermarkAfter,
   }) =>
@@ -143,6 +152,7 @@ class BackgroundRunRecord {
         analyzed: analyzed ?? this.analyzed,
         saved: saved ?? this.saved,
         released: released ?? this.released,
+        alreadyLogged: alreadyLogged ?? this.alreadyLogged,
         stopReason: stopReason ?? this.stopReason,
         watermarkBefore: watermarkBefore,
         watermarkAfter: watermarkAfter ?? this.watermarkAfter,
@@ -163,6 +173,9 @@ class BackgroundRunRecord {
         'wm_before': watermarkBefore?.toUtc().toIso8601String(),
         'wm_after': watermarkAfter?.toUtc().toIso8601String(),
         if (bootMs != null) 'boot_ms': bootMs,
+        // Only when there is something to say: an entry without them is
+        // exactly what every earlier version wrote, and reads back as 0.
+        if (alreadyLogged > 0) 'known': alreadyLogged,
       };
 
   /// Null for an entry that cannot be read (a newer or damaged shape):
@@ -188,6 +201,7 @@ class BackgroundRunRecord {
       analyzed: count(json['analyzed']),
       saved: count(json['saved']),
       released: count(json['released']),
+      alreadyLogged: count(json['known']),
       stopReason: stop is String ? stop : null,
       watermarkBefore: instant(json['wm_before']),
       watermarkAfter: instant(json['wm_after']),
@@ -349,6 +363,12 @@ class BackgroundRunRecorder {
           analyzed: r.analyzed + 1,
           saved: r.saved + (saved ? 1 : 0),
           released: r.released + (released ? 1 : 0)));
+
+  /// Photos the scan counted covered without a read, because a meal
+  /// already names them ([BackgroundRunRecord.alreadyLogged]).
+  Future<void> alreadyLogged(int count) => count <= 0
+      ? Future.value()
+      : _update((r) => r.copyWith(alreadyLogged: r.alreadyLogged + count));
 
   /// Photos released unprocessed (the time budget ran out).
   Future<void> releasedUnprocessed(int count) => count <= 0

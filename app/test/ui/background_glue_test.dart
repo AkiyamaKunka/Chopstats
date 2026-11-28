@@ -2958,6 +2958,120 @@ void main() {
     });
   });
 
+  // 2026-11-28: a run starts an hour behind its watermark, so each one read
+  // and hashed the photos it had logged last time again before it reached
+  // a new one, out of the 15 s in which an iOS run may start a photo. On
+  // iOS the scan now counts a photo a meal names covered without a read
+  // (LibraryPhotoIntake.scanSkipsLogged), as the late-import pass does.
+  group('the run does not read a photo a meal already names (iOS)', () {
+    final breakfastAt = DateTime(2026, 11, 27, 8, 30);
+    final lunchAt = DateTime(2026, 11, 27, 12, 0);
+    final now = DateTime(2026, 11, 27, 12, 20);
+
+    /// One run over a library that holds the breakfast the last run logged
+    /// (the watermark sits on it) and a lunch photo taken since.
+    Future<
+        ({
+          List<String> reads,
+          List<String> hashed,
+          FakeDao dao,
+          BackgroundRunRecord record,
+          DateTime? watermark,
+        })> run({required bool skips}) async {
+      final settings = await settingsWith(key: 'k');
+      final p = await SharedPreferences.getInstance();
+      await p.setString(backgroundWatermarkPrefsKey,
+          breakfastAt.toUtc().toIso8601String());
+      final library = _Library()
+        ..assets.add(_Asset('breakfast', breakfastAt))
+        ..assets.add(_Asset('lunch', lunchAt));
+      final breakfastHash = md5.convert(utf8.encode('breakfast')).toString();
+      final dao = FakeDao()
+        ..seed(Meal(
+            id: 1,
+            date: '2026-11-27',
+            time: '08:30 AM',
+            timestamp: breakfastAt.toIso8601String(),
+            source: MealSource.appWatch,
+            imageHash: breakfastHash,
+            fileId: 'breakfast',
+            analysis: const {'is_food': true, 'total_calories': 320}));
+      dao.ledger[breakfastHash] = IngestionStatus.saved;
+      final hashed = <String>[];
+      final recorder =
+          BackgroundRunRecorder(p, platform: 'ios', clock: () => now);
+      await recorder.begin();
+      await headlessBackfillWith(
+        settings: settings,
+        prefs: p,
+        // As _runAfterLaunch builds it (production_wiring_test pins the
+        // arguments).
+        intake: LibraryPhotoIntake(
+            lookbackDays: () => settings.lookbackDays,
+            library: library,
+            clock: () => now,
+            onBackfillListed: recorder.listed,
+            loggedAssetIds: dao.loggedAssetIds,
+            scanSkipsLogged: skips,
+            onScanSkippedLogged: recorder.alreadyLogged),
+        pipeline: () async => PhotoPipeline(
+            dao: dao,
+            analyzer: FakeAnalyzer()
+              ..nextPhotoOutcome = const AnalysisOutcome(
+                  analysis: {'is_food': true, 'food_items': []},
+                  isFood: true,
+                  wall: Duration.zero),
+            hasher: (b) async {
+              hashed.add(utf8.decode(b));
+              return md5.convert(b).toString();
+            }),
+        showMealCard: (_, _, {payload}) async {},
+        clock: () => now,
+        recorder: recorder,
+      );
+      return (
+        reads: library.reads,
+        hashed: hashed,
+        dao: dao,
+        record: recorder.current!,
+        watermark:
+            readStoredInstant(p.getString(backgroundWatermarkPrefsKey)),
+      );
+    }
+
+    test('breakfast, logged by the last run, is neither read nor hashed; '
+        'lunch is logged, and the record says where the other photo went',
+        () async {
+      final r = await run(skips: true);
+      expect(r.reads, ['lunch']);
+      expect(r.hashed, ['lunch']);
+      expect([for (final m in r.dao.meals) m.fileId], ['breakfast', 'lunch']);
+      expect(r.watermark, lunchAt);
+      final rec = r.record;
+      expect(rec.stopReason, BackgroundStop.done);
+      expect(
+          (rec.enumerated, rec.offered, rec.analyzed, rec.saved, rec.released),
+          (2, 1, 1, 1, 0));
+      expect(rec.alreadyLogged, 1);
+    });
+
+    // Android's run, and every run before this change: the same meals, the
+    // same ledger and the same watermark, reached by reading both photos.
+    test('a run that reads every photo ends in the same state', () async {
+      final skipped = await run(skips: true);
+      final read = await run(skips: false);
+      expect(read.reads, ['breakfast', 'lunch']);
+      expect(read.hashed, ['breakfast', 'lunch']);
+      expect(read.watermark, skipped.watermark);
+      expect([for (final m in read.dao.meals) m.fileId],
+          [for (final m in skipped.dao.meals) m.fileId]);
+      expect(read.dao.ledger, skipped.dao.ledger);
+      expect(read.record.alreadyLogged, 0);
+      expect((read.record.offered, read.record.analyzed, read.record.saved),
+          (2, 2, 1));
+    });
+  });
+
   // Design G1b, 2026-10-23: photos other apps imported late, which no
   // createDate scan lists, go through the same pipeline after the scan.
   group('late imports', () {

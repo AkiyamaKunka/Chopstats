@@ -377,6 +377,7 @@
   "diagBgRunUnfinished": "未完成",
   "diagBgRunSeconds": "{seconds} 秒",
   "diagBgRunCounts": "照片：列出 {listed}，读取 {read}，处理完 {processed}，记录 {logged}，留待之后 {later}",
+  "diagBgRunAlreadyLogged": "之前已记录，不再读取：{count}",
   "diagBgRunKilled": "在完成前被系统结束，最后一步：{step}。",
   "diagBgStageBoot": "启动",
   "diagBgStageSettings": "读取设置",

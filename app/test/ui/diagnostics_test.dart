@@ -809,6 +809,34 @@ void main() {
       expect(find.textContaining('未完成'), findsOneWidget);
     });
 
+    // 2026-11-28 (iOS): the scan no longer reads a photo a meal already
+    // names, so "listed" and "read" drift apart; the card says where the
+    // difference went, and says nothing when there is none.
+    testWidgets('photos already logged and not read again get their own '
+        'line, only when there are any', (tester) async {
+      final skipped = BackgroundRunRecord(
+          start: t0,
+          end: t0.add(const Duration(seconds: 3)),
+          platform: 'ios',
+          stage: BackgroundRunStage.done,
+          stopReason: BackgroundStop.done,
+          enumerated: 5,
+          offered: 1,
+          analyzed: 1,
+          saved: 1,
+          alreadyLogged: 4);
+      await pump(tester, [skipped, budget]);
+      expect(
+          find.text('Photos: 5 listed, 1 read, 1 processed, 1 logged, '
+              '0 left for later'),
+          findsOneWidget);
+      expect(find.text('Already logged, not read again: 4'), findsOneWidget);
+      expect(find.textContaining('Already logged'), findsOneWidget,
+          reason: 'not under the run that skipped none');
+      await pump(tester, [skipped], locale: const Locale('zh'));
+      expect(find.text('之前已记录，不再读取：4'), findsOneWidget);
+    });
+
     testWidgets('only the latest five are listed', (tester) async {
       final runs = [
         for (var i = 0; i < 7; i++)

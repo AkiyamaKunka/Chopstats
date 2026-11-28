@@ -138,6 +138,38 @@ void main() {
     expect(prefs.getString(backgroundRunsPrefsKey), isNot(contains('key=')));
   });
 
+  // 2026-11-28 (iOS): photos the scan listed and did not read again
+  // because a meal already names each one. Written only when there are
+  // any, so an entry without them is what every earlier version wrote,
+  // and what an earlier version reads from a newer entry is unchanged.
+  test('photos already logged and not read again: "known", only when above '
+      '0; an older entry reads as 0', () async {
+    final prefs = await _prefs();
+    final rec = BackgroundRunRecorder(prefs, platform: 'ios', clock: () => t0);
+    await rec.begin();
+    await rec.listed(5);
+    await rec.alreadyLogged(0);
+    expect(_stored(prefs).single.containsKey('known'), isFalse);
+    await rec.alreadyLogged(3);
+    await rec.alreadyLogged(1); // a second pass of the same scan
+    expect(_stored(prefs).single['known'], 4);
+    final r = decodeBackgroundRuns(prefs.getString(backgroundRunsPrefsKey))
+        .single;
+    expect((r.enumerated, r.alreadyLogged, r.offered), (5, 4, 0));
+    // Every other step keeps it.
+    await rec.offered();
+    await rec.finish(BackgroundStop.done);
+    expect(rec.current!.alreadyLogged, 4);
+    // An entry written before the count existed, and junk in its place.
+    final old = jsonEncode([
+      {'start': t0.toIso8601String(), 'stage': 'done', 'enumerated': 5},
+      {'start': t0.toIso8601String(), 'known': -2},
+      {'start': t0.toIso8601String(), 'known': 'three'},
+    ]);
+    expect([for (final e in decodeBackgroundRuns(old)) e.alreadyLogged],
+        [0, 0, 0]);
+  });
+
   test('a damaged store reads as what it can: bad entries skipped, bad JSON '
       'empty, and a new run still records', () async {
     expect(decodeBackgroundRuns('not json'), isEmpty);

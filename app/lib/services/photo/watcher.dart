@@ -52,7 +52,8 @@ DateTime lookbackCutoff(DateTime now, int lookbackDays) {
 /// Integration-contract factory: the integrator wires this with the
 /// settings module's [AppSettings]. The lookback window is read through a
 /// closure so later settings edits apply to the next scan without rewiring.
-/// [onBackfillListed], [passOver], [loggedAssetIds]: see
+/// [onBackfillListed], [passOver], [loggedAssetIds], [scanSkipsLogged],
+/// [onScanSkippedLogged]: see
 /// [LibraryPhotoIntake]. On iOS the intake also reads the library's change
 /// history for late imports (design G1b), its cursor in the backup-excluded
 /// local store, and asks the same channel which photos sit in a Meta
@@ -69,6 +70,8 @@ PhotoIntake createPhotoIntake(AppSettings settings,
     {FutureOr<void> Function(int count)? onBackfillListed,
     bool Function(String assetId)? passOver,
     Future<Set<String>> Function(List<String> assetIds)? loggedAssetIds,
+    bool scanSkipsLogged = false,
+    FutureOr<void> Function(int count)? onScanSkippedLogged,
     bool Function()? liveHeld,
     @visibleForTesting bool? isIOS}) {
   final changes = platformPhotoChangeSource(isIOS: isIOS);
@@ -84,6 +87,8 @@ PhotoIntake createPhotoIntake(AppSettings settings,
           : LateImportCursor(
               source: changes, store: LocalNoBackupStore.platform()),
       loggedAssetIds: loggedAssetIds,
+      scanSkipsLogged: scanSkipsLogged,
+      onScanSkippedLogged: onScanSkippedLogged,
       onLateImportPass: changes == null ? null : recordLateImportPass,
       // The background engine's intake is never started, so it has no
       // live pass; its own passes take the run's budget.
@@ -138,6 +143,12 @@ const Duration metaAlbumLookupTimeout = Duration(seconds: 2);
 /// without it — dated exactly as before.
 const Duration addedDateLookupTimeout = Duration(seconds: 2);
 
+/// How long one scan waits to hear which of its photos a meal already names
+/// ([LibraryPhotoIntake.scanSkipsLogged]) before it reads them all as it
+/// always did. One read of the meals table; this only bounds a database the
+/// other engine is holding.
+const Duration loggedLookupTimeout = Duration(seconds: 2);
+
 /// What one [LibraryPhotoIntake._emit] call left undone, for a scan that
 /// wants to know whether it read its whole window.
 class _EmitTally {
@@ -151,6 +162,14 @@ class _EmitTally {
   bool stopped = false;
 
   bool get complete => unread == 0 && released == 0 && !stopped;
+
+  /// [LibraryPhotoIntake.scanSkipsLogged]: the photos this scan has asked
+  /// the meals about, those a meal names, and those it has counted covered
+  /// for it. Kept for the whole scan, so each photo is asked about once
+  /// and counted once however many passes the scan makes.
+  final Set<String> askedLogged = <String>{};
+  final Set<String> logged = <String>{};
+  final Set<String> skippedLogged = <String>{};
 }
 
 class LibraryPhotoIntake implements PhotoIntake {
@@ -164,6 +183,9 @@ class LibraryPhotoIntake implements PhotoIntake {
       this.passOver,
       this.lateImports,
       this.loggedAssetIds,
+      this.scanSkipsLogged = false,
+      this.onScanSkippedLogged,
+      @visibleForTesting this.loggedTimeout = loggedLookupTimeout,
       this.onLateImportPass,
       this.liveLateShouldContinue,
       this.liveHeld,
@@ -209,6 +231,50 @@ class LibraryPhotoIntake implements PhotoIntake {
   /// Those of the ids a meal already names (MealsDao.loggedAssetIds): the
   /// late-import pass skips them without reading a byte. Null: none known.
   final Future<Set<String>> Function(List<String> assetIds)? loggedAssetIds;
+
+  /// Whether [backfillScan] too counts a photo a meal already names
+  /// ([loggedAssetIds]) covered WITHOUT reading it (2026-11-28). True in
+  /// the iOS background run only (ui/background_glue.dart).
+  ///
+  /// That run starts an hour behind its watermark, so each one read and
+  /// hashed every photo of that hour again, the meal it logged last time
+  /// first, out of the 15 s in which it may start a photo. The answer was
+  /// the same each time: a photo whose bytes are a meal's is "already
+  /// logged", and so is one whose bytes changed since (edited in Photos)
+  /// while a meal names its asset (MealsDao.reservePhotoHash's asset
+  /// rule). Skipped, the photo counts covered for the frontier exactly as
+  /// that answer covers it; nothing is marked seen and the ledger is not
+  /// touched. Asked once per scan, for the photos this session has not
+  /// handled; a lookup that fails or outlasts [loggedTimeout] names none,
+  /// and every photo is read as before.
+  ///
+  /// Two things the read did that the skip does not. An edited copy is not
+  /// ledgered under its new bytes by this run. And the asset rule also
+  /// wants the meal dated within a day of the photo (see Android below):
+  /// an edited copy whose meal the user has moved further away than that
+  /// would be analyzed as a new photo, and here it is left as the one meal.
+  /// The app's own catch-up still reads every photo of the look-back
+  /// window, so it has the last word on both.
+  ///
+  /// Only a meal names an asset. The ledger's other verdicts (not food,
+  /// failed, deleted, leftovers) are kept by the bytes' hash alone, so
+  /// those photos are still read to be recognized.
+  ///
+  /// Not on Android: asset ids there are small integers that a restored
+  /// backup or an import from another phone can repeat for a different
+  /// photo, which is why the reservation's asset rule checks the day. An
+  /// iPhone's are random per library, which the late-import pass already
+  /// relies on. And not in the app's own engine, whose scans are left as
+  /// they were.
+  final bool scanSkipsLogged;
+
+  /// Told how many photos a [backfillScan] counted covered because a meal
+  /// names them ([scanSkipsLogged]), once per pass that met any: the
+  /// background run's diagnostics record. A throwing hook changes nothing.
+  final FutureOr<void> Function(int count)? onScanSkippedLogged;
+
+  /// [loggedLookupTimeout]; shorter in tests.
+  final Duration loggedTimeout;
 
   /// Hears what each late-import pass did (the diagnostics record). A
   /// throwing hook changes nothing.
@@ -619,6 +685,9 @@ class LibraryPhotoIntake implements PhotoIntake {
   /// turned away is left as if unread — not released, so the late-import
   /// carry keeps it and the next scan offers it — and a later pass of the
   /// same scan does not read it again.
+  /// A [backfillScan]'s passes (the ones that hand in a [tally]) count a
+  /// photo a meal already names covered without reading it, where
+  /// [scanSkipsLogged] says so.
   Future<DateTime?> _emit(List<LibraryAsset> assets,
       {bool reportFrontier = true,
       bool Function()? shouldContinue,
@@ -660,6 +729,14 @@ class LibraryPhotoIntake implements PhotoIntake {
       }();
       return (await albumIds!).contains(id);
     }
+
+    // The photos of this batch a meal already names, for a scan that
+    // skips them ([scanSkipsLogged]). Every other delivery starts as it
+    // always did, with no wait before its first photo.
+    final logged = scanSkipsLogged && tally != null
+        ? await _loggedForScan(ordered, tally)
+        : const <String>{};
+    var skippedLogged = 0;
 
     void cover(LibraryAsset asset, {bool delivered = false}) {
       if (frontierOpen) frontier = asset.createDateTime;
@@ -703,6 +780,16 @@ class LibraryPhotoIntake implements PhotoIntake {
           !_seenAssetIds.contains(asset.id) &&
           passOver!(asset.id)) {
         cover(asset);
+        continue;
+      }
+      if (logged.contains(asset.id) && !_seenAssetIds.contains(asset.id)) {
+        // A meal names it: logged. Covered as the reservation's "already
+        // logged" would cover it, without the read and the hash that led
+        // there, and before the budget is asked: it costs none.
+        cover(asset);
+        if (tally != null && tally.skippedLogged.add(asset.id)) {
+          skippedLogged++;
+        }
         continue;
       }
       // The caller's time budget, asked BEFORE the original is read: past
@@ -832,6 +919,37 @@ class LibraryPhotoIntake implements PhotoIntake {
       }
     }
     if (onSettled != null) await reportSettled(onSettled);
+    if (skippedLogged > 0) {
+      try {
+        await onScanSkippedLogged?.call(skippedLogged);
+      } catch (_) {}
+    }
     return frontier;
+  }
+
+  /// Those of [assets] a meal already names, for a [backfillScan] that
+  /// skips them ([scanSkipsLogged]); empty where nothing is known. The
+  /// scan's [tally] remembers what was asked, so a second pass asks only
+  /// about photos the first did not. Never throws: a lookup that fails
+  /// names none, and the photos are read.
+  Future<Set<String>> _loggedForScan(
+      List<LibraryAsset> assets, _EmitTally tally) async {
+    final lookup = loggedAssetIds;
+    if (lookup == null) return const <String>{};
+    final ask = [
+      for (final a in assets)
+        if (!_seenAssetIds.contains(a.id) && tally.askedLogged.add(a.id)) a.id,
+    ];
+    if (ask.isNotEmpty) {
+      try {
+        // Through then<Set<String>>: see inMetaAlbum in [_emit].
+        tally.logged.addAll(await lookup(ask)
+            .then<Set<String>>((ids) => ids)
+            .timeout(loggedTimeout, onTimeout: () => const <String>{}));
+      } catch (_) {
+        // Unknown: read them, and the ledger answers.
+      }
+    }
+    return tally.logged;
   }
 }
