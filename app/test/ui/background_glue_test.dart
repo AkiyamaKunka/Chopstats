@@ -3468,6 +3468,93 @@ void main() {
       expect(rec.alreadyLogged, 1);
     });
 
+    // 2026-11-27 as the phone would have shown it (review, 2026-11-28):
+    // the run lists breakfast (logged by the last run) and lunch (new),
+    // sends lunch, and its deadline comes before the server answers. The
+    // record heard of breakfast only at the scan's end, which such a run
+    // never reaches: "2 listed, 1 read", and no word of the other photo.
+    test('a run cut off on the new photo has still said which photo it did '
+        'not read, and why the new one was left', () async {
+      SharedPreferences.setMockInitialValues({});
+      final p = await SharedPreferences.getInstance();
+      final settings =
+          await AppSettings.load(prefs: p, keyStore: MemoryKeyStore());
+      await settings.setProvider(AiProvider.server);
+      await settings.setServerBaseUrl('https://10.0.0.5');
+      await settings.setServerApiKey('k');
+      await settings.setWatcherEnabled(true);
+      await p.setString(backgroundWatermarkPrefsKey,
+          breakfastAt.toUtc().toIso8601String());
+      final library = _Library()
+        ..assets.add(_Asset('breakfast', breakfastAt))
+        ..assets.add(_Asset('lunch', lunchAt));
+      final breakfastHash = md5.convert(utf8.encode('breakfast')).toString();
+      final dao = FakeDao()
+        ..seed(Meal(
+            id: 1,
+            date: '2026-11-27',
+            time: '08:30 AM',
+            timestamp: breakfastAt.toIso8601String(),
+            source: MealSource.appWatch,
+            imageHash: breakfastHash,
+            fileId: 'breakfast',
+            analysis: const {'is_food': true, 'total_calories': 320}));
+      dao.ledger[breakfastHash] = IngestionStatus.saved;
+      final recorder =
+          BackgroundRunRecorder(p, platform: 'ios', clock: () => now);
+      await recorder.begin();
+      var sent = false;
+      final inFlight = RunInFlight(
+          deadline: now.add(iosRunDeadline),
+          clock: () => now,
+          // The server never answers in time.
+          client: MockClient((_) {
+            sent = true;
+            return Completer<http.Response>().future;
+          }))
+        ..recorder = recorder;
+      final run = headlessBackfillWith(
+        settings: settings,
+        prefs: p,
+        intake: LibraryPhotoIntake(
+            lookbackDays: () => settings.lookbackDays,
+            library: library,
+            clock: () => now,
+            onBackfillListed: recorder.listed,
+            loggedAssetIds: dao.loggedAssetIds,
+            scanSkipsLogged: true,
+            onScanSkippedLogged: recorder.alreadyLogged),
+        pipeline: () async => inFlight.pipeline = PhotoPipeline(
+            dao: dao,
+            analyzer: ServerAnalyzer(settings,
+                client: inFlight.traffic, normalizer: (b) async => b),
+            hasher: (b) async => md5.convert(b).toString()),
+        showMealCard: (_, _, {payload}) async {},
+        clock: () => now,
+        photoOffered: inFlight.offered,
+        recorder: recorder,
+      );
+      for (var i = 0; i < 500 && !sent; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 1));
+      }
+      expect(sent, isTrue, reason: 'lunch was never sent');
+      expect(
+          await finishWithinGrant(run,
+              left: Duration.zero,
+              recorder: recorder,
+              abandon: inFlight.abandon),
+          isTrue);
+      final rec =
+          decodeBackgroundRuns(p.getString(backgroundRunsPrefsKey)).single;
+      expect(rec.stopReason, BackgroundStop.budget);
+      expect(library.reads, ['lunch']);
+      expect(
+          (rec.enumerated, rec.offered, rec.analyzed, rec.saved, rec.released),
+          (2, 1, 0, 0, 1));
+      expect(rec.alreadyLogged, 1, reason: 'breakfast: said as it was skipped');
+      expect(rec.left, {BackgroundLeft.deadline: 1});
+    });
+
     // Android's run, and every run before this change: the same meals, the
     // same ledger and the same watermark, reached by reading both photos.
     test('a run that reads every photo ends in the same state', () async {

@@ -15,20 +15,22 @@ import 'package:calorie_tracker/services/photo/watcher.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 class _Asset implements LibraryAsset {
-  _Asset(this.id, this.createDateTime, this._reads);
+  _Asset(this.id, this.createDateTime, this._reads, this._stuck);
   @override
   final String id;
   @override
   final DateTime createDateTime;
   final List<String> _reads;
+  final Set<String> _stuck;
 
   @override
   Future<String> fileName() async => '$id.HEIC';
 
   @override
-  Future<Uint8List?> originBytes() async {
+  Future<Uint8List?> originBytes() {
     _reads.add(id);
-    return Uint8List.fromList(id.codeUnits);
+    if (_stuck.contains(id)) return Completer<Uint8List?>().future;
+    return Future.value(Uint8List.fromList(id.codeUnits));
   }
 }
 
@@ -38,8 +40,11 @@ class _Library implements PhotoLibrary {
   /// The ids whose original was read, in order.
   final List<String> reads = [];
 
+  /// Ids whose original never arrives (an iCloud download that hangs).
+  final Set<String> stuck = {};
+
   void add(String id, DateTime created) =>
-      assets.add(_Asset(id, created, reads));
+      assets.add(_Asset(id, created, reads, stuck));
 
   @override
   Future<List<LibraryAsset>> imagesCreatedAfter(
@@ -157,7 +162,9 @@ void main() {
       expect(library.reads, isEmpty);
       expect(offered, isEmpty);
       expect(frontier, at(12));
-      expect(skipped, [2]);
+      // One call per photo, as it is skipped (it was one call of 2 at the
+      // scan's end, which a scan cut off before then never made).
+      expect(skipped, [1, 1]);
     });
 
     // The watermark must end where it would have with every photo read:
@@ -254,6 +261,45 @@ void main() {
         reason: 'each id asked about once: $asked',
       );
       expect(skipped.fold<int>(0, (a, b) => a + b), 2);
+    });
+
+    // 2026-11-27's run, as the run's record showed it: breakfast was
+    // logged, lunch was new, and the run's deadline cut lunch off in
+    // flight. The engine goes at the deadline, so that scan never reaches
+    // its end. The count was only told there, and the card read "2 listed,
+    // 1 read" with no word about the other photo.
+    test('is told as it is skipped: a scan cut off on the next photo has '
+        'already said so', () async {
+      library
+        ..add('breakfast', at(8))
+        ..add('lunch', at(12));
+      meals = {'breakfast'};
+      final it = intake();
+      final inSink = Completer<void>();
+      it.attachSink((photo, safeFrontier) {
+        inSink.complete();
+        return Completer<bool>().future; // the deadline cuts it off here
+      });
+      unawaited(it.backfillScan());
+      await inSink.future;
+      expect(library.reads, ['lunch']);
+      expect(skipped, [1]);
+    });
+
+    test('is told before the next photo is even read (an original that '
+        'never arrives)', () async {
+      library
+        ..add('breakfast', at(8))
+        ..add('lunch', at(12))
+        ..stuck.add('lunch');
+      meals = {'breakfast'};
+      unawaited(intake().backfillScan());
+      for (var i = 0; i < 50 && library.reads.isEmpty; i++) {
+        await pumpEventQueue();
+      }
+      expect(library.reads, ['lunch'], reason: 'the read began');
+      expect(offered, isEmpty, reason: 'and never ended');
+      expect(skipped, [1]);
     });
 
     test('is not marked seen: nothing is remembered that the meals table '

@@ -268,9 +268,13 @@ class LibraryPhotoIntake implements PhotoIntake {
   /// they were.
   final bool scanSkipsLogged;
 
-  /// Told how many photos a [backfillScan] counted covered because a meal
-  /// names them ([scanSkipsLogged]), once per pass that met any: the
-  /// background run's diagnostics record. A throwing hook changes nothing.
+  /// Told of each photo a [backfillScan] counts covered because a meal
+  /// names it ([scanSkipsLogged]), as it is skipped and before the next
+  /// photo is read: the background run's diagnostics record. One call per
+  /// photo ([count] is 1), not one at the scan's end: a run whose deadline
+  /// cuts off the next photo never reaches that end, and its record then
+  /// said nothing of what it had skipped (review, 2026-11-28). A throwing
+  /// hook changes nothing.
   final FutureOr<void> Function(int count)? onScanSkippedLogged;
 
   /// [loggedLookupTimeout]; shorter in tests.
@@ -736,7 +740,6 @@ class LibraryPhotoIntake implements PhotoIntake {
     final logged = scanSkipsLogged && tally != null
         ? await _loggedForScan(ordered, tally)
         : const <String>{};
-    var skippedLogged = 0;
 
     void cover(LibraryAsset asset, {bool delivered = false}) {
       if (frontierOpen) frontier = asset.createDateTime;
@@ -788,7 +791,11 @@ class LibraryPhotoIntake implements PhotoIntake {
         // there, and before the budget is asked: it costs none.
         cover(asset);
         if (tally != null && tally.skippedLogged.add(asset.id)) {
-          skippedLogged++;
+          // Said now: the scan may never get past the photo after this
+          // one ([onScanSkippedLogged]).
+          try {
+            await onScanSkippedLogged?.call(1);
+          } catch (_) {}
         }
         continue;
       }
@@ -919,11 +926,6 @@ class LibraryPhotoIntake implements PhotoIntake {
       }
     }
     if (onSettled != null) await reportSettled(onSettled);
-    if (skippedLogged > 0) {
-      try {
-        await onScanSkippedLogged?.call(skippedLogged);
-      } catch (_) {}
-    }
     return frontier;
   }
 
