@@ -287,8 +287,17 @@ def _cli_for_request(raise_on_busy: bool, kind: str, declined: str) -> bool:
     wait = busy_wait_seconds() if raise_on_busy else 0
     if _acquire_cli_for_foreground(wait, note):
         if raise_on_busy and "waited" in note:
-            log.info(f"Claude CLI busy — app {kind} request waited "
-                     f"{note['waited']:.1f} s for it.")
+            # _CLI_LOCK is this request's already, and the caller's
+            # try/finally, which gives it back, begins only after this
+            # function returns. Nothing may raise in between: an error
+            # from the logger here would leave the CLI "busy" until the
+            # next restart. So a line that cannot be written is lost, and
+            # the request goes on.
+            try:
+                log.info(f"Claude CLI busy — app {kind} request waited "
+                         f"{note['waited']:.1f} s for it.")
+            except Exception:
+                pass
         return True
     if not raise_on_busy:
         log.info(f"Claude CLI busy — {declined}")

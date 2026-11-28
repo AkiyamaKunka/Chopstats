@@ -1610,6 +1610,56 @@ def test_three_app_requests_at_once_run_one_cli_at_a_time(monkeypatch):
     assert claude_analyzer._LOOKUP_STATE["fg_waiting"] == 0
 
 
+@pytest.mark.parametrize("kind", ["photo", "leftover", "text"])
+def test_a_waited_line_that_cannot_be_written_does_not_keep_the_cli_locked(
+        monkeypatch, kind):
+    """The "waited" line is written when the request already holds the
+    CLI's lock, and before the try/finally that gives the lock back has
+    begun. An error from the logger at that point would leave the lock
+    held, and the analyzer would answer "busy" to everything until the
+    service was started again (review 2026-11-28). Now the line is lost
+    and nothing else: the request is analyzed and answered, and the lock
+    comes back."""
+    _configure(monkeypatch)
+    monkeypatch.delenv("CLAUDE_API_BUSY_WAIT_SECONDS", raising=False)
+    calls = _fake_run(monkeypatch, stdout=_envelope(json.dumps(GOOD_ANALYSIS)))
+    real_wait = claude_analyzer._wait_for_cli
+
+    def wait(seconds):
+        claude_analyzer._CLI_LOCK.release()  # the analysis ahead ends
+        return real_wait(seconds)  # and this request has the CLI
+
+    monkeypatch.setattr(claude_analyzer, "_wait_for_cli", wait)
+    real_info = claude_analyzer.log.info
+    lost = []
+
+    def info(message, *args, **kwargs):
+        if "request waited" in str(message):
+            lost.append(message)
+            raise RuntimeError("the journal cannot take this line")
+        return real_info(message, *args, **kwargs)
+
+    monkeypatch.setattr(claude_analyzer.log, "info", info)
+    box = {}
+    assert claude_analyzer._CLI_LOCK.acquire(blocking=False)  # the one ahead
+    try:
+        box["answer"] = _app_request(kind)
+    except RuntimeError as e:
+        box["error"] = e
+    finally:
+        # Handed back here whatever happened, so that a failing run cannot
+        # leave the CLI locked for the tests after it.
+        left_locked = claude_analyzer._CLI_LOCK.locked()
+        if left_locked:
+            claude_analyzer._CLI_LOCK.release()
+
+    assert len(lost) == 1, "the line was never on its way to the journal"
+    assert left_locked is False, "the CLI stayed locked: busy until restart"
+    assert box == {"answer": _app_answer(kind)}
+    assert len(calls) == 1
+    assert claude_analyzer._LOOKUP_STATE["fg_waiting"] == 0
+
+
 def test_the_wait_itself_ends_at_its_limit_and_takes_nothing():
     """_wait_for_cli is the one line the stand-ins above replace: it gives
     up at its limit (10 ms here) and leaves the lock with its holder, and
