@@ -184,6 +184,28 @@ void main() {
       expect(dao.ledger, isEmpty);
     });
 
+    // A deliberate photo whose reservation was lost while the model
+    // answered is settled again from the verdict it already has, with no
+    // second upload (PhotoPipeline._afterLost).
+    test('says a photo is being sent once though its verdict is settled '
+        'twice: nothing is uploaded the second time', () async {
+      analyzer
+        ..nextPhotoOutcome = const AnalysisOutcome(
+            analysis: {'is_food': true, 'meal_description': 'Soup'},
+            isFood: true,
+            wall: Duration.zero)
+        ..onAnalyze = () async {
+          events.add('sent');
+          // Meanwhile the row went to another run's stale reclaim.
+          dao.ledger.remove('hash-7');
+          dao.stamps.remove('hash-7');
+        };
+      final outcome = await pipeline().process(_photo(deliberate: true));
+      expect(outcome.kind, PhotoOutcomeKind.saved);
+      expect(dao.meals, hasLength(1));
+      expect(events, ['checking asset7', 'sent', 'checked none']);
+    });
+
     test('the analyzers\' own failure lines: unreachable, busy and '
         'rate-limited leave the photo waiting; a quota pause and a rejected '
         'key do not; an unreadable photo is a failure kept', () async {

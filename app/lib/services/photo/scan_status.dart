@@ -120,7 +120,8 @@ class PhotoScanStatus extends ChangeNotifier {
       <String, AnalysisErrorKind>{};
 
   /// Since [reset], until the next scan begins: the photo still in flight
-  /// then is not this row's to report any more.
+  /// then is not this row's to report any more. The watcher begins none
+  /// for a scan the switch-off itself has ended (LibraryPhotoIntake.stop).
   bool _switchedOff = false;
 
   bool get _busy =>

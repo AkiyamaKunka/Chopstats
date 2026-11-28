@@ -360,12 +360,19 @@ class LibraryPhotoIntake implements PhotoIntake, ReportsPhotoScans {
 
   @override
   Future<void> stop() async {
+    // Switched off: a scan in progress reads nothing more, and Today's row
+    // says nothing more about photos no scan will take up.
+    //
+    // Both whether or not the live watcher ever started. With no photo
+    // access at launch it did not, and once access is granted the
+    // catch-ups scan all the same (Android does not restart the app for
+    // that). stop() used to return at once then: a catch-up in progress
+    // sent the rest of its window, and the row kept "1 photo is not
+    // checked yet" with a Retry that did nothing.
+    _generation++; // quiesce in-flight emission loops
+    scanStatus?.reset();
     if (!_started) return;
     _started = false;
-    _generation++; // quiesce in-flight emission loops
-    // Switched off: Today's row says nothing more about photos no scan
-    // will take up.
-    scanStatus?.reset();
     await _library.stopChangeNotify();
   }
 
@@ -387,6 +394,8 @@ class LibraryPhotoIntake implements PhotoIntake, ReportsPhotoScans {
     }
     _scanning = true;
     try {
+      // The switch as it stands before this scan's first wait (see below).
+      final generation = _generation;
       final cutoff = _incrementalCutoff ?? _clock();
       final assets = await _library.imagesCreatedAfter(cutoff);
       // Same truncation rule as backfillScan: a capped result set hides an
@@ -395,8 +404,17 @@ class LibraryPhotoIntake implements PhotoIntake, ReportsPhotoScans {
       final truncated = listedCount(assets) >= 500;
       // Today's row: what this scan is about to check. Nothing is asked
       // (or waited for) without a status.
-      final scan =
-          scanStatus?.begin(expected: await _lookUnchecked(assets));
+      final status = scanStatus;
+      final expected =
+          status == null ? const <String>[] : await _lookUnchecked(assets);
+      // A stop() while the library was listed or the estimate worked out
+      // ends the scan here: it reads no photo, and opens no scan on the
+      // row stop() has cleared. (The reads used to take their mark only
+      // as they began, after both waits, and sent the photo with the
+      // watcher off; and a scan opened after the row's reset had it report
+      // again the photo another scan still had in flight.)
+      if (_generation != generation) return;
+      final scan = status?.begin(expected: expected);
       final DateTime? frontier;
       try {
         frontier = await _emit(assets,
@@ -545,6 +563,10 @@ class LibraryPhotoIntake implements PhotoIntake, ReportsPhotoScans {
     // lookback clamp.
     final narrowed = since != null && since.isAfter(cutoff);
     if (narrowed) cutoff = since;
+    // The switch as it stands before this scan's first wait: a stop() while
+    // the library is being listed ends the scan before it reads a photo,
+    // as one during a pass does (below, where the passes begin).
+    final generation = _generation;
     // §6.4: EVERY photo in the window is offered downstream; the status
     // ledger (saved/skipped/failed/deleted incl. tombstones) is what makes
     // the re-scan idempotent — keep the window small. The raised limit
@@ -599,14 +621,23 @@ class LibraryPhotoIntake implements PhotoIntake, ReportsPhotoScans {
     // One generation for every pass: each used to take its own as it
     // began, so a stop() during the first pass (Watch Camera Roll switched
     // off mid catch-up) ended that pass, and the next one, begun after the
-    // stop, delivered the rest of the window all the same.
-    final generation = _generation;
+    // stop, delivered the rest of the window all the same. It is the one
+    // taken above, before the library was listed.
+    //
     // Today's row (scan_status.dart): what this scan is about to check. A
     // capped listing hides the window's oldest photos, so it cannot say
-    // that a photo still waiting is gone.
-    final scan = scanStatus?.begin(
-        expected: await _lookUnchecked(assets),
-        wholeWindow: lookbackDays <= 0 && !narrowed && !truncated);
+    // that a photo still waiting is gone. A scan that stop() reached
+    // meanwhile opens none: it reads nothing (its generation is gone), and
+    // a scan opened on the row stop() has cleared would have it report
+    // again the photo another scan still has in flight.
+    final status = scanStatus;
+    final expected =
+        status == null ? const <String>[] : await _lookUnchecked(assets);
+    final scan = _generation != generation
+        ? null
+        : status?.begin(
+            expected: expected,
+            wholeWindow: lookbackDays <= 0 && !narrowed && !truncated);
     final DateTime? frontier;
     try {
       if (newestDayFirst) {

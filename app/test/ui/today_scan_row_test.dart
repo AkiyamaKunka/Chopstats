@@ -193,6 +193,86 @@ void main() {
       }, skip: !haveIphoneFonts);
     }
 
+    // The tests above measure with the iPhone's own fonts, which CI does
+    // not have: there nothing failed with the row put over the totals.
+    // Where the row is holds with any font.
+    testWidgets('the row sits under the totals, which do not move, and over '
+        'what follows them, while it counts and while photos wait (any '
+        'fonts)', (tester) async {
+      final status = PhotoScanStatus();
+      await pumpApp(tester, _today(FakeDao(), status, onRetry: () async {}),
+          size: _se);
+      final hero = tester.getRect(find.byKey(_hero));
+      final empty = find.byKey(const Key('todayEmpty'), skipOffstage: false);
+
+      final scan = _checking(status);
+      await _pumpMotion(tester);
+      expect(tester.getRect(find.byKey(_hero)), hero);
+      var row = tester.getRect(find.byKey(_row));
+      expect(row.top, greaterThanOrEqualTo(hero.bottom));
+      expect(tester.getRect(empty).top, greaterThanOrEqualTo(row.bottom));
+      // The cards' one gutter.
+      expect(_cell(tester, _row).left, _cell(tester, _hero).left);
+      expect(_cell(tester, _row).right, _cell(tester, _hero).right);
+
+      status.finished('a', ScanVerdict.waiting,
+          kind: AnalysisErrorKind.network);
+      scan.end();
+      await _pumpMotion(tester);
+      expect(find.byKey(_retry), findsOneWidget);
+      expect(tester.getRect(find.byKey(_hero)), hero);
+      row = tester.getRect(find.byKey(_row));
+      expect(row.top, greaterThanOrEqualTo(hero.bottom));
+      expect(tester.getRect(empty).top, greaterThanOrEqualTo(row.bottom));
+    });
+
+    for (final lang in const ['en', 'zh']) {
+      testWidgets('$lang: what the row says while it counts, when the scan '
+          'is over and when photos wait (any fonts)', (tester) async {
+        final en = lang == 'en';
+        final keepOpen = en ? 'Keep Chopstats open.' : '请保持筷拍打开。';
+        final status = PhotoScanStatus();
+        await pumpApp(tester, _today(FakeDao(), status, onRetry: () async {}),
+            size: _se, locale: Locale(lang));
+        final scan = _checking(status);
+        await _pumpMotion(tester);
+        expect(
+            find.text(
+                en ? 'Checking photos: 1 of 3' : '正在检查照片：第 1 张，共 3 张'),
+            findsOneWidget);
+        expect(find.text(keepOpen), findsOneWidget);
+
+        for (final id in ['a', 'b', 'c']) {
+          status.checking(id);
+          status.finished(id, ScanVerdict.checked);
+        }
+        scan.end();
+        await _pumpMotion(tester);
+        expect(find.text(en ? '3 photos checked.' : '已检查 3 张照片。'),
+            findsOneWidget);
+        expect(find.text(keepOpen), findsNothing);
+        expect(find.byKey(_retry), findsNothing);
+        await tester.pump(PhotoScanRow.doneFor);
+        await tester.pumpAndSettle();
+        expect(find.byKey(_row), findsNothing);
+
+        _waiting(status, kind: AnalysisErrorKind.serverBusy);
+        await _pumpMotion(tester);
+        expect(
+            find.text(en
+                ? '3 photos are not checked yet (your server is busy with '
+                    'another analysis).'
+                : '还有 3 张照片没有检查（你的服务器正在处理另一张照片）。'),
+            findsOneWidget);
+        expect(find.text(keepOpen), findsNothing);
+        expect(
+            find.descendant(
+                of: find.byKey(_retry),
+                matching: find.text(en ? 'Retry' : '重试')),
+            findsOneWidget);
+      });
+    }
+
     testWidgets('one photo reads as one', (tester) async {
       final status = PhotoScanStatus();
       await pumpApp(tester, _today(FakeDao(), status), size: _se);
@@ -209,6 +289,145 @@ void main() {
       await tester.pumpAndSettle();
     });
 
+    // "N photos checked." is for a scan that checked some. One whose
+    // photos all ended with nothing to count (a pause every photo shares
+    // came on as the first was sent) has nothing to say: not "0 photos
+    // checked."
+    testWidgets('a scan that came to no photo checked says nothing after '
+        'it', (tester) async {
+      final status = PhotoScanStatus();
+      await pumpApp(tester, _today(FakeDao(), status), size: _se);
+      final scan = status.begin(expected: ['a']);
+      status.checking('a');
+      await _pumpMotion(tester);
+      expect(find.text('Checking 1 photo'), findsOneWidget);
+      status.finished('a', ScanVerdict.none);
+      scan.end();
+      await _pumpMotion(tester);
+      expect(find.byKey(_row), findsNothing);
+    });
+
+    testWidgets('a scan long over leaves no "photos checked." behind when '
+        'its waiting photo is then logged by hand: the row just goes',
+        (tester) async {
+      final status = PhotoScanStatus();
+      await pumpApp(tester, _today(FakeDao(), status, onRetry: () async {}),
+          size: _se);
+      final scan = status.begin(expected: ['a', 'p']);
+      status.checking('a');
+      status.finished('a', ScanVerdict.checked);
+      status.checking('p');
+      status.finished('p', ScanVerdict.waiting,
+          kind: AnalysisErrorKind.network);
+      scan.end();
+      await _pumpMotion(tester);
+      expect(find.byKey(_retry), findsOneWidget);
+      // Log › From recent photos: the user picks p.
+      status.settled('p');
+      await _pumpMotion(tester);
+      expect(find.byKey(_row), findsNothing);
+    });
+
+    testWidgets('"3 photos checked." keeps its count for its three seconds, '
+        'though the next scan has begun and Today is rebuilt',
+        (tester) async {
+      final status = PhotoScanStatus();
+      await pumpApp(tester, _today(FakeDao(), status), size: _se);
+      final scan = _checking(status);
+      for (final id in ['a', 'b', 'c']) {
+        status.checking(id);
+        status.finished(id, ScanVerdict.checked);
+      }
+      scan.end();
+      await _pumpMotion(tester);
+      expect(find.text('3 photos checked.'), findsOneWidget);
+      // A photo arrives: the live watcher's scan begins, nothing sent yet.
+      final next = status.begin(expected: ['d']);
+      unawaited(tester
+          .state<TodayScreenState>(find.byType(TodayScreen))
+          .reload());
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('3 photos checked.'), findsOneWidget);
+      next.end();
+      await tester.pump(PhotoScanRow.doneFor);
+      await tester.pumpAndSettle();
+      expect(find.byKey(_row), findsNothing);
+    });
+
+    testWidgets('each scan\'s "photos checked." gets its own three seconds: '
+        'one that follows another closely is not cut short by the first '
+        'one\'s clock', (tester) async {
+      final status = PhotoScanStatus();
+      await pumpApp(tester, _today(FakeDao(), status), size: _se);
+      Future<void> scanOf(String id) async {
+        final scan = status.begin(expected: [id]);
+        status.checking(id);
+        await tester.pump();
+        status.finished(id, ScanVerdict.checked);
+        scan.end();
+        await tester.pump();
+      }
+
+      await scanOf('a');
+      expect(find.text('1 photo checked.'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 2));
+      await scanOf('b');
+      expect(find.text('1 photo checked.'), findsOneWidget);
+      // The first line's three seconds are long up now; the second's are
+      // not.
+      await tester.pump(const Duration(milliseconds: 2500));
+      expect(find.text('1 photo checked.'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pumpAndSettle();
+      expect(find.byKey(_row), findsNothing);
+    });
+
+    testWidgets('leaving Today while "photos checked." shows leaves no '
+        'clock running', (tester) async {
+      final status = PhotoScanStatus();
+      await pumpApp(tester, _today(FakeDao(), status), size: _se);
+      final scan = status.begin(expected: ['a']);
+      status.checking('a');
+      status.finished('a', ScanVerdict.checked);
+      scan.end();
+      await tester.pump();
+      expect(find.text('1 photo checked.'), findsOneWidget);
+      // The test ends with the tree gone: a timer still pending fails it.
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a row built while photos already wait, or a scan is '
+        'already at work, shows them from its first frame', (tester) async {
+      // Today finishes loading after the launch catch-up has begun.
+      final waiting = PhotoScanStatus();
+      _waiting(waiting, count: 2);
+      await pumpApp(tester, _today(FakeDao(), waiting), size: _se);
+      expect(
+          find.text('2 photos are not checked yet (network or service '
+              'issue).'),
+          findsOneWidget);
+
+      await tester.pumpWidget(const SizedBox());
+      final checking = PhotoScanStatus();
+      final scan = _checking(checking);
+      // The spinner never settles.
+      await pumpApp(tester, _today(FakeDao(), checking),
+          size: _se, settle: false);
+      await _pumpMotion(tester);
+      expect(find.text('Checking photos: 1 of 3'), findsOneWidget);
+
+      // A row handed another status shows that one's state at once.
+      await pumpApp(tester, _today(FakeDao(), waiting),
+          size: _se, settle: false);
+      await _pumpMotion(tester);
+      expect(
+          find.text('2 photos are not checked yet (network or service '
+              'issue).'),
+          findsOneWidget);
+      scan.end();
+    });
+
     testWidgets('opens over AppMotion.standard, and at once with animations '
         'off', (tester) async {
       final status = PhotoScanStatus();
@@ -218,10 +437,13 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 60));
       final mid = tester.getRect(find.byKey(const Key('todayEmpty'))).top;
+      final midRowTop = tester.getRect(find.byKey(_row)).top;
       await _pumpMotion(tester);
       final open = tester.getRect(find.byKey(const Key('todayEmpty'))).top;
       expect(mid, greaterThan(emptyTop));
       expect(mid, lessThan(open), reason: 'it slides, it does not jump');
+      expect(midRowTop, tester.getRect(find.byKey(_row)).top,
+          reason: 'it opens downward: its top edge stays under the totals');
       scan.end();
 
       final still = PhotoScanStatus();

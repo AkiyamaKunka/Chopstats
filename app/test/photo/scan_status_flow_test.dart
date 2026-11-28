@@ -10,13 +10,16 @@
 // comes up, what it counts, what stays behind as not checked yet, and that
 // a scan with nothing to check, or a photo that is simply not food, says
 // nothing.
+import 'dart:async';
 import 'dart:io';
 
 import 'package:calorie_tracker/core/contracts.dart';
 import 'package:calorie_tracker/core/outcome_kind.dart';
 import 'package:calorie_tracker/services/local_store.dart';
 import 'package:calorie_tracker/services/photo/photo_changes.dart';
+import 'package:calorie_tracker/services/photo/photo_library.dart';
 import 'package:calorie_tracker/services/photo/scan_status.dart';
+import 'package:calorie_tracker/services/photo/watcher.dart';
 import 'package:calorie_tracker/ui/background_glue.dart';
 import 'package:calorie_tracker/ui/photo_pipeline.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -24,7 +27,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../support/photo_scan_rig.dart';
 import '../ui/fakes.dart' show FakeDao;
-import 'watcher_test.dart' show FakeAsset;
+import 'watcher_test.dart' show FakeAsset, FakePhotoLibrary;
 
 void main() {
   group('a catch-up over a day\'s backlog', () {
@@ -132,6 +135,42 @@ void main() {
       expect(rig.status.waitingCount, 0);
       expect(rig.status.checkedCount, 2);
     });
+
+    test('that photo also when it is the last one the catch-up reaches: '
+        'the row does not hold "2 of 2" for it until the catch-up is over',
+        () async {
+      SharedPreferences.setMockInitialValues({});
+      final prefs = await SharedPreferences.getInstance();
+      final rig = PhotoScanRig();
+      rig.library.assets = [
+        rig.photo('a', 1, yesterdayAt(8)),
+        FakeAsset('unreadable', 'IMG_x.HEIC', yesterdayAt(9), null),
+      ];
+      await foregroundCatchUp(rig.intake, loadPrefs: () async => prefs);
+      expect(rig.row,
+          ['checking 1/2', 'checking 2/2', 'checking 1/1', 'idle']);
+      expect(rig.status.checkedCount, 1);
+    });
+  });
+
+  group('the estimate of what looks unchecked', () {
+    // It only words the row's count. Whatever it cannot find out, the scan
+    // goes on, and the photos are counted as if nothing were known.
+    test('survives a watermark that cannot be read and a meals lookup that '
+        'fails', () async {
+      final dao = FakeLedger()
+        ..onLoggedAssetIds = (() => throw StateError('database is locked'));
+      final rig = PhotoScanRig(
+          dao: dao, checkedThrough: () => throw StateError('preferences'));
+      rig.library.assets = [
+        rig.photo('a', 1, yesterdayAt(8)),
+        rig.photo('b', 2, yesterdayAt(9)),
+      ];
+      await rig.catchUp();
+      expect(dao.onLoggedAssetIds, isNull, reason: 'the lookup was asked');
+      expect(rig.row, ['checking 1/2', 'checking 2/2', 'idle']);
+      expect(rig.analyzer.sent, [1, 2]);
+    });
   });
 
   group('photos that could not be sent', () {
@@ -180,6 +219,62 @@ void main() {
       await rig.catchUp();
       expect(rig.row.last, 'idle');
       expect(rig.analyzer.sent, [2]);
+    });
+
+    // "Forgotten" is for a scan that would have listed the photo. Those
+    // that would not cannot say it is gone.
+    test('a listing that hit the library\'s cap forgets no waiting photo: it '
+        'hides the window\'s oldest ones', () async {
+      final library = ScriptedLibrary();
+      final rig = PhotoScanRig(library: library);
+      library.assets = [rig.photo('lunch', 2, yesterdayAt(12))];
+      rig.analyzer.script[2] = (_) => unreachableReply;
+      await rig.catchUp();
+      expect(shownOf(rig.status), 'waiting 1 network');
+      // So many newer images since that the listing is full before it
+      // reaches the photo.
+      library
+        ..assets = []
+        ..capped = true;
+      await expectLater(
+          rig.catchUp(), throwsA(isA<BackfillWindowTruncated>()));
+      expect(shownOf(rig.status), 'waiting 1 network');
+    });
+
+    test('nor does a scan of less than the whole window: one that starts '
+        'from a watermark, or is asked for fewer days', () async {
+      final rig = PhotoScanRig();
+      rig.library.assets = [rig.photo('lunch', 2, twoDaysAgoAt(12))];
+      rig.analyzer.script[2] = (_) => unreachableReply;
+      await rig.catchUp();
+      expect(shownOf(rig.status), 'waiting 1 network');
+      // Both list from later than the photo.
+      await rig.intake.backfillScan(since: yesterdayAt(0));
+      expect(shownOf(rig.status), 'waiting 1 network');
+      await rig.intake.backfillScan(lookbackDays: 1);
+      expect(shownOf(rig.status), 'waiting 1 network');
+      expect(rig.analyzer.sent, [2], reason: 'neither one listed it');
+    });
+
+    test('a waiting photo taken before the last one known checked (imported '
+        'late, or one the background run\'s mark passed over) is taken up '
+        'by the next catch-up straight away all the same', () async {
+      // Everything up to last night is known checked. This photo is older,
+      // and this session let it go.
+      final rig = PhotoScanRig(checkedThrough: () => yesterdayAt(23));
+      rig.library.assets = [rig.photo('late', 2, twoDaysAgoAt(19))];
+      rig.analyzer.script[2] = (_) => unreachableReply;
+      await rig.catchUp();
+      expect(shownOf(rig.status), 'waiting 1 network');
+
+      rig.row.clear();
+      rig.rowAtRead.clear();
+      rig.analyzer.script.remove(2);
+      await rig.catchUp();
+      expect(rig.rowAtRead, ['checking 1/1'],
+          reason: 'its date says checked, this session knows better: the '
+              'row does not go away and come back as the photo is read');
+      expect(rig.row, ['checking 1/1', 'idle']);
     });
 
     test('an unreachable server: every photo waits, and the reason is the '
@@ -307,6 +402,52 @@ void main() {
       expect(rig.row, ['checking 1/2', 'checking 2/2', 'idle']);
     });
 
+    test('each of its scans is a round of its own: a photo that arrives '
+        'later is counted from one again', () async {
+      final now = DateTime.now();
+      final rig = PhotoScanRig(clock: () => now);
+      await rig.intake.start();
+      final first = rig.photo('new1', 1, now.add(const Duration(seconds: 5)));
+      rig.library.assets = [first];
+      rig.library.changeListener!();
+      await _until(() => rig.row.isNotEmpty && rig.row.last == 'idle');
+      expect(rig.row, ['checking 1/1', 'idle']);
+
+      rig.row.clear();
+      rig.library.assets = [
+        first,
+        rig.photo('new2', 2, now.add(const Duration(seconds: 9))),
+      ];
+      rig.library.changeListener!();
+      await _until(() => rig.row.isNotEmpty && rig.row.last == 'idle');
+      expect(rig.row, ['checking 1/1', 'idle'],
+          reason: 'not "2 of 2": the first scan\'s round is over');
+      expect(rig.status.checkedCount, 1,
+          reason: 'what "1 photo checked." counts');
+    });
+
+    test('a photo it let go that another run of the app has logged since '
+        'waits no longer once its next scan meets it', () async {
+      final now = DateTime.now();
+      final dao = FakeLedger();
+      final rig = PhotoScanRig(clock: () => now, dao: dao);
+      await rig.intake.start();
+      rig.library.assets = [
+        rig.photo('new', 1, now.add(const Duration(seconds: 5))),
+      ];
+      rig.analyzer.script[1] = (_) => unreachableReply;
+      rig.library.changeListener!();
+      await _until(() => rig.row.isNotEmpty && rig.row.last != 'checking 1/1');
+      expect(rig.row, ['checking 1/1', 'waiting 1 network']);
+
+      // The background run got through to the server, and logged it.
+      dao.loggedMeal('new', 'hash-1');
+      rig.library.changeListener!();
+      await _until(() => rig.row.last == 'idle');
+      expect(rig.analyzer.sent, [1], reason: 'found logged, not sent again');
+      expect(rig.status.waitingCount, 0);
+    });
+
     // Before 2026-11-28 each pass of a catch-up took its own "still on"
     // mark as it began: a switch-off during the newest day's pass ended
     // that pass, and the window pass, begun after it, sent the rest.
@@ -339,6 +480,177 @@ void main() {
       expect(rig.row.last, 'waiting 1 network');
       await rig.intake.stop();
       expect(rig.row.last, 'idle');
+    });
+  });
+
+  group('switching Watch Camera Roll off before a scan\'s first read', () {
+    // A scan waits twice before it reads a photo: for the library's
+    // listing, and (for the row) for the meals' answer to what looks
+    // unchecked. The live scan used to take its "still on" mark only as
+    // the reads began, so a switch-off during either wait sent the photo
+    // all the same, and raised "Checking 1 photo" with the watcher off.
+    test('while a live scan works out what looks unchecked: nothing is '
+        'read or sent, and no row comes up', () async {
+      final now = DateTime.now();
+      final dao = FakeLedger();
+      final rig = PhotoScanRig(clock: () => now, dao: dao);
+      await rig.intake.start();
+      rig.library.assets = [
+        rig.photo('new', 1, now.add(const Duration(seconds: 5))),
+      ];
+      rig.analyzer.script[1] = (_) => foodReply('Noodles', 650);
+      dao.onLoggedAssetIds = rig.intake.stop;
+      rig.library.changeListener!();
+      await pumpEventQueue();
+      expect(dao.onLoggedAssetIds, isNull, reason: 'the scan got that far');
+      expect(rig.reads, isEmpty);
+      expect(rig.analyzer.sent, isEmpty);
+      expect(rig.row, isEmpty);
+      expect(rig.dao.meals, isEmpty);
+    });
+
+    test('while a live scan lists the library: the same', () async {
+      final now = DateTime.now();
+      final library = ScriptedLibrary();
+      final rig = PhotoScanRig(clock: () => now, library: library);
+      await rig.intake.start();
+      library.assets = [
+        rig.photo('new', 1, now.add(const Duration(seconds: 5))),
+      ];
+      library.onListed = rig.intake.stop;
+      library.changeListener!();
+      await pumpEventQueue();
+      expect(library.onListed, isNull, reason: 'the scan got that far');
+      expect(rig.reads, isEmpty);
+      expect(rig.analyzer.sent, isEmpty);
+      expect(rig.row, isEmpty);
+    });
+
+    test('while a catch-up lists the library: the same', () async {
+      final library = ScriptedLibrary();
+      final rig = PhotoScanRig(library: library);
+      await rig.intake.start();
+      library.assets = [rig.photo('lunch', 1, yesterdayAt(12))];
+      library.onListed = rig.intake.stop;
+      await rig.catchUp();
+      expect(library.onListed, isNull, reason: 'the scan got that far');
+      expect(rig.reads, isEmpty);
+      expect(rig.analyzer.sent, isEmpty);
+      expect(rig.row, isEmpty);
+    });
+
+    // stop() clears the row, and the photo in flight then ends unreported
+    // (scan_status_test: reset). A scan the switch had reached before its
+    // first read used to open its round on the row all the same, after
+    // the reset, and so undid it: the photo in flight came back as "1
+    // photo is not checked yet", with a Retry that does nothing while the
+    // watcher is off.
+    test('such a live scan opens no round on the row: the photo a catch-up '
+        'still has in flight ends unreported', () async {
+      final now = DateTime.now();
+      final dao = FakeLedger();
+      final rig = PhotoScanRig(clock: () => now, dao: dao);
+      await rig.intake.start();
+      final lunch = rig.photo('lunch', 2, yesterdayAt(12));
+      rig.library.assets = [lunch];
+      rig.analyzer.script[2] = (_) => unreachableReply;
+      final answer = Completer<void>();
+      rig.analyzer.onSend = (_) => answer.future;
+      final catchUp = rig.catchUp();
+      await _until(() => rig.analyzer.sent.isNotEmpty);
+      expect(rig.row, ['checking 1/1']);
+
+      // A photo arrives, and the switch goes off while its scan works out
+      // what looks unchecked.
+      rig.library.assets = [
+        lunch,
+        rig.photo('new', 1, now.add(const Duration(seconds: 5))),
+      ];
+      dao.onLoggedAssetIds = rig.intake.stop;
+      rig.library.changeListener!();
+      await pumpEventQueue();
+      expect(dao.onLoggedAssetIds, isNull, reason: 'the scan got that far');
+      expect(shownOf(rig.status), 'idle');
+
+      // The server could not be reached for the photo in flight.
+      answer.complete();
+      await catchUp;
+      await pumpEventQueue();
+      expect(shownOf(rig.status), 'idle');
+      expect(rig.status.waitingCount, 0);
+      expect(rig.analyzer.sent, [2], reason: 'the new photo was not sent');
+    });
+
+    test('nor does such a catch-up: the photo the live watcher still has '
+        'in flight ends unreported', () async {
+      final now = DateTime.now();
+      final dao = FakeLedger();
+      final rig = PhotoScanRig(clock: () => now, dao: dao);
+      await rig.intake.start();
+      final fresh = rig.photo('new', 1, now.add(const Duration(seconds: 5)));
+      rig.library.assets = [fresh];
+      rig.analyzer.script[1] = (_) => unreachableReply;
+      final answer = Completer<void>();
+      rig.analyzer.onSend = (_) => answer.future;
+      rig.library.changeListener!();
+      await _until(() => rig.analyzer.sent.isNotEmpty);
+      expect(rig.row, ['checking 1/1']);
+
+      // A catch-up starts, and the switch goes off while it works out
+      // what looks unchecked.
+      rig.library.assets = [rig.photo('lunch', 2, yesterdayAt(12)), fresh];
+      dao.onLoggedAssetIds = rig.intake.stop;
+      await rig.catchUp();
+      expect(dao.onLoggedAssetIds, isNull, reason: 'the scan got that far');
+      expect(shownOf(rig.status), 'idle');
+
+      answer.complete();
+      await pumpEventQueue();
+      expect(shownOf(rig.status), 'idle');
+      expect(rig.status.waitingCount, 0);
+      expect(rig.reads, ['new'], reason: 'the catch-up read nothing');
+      expect(rig.analyzer.sent, [1]);
+    });
+  });
+
+  // With no photo access at launch the live watcher does not start. Once
+  // access is granted (Android does not restart the app for that) the
+  // catch-ups scan all the same, and the row reports them. stop() used to
+  // return at once then: the row kept "1 photo is not checked yet" with a
+  // Retry that did nothing, and a catch-up in progress sent the rest of
+  // its window.
+  group('switching Watch Camera Roll off when the live watcher never '
+      'started', () {
+    test('clears the row', () async {
+      final rig = PhotoScanRig();
+      rig.library.permissionGranted = false;
+      await rig.intake.start(); // refused: no live watcher
+      expect(rig.library.changeListener, isNull);
+      rig.library.assets = [rig.photo('lunch', 1, yesterdayAt(12))];
+      rig.analyzer.script[1] = (_) => unreachableReply;
+      await rig.catchUp();
+      expect(shownOf(rig.status), 'waiting 1 network');
+      await rig.intake.stop();
+      expect(shownOf(rig.status), 'idle');
+      expect(rig.status.waitingCount, 0);
+    });
+
+    test('ends a catch-up in progress: nothing more is read or sent',
+        () async {
+      final rig = PhotoScanRig();
+      rig.library.permissionGranted = false;
+      await rig.intake.start(); // refused: no live watcher
+      rig.library.assets = [
+        rig.photo('breakfast', 1, yesterdayAt(8)),
+        rig.photo('lunch', 2, yesterdayAt(12)),
+      ];
+      rig.analyzer.onSend = (n) async {
+        if (n == 1) await rig.intake.stop();
+      };
+      await rig.catchUp();
+      expect(rig.reads, ['breakfast']);
+      expect(rig.analyzer.sent, [1]);
+      expect(shownOf(rig.status), 'idle');
     });
   });
 
@@ -382,6 +694,51 @@ void main() {
       await rig.intake.lateImportScan();
       expect(rig.row, ['checking 1/2', 'checking 2/2', 'idle']);
       expect(rig.analyzer.sent, [1, 2]);
+    });
+
+    test('a late-import pass counts its photos though every one lies '
+        'behind the last photo known checked, and is a round of its own',
+        () async {
+      final history = FakePhotoChangeSource();
+      // Everything up to last night is known checked.
+      final rig = PhotoScanRig(
+          lookbackDays: 7,
+          checkedThrough: () => yesterdayAt(23),
+          lateImports: LateImportCursor(
+              source: history,
+              store: LocalNoBackupStore(
+                  root: () async => root, createMissingDirectory: true)));
+      await rig.intake.lateImportScan(); // the cursor starts from here
+      final g1 = rig.photo('g1', 1, twoDaysAgoAt(19));
+      final g2 = rig.photo('g2', 2, twoDaysAgoAt(19, 5));
+      final g3 = rig.photo('g3', 3, twoDaysAgoAt(20));
+      // What the history reports next, once.
+      var imported = <FakeAsset>[g1, g2];
+      history.onInsertedImagesSince = (token, _, _, _) {
+        final batch = imported;
+        imported = [];
+        return InsertedImages(PhotoChangeStatus.ok,
+            token: batch.isEmpty ? token : history.nextToken(),
+            deviceTag: history.deviceTag,
+            ids: [
+              for (final a in batch)
+                InsertedImage(a.id, created: a.createDateTime),
+            ]);
+      };
+      rig.library.assets = [g1, g2];
+      await rig.intake.lateImportScan();
+      expect(rig.row, ['checking 1/2', 'checking 2/2', 'idle'],
+          reason: 'both are counted from the start: their dates, behind '
+              'the mark, say nothing about a photo imported late');
+
+      // One more arrives later: a new round, counted from one.
+      rig.row.clear();
+      rig.library.assets = [g1, g2, g3];
+      imported = [g3];
+      await rig.intake.lateImportScan();
+      expect(rig.row, ['checking 1/1', 'idle'],
+          reason: 'not "3 of 3": the first pass\'s round is over');
+      expect(rig.status.checkedCount, 1);
     });
 
     test('the app\'s catch-up is one round: the row comes with the first '
@@ -430,6 +787,27 @@ void main() {
               'for the glasses photo');
       expect(rig.status.checkedCount, 2);
     });
+
+    // The round is held until the catch-up ends. Left open (the caller's
+    // shouldContinue threw as the catch-up asked whether to go on to the
+    // late imports), it held the row on "1 of 1" for the rest of the
+    // session, and every later scan counted on from there.
+    test('the catch-up\'s round ends however the catch-up ends', () async {
+      SharedPreferences.setMockInitialValues({});
+      final prefs = await SharedPreferences.getInstance();
+      final rig = PhotoScanRig();
+      rig.library.assets = [rig.photo('lunch', 1, yesterdayAt(12))];
+      var asked = 0;
+      await expectLater(
+          foregroundCatchUp(rig.intake,
+              loadPrefs: () async => prefs,
+              // Yes before the photo is read; then it fails.
+              shouldContinue: () =>
+                  ++asked == 1 || (throw StateError('lifecycle probe'))),
+          throwsStateError);
+      expect(rig.analyzer.sent, [1]);
+      expect(rig.row, ['checking 1/1', 'idle']);
+    });
   });
 
   test('cachedBackgroundWatermark reads the stored mark as this engine '
@@ -446,8 +824,39 @@ void main() {
   });
 }
 
+/// A library that can be told its listing hit the query's cap, and that
+/// runs a hook once, as it lists.
+class ScriptedLibrary extends FakePhotoLibrary {
+  /// The listing is full: there may be older images it does not show.
+  bool capped = false;
+
+  /// Awaited in the next listing, before it answers; then forgotten.
+  Future<void> Function()? onListed;
+
+  @override
+  Future<List<LibraryAsset>> imagesCreatedAfter(DateTime cutoff,
+      {int limit = 500}) async {
+    final listed = await super.imagesCreatedAfter(cutoff, limit: limit);
+    final hook = onListed;
+    onListed = null;
+    await hook?.call();
+    return capped ? LibraryListing(listed, listed: limit) : listed;
+  }
+}
+
 /// The in-memory ledger with an earlier session's work in it.
 class FakeLedger extends FakeDao {
+  /// Awaited in the next loggedAssetIds, before it answers; then forgotten.
+  Future<void> Function()? onLoggedAssetIds;
+
+  @override
+  Future<Set<String>> loggedAssetIds(List<String> assetIds) async {
+    final hook = onLoggedAssetIds;
+    onLoggedAssetIds = null;
+    await hook?.call();
+    return super.loggedAssetIds(assetIds);
+  }
+
   /// A meal an earlier scan logged from the library photo [assetId].
   void loggedMeal(String assetId, String hash) {
     final at = yesterdayAt(12);

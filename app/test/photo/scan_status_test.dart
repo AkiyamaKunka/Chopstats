@@ -170,6 +170,14 @@ void main() {
 
     status.begin(expected: const [], wholeWindow: true).end();
     expect(shown(status), 'idle');
+
+    // Forgotten without a word: the scan that no longer lists it shows
+    // nothing for the photos it only expects.
+    status.finished('gone too', ScanVerdict.waiting,
+        kind: AnalysisErrorKind.network);
+    final later = status.begin(expected: ['x'], wholeWindow: true);
+    expect(shown(status), 'idle');
+    later.end();
   });
 
   test('a verdict from elsewhere settles a waiting photo (the user picked '
@@ -184,6 +192,129 @@ void main() {
     status.settled('never-seen');
     expect(heard, ['waiting 1 network'], reason: 'one change, one notice');
     status.settled('b');
+    expect(shown(status), 'idle');
+
+    // One a running scan has not reached yet leaves its count.
+    final scan = status.begin(expected: ['x', 'y', 'z']);
+    status.checking('x');
+    expect(shown(status), 'checking 1/3');
+    status.settled('z');
+    expect(shown(status), 'checking 1/2');
+    scan.end();
+  });
+
+  test('a waiting photo whose next turn ends with nothing to count (found '
+      'logged by another run of the app, held back by a pause) waits no '
+      'longer', () {
+    final first = status.begin(expected: ['a']);
+    status.finished('a', ScanVerdict.waiting,
+        kind: AnalysisErrorKind.network);
+    first.end();
+    expect(shown(status), 'waiting 1 network');
+    // A scan of less than the window (the live watcher's) meets it again,
+    // so nothing but the photo's own turn can settle it.
+    final next = status.begin(expected: ['a']);
+    expect(shown(status), 'waiting 1 network');
+    status.finished('a', ScanVerdict.none);
+    next.end();
+    expect(shown(status), 'idle');
+    expect(status.waitingCount, 0);
+  });
+
+  test('a photo whose turn ends without a send counts as the scan goes on: '
+      'one decided on the phone brings the row up, and one another run '
+      'holds is "not checked yet" only once the scan is over', () {
+    final scan = status.begin(expected: ['a', 'b']);
+    // Not food by the phone's own check: a verdict, and nothing sent.
+    status.finished('a', ScanVerdict.checked);
+    expect(shown(status), 'checking 2/2');
+    scan.end();
+
+    final other = PhotoScanStatus();
+    final held = other.begin(expected: ['a', 'b']);
+    // Another run of the app has it.
+    other.finished('a', ScanVerdict.waiting);
+    expect(shown(other), 'checking 2/2',
+        reason: 'no Retry while the scan is still going');
+    held.end();
+    expect(shown(other), 'waiting 1');
+  });
+
+  test('the photo being checked stays so when another photo\'s turn ends',
+      () {
+    final scan = status.begin(expected: ['a', 'b']);
+    status.checking('a');
+    status.finished('b', ScanVerdict.none);
+    expect(shown(status), 'checking 1/1');
+    status.finished('a', ScanVerdict.checked);
+    expect(shown(status), 'idle');
+    scan.end();
+  });
+
+  test('a photo is counted once in a round, however many of its scans list '
+      'it: the one being checked, and one let go that a later scan of the '
+      'round lists and sends again', () {
+    final catchUp = status.begin(expected: ['a', 'p']);
+    status.checking('a');
+    // The live watcher's scan lists a too, beside a new photo.
+    final live = status.begin(expected: ['a', 'n']);
+    expect(shown(status), 'checking 1/3', reason: 'a, p and n');
+    status.finished('a', ScanVerdict.checked);
+    status.checking('p');
+    status.finished('p', ScanVerdict.waiting,
+        kind: AnalysisErrorKind.network);
+    expect(shown(status), 'checking 3/3', reason: 'n is left');
+    // Let go, so unread: a third scan lists p again ...
+    final again = status.begin(expected: ['p']);
+    expect(shown(status), 'checking 3/3', reason: 'p is not counted twice');
+    // ... and sends it.
+    status.checking('p');
+    expect(status.total, 3, reason: 'a done, p being checked, n to come');
+    status.finished('p', ScanVerdict.checked);
+    status.checking('n');
+    status.finished('n', ScanVerdict.checked);
+    catchUp.end();
+    live.end();
+    again.end();
+    expect(shown(status), 'idle');
+    expect(status.checkedCount, 3);
+  });
+
+  test('a second scan of the whole window that begins while the first is '
+      'still running takes up what the first let go: to be checked again, '
+      'not among the checked', () {
+    final first = status.begin(expected: ['a', 'p'], wholeWindow: true);
+    status.checking('a');
+    status.finished('a', ScanVerdict.checked);
+    status.checking('p');
+    status.finished('p', ScanVerdict.waiting,
+        kind: AnalysisErrorKind.network);
+    expect(status.checkedCount, 1);
+    // A return to the app starts another catch-up before this one is over.
+    final second = status.begin(expected: ['p'], wholeWindow: true);
+    expect(shown(status), 'checking 2/2');
+    expect(status.checkedCount, 1);
+    expect(status.waitingCount, 0);
+    // The visit ends before p's turn: it is neither checked nor waiting.
+    first.end();
+    second.end();
+    expect(shown(status), 'idle');
+    expect(status.checkedCount, 1,
+        reason: 'what "1 photo checked." says, not 2');
+  });
+
+  test('ending a scan twice ends it once: the other scans of the round go '
+      'on', () {
+    final one = status.begin(expected: ['x']);
+    final other = status.begin(expected: ['y']);
+    status.checking('x');
+    status.finished('x', ScanVerdict.checked);
+    expect(shown(status), 'checking 2/2');
+    one.end();
+    one.end();
+    expect(shown(status), 'checking 2/2',
+        reason: 'the other scan still has y to check');
+    other.end();
     expect(shown(status), 'idle');
   });
 
@@ -271,6 +402,21 @@ void main() {
     next.end();
   });
 
+  test('nor does a catch-up whose photo was sent and ended with nothing '
+      'to count (a pause every photo shares came on with it): not "1 of 0" '
+      'until the catch-up is over', () {
+    final round = status.begin(untilEnd: true);
+    final window = status.begin(expected: ['a'], wholeWindow: true);
+    status.checking('a');
+    expect(shown(status), 'checking 1/1');
+    status.finished('a', ScanVerdict.none);
+    expect(shown(status), 'idle');
+    window.end();
+    expect(shown(status), 'idle');
+    round.end();
+    expect(status.checkedCount, 0);
+  });
+
   test('reset forgets everything, and the photo still in flight then is '
       'not reported any more (Watch Camera Roll switched off)', () {
     final scan = status.begin(expected: ['a', 'b']);
@@ -292,6 +438,39 @@ void main() {
     final again = status.begin(expected: ['c']);
     status.checking('c');
     expect(shown(status), 'checking 1/1');
+    again.end();
+  });
+
+  test('after a reset the scans still running say nothing more, and leave '
+      'nothing behind for the next round', () {
+    final scan = status.begin(expected: ['a', 'b', 'c', 'z']);
+    status.checking('a');
+    status.finished('a', ScanVerdict.checked);
+    status.checking('b');
+    expect(shown(status), 'checking 2/4');
+    status.reset();
+    expect(shown(status), 'idle');
+    expect(status.checkedCount, 0,
+        reason: 'no "1 photo checked." after a switch-off');
+    // b's answer arrives. c had been read and looked up before the
+    // switch, and its send starts after it.
+    status.finished('b', ScanVerdict.checked);
+    status.checking('c');
+    expect(shown(status), 'idle');
+    status.finished('c', ScanVerdict.checked);
+    expect(shown(status), 'idle');
+
+    // Switched on again before that scan is over: a new sweep begins.
+    final again = status.begin(expected: ['d']);
+    expect(shown(status), 'idle',
+        reason: 'the estimate alone brings no row up');
+    // d gets its verdict on the phone: nothing is sent for it.
+    status.finished('d', ScanVerdict.checked);
+    expect(shown(status), 'idle',
+        reason: 'neither b, in flight at the switch, nor z, which the old '
+            'scan never reached, is left to wait for');
+    expect(status.checkedCount, 1);
+    scan.end();
     again.end();
   });
 

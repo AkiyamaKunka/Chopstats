@@ -433,15 +433,21 @@ Future<DateTime?> foregroundCatchUp(PhotoIntake intake,
     if (frontier != null) await checkpoint(frontier);
     return frontier;
   } finally {
-    // Photos other apps imported late (design G1b): after the window, so
-    // today's photos still go first. Never a watermark; never a throw. A
-    // truncated window still gets it. Not once the user has left (iOS).
-    if (shouldContinue?.call() ?? true) {
-      try {
-        await intake.lateImportScan(shouldContinue: shouldContinue);
-      } catch (_) {}
+    try {
+      // Photos other apps imported late (design G1b): after the window, so
+      // today's photos still go first. Never a watermark; never a throw. A
+      // truncated window still gets it. Not once the user has left (iOS).
+      if (shouldContinue?.call() ?? true) {
+        try {
+          await intake.lateImportScan(shouldContinue: shouldContinue);
+        } catch (_) {}
+      }
+    } finally {
+      // Whatever happened above ([shouldContinue] is the caller's, and may
+      // throw): a round left open would hold the row on its last count for
+      // the rest of the session.
+      round?.end();
     }
-    round?.end();
   }
 }
 
