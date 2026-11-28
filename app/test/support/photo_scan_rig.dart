@@ -3,9 +3,9 @@
 /// PhotoPipeline over the in-memory ledger, both reporting to one
 /// PhotoScanStatus (Today's "Checking photos" row).
 ///
-/// For the tests of that row's facts: what the row is told, in which order
-/// photos reach the model, and what the ledger answers for a photo offered
-/// twice.
+/// For the tests of that row's facts and of the scan's order: what the
+/// row is told, in which order photos reach the model, what the ledger
+/// answers for a photo offered twice, and what the leftover check is shown.
 library;
 
 import 'dart:async';
@@ -13,12 +13,22 @@ import 'dart:typed_data';
 
 import 'package:calorie_tracker/core/contracts.dart';
 import 'package:calorie_tracker/services/photo/photo_changes.dart';
+import 'package:calorie_tracker/services/photo/photo_library.dart';
 import 'package:calorie_tracker/services/photo/scan_status.dart';
 import 'package:calorie_tracker/services/photo/watcher.dart';
 import 'package:calorie_tracker/ui/photo_pipeline.dart';
 
 import '../photo/watcher_test.dart' show FakeAsset, FakePhotoLibrary;
 import '../ui/fakes.dart';
+
+/// A library image the library marks as a screenshot.
+class ScreenshotAsset extends FakeAsset implements ScreenshotMarked {
+  ScreenshotAsset(super.id, super.name, super.createDateTime, super.bytes,
+      {super.onRead});
+
+  @override
+  bool get isScreenshot => true;
+}
 
 /// A model reply: a meal of [kcal] called [name].
 AnalysisOutcome foodReply(String name, num kcal) => AnalysisOutcome(
@@ -163,6 +173,11 @@ class PhotoScanRig {
   FakeAsset photo(String id, int n, DateTime at) => FakeAsset(
       id, 'IMG_$id.HEIC', at, Uint8List.fromList([n, 0, 0]),
       onRead: () => _read(id));
+
+  /// A screenshot taken at [at].
+  ScreenshotAsset screenshot(String id, int n, DateTime at) =>
+      ScreenshotAsset(id, 'IMG_$id.PNG', at, Uint8List.fromList([n, 0, 0]),
+          onRead: () => _read(id));
 
   /// The ids of the originals read, in order.
   final List<String> reads = [];

@@ -209,10 +209,11 @@ class LibraryPhotoIntake implements PhotoIntake, ReportsPhotoScans {
 
   /// The ids of the images created at or after a time that sit in a Meta
   /// glasses album (design G2a; iOS: [metaAlbumAssetIds]). Asked at most
-  /// once per batch a scan delivers (a launch catch-up delivers two), when
-  /// its first photo is read — never for one that reads nothing — and only
-  /// to recognize glasses photos: a failure, a timeout or null (Android,
-  /// tests) just means "in no album".
+  /// once per batch a scan delivers (a launch catch-up delivers two, or
+  /// three when the newest day has screenshots beside its other photos),
+  /// when its first photo is read — never for one that reads nothing — and
+  /// only to recognize glasses photos: a failure, a timeout or null
+  /// (Android, tests) just means "in no album".
   final Future<Set<String>> Function(DateTime since)? metaAlbumIds;
 
   /// [metaAlbumLookupTimeout]; shorter in tests.
@@ -566,11 +567,36 @@ class LibraryPhotoIntake implements PhotoIntake, ReportsPhotoScans {
     // it handled is "seen" by the pass after it, which counts it covered
     // without reading it again, and what it released stays out of that
     // pass (one try per scan) and halts the frontier there.
+    //
+    // Within that day, screenshots last (2026-11-28): the day's other
+    // photos first, then its screenshots, each group in shooting order. On
+    // 2026-11-27 a 40-second visit spent its model calls on the pictures
+    // ahead of the lunch photo and ended before its turn. Two passes of
+    // the kind described above, so coverage is exactly as with one: neither
+    // reports a frontier, what they handled is "seen" by the pass after
+    // them, and what they released or left unread halts the frontier
+    // there. However many photos taken after a screenshot were checked
+    // first, no watermark passes it until it was checked itself, and the
+    // ledger still answers for each photo once.
+    //
+    // The automatic leftover check finds a meal photographed before its
+    // leftovers as before: both keep their shooting order. What it no
+    // longer finds is a meal the scan logs from a SCREENSHOT (an order
+    // confirmation) when the leftovers were photographed after it and both
+    // were unchecked in the same visit: the leftovers photo is then checked
+    // first, and logged as a meal of its own. The Leftovers flow repairs
+    // that by hand; a screenshot checked by an earlier scan is found as
+    // before.
+    //
+    // Only where the library says which photos are screenshots
+    // (photo_library.dart isScreenshotAsset: iOS's own mark, Android's
+    // Screenshots folder); elsewhere one pass, as before. The background
+    // run never asks for the newest day first, and keeps strict order.
     final released = <String>{};
     final tally = _EmitTally();
-    // One allowance of glasses photos for both passes (design G3).
+    // One allowance of glasses photos for every pass (design G3).
     final quota = GlassesQuota(limit: glassesPerScan);
-    // One generation for both passes: each used to take its own as it
+    // One generation for every pass: each used to take its own as it
     // began, so a stop() during the first pass (Watch Camera Roll switched
     // off mid catch-up) ended that pass, and the next one, begun after the
     // stop, delivered the rest of the window all the same.
@@ -584,13 +610,29 @@ class LibraryPhotoIntake implements PhotoIntake, ReportsPhotoScans {
     final DateTime? frontier;
     try {
       if (newestDayFirst) {
-        await _emit(_newestDay(assets),
-            reportFrontier: false,
-            shouldContinue: shouldContinue,
-            released: released,
-            tally: tally,
-            glassesQuota: quota,
-            generation: generation);
+        final day = _newestDay(assets);
+        final screenshots = [
+          for (final a in day)
+            if (isScreenshotAsset(a)) a,
+        ];
+        final passes = screenshots.isEmpty || screenshots.length == day.length
+            ? [day]
+            : [
+                [
+                  for (final a in day)
+                    if (!isScreenshotAsset(a)) a,
+                ],
+                screenshots,
+              ];
+        for (final pass in passes) {
+          await _emit(pass,
+              reportFrontier: false,
+              shouldContinue: shouldContinue,
+              released: released,
+              tally: tally,
+              glassesQuota: quota,
+              generation: generation);
+        }
       }
       frontier = await _emit(assets,
           reportFrontier: !truncated,

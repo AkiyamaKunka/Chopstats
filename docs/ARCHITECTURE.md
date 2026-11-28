@@ -137,6 +137,15 @@ against the local database. The automatic path applies a leftover only when
 the model's confidence is at least 0.75. The manual Leftovers flow is the
 fallback and the repair path.
 
+The automatic path can only match a meal that is already logged when the
+leftovers photo is checked. Scans check photos in the order they were taken,
+with one exception: the app's catch-up (at launch and on a return to the app)
+starts with the newest day, and within that day checks screenshots after the
+other photos, so a short visit reaches a photographed meal sooner. A meal that
+exists only as a screenshot (an order confirmation) is therefore logged after
+that day's photos, and leftovers photographed after it and checked in the same
+visit are logged as a meal of their own.
+
 ### Today and History
 
 Today compares the running total with a typical day, which is the median of
