@@ -35,6 +35,8 @@ import '../services/nl/executor.dart';
 import '../services/garmin_client.dart';
 import '../services/photo/background_restriction.dart'
     show androidBackgroundAllowed;
+import '../services/photo/background_schedule.dart'
+    show lastBackgroundSchedule;
 import '../services/photo/background_time.dart';
 import '../services/photo/deferred_assets.dart'
     show clearDeferredAsset, holdGlassesPreview;
@@ -605,6 +607,13 @@ class AppServices {
       // Read fresh: the background engine writes the runs, and a catch-up
       // here that moved the watermark since clears it.
       backgroundScanStuck: backgroundScanStuckNow,
+      // iOS: the request for the next background scan (2026-11-28). The
+      // shell asks for it again, when iOS holds none, on every return to
+      // the app and every leave, and Settings shows a refusal. Android's
+      // WorkManager chain is left exactly as it was: no hook, no probe.
+      keepBackgroundScan:
+          Platform.isIOS ? () => keepBackgroundScanScheduled(settings) : null,
+      backgroundSchedule: Platform.isIOS ? lastBackgroundSchedule : null,
       // BGTaskScheduler refuses every request (error 1, swallowed by the
       // plugin) while Background App Refresh is off — without this the
       // row would say "not run yet" forever and never say why. Android's

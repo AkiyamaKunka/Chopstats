@@ -15,6 +15,8 @@ import '../services/analysis_keep_alive.dart' show AnalysisKeepAlive;
 import '../services/backup/backup_coordinator.dart';
 import '../services/backup/save_file_channel.dart' show SaveFileStatus;
 import '../services/garmin_client.dart';
+import '../services/photo/background_schedule.dart'
+    show BackgroundSchedule;
 import '../services/photo/coverage.dart';
 import '../services/photo/photo_library.dart';
 import '../services/usual/usual_foods.dart' show UsualFoods;
@@ -432,6 +434,19 @@ class UiServices {
   /// (backgroundScanLooksStuck). Null probe: never said.
   final Future<bool> Function()? backgroundScanStuck;
 
+  /// iOS: what iOS last said about the request for the next background
+  /// scan (background_schedule.dart): held, or refused and why. Settings'
+  /// background-scan row turns into 'Not scheduled' on a refusal. Null
+  /// probe (Android, tests) or answer: nothing is said.
+  final Future<BackgroundSchedule?> Function()? backgroundSchedule;
+
+  /// iOS: asks iOS for the next background scan again when it holds no
+  /// request (background_glue.dart keepBackgroundScanScheduled). The shell
+  /// calls it each time the app comes to the foreground and each time it
+  /// leaves. Null on Android, whose WorkManager chain needs nothing of the
+  /// kind, and in tests.
+  final Future<void> Function()? keepBackgroundScan;
+
   /// Re-arms the OS-scheduled daily summary (iOS). The shell calls it on
   /// every lifecycle transition so the pending card is never staler than
   /// the last time the user had the app open. Null on Android (the
@@ -511,6 +526,8 @@ class UiServices {
     this.lastBackgroundScan,
     this.backgroundRefreshEnabled,
     this.backgroundScanStuck,
+    this.backgroundSchedule,
+    this.keepBackgroundScan,
     this.mealInUse,
     this.restaurantAssist,
     this.usualFoods,

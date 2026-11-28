@@ -774,6 +774,24 @@ abstract class AppLocalizations {
   /// **'Background scan is stuck — opening Chopstats once catches up.'**
   String get backgroundScanStuck;
 
+  /// iPhone, Settings › Photos: the Background scan row's value while iOS holds no request for the next background scan (it refused the last one the app made). Short: it shares the row with the title. The footer line under the group says why (backgroundScanNotScheduledUnavailable or backgroundScanNotScheduledRefused).
+  ///
+  /// In en, this message translates to:
+  /// **'Not scheduled'**
+  String get backgroundScanNotScheduled;
+
+  /// iPhone, Settings › Photos footer line while the Background scan row reads backgroundScanNotScheduled and iOS answered the request with 'unavailable' (BGTaskScheduler error 1). It must not name a cause the app cannot see: with Background App Refresh off the row shows the Off remedy instead.
+  ///
+  /// In en, this message translates to:
+  /// **'The next background scan is not scheduled: iOS is not taking background requests from Chopstats right now. Chopstats asks again each time you open or leave it; until then, new photos are logged when you open the app.'**
+  String get backgroundScanNotScheduledUnavailable;
+
+  /// As backgroundScanNotScheduledUnavailable, for any other refusal. {code} is the error's name as iOS gives it (notPermitted, tooManyPendingTaskRequests) or 'error 7'; never translated.
+  ///
+  /// In en, this message translates to:
+  /// **'The next background scan is not scheduled: iOS refused the request ({code}). Chopstats asks again each time you open or leave it; until then, new photos are logged when you open the app.'**
+  String backgroundScanNotScheduledRefused(String code);
+
   /// No description provided for @settingsSectionProfile.
   ///
   /// In en, this message translates to:
@@ -2321,6 +2339,24 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'none'**
   String get diagBgRunWatermarkNone;
+
+  /// iPhone, Diagnostics › Recent background scans, first line: iOS holds a request for the next background scan. {time} is when the app last asked iOS, as a local 'yyyy-MM-dd HH:mm'.
+  ///
+  /// In en, this message translates to:
+  /// **'Next scan: scheduled. iOS holds the request and picks the time. Checked {time}.'**
+  String diagBgScheduleOk(String time);
+
+  /// As diagBgScheduleOk, when iOS answered the app's request with 'unavailable' and holds none.
+  ///
+  /// In en, this message translates to:
+  /// **'Next scan: not scheduled. iOS is not taking background requests from Chopstats right now. Checked {time}.'**
+  String diagBgScheduleUnavailable(String time);
+
+  /// As diagBgScheduleUnavailable, for any other refusal; {code} as in backgroundScanNotScheduledRefused.
+  ///
+  /// In en, this message translates to:
+  /// **'Next scan: not scheduled. iOS refused the request ({code}). Checked {time}.'**
+  String diagBgScheduleRefused(String code, String time);
 
   /// Diagnostics section: photos other apps (the Meta AI app for glasses, AirDrop, WeChat) added to the library after they were taken, which the automatic scan caught through the photo library's change history.
   ///

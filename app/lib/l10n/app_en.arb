@@ -447,6 +447,23 @@
   "@backgroundScanStuck": {
     "description": "Photos footer line in Settings when the recorded background runs keep starting but log nothing."
   },
+  "backgroundScanNotScheduled": "Not scheduled",
+  "@backgroundScanNotScheduled": {
+    "description": "iPhone, Settings › Photos: the Background scan row's value while iOS holds no request for the next background scan (it refused the last one the app made). Short: it shares the row with the title. The footer line under the group says why (backgroundScanNotScheduledUnavailable or backgroundScanNotScheduledRefused)."
+  },
+  "backgroundScanNotScheduledUnavailable": "The next background scan is not scheduled: iOS is not taking background requests from Chopstats right now. Chopstats asks again each time you open or leave it; until then, new photos are logged when you open the app.",
+  "@backgroundScanNotScheduledUnavailable": {
+    "description": "iPhone, Settings › Photos footer line while the Background scan row reads backgroundScanNotScheduled and iOS answered the request with 'unavailable' (BGTaskScheduler error 1). It must not name a cause the app cannot see: with Background App Refresh off the row shows the Off remedy instead."
+  },
+  "backgroundScanNotScheduledRefused": "The next background scan is not scheduled: iOS refused the request ({code}). Chopstats asks again each time you open or leave it; until then, new photos are logged when you open the app.",
+  "@backgroundScanNotScheduledRefused": {
+    "description": "As backgroundScanNotScheduledUnavailable, for any other refusal. {code} is the error's name as iOS gives it (notPermitted, tooManyPendingTaskRequests) or 'error 7'; never translated.",
+    "placeholders": {
+      "code": {
+        "type": "String"
+      }
+    }
+  },
   "settingsSectionProfile": "Profile",
   "settingsRowDietaryProfile": "Dietary Profile",
   "profileSet": "Set",
@@ -1027,6 +1044,36 @@
     }
   },
   "diagBgRunWatermarkNone": "none",
+  "diagBgScheduleOk": "Next scan: scheduled. iOS holds the request and picks the time. Checked {time}.",
+  "@diagBgScheduleOk": {
+    "description": "iPhone, Diagnostics › Recent background scans, first line: iOS holds a request for the next background scan. {time} is when the app last asked iOS, as a local 'yyyy-MM-dd HH:mm'.",
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "diagBgScheduleUnavailable": "Next scan: not scheduled. iOS is not taking background requests from Chopstats right now. Checked {time}.",
+  "@diagBgScheduleUnavailable": {
+    "description": "As diagBgScheduleOk, when iOS answered the app's request with 'unavailable' and holds none.",
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "diagBgScheduleRefused": "Next scan: not scheduled. iOS refused the request ({code}). Checked {time}.",
+  "@diagBgScheduleRefused": {
+    "description": "As diagBgScheduleUnavailable, for any other refusal; {code} as in backgroundScanNotScheduledRefused.",
+    "placeholders": {
+      "code": {
+        "type": "String"
+      },
+      "time": {
+        "type": "String"
+      }
+    }
+  },
   "diagLateImportsTitle": "Late imports (other apps, glasses)",
   "@diagLateImportsTitle": {
     "description": "Diagnostics section: photos other apps (the Meta AI app for glasses, AirDrop, WeChat) added to the library after they were taken, which the automatic scan caught through the photo library's change history."

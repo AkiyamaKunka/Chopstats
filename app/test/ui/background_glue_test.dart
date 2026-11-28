@@ -23,6 +23,7 @@ import 'package:calorie_tracker/services/analyzer/provider_analyzers.dart'
     show ServerAnalyzer;
 import 'package:calorie_tracker/services/photo/background.dart';
 import 'package:calorie_tracker/services/photo/background_runs.dart';
+import 'package:calorie_tracker/services/photo/background_schedule.dart';
 import 'package:calorie_tracker/services/photo/deferred_assets.dart';
 import 'package:calorie_tracker/services/photo/food_prefilter.dart';
 import 'package:calorie_tracker/services/local_store.dart';
@@ -42,7 +43,8 @@ import 'package:calorie_tracker/ui/play_channel.dart'
     show watchRetiredNoticeOwed;
 import 'package:calorie_tracker/ui/services.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show PlatformException;
+import 'package:flutter/services.dart'
+    show MethodCall, MethodChannel, PlatformException;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/testing.dart' show MockClient;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -2406,6 +2408,109 @@ void main() {
         'register:$photoBackfillUniqueName:$photoBackfillTaskName',
       ]);
       expect(scheduler.frequency, backgroundScanFrequency);
+    });
+
+    // 2026-11-28: iOS's request for the next scan is kept alive through a
+    // channel of its own (background_schedule.dart), asked right behind
+    // this submit and at every return to the app and every leave.
+    group('the request iOS holds for the next scan', () {
+      const channel = MethodChannel(backgroundScheduleChannelName);
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      late List<MethodCall> asked;
+
+      /// iOS's side of the channel: it holds [held] requests and answers a
+      /// submit with [refusal] (null: taken).
+      void ios({int held = 0, Map<String, Object?>? refusal}) {
+        asked = [];
+        messenger.setMockMethodCallHandler(channel, (call) async {
+          asked.add(call);
+          return call.method == 'pending' ? held : refusal;
+        });
+        addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+      }
+
+      // Android's whole background path is the WorkManager calls pinned
+      // above. Nothing here may add to it: not a channel call, not a
+      // scheduler call, not a stored value.
+      test('Android: the WorkManager calls and nothing else, at a launch, '
+          'a setting change, a return to the app or a leave', () async {
+        ios();
+        final settings = await settingsWith(key: 'k', lookback: 5);
+        final prefs = await SharedPreferences.getInstance();
+        final before = prefs.getKeys();
+        await syncBackgroundScan(settings);
+        // What the shell's hook would do, were it handed one on Android.
+        expect(await keepBackgroundScanScheduled(settings), isNull);
+        expect(await lastBackgroundSchedule(), isNull);
+        expect(scheduler.calls, [
+          'init',
+          'register:$photoBackfillUniqueName:$photoBackfillTaskName',
+        ]);
+        expect(scheduler.policy, ExistingPeriodicWorkPolicy.update);
+        expect(scheduler.frequency, backgroundScanFrequency);
+        expect(scheduler.inputData, {'lookbackDays': 5});
+        await settings.setWatcherEnabled(false);
+        await syncBackgroundScan(settings);
+        expect(await keepBackgroundScanScheduled(settings), isNull);
+        expect(scheduler.calls.last, 'cancel:$photoBackfillUniqueName');
+        expect(scheduler.calls, hasLength(3));
+        expect(asked, isEmpty, reason: 'the iOS channel is never called');
+        expect(prefs.getKeys().difference(before), isEmpty,
+            reason: 'nothing stored: ${prefs.getKeys().difference(before)}');
+        expect(prefs.getString(backgroundSchedulePrefsKey), isNull);
+      });
+
+      group('iOS', () {
+        setUp(() {
+          debugIsAndroidOverride = false;
+          debugIsIOSOverride = true;
+        });
+        tearDown(() => debugIsIOSOverride = null);
+
+        test('workmanager\'s submit was refused (it only logs that): one '
+            'more is made, and its refusal is recorded', () async {
+          ios(refusal: {'domain': 'BGTaskSchedulerErrorDomain', 'code': 1});
+          final settings = await settingsWith(key: 'k');
+          await syncBackgroundScan(settings);
+          expect(scheduler.calls, [
+            'init',
+            'cancel:$photoBackfillUniqueName',
+            'register:$photoBackfillUniqueName:$photoBackfillTaskName',
+          ]);
+          expect([for (final c in asked) c.method], ['pending', 'submit']);
+          final now = await lastBackgroundSchedule();
+          expect((now?.scheduled, now?.refusal),
+              (false, BackgroundRefusal.unavailable));
+        });
+
+        test('workmanager\'s submit was taken: iOS holds it, nothing more is '
+            'submitted, and "scheduled" is recorded', () async {
+          ios(held: 1);
+          final settings = await settingsWith(key: 'k', watcher: false);
+          await syncBackgroundScan(settings);
+          expect([for (final c in asked) c.method], ['pending']);
+          expect((await lastBackgroundSchedule())?.scheduled, isTrue);
+          // The shell's hook, at each return to the app and each leave:
+          // wanted on iOS whatever the Watch Camera Roll switch says, as
+          // the launch's own submit is.
+          final again = await keepBackgroundScanScheduled(settings);
+          expect((again?.scheduled, again?.submitted), (true, false));
+          expect([for (final c in asked) c.method], ['pending', 'pending']);
+        });
+
+        test('the request was lost since: the next return to the app makes '
+            'it again', () async {
+          ios(held: 0);
+          final settings = await settingsWith(key: 'k');
+          final now = await keepBackgroundScanScheduled(settings);
+          expect([for (final c in asked) c.method], ['pending', 'submit']);
+          expect((now?.scheduled, now?.submitted), (true, true));
+          expect(scheduler.calls, isEmpty,
+              reason: 'never through workmanager: its cancel-then-register '
+                  'would replace a request iOS holds');
+        });
+      });
     });
   });
 

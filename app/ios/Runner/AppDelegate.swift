@@ -101,9 +101,10 @@ import workmanager_apple
 
   /// The plugins that live in this target (ImageIOPlugin.swift,
   /// BackgroundTimePlugin.swift, PhotoChangesPlugin.swift,
-  /// PlacesPlugin.swift, CloudBackupPlugin.swift), for every engine: the
-  /// app's own and workmanager's headless background engine. Only the
-  /// app's engine calls the background-time and places channels;
+  /// PlacesPlugin.swift, CloudBackupPlugin.swift,
+  /// BackgroundSchedulePlugin.swift), for every engine: the app's own and
+  /// workmanager's headless background engine. Only the app's engine calls
+  /// the background-time, places and background-schedule channels;
   /// registering them in both keeps one path. The photo change history is
   /// read by both, and so is iCloud Backup (the background run may update
   /// a backup this install already owns).
@@ -122,6 +123,9 @@ import workmanager_apple
     }
     if let registrar = registry.registrar(forPlugin: "CloudBackupPlugin") {
       CloudBackupPlugin.register(with: registrar)
+    }
+    if let registrar = registry.registrar(forPlugin: "BackgroundSchedulePlugin") {
+      BackgroundSchedulePlugin.register(with: registrar)
     }
   }
 }

@@ -448,6 +448,18 @@ class AppLocalizationsZh extends AppLocalizations {
   String get backgroundScanStuck => '后台扫描卡住了 —— 打开筷拍一次即可补上。';
 
   @override
+  String get backgroundScanNotScheduled => '未安排';
+
+  @override
+  String get backgroundScanNotScheduledUnavailable =>
+      '下一次后台扫描还没有安排上：iOS 目前不接受筷拍的后台扫描申请。每次打开或离开筷拍时，筷拍都会重新申请；在那之前，新照片会在你打开筷拍时记录。';
+
+  @override
+  String backgroundScanNotScheduledRefused(String code) {
+    return '下一次后台扫描还没有安排上：iOS 拒绝了筷拍的申请（$code）。每次打开或离开筷拍时，筷拍都会重新申请；在那之前，新照片会在你打开筷拍时记录。';
+  }
+
+  @override
   String get settingsSectionProfile => '个人资料';
 
   @override
@@ -1322,6 +1334,21 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get diagBgRunWatermarkNone => '无';
+
+  @override
+  String diagBgScheduleOk(String time) {
+    return '下一次扫描：已安排。iOS 已收下申请，何时运行由 iOS 决定。检查时间：$time。';
+  }
+
+  @override
+  String diagBgScheduleUnavailable(String time) {
+    return '下一次扫描：未安排。iOS 目前不接受筷拍的后台扫描申请。检查时间：$time。';
+  }
+
+  @override
+  String diagBgScheduleRefused(String code, String time) {
+    return '下一次扫描：未安排。iOS 拒绝了筷拍的申请（$code）。检查时间：$time。';
+  }
 
   @override
   String get diagLateImportsTitle => '后导入的照片（其他 App、眼镜）';

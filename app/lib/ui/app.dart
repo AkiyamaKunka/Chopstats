@@ -977,6 +977,21 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       // iCloud Backup's background-entry run (inside a background task).
       s.cloudBackup?.onLifecycle(false);
     }
+    // iOS: the request for the next background scan, asked for again when
+    // iOS holds none — each time the app comes to the foreground and each
+    // time it leaves (2026-11-28). It used to be made at a cold start only,
+    // so a request lost once (a refused submit, a run that ended before
+    // asking) meant no background scan until the app was closed and
+    // opened. 'hidden' and 'paused' arrive together and share one check.
+    // No hook on Android.
+    if (state == AppLifecycleState.resumed ||
+        state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.paused) {
+      final keep = s.keepBackgroundScan;
+      if (keep != null) {
+        unawaited(keep().then((_) {}, onError: (Object _) {}));
+      }
+    }
     if (state != AppLifecycleState.resumed) return;
     if (_leftApp) {
       _leftApp = false;
@@ -1111,6 +1126,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
               lastBackgroundScan: s.lastBackgroundScan,
               backgroundRefreshEnabled: s.backgroundRefreshEnabled,
               backgroundScanStuck: s.backgroundScanStuck,
+              backgroundSchedule: s.backgroundSchedule,
               changes: s.settingsChanges,
               restaurantAssist: s.restaurantAssist,
               cloudBackup: s.cloudBackup,

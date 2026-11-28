@@ -1,3 +1,4 @@
+import BackgroundTasks
 import CryptoKit
 import CoreLocation
 import CoreVideo
@@ -1225,6 +1226,108 @@ class BackgroundTimePluginTests: XCTestCase {
   func testUnknownMethodIsNotImplemented() {
     let reply = call(BackgroundTimePlugin(), "nope", nil)
     XCTAssertTrue((reply as AnyObject?) === FlutterMethodNotImplemented)
+  }
+}
+
+/// The background-schedule channel (Runner/BackgroundSchedulePlugin.swift):
+/// how many requests iOS holds for the photo scan's BGAppRefreshTask, and
+/// one more when Dart asks (lib/services/photo/background_schedule.dart).
+/// The simulator refuses every submit, so the scheduler is a fake here; the
+/// real one is asked for its count only.
+class BackgroundSchedulePluginTests: XCTestCase {
+  /// BGTaskScheduler as the plugin sees it.
+  private final class FakeScheduler {
+    var held: [String] = []
+    var submitted: [String] = []
+    var refusal: Error?
+
+    var queue: BackgroundSchedulePlugin.Queue {
+      BackgroundSchedulePlugin.Queue(
+        pending: { done in done(self.held) },
+        submit: { identifier in
+          if let refusal = self.refusal { throw refusal }
+          self.submitted.append(identifier)
+          self.held.append(identifier)
+        })
+    }
+  }
+
+  /// One channel call; the reply must arrive on the main thread.
+  private func call(
+    _ plugin: BackgroundSchedulePlugin, _ method: String, _ args: Any? = nil
+  ) -> Any? {
+    let replied = expectation(description: method)
+    var reply: Any? = "unset"
+    plugin.handle(FlutterMethodCall(methodName: method, arguments: args)) {
+      XCTAssertTrue(Thread.isMainThread)
+      reply = $0
+      replied.fulfill()
+    }
+    wait(for: [replied], timeout: 5)
+    return reply
+  }
+
+  func testChannelNameMatchesDart() {
+    XCTAssertEqual(BackgroundSchedulePlugin.channelName, "dev.calorietracker/bgschedule")
+  }
+
+  func testPendingCountsOnlyThePhotoScansRequests() {
+    let scheduler = FakeScheduler()
+    let plugin = BackgroundSchedulePlugin(queue: scheduler.queue)
+    XCTAssertEqual(call(plugin, "pending") as? Int, 0)
+    scheduler.held = ["some.other.task", AppDelegate.photoBackfillIdentifier]
+    XCTAssertEqual(call(plugin, "pending") as? Int, 1)
+    XCTAssertTrue(scheduler.submitted.isEmpty, "asking never submits")
+  }
+
+  func testSubmitIsForThePhotoScansIdentifierWhateverDartSends() {
+    let scheduler = FakeScheduler()
+    let plugin = BackgroundSchedulePlugin(queue: scheduler.queue)
+    XCTAssertNil(call(plugin, "submit", ["identifier": "some.other.task", "delay": 3600]))
+    XCTAssertEqual(scheduler.submitted, [AppDelegate.photoBackfillIdentifier])
+    XCTAssertEqual(call(plugin, "pending") as? Int, 1)
+  }
+
+  func testARefusedSubmitRepliesTheDomainAndCodeIOSThrew() {
+    let scheduler = FakeScheduler()
+    scheduler.refusal = BGTaskScheduler.Error(.unavailable)
+    let plugin = BackgroundSchedulePlugin(queue: scheduler.queue)
+    let reply = call(plugin, "submit") as? [String: Any]
+    XCTAssertEqual(reply?["domain"] as? String, "BGTaskSchedulerErrorDomain")
+    XCTAssertEqual(reply?["code"] as? Int, 1)
+    XCTAssertEqual(call(plugin, "pending") as? Int, 0)
+    // Any other error keeps its own domain and code.
+    scheduler.refusal = NSError(domain: "SomeOtherDomain", code: 7)
+    let other = call(plugin, "submit") as? [String: Any]
+    XCTAssertEqual(other?["domain"] as? String, "SomeOtherDomain")
+    XCTAssertEqual(other?["code"] as? Int, 7)
+  }
+
+  /// The codes Dart names (BackgroundRefusal.of).
+  func testTheErrorCodesAreTheOnesDartNames() {
+    XCTAssertEqual(BGTaskScheduler.Error.errorDomain, "BGTaskSchedulerErrorDomain")
+    XCTAssertEqual(BGTaskScheduler.Error.Code.unavailable.rawValue, 1)
+    XCTAssertEqual(BGTaskScheduler.Error.Code.tooManyPendingTaskRequests.rawValue, 2)
+    XCTAssertEqual(BGTaskScheduler.Error.Code.notPermitted.rawValue, 3)
+  }
+
+  func testUnknownMethodIsNotImplemented() {
+    var reply: Any? = "unset"
+    BackgroundSchedulePlugin(queue: FakeScheduler().queue)
+      .handle(FlutterMethodCall(methodName: "cancel", arguments: nil)) { reply = $0 }
+    XCTAssertTrue((reply as AnyObject?) === FlutterMethodNotImplemented)
+  }
+
+  /// Hosted in the running app, so the scheduler is real: it answers a
+  /// count, and the identifier is one this build may schedule.
+  func testTheRealSchedulerAnswersACountForAPermittedIdentifier() {
+    let count = call(BackgroundSchedulePlugin(), "pending") as? Int
+    XCTAssertNotNil(count)
+    XCTAssertGreaterThanOrEqual(count ?? -1, 0)
+    let permitted =
+      Bundle.main.object(forInfoDictionaryKey: "BGTaskSchedulerPermittedIdentifiers")
+      as? [String]
+    XCTAssertEqual(permitted?.contains(AppDelegate.photoBackfillIdentifier), true)
   }
 }
 

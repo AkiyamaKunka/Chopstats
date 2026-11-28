@@ -36,6 +36,7 @@ import '../services/backup/backup_coordinator.dart';
 import '../services/backup/backup_prefs.dart' show backupHoldsCatchUp;
 import '../services/photo/background.dart';
 import '../services/photo/background_runs.dart';
+import '../services/photo/background_schedule.dart';
 import '../services/photo/deferred_assets.dart';
 import '../services/photo/food_prefilter.dart' show foodScoreViaImageIO;
 import '../services/photo/glasses_check.dart' show recordGlassesCheckLocally;
@@ -1191,11 +1192,34 @@ void appBackgroundDispatcher() {
 /// daily summary too — cancelling it silently killed the notification
 /// (2026-08-16). The summary is an OS alarm now (os_summary.dart), so it
 /// no longer needs the job.
-Future<void> syncBackgroundScan(AppSettings settings) => enableBackgroundScan(
-    backgroundJobWanted(watcherEnabled: settings.watcherEnabled),
-    lookbackDays: settings.lookbackDays,
-    frequency: backgroundScanFrequency,
-    dispatcher: appBackgroundDispatcher);
+///
+/// iOS: the plugin only logs a submit iOS refuses, so what iOS made of
+/// this one is asked and recorded right after it
+/// ([keepBackgroundScanScheduled]); Android asks nothing more.
+Future<void> syncBackgroundScan(AppSettings settings) async {
+  await enableBackgroundScan(
+      backgroundJobWanted(watcherEnabled: settings.watcherEnabled),
+      lookbackDays: settings.lookbackDays,
+      frequency: backgroundScanFrequency,
+      dispatcher: appBackgroundDispatcher);
+  await keepBackgroundScanScheduled(settings);
+}
+
+/// iOS: the request for the next background scan, made again when iOS
+/// holds none, and what iOS said recorded for Settings and the diagnostics
+/// page (background_schedule.dart, 2026-11-28). Wanted under the same
+/// condition as the launch's own submit ([backgroundJobWanted]: on iOS,
+/// always). Called behind that submit ([syncBackgroundScan]) and by the
+/// shell each time the app comes to the foreground and each time it leaves
+/// (app.dart) — a return to the app used to ask for nothing, so a request
+/// lost once stayed lost until the next cold start.
+///
+/// A request iOS already holds is never replaced. Android: nothing at all
+/// — no channel call, no scheduler call, nothing written; WorkManager
+/// keeps its own chain. Never throws.
+Future<BackgroundSchedule?> keepBackgroundScanScheduled(AppSettings settings) =>
+    keepBackgroundRequest(
+        wanted: backgroundJobWanted(watcherEnabled: settings.watcherEnabled));
 
 /// Settings' "the background scan is stuck" probe (2026-10-19): the
 /// stored runs and the watermark, both read FRESH (the background engine

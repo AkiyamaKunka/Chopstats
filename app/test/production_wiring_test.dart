@@ -196,6 +196,54 @@ void main() {
       expect(init(), _wired(r'backgroundScanStuck: backgroundScanStuckNow,'));
     });
 
+    // 2026-11-28: the request for the next background scan used to be made
+    // at a cold start only, and a submit iOS refused was only logged by
+    // the plugin. iOS only: handed a hook or a probe, Android's shell and
+    // Settings would start asking a channel that does not exist there
+    // (background_schedule.dart answers nothing on Android even so, which
+    // background_glue_test proves).
+    test('iOS: the shell keeps the request for the next background scan '
+        'alive and Settings reads what iOS said; Android gets neither', () {
+      expect(
+        init(),
+        _wired(
+          r'keepBackgroundScan: Platform\.isIOS \? \(\) => '
+          r'keepBackgroundScanScheduled\(settings\) : null,',
+        ),
+      );
+      expect(
+        init(),
+        _wired(
+          r'backgroundSchedule: Platform\.isIOS \? lastBackgroundSchedule : '
+          r'null,',
+        ),
+      );
+      final shell = _source('lib/ui/app.dart');
+      expect(shell, _wired(r'backgroundSchedule: s\.backgroundSchedule,'));
+      expect(
+        shell,
+        _wired(
+          r'if \(state == AppLifecycleState\.resumed \|\| '
+          r'state == AppLifecycleState\.hidden \|\| '
+          r'state == AppLifecycleState\.paused\) \{ '
+          r'final keep = s\.keepBackgroundScan;',
+        ),
+      );
+      // The launch and every Watch Camera Roll or look-back edit: what iOS
+      // made of workmanager's submit is asked right behind it.
+      final sync = _body(
+        _source('lib/ui/background_glue.dart'),
+        'Future<void> syncBackgroundScan(AppSettings settings) async {',
+      );
+      expect(
+        sync,
+        _wired(
+          r'await enableBackgroundScan\([^;]*\); '
+          r'await keepBackgroundScanScheduled\(settings\);',
+        ),
+      );
+    });
+
     // G2b: without it every glasses preview copy is analyzed at once.
     test('a glasses preview copy waits once for its full-size one', () {
       expect(init(), _wired(r'previewHold: holdGlassesPreview,'));
