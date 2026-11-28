@@ -1356,11 +1356,20 @@ void main() {
       expect(
         launch(),
         _wired(
-          r'return finishWithinGrant\(run, left: startedAt\.add\(runDeadline\)'
+          r'final finished = finishWithinGrant\(run, '
+          r'left: startedAt\.add\(runDeadline\)'
           r'\.difference\(clock\(\)\), recorder: recorder, '
           r'abandon: ios \? inFlight\.abandon : inFlight\.endAtDeadline, '
           r'abandonLimit: ios \? iosAbandonLimit : androidDeadlineWrapUp\);',
         ),
+      );
+      // The Check new photos trial (2026-11-28): only a run the action
+      // started waits for the wrapper and then answers it; every other run
+      // returns the wrapper's own future, as before.
+      expect(
+        launch(),
+        _wired(r'if \(hint == null \|\| !byShortcut\) return finished; '
+            r'return _answerShortcut\(finished,'),
       );
       expect(launch(), isNot(contains('if (!ios) return run;')));
     });

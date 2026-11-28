@@ -106,6 +106,13 @@ abstract final class BackgroundLeft {
   ];
 }
 
+/// What started a run, when it was not the OS ([BackgroundRunRecord.trigger]).
+abstract final class BackgroundTrigger {
+  /// The Check new photos action, from Shortcuts or Siri (the iPhone trial
+  /// build of 2026-11-28: ios/Runner/CheckNewPhotosIntent.swift).
+  static const shortcuts = 'shortcuts';
+}
+
 class BackgroundRunRecord {
   const BackgroundRunRecord({
     required this.start,
@@ -123,6 +130,7 @@ class BackgroundRunRecord {
     this.watermarkBefore,
     this.watermarkAfter,
     this.bootMs,
+    this.trigger,
   });
 
   /// UTC instants.
@@ -177,6 +185,11 @@ class BackgroundRunRecord {
   /// Null without a stamp for this run.
   final int? bootMs;
 
+  /// What started the run when it was not the OS: [BackgroundTrigger]
+  /// (since 2026-11-28). Null for every run iOS or WorkManager started, and
+  /// for every entry written before.
+  final String? trigger;
+
   bool get finished => end != null;
 
   /// [left] with [count] more photos left for [reason].
@@ -212,6 +225,7 @@ class BackgroundRunRecord {
         watermarkBefore: watermarkBefore,
         watermarkAfter: watermarkAfter ?? this.watermarkAfter,
         bootMs: bootMs,
+        trigger: trigger,
       );
 
   Map<String, Object?> toJson() => {
@@ -232,6 +246,7 @@ class BackgroundRunRecord {
         // exactly what every earlier version wrote, and reads back as 0.
         if (alreadyLogged > 0) 'known': alreadyLogged,
         if (left.isNotEmpty) 'left': left,
+        if (trigger != null) 'trigger': trigger,
       };
 
   /// Null for an entry that cannot be read (a newer or damaged shape):
@@ -263,6 +278,10 @@ class BackgroundRunRecord {
       watermarkBefore: instant(json['wm_before']),
       watermarkAfter: instant(json['wm_after']),
       bootMs: json['boot_ms'] is int ? count(json['boot_ms']) : null,
+      trigger: switch (json['trigger']) {
+        final String t when t.isNotEmpty => t,
+        _ => null,
+      },
     );
   }
 }
@@ -382,11 +401,15 @@ bool _madeProgress(BackgroundRunRecord r) {
 /// from memory.
 class BackgroundRunRecorder {
   BackgroundRunRecorder(this._prefs,
-      {required this.platform, DateTime Function()? clock})
+      {required this.platform, DateTime Function()? clock, this.trigger})
       : _clock = clock ?? DateTime.now;
 
   final SharedPreferences _prefs;
   final String platform;
+
+  /// What started this run when it was not the OS ([BackgroundTrigger]),
+  /// written into its entry from [begin] on.
+  final String? trigger;
   final DateTime Function() _clock;
   List<BackgroundRunRecord> _older = const [];
   BackgroundRunRecord? _current;
@@ -416,7 +439,8 @@ class BackgroundRunRecorder {
         watermarkAfter: watermarkBefore?.toUtc(),
         bootMs: bootLead == null || bootLead <= Duration.zero
             ? null
-            : bootLead.inMilliseconds);
+            : bootLead.inMilliseconds,
+        trigger: trigger);
     await _write();
   }
 

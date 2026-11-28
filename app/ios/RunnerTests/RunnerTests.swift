@@ -2975,6 +2975,9 @@ class CheckNewPhotosTests: XCTestCase {
     XCTAssertEqual(outcome(0, 0, "watcher_off", sharing: false), .watcherOff, "the guard first")
     XCTAssertEqual(outcome(0, 1, "budget"), .outOfTime)
     XCTAssertEqual(outcome(0, 0, "error:PlatformException", sharing: nil), .failed)
+    XCTAssertEqual(outcome(0, 0, "error:MissingPluginException", sharing: false), .failed)
+    XCTAssertEqual(outcome(0, 0, "paused", sharing: false), .paused, "nothing was read")
+    XCTAssertEqual(outcome(0, 2, "budget", sharing: false), .sharingStopped)
     XCTAssertEqual(outcome(0, 0, "system_stop"), .failed)
     XCTAssertEqual(outcome(0, 0, "a_later_reason"), .failed)
 

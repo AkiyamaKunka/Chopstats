@@ -192,14 +192,13 @@ enum CheckNewPhotos {
     case "no_key": return .noAI
     case "needs_https": return .needsHttps
     case "no_permission": return .noPhotoAccess
-    default: break
-    }
-    // Photos were read and held back at the send (AiSendGate).
-    if r.sharing == false { return .sharingStopped }
-    switch r.stop {
     case "paused": return .paused
-    case "budget": return .outOfTime
-    case "done": return r.left > 0 ? .waiting(photos: r.left) : .nothingNew
+    case "done", "budget":
+      // The scan ran, and its photos were held back at the send: the
+      // consent check (AiSendGate) refused the AI service the settings name.
+      if r.sharing == false { return .sharingStopped }
+      if r.stop == "budget" { return .outOfTime }
+      return r.left > 0 ? .waiting(photos: r.left) : .nothingNew
     default: return .failed  // error:<class>, system_stop, a later version's reason
     }
   }

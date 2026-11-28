@@ -575,6 +575,11 @@ class _BackgroundRuns extends StatelessWidget {
                 children: [
                   Text('${localStamp(r.start)} · ${_took(l, r)}',
                       style: theme.textTheme.titleSmall),
+                  // Not iOS's own turn: the Check new photos action started
+                  // it (the trial build, 2026-11-28).
+                  if (r.trigger == BackgroundTrigger.shortcuts)
+                    Text(l.diagBgRunByShortcuts,
+                        key: const Key('diagBgRunTrigger'), style: muted),
                   const SizedBox(height: 4),
                   Text(backgroundRunVerdict(l, r),
                       style: theme.textTheme.bodyMedium),

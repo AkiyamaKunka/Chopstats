@@ -1381,6 +1381,9 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String get diagBgRunByShortcuts => 'Started by Shortcuts';
+
+  @override
   String diagBgRunAlreadyLogged(int count) {
     return 'Already logged, not read again: $count';
   }

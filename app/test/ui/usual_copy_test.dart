@@ -215,8 +215,9 @@ final _placeholderRe = RegExp(r'\{(\w+)\}');
 /// diagBgLeft* reasons); and the seven of Today's photo-scan row
 /// (todayScanChecking, todayScanKeepOpen, todayScanCheckingLabel,
 /// todayScanCheckingValue, todayScanDone, todayScanWaiting,
-/// todayScanWaitingReason).
-const _keyCount = 1029;
+/// todayScanWaitingReason); and the Check new photos trial's line on a
+/// scan Shortcuts started (diagBgRunByShortcuts).
+const _keyCount = 1030;
 
 Directory _appRoot() {
   var dir = Directory.current;

@@ -170,6 +170,44 @@ void main() {
         [0, 0, 0]);
   });
 
+  // 2026-11-28, the Check new photos trial: a run the action started says
+  // so ("trigger"), stored only when set. A run iOS started writes exactly
+  // what it wrote before, and an entry from before reads as started by iOS.
+  test('a run Shortcuts started says so through every write; one iOS '
+      'started stores no trigger; an older entry reads as none', () async {
+    final prefs = await _prefs();
+    final byShortcuts = BackgroundRunRecorder(prefs,
+        platform: 'ios', clock: () => t0, trigger: BackgroundTrigger.shortcuts);
+    await byShortcuts.begin();
+    expect(_stored(prefs).single['trigger'], 'shortcuts');
+    await byShortcuts.listed(2);
+    await byShortcuts.offered();
+    await byShortcuts.processed(saved: true, released: false);
+    await byShortcuts.finish(BackgroundStop.done);
+    expect(_stored(prefs).single['trigger'], 'shortcuts');
+    final r = decodeBackgroundRuns(prefs.getString(backgroundRunsPrefsKey))
+        .single;
+    expect(r.trigger, BackgroundTrigger.shortcuts);
+    expect(r.copyWith(saved: 2).trigger, BackgroundTrigger.shortcuts);
+
+    final ios = await _prefs();
+    final byIos = BackgroundRunRecorder(ios, platform: 'ios', clock: () => t0);
+    await byIos.begin();
+    await byIos.finish(BackgroundStop.done);
+    expect(_stored(ios).single.containsKey('trigger'), isFalse);
+    expect(decodeBackgroundRuns(ios.getString(backgroundRunsPrefsKey))
+        .single
+        .trigger, isNull);
+
+    final old = jsonEncode([
+      {'start': t0.toIso8601String(), 'stage': 'done', 'stop': 'done'},
+      {'start': t0.toIso8601String(), 'trigger': 7},
+      {'start': t0.toIso8601String(), 'trigger': ''},
+    ]);
+    expect([for (final e in decodeBackgroundRuns(old)) e.trigger],
+        [null, null, null]);
+  });
+
   // 2026-11-28: a run said how many photos it left for later, never why.
   // On 2026-11-27 the phone could not answer "why was nothing logged".
   group('why photos were left for later', () {

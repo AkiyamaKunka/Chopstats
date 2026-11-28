@@ -2244,6 +2244,12 @@ abstract class AppLocalizations {
     int later,
   );
 
+  /// Diagnostics › Recent background scans, under a scan's time: this scan was started by the Check new photos action (from the Shortcuts app, an automation or Siri), not by iOS. iPhone only. Shortcuts is the name of Apple's app; in Chinese it is 快捷指令, inside 「」.
+  ///
+  /// In en, this message translates to:
+  /// **'Started by Shortcuts'**
+  String get diagBgRunByShortcuts;
+
   /// Diagnostics › Recent background scans, under the counts line (diagBgRunCounts), only when the number is above 0: photos the scan listed and did not read again because a meal already has each one as its photo. iPhone only.
   ///
   /// In en, this message translates to:

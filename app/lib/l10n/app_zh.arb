@@ -377,6 +377,7 @@
   "diagBgRunUnfinished": "未完成",
   "diagBgRunSeconds": "{seconds} 秒",
   "diagBgRunCounts": "照片：列出 {listed}，读取 {read}，处理完 {processed}，记录 {logged}，留待之后 {later}",
+  "diagBgRunByShortcuts": "由「快捷指令」启动",
   "diagBgRunAlreadyLogged": "之前已记录，不再读取：{count}",
   "diagBgRunLeftWhy": "留待之后的原因：{reasons}",
   "diagBgLeftJoin": "；",

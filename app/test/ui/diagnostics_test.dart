@@ -809,6 +809,29 @@ void main() {
       expect(find.textContaining('未完成'), findsOneWidget);
     });
 
+    // 2026-11-28, the Check new photos trial: a scan the action started
+    // says so under its time; a scan iOS started says nothing more.
+    testWidgets('a scan Shortcuts started says so, in both languages',
+        (tester) async {
+      final byShortcuts = BackgroundRunRecord(
+          start: t0.add(const Duration(minutes: 5)),
+          end: t0.add(const Duration(minutes: 5, seconds: 12)),
+          platform: 'ios',
+          stage: BackgroundRunStage.done,
+          stopReason: BackgroundStop.done,
+          enumerated: 1,
+          offered: 1,
+          analyzed: 1,
+          saved: 1,
+          trigger: BackgroundTrigger.shortcuts);
+      await pump(tester, [byShortcuts, budget, failed]);
+      expect(find.text('Started by Shortcuts'), findsOneWidget,
+          reason: 'only under the scan the action started');
+      expect(find.byKey(const Key('diagBgRunTrigger')), findsOneWidget);
+      await pump(tester, [byShortcuts, budget], locale: const Locale('zh'));
+      expect(find.text('由「快捷指令」启动'), findsOneWidget);
+    });
+
     // 2026-11-28 (iOS): the scan no longer reads a photo a meal already
     // names, so "listed" and "read" drift apart; the card says where the
     // difference went, and says nothing when there is none.

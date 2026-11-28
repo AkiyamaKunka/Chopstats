@@ -17,6 +17,7 @@
 library;
 
 import 'dart:async';
+import 'dart:convert' show jsonEncode;
 import 'dart:io' show Platform;
 import 'dart:ui' show Locale, PlatformDispatcher;
 
@@ -160,6 +161,81 @@ DateTime backgroundRunStart(String? nativeStamp, DateTime enteredDart) {
   final lead = enteredDart.difference(native);
   if (lead.isNegative || lead > nativeLaunchMaxLead) return enteredDart;
   return native;
+}
+
+/// Written by the Check new photos action (the iPhone trial build of
+/// 2026-11-28, ios/Runner/CheckNewPhotosIntent.swift) just before it starts
+/// this very run through workmanager: when it did, as an ISO instant in
+/// [backgroundNativeLaunchPrefsKey]'s format. The run it started takes it
+/// as its own ([startedByShortcut]) and removes it.
+const String shortcutHintPrefsKey = 'background.shortcut_hint_iso';
+
+/// The answer a run the action started leaves for it; the action polls for
+/// it, at most 25 s from its own start, and words it for Shortcuts and
+/// Siri. JSON ([shortcutResultFor]): the hint it took, when it ended, the
+/// meals it saved, the photos it left for a later run, its stop reason
+/// ([BackgroundStop]) and whether its settings allowed sending to the AI
+/// service they name. Written at the run's end, also when the deadline ends
+/// it ([finishWithinGrant]) or it throws. A run the OS started never
+/// writes it.
+const String shortcutResultPrefsKey = 'background.shortcut_result';
+
+/// The most the action's hint may lead the run's start and still be its:
+/// the action writes it, then workmanager creates the engine and stamps the
+/// launch ([backgroundNativeLaunchPrefsKey]), within a second or two.
+const Duration shortcutHintMaxLead = Duration(seconds: 10);
+
+/// Whether the action's [hint] belongs to the run that started at
+/// [runStart] ([backgroundRunStart]): at most [shortcutHintMaxLead] older,
+/// and not newer.
+@visibleForTesting
+bool startedByShortcut(String? hint, DateTime runStart) {
+  final at = DateTime.tryParse(hint ?? '');
+  if (at == null) return false;
+  final lead = runStart.difference(at);
+  return !lead.isNegative && lead <= shortcutHintMaxLead;
+}
+
+/// The action's answer ([shortcutResultPrefsKey]) from [run], this run's
+/// entry as it ended. [sharing]: null when the run ended before it had its
+/// settings.
+@visibleForTesting
+Map<String, Object?> shortcutResultFor(BackgroundRunRecord? run,
+        {required String hint, required DateTime at, bool? sharing}) =>
+    {
+      'hint': hint,
+      'at': at.toUtc().toIso8601String(),
+      'saved': run?.saved ?? 0,
+      'left': run?.released ?? 0,
+      'stop': run?.stopReason ?? 'unknown',
+      'sharing': ?sharing,
+    };
+
+/// [run], then the action's answer from the run's entry as it ended: run
+/// to the end, ended by the deadline, or thrown. Never throws more than
+/// [run] does.
+Future<bool> _answerShortcut(Future<bool> run,
+    {required SharedPreferences prefs,
+    required BackgroundRunRecorder recorder,
+    required String hint,
+    required RunInFlight inFlight,
+    required DateTime Function() clock}) async {
+  try {
+    return await run;
+  } finally {
+    try {
+      bool? sharing;
+      try {
+        sharing = inFlight.sharingAllowed?.call();
+      } catch (_) {}
+      await prefs.setString(
+          shortcutResultPrefsKey,
+          jsonEncode(shortcutResultFor(recorder.current,
+              hint: hint, at: clock(), sharing: sharing)));
+    } catch (_) {
+      // The action then says the check ran out of time.
+    }
+  }
 }
 
 /// Result of one drained backfill: what happened to each photo, whether
@@ -769,11 +845,23 @@ Future<bool> runHeadlessBackfill({
       ? backgroundRunStart(
           prefs.getString(backgroundNativeLaunchPrefsKey), enteredDart)
       : enteredDart;
+  // iOS: the Check new photos action started this run (the trial build):
+  // its hint is taken once, the entry says so, and the run's answer is
+  // left for the action at its end. Every other run is as before.
+  final hint = ios ? prefs.getString(shortcutHintPrefsKey) : null;
+  final byShortcut = hint != null && startedByShortcut(hint, startedAt);
+  if (byShortcut) {
+    try {
+      await prefs.remove(shortcutHintPrefsKey);
+    } catch (_) {}
+  }
   await recordBackgroundLaunch(prefs, clock);
   // This run's diagnostics entry, rewritten at every step so a run iOS
   // kills still shows how far it got (background_runs.dart).
   final recorder = BackgroundRunRecorder(prefs,
-      platform: ios ? 'ios' : 'android', clock: clock);
+      platform: ios ? 'ios' : 'android',
+      clock: clock,
+      trigger: byShortcut ? BackgroundTrigger.shortcuts : null);
   await recorder.begin(
       watermarkBefore:
           readStoredInstant(prefs.getString(backgroundWatermarkPrefsKey)),
@@ -793,11 +881,18 @@ Future<bool> runHeadlessBackfill({
       loadSettings: loadSettings);
   // The whole run ends in its time, whatever it is stuck on: inside iOS's
   // grant, and before WorkManager's 10-minute stop on Android.
-  return finishWithinGrant(run,
+  final finished = finishWithinGrant(run,
       left: startedAt.add(runDeadline).difference(clock()),
       recorder: recorder,
       abandon: ios ? inFlight.abandon : inFlight.endAtDeadline,
       abandonLimit: ios ? iosAbandonLimit : androidDeadlineWrapUp);
+  if (hint == null || !byShortcut) return finished;
+  return _answerShortcut(finished,
+      prefs: prefs,
+      recorder: recorder,
+      hint: hint,
+      inFlight: inFlight,
+      clock: clock);
 }
 
 /// How long iOS's deadline waits for the photo in flight to be released
@@ -868,6 +963,12 @@ class RunInFlight {
   /// its settings and notifier: Android's deadline runs it
   /// ([endAtDeadline]).
   Future<void> Function()? rearm;
+
+  /// Whether the run's settings allow sending to the AI service they name
+  /// (as the consent check at each send reads them), set once the run has
+  /// its settings: the Check new photos action's answer says so
+  /// ([shortcutResultFor]). Read by nothing else.
+  bool Function()? sharingAllowed;
 
   /// Android's end at [androidRunDeadline]: the photo in flight released
   /// ([abandon]), then the summary re-armed — the run's own re-arm sits at
@@ -965,6 +1066,8 @@ Future<bool> _runAfterLaunch({
     // WorkManager retry storm helps nobody (background.dart's rule).
     return true;
   }
+  inFlight.sharingAllowed =
+      () => settings.hasAiConsent(settings.activeAiConsentRoute);
   // Android 13 and later: a language picked for the app in Android's
   // settings since the app last ran is this run's (read only).
   final languageAgreed =

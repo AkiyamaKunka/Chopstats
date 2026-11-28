@@ -4,7 +4,7 @@
 // first device use — the watcher only worked while the app was foreground —
 // so these tests pin every seam of the fix.
 import 'dart:async';
-import 'dart:convert' show jsonEncode, utf8;
+import 'dart:convert' show jsonDecode, jsonEncode, utf8;
 import 'dart:io' show Directory;
 import 'dart:typed_data';
 
@@ -1603,6 +1603,204 @@ void main() {
         expect(run.stopReason, BackgroundStop.budget);
         expect(run.bootMs, 2000);
       });
+    });
+  });
+
+  // 2026-11-28, the iPhone trial build: the Check new photos action
+  // (ios/Runner/CheckNewPhotosIntent.swift) leaves a hint, starts this same
+  // run through workmanager, and waits for the answer the run leaves. A run
+  // iOS started, and Android's, must not change at all.
+  group('a run the Check new photos action started', () {
+    late SharedPreferences prefs;
+    final t0 = DateTime.utc(2026, 11, 28, 12, 0, 0);
+
+    setUp(() async {
+      SharedPreferences.setMockInitialValues({});
+      prefs = await SharedPreferences.getInstance();
+    });
+    tearDown(() => isHeadlessEngine = false);
+
+    Map<String, Object?>? answerIn(SharedPreferences p) {
+      final raw = p.getString(shortcutResultPrefsKey);
+      return raw == null
+          ? null
+          : (jsonDecode(raw) as Map).cast<String, Object?>();
+    }
+
+    String hintBefore(Duration lead) => t0.subtract(lead).toIso8601String();
+
+    Future<AppSettings> unreadable() async =>
+        throw PlatformException(code: '-25308');
+
+    test("the hint is the run's when at most 10 s older than the run's "
+        'start, and not newer', () {
+      expect(shortcutHintMaxLead, const Duration(seconds: 10));
+      for (final lead in [
+        Duration.zero,
+        const Duration(seconds: 2),
+        shortcutHintMaxLead,
+      ]) {
+        expect(startedByShortcut(hintBefore(lead), t0), isTrue,
+            reason: '$lead');
+      }
+      expect(startedByShortcut('2026-11-28T11:59:58.123Z', t0), isTrue,
+          reason: 'the format the action writes');
+      expect(
+          startedByShortcut(
+              hintBefore(shortcutHintMaxLead + const Duration(milliseconds: 1)),
+              t0),
+          isFalse);
+      expect(
+          startedByShortcut(
+              t0.add(const Duration(milliseconds: 1)).toIso8601String(), t0),
+          isFalse,
+          reason: 'newer than the run');
+      for (final junk in [null, '', 'soon']) {
+        expect(startedByShortcut(junk, t0), isFalse, reason: '$junk');
+      }
+    });
+
+    test('its entry says Shortcuts started it, and when the deadline ends '
+        'it the answer is still left, from the entry as it ended', () async {
+      final hint = hintBefore(const Duration(seconds: 2));
+      await prefs.setString(shortcutHintPrefsKey, hint);
+      // Dart entry at t0; every later reading 40 ms short of the deadline.
+      var calls = 0;
+      final late = t0.add(iosRunDeadline - const Duration(milliseconds: 40));
+      final ok = await runHeadlessBackfill(
+        isIOS: true,
+        loadPrefs: () async => prefs,
+        clock: () => calls++ == 0 ? t0 : late,
+        loadSettings: () => Completer<AppSettings>().future,
+      ).timeout(const Duration(seconds: 5));
+      expect(ok, isTrue);
+      final run =
+          decodeBackgroundRuns(prefs.getString(backgroundRunsPrefsKey)).single;
+      expect(run.trigger, BackgroundTrigger.shortcuts);
+      expect(run.stopReason, BackgroundStop.budget);
+      expect(
+          answerIn(prefs),
+          {
+            'hint': hint,
+            'at': late.toIso8601String(),
+            'saved': 0,
+            'left': 0,
+            'stop': BackgroundStop.budget,
+          },
+          reason: 'no settings yet, so nothing said about sharing');
+      expect(prefs.getString(shortcutHintPrefsKey), isNull,
+          reason: 'taken by this run');
+    });
+
+    test("a guard's stop is the answer, with whether the AI service the "
+        'settings name may be sent to', () async {
+      final settings = await settingsWith(key: 'k', watcher: false);
+      final store = await SharedPreferences.getInstance();
+      Future<Map<String, Object?>?> run(String hint) async {
+        await store.setString(shortcutHintPrefsKey, hint);
+        final ok = await runHeadlessBackfill(
+          isIOS: true,
+          loadPrefs: () async => store,
+          clock: () => t0,
+          loadSettings: () async => settings,
+        );
+        expect(ok, isTrue);
+        return answerIn(store);
+      }
+
+      final first = hintBefore(const Duration(seconds: 1));
+      expect(await run(first), {
+        'hint': first,
+        'at': t0.toIso8601String(),
+        'saved': 0,
+        'left': 0,
+        'stop': BackgroundStop.watcherOff,
+        'sharing': false,
+      });
+      await settings.setAiConsent(settings.activeAiConsentRoute,
+          granted: true);
+      final second = hintBefore(const Duration(milliseconds: 500));
+      expect(await run(second), containsPair('sharing', true));
+      expect(answerIn(store), containsPair('hint', second));
+      final runs = decodeBackgroundRuns(store.getString(backgroundRunsPrefsKey));
+      expect([for (final r in runs) (r.trigger, r.stopReason)], [
+        (BackgroundTrigger.shortcuts, BackgroundStop.watcherOff),
+        (BackgroundTrigger.shortcuts, BackgroundStop.watcherOff),
+      ]);
+    });
+
+    test('a run whose settings cannot be read answers with that stop',
+        () async {
+      final hint = hintBefore(const Duration(seconds: 1));
+      await prefs.setString(shortcutHintPrefsKey, hint);
+      final ok = await runHeadlessBackfill(
+          isIOS: true,
+          loadPrefs: () async => prefs,
+          clock: () => t0,
+          loadSettings: unreadable);
+      expect(ok, isTrue);
+      expect(answerIn(prefs), {
+        'hint': hint,
+        'at': t0.toIso8601String(),
+        'saved': 0,
+        'left': 0,
+        'stop': 'error:PlatformException',
+      });
+    });
+
+    test('a run iOS started is as before: a stale or a newer hint is left '
+        'alone, its entry is byte for byte the same, and no answer is '
+        'written', () async {
+      Future<SharedPreferences> runWith(String? hint) async {
+        SharedPreferences.setMockInitialValues(
+            {shortcutHintPrefsKey: ?hint});
+        final p = await SharedPreferences.getInstance();
+        final ok = await runHeadlessBackfill(
+            isIOS: true,
+            loadPrefs: () async => p,
+            clock: () => t0,
+            loadSettings: unreadable);
+        expect(ok, isTrue);
+        return p;
+      }
+
+      final reference = (await runWith(null)).getString(backgroundRunsPrefsKey);
+      expect(reference, isNot(contains('trigger')));
+      for (final hint in [
+        hintBefore(shortcutHintMaxLead + const Duration(seconds: 1)),
+        t0.add(const Duration(seconds: 1)).toIso8601String(),
+      ]) {
+        final p = await runWith(hint);
+        expect(p.getString(backgroundRunsPrefsKey), reference, reason: hint);
+        expect(p.getString(shortcutResultPrefsKey), isNull, reason: hint);
+        expect(p.getString(shortcutHintPrefsKey), hint, reason: 'not taken');
+      }
+    });
+
+    test("Android's run is unchanged: a fresh hint is not even read",
+        () async {
+      Future<SharedPreferences> runWith(String? hint) async {
+        SharedPreferences.setMockInitialValues(
+            {shortcutHintPrefsKey: ?hint});
+        final p = await SharedPreferences.getInstance();
+        final ok = await runHeadlessBackfill(
+            isIOS: false,
+            loadPrefs: () async => p,
+            clock: () => t0,
+            loadSettings: unreadable);
+        expect(ok, isTrue);
+        return p;
+      }
+
+      final reference = (await runWith(null)).getString(backgroundRunsPrefsKey);
+      final hint = hintBefore(const Duration(seconds: 1));
+      final p = await runWith(hint);
+      final run = decodeBackgroundRuns(p.getString(backgroundRunsPrefsKey)).single;
+      expect(run.platform, 'android');
+      expect(run.trigger, isNull);
+      expect(p.getString(backgroundRunsPrefsKey), reference);
+      expect(p.getString(shortcutResultPrefsKey), isNull);
+      expect(p.getString(shortcutHintPrefsKey), hint);
     });
   });
 

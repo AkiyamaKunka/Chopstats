@@ -1282,6 +1282,9 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
+  String get diagBgRunByShortcuts => '由「快捷指令」启动';
+
+  @override
   String diagBgRunAlreadyLogged(int count) {
     return '之前已记录，不再读取：$count';
   }
