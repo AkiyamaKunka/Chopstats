@@ -18,6 +18,7 @@ import '../../services/photo/photo_library.dart';
 import '../outcome_text.dart';
 import '../photo_pipeline.dart';
 import '../l10n.dart';
+import '../unit_text.dart';
 import '../large_text.dart';
 import '../theme/app_dialog.dart';
 import '../theme/tokens.dart';
@@ -265,7 +266,7 @@ class _CoverageScreenState extends State<CoverageScreen> {
     final remaining = items.length - attempted;
     final stop = stopOutcome;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(stop != null
+        content: unitText(l, stop != null
             // Stopped on the LAST photo: nothing remains, so no "the
             // remaining 0 photos … run this again later" (U13).
             ? remaining == 0

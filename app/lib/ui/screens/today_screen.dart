@@ -17,6 +17,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../l10n.dart';
+import '../unit_text.dart';
 import '../widgets/calorie_ring.dart';
 import '../widgets/day_report.dart';
 import '../widgets/grouped.dart' show GroupedCard, appLargeTitleBar;
@@ -583,7 +584,7 @@ class TodayScreenState extends State<TodayScreen>
           ),
           if (typicalLine != null) ...[
             const SizedBox(height: AppSpace.cardGap),
-            Text(typicalLine,
+            unitText(l, typicalLine,
                 key: const Key('typicalDayLine'), style: footnote),
           ],
           if (_garmin != null && _garmin!.activeCalories <= 0) ...[
@@ -596,7 +597,8 @@ class TodayScreenState extends State<TodayScreen>
           ],
           if (_garmin != null && _garmin!.activeCalories > 0) ...[
             const SizedBox(height: AppSpace.s4),
-            Text(
+            unitText(
+              l,
               _garminLine(context, totals.cal, _garmin!.activeCalories),
               key: const Key('garminBurnLine'),
               style: footnote,

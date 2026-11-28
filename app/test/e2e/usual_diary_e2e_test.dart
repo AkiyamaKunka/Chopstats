@@ -243,8 +243,10 @@ void main() {
       expect(
           find.descendant(of: offerCard, matching: find.text(l.usualCardTitle)),
           findsOneWidget);
-      expect(
-          tester.widget<Text>(find.byKey(const Key('usualOfferItem0'))).data,
+      // Drawn through a span in zh (lib/ui/unit_text.dart): what it reads.
+      final item0 =
+          tester.widget<Text>(find.byKey(const Key('usualOfferItem0')));
+      expect(item0.data ?? item0.textSpan!.toPlainText(),
           l.usualItemLine(w.shown, '305', '350'));
       expect(find.text(l.usualCardFrom(w.shown, '2026-10-19')),
           findsOneWidget);

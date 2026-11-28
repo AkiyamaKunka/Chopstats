@@ -12,6 +12,7 @@ import '../ai_consent.dart';
 import '../meal_in_use.dart';
 import '../nl_presenter.dart';
 import '../l10n.dart';
+import '../unit_text.dart';
 import '../services.dart' show SettingsStore;
 import '../large_text.dart';
 import '../theme/tokens.dart';
@@ -213,7 +214,7 @@ class _FixMealScreenState extends State<FixMealScreen> {
               // The instructions read as the field's footer, the way
               // Describe's help sits under its field.
               const SizedBox(height: AppSpace.s8),
-              Text(context.l10n.fixIntro, style: muted),
+              unitText(context.l10n, context.l10n.fixIntro, style: muted),
               const SizedBox(height: AppSpace.s4),
               // The old copy promised "the meal numbers match the Today
               // list". They do not: Today renders no numbers at all, and the
@@ -250,7 +251,8 @@ class _FixMealScreenState extends State<FixMealScreen> {
                 for (final line in _log.reversed)
                   Padding(
                     padding: const EdgeInsets.only(top: 6),
-                    child: Text('• $line', style: theme.textTheme.bodyMedium),
+                    child: unitText(context.l10n, '• $line',
+                        style: theme.textTheme.bodyMedium),
                   ),
               ],
             ],

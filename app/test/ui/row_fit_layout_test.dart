@@ -135,7 +135,10 @@ void main() {
             final detail = find.descendant(
                 of: row, matching: find.textContaining(c.kcal));
             expect(detail, findsOneWidget);
-            final line = tester.widget<Text>(detail).data!;
+            // zh draws it through a span (lib/ui/unit_text.dart); this
+            // is what it reads.
+            final text = tester.widget<Text>(detail);
+            final line = text.data ?? text.textSpan!.toPlainText();
             expect(line, contains(day));
             expect(line, contains(kcal));
             expect(tester.getTopLeft(detail).dy,

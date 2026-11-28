@@ -22,6 +22,7 @@ import '../../services/photo/glasses.dart' show isMetaGlassesAnalysis;
 import '../assist_view.dart';
 import '../format.dart';
 import '../l10n.dart';
+import '../unit_text.dart';
 import 'glasses_badge.dart';
 import 'grouped.dart' show GroupedCard;
 import 'macro_chart.dart' show MacroPalette;
@@ -128,7 +129,8 @@ class MealCard extends StatelessWidget {
               for (final item in items)
                 Padding(
                   padding: const EdgeInsets.only(top: 2),
-                  child: Text(
+                  child: unitText(
+                    context.l10n,
                     // Item line per §5.4; name stringified, missing → '?'.
                     // A template, so zh gets its full-width colon (L7).
                     '• ${context.l10n.mealItemLine(
@@ -182,7 +184,8 @@ class _AssistChip extends StatelessWidget {
               size: icon, color: scheme.onSurfaceVariant),
           const SizedBox(width: 4),
           Flexible(
-            child: Text(
+            child: unitText(
+              context.l10n,
               text,
               style: theme.textTheme.labelSmall
                   ?.copyWith(color: scheme.onSurfaceVariant),

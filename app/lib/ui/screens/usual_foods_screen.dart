@@ -23,6 +23,7 @@ import '../../core/contracts.dart';
 import '../../services/usual/usual_foods.dart';
 import '../format.dart' show formatKcal, formatOneDecimal;
 import '../l10n.dart';
+import '../unit_text.dart';
 import '../large_text.dart';
 import '../theme/app_dialog.dart';
 import '../theme/tokens.dart';
@@ -147,7 +148,8 @@ class _UsualFoodsScreenState extends State<UsualFoodsScreen> {
         key: const Key('usualLoggedSnack'),
         duration: kUsualUndoSnackDuration,
         persist: usualUndoPersists(messenger),
-        content: Text(l.usualLoggedSnack(done.title, formatKcal(done.kcal))),
+        content:
+            unitText(l, l.usualLoggedSnack(done.title, formatKcal(done.kcal))),
         action: SnackBarAction(
           label: l.assistUndo,
           onPressed: () async {
@@ -466,7 +468,7 @@ class _UsualRow extends StatelessWidget {
           Text(meal.title,
               style: theme.textTheme.bodyLarge?.copyWith(color: colors.label)),
           const SizedBox(height: AppSpace.s2),
-          Text(numbers,
+          unitText(l, numbers,
               style: theme.textTheme.bodyMedium
                   ?.copyWith(color: colors.secondaryLabel)),
           Text(stats,

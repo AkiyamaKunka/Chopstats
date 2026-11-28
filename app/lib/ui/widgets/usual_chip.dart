@@ -16,6 +16,7 @@ import 'package:flutter/material.dart';
 
 import '../../services/usual/usual_foods.dart';
 import '../l10n.dart';
+import '../unit_text.dart';
 import '../large_text.dart';
 import '../theme/tokens.dart';
 import 'usual_offer_card.dart' show usualItemText;
@@ -48,7 +49,8 @@ class UsualChip extends StatelessWidget {
         ? usualItemText(l, item, item.learnedName)
         : l.usualChipMany(offer.items.length);
     final icon = MediaQuery.textScalerOf(context).scale(14).clamp(14.0, 28.0);
-    final label = Text(
+    final label = unitText(
+      l,
       text,
       key: const Key('usualChipText'),
       style: theme.textTheme.labelSmall?.copyWith(

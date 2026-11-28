@@ -100,10 +100,9 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(
-      tester.widget<Text>(find.byKey(const Key('dayTotalKcal'))).data,
-      '~0 千卡',
-    );
+    // Drawn through a span in zh (lib/ui/unit_text.dart): what it reads.
+    final total = tester.widget<Text>(find.byKey(const Key('dayTotalKcal')));
+    expect(total.data ?? total.textSpan!.toPlainText(), '~0 千卡');
     expect(
       find.text('~0 千卡'),
       findsNWidgets(2),

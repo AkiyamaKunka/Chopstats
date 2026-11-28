@@ -91,6 +91,7 @@ import '../assist_view.dart';
 import '../format.dart' show formatKcal, formatOneDecimal, isoDate;
 import '../l10n.dart';
 import '../large_text.dart';
+import '../unit_text.dart';
 import '../meal_edit_logic.dart';
 import '../meal_in_use.dart';
 import '../provider_names.dart' show providerDisplayLabel;
@@ -933,8 +934,8 @@ class _MealEditorScreenState extends State<MealEditorScreen>
 
   void _say(String text, {Key? key}) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(key: key, content: Text(text)));
+    ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(key: key, content: unitText(context.l10n, text)));
   }
 
   /// Re-reads the row behind the form after an assist write: an untouched
@@ -1193,7 +1194,7 @@ class _MealEditorScreenState extends State<MealEditorScreen>
             if (view.whyText(l) case final why?) Text(why),
             if (total is num) ...[
               const SizedBox(height: 8),
-              Text(l.assistAcceptTotal(formatKcal(total))),
+              unitText(l, l.assistAcceptTotal(formatKcal(total))),
             ],
           ],
         ),
@@ -2332,7 +2333,8 @@ class _MealEditorScreenState extends State<MealEditorScreen>
             ),
             const SizedBox(height: 16),
             // Live composition of what's typed above.
-            Text('~${context.l10n.kcalAmount(formatKcal(kcalNow))}',
+            unitText(context.l10n,
+                '~${context.l10n.kcalAmount(formatKcal(kcalNow))}',
                 style: theme.textTheme.titleMedium),
             const SizedBox(height: 8),
             MacroBreakdownBar(
@@ -2678,26 +2680,32 @@ class _NoteChangesCard extends StatelessWidget {
             children: [
               Text(l.mealNoteChangedTitle, style: theme.textTheme.titleSmall),
               const SizedBox(height: 6),
-              Text(l.mealNoteYourNote(step.note),
+              // Every line that can hold a number and its unit keeps them
+              // on one line in Chinese ('…130 千' / '卡' on a Pro Max).
+              unitText(l, l.mealNoteYourNote(step.note),
                   key: const Key('mealNoteYourNote')),
               if (descBefore != null && descAfter != null)
-                Text(l.mealNoteDescChange(descBefore, descAfter),
+                unitText(l, l.mealNoteDescChange(descBefore, descAfter),
                     key: const Key('mealNoteDescChange')),
-              Text(
+              unitText(
+                  l,
                   l.mealNoteTotalChange(formatKcal(d.totalsBefore.calories),
                       formatKcal(d.totalsAfter.calories)),
                   key: const Key('mealNoteTotalChange')),
               for (final (name, before, after) in macros)
                 if ((after - before).abs() >= 0.05)
-                  Text(l.mealNoteMacroChange(name, formatOneDecimal(before),
-                      formatOneDecimal(after))),
-              for (final x in shown) Text(line(x)),
+                  unitText(
+                      l,
+                      l.mealNoteMacroChange(name, formatOneDecimal(before),
+                          formatOneDecimal(after))),
+              for (final x in shown) unitText(l, line(x)),
               if (more > 0) Text(l.mealNoteMoreChanges(more)),
               if (d.unchangedCount > 0)
                 Text(l.mealNoteUnchangedCount(d.unchangedCount),
                     key: const Key('mealNoteUnchanged')),
               if (d.reason.isNotEmpty)
-                Text('💬 ${d.reason}', key: const Key('mealNoteReason')),
+                unitText(l, '💬 ${d.reason}',
+                    key: const Key('mealNoteReason')),
               const SizedBox(height: 6),
               Text(l.mealNoteCheckThenSave),
               if (onUndo != null)

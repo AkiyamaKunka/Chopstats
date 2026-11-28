@@ -13,6 +13,7 @@ import '../refresh_signal.dart';
 import '../restaurant_assist_controls.dart';
 import '../services.dart' show SettingsStore;
 import '../l10n.dart';
+import '../unit_text.dart';
 import '../large_text.dart';
 import '../theme/tokens.dart';
 import '../widgets/grouped.dart';
@@ -184,9 +185,10 @@ class HistoryScreenState extends State<HistoryScreen> {
   Widget _kcalValue(BuildContext context, num kcal, {required bool stacked}) {
     final style = context.nums.value.copyWith(color: context.colors.label);
     final number = formatKcal(kcal);
-    final full = '~${context.l10n.kcalAmount(number)}';
+    final l = context.l10n;
+    final full = '~${l.kcalAmount(number)}';
     final at = full.indexOf(number);
-    if (!stacked || at < 0) return Text(full, style: style);
+    if (!stacked || at < 0) return unitText(l, full, style: style);
     final head = full.substring(0, at + number.length).trim();
     final unit = full.substring(at + number.length).trim();
     return Semantics(
@@ -196,7 +198,8 @@ class HistoryScreenState extends State<HistoryScreen> {
         spacing: MediaQuery.textScalerOf(context).scale(4),
         children: [
           Text(head, style: style),
-          if (unit.isNotEmpty) Text(unit, style: style),
+          // 千卡 itself never splits either.
+          if (unit.isNotEmpty) unitText(l, unit, style: style),
         ],
       ),
     );
@@ -268,12 +271,15 @@ class HistoryScreenState extends State<HistoryScreen> {
   Widget _average(BuildContext context, int avg) {
     final theme = Theme.of(context);
     final colors = context.colors;
+    final l = context.l10n;
     final number = formatKcal(avg);
-    final full = context.l10n.historyAverage(number);
+    final full = l.historyAverage(number);
     final quiet =
         theme.textTheme.bodySmall?.copyWith(color: colors.secondaryLabel);
     final at = full.indexOf(number);
-    if (at < 0) return Text(full, key: const Key('historyAverage'), style: quiet);
+    if (at < 0) {
+      return unitText(l, full, key: const Key('historyAverage'), style: quiet);
+    }
     return Text.rich(
       key: const Key('historyAverage'),
       TextSpan(style: quiet, children: [
@@ -281,7 +287,8 @@ class HistoryScreenState extends State<HistoryScreen> {
         TextSpan(
             text: number,
             style: context.nums.value.copyWith(color: colors.label)),
-        TextSpan(text: full.substring(at + number.length)),
+        // The unit stays with the number in Chinese (' 千卡 / 天').
+        unitSpan(l, full.substring(at + number.length), before: number),
       ]),
     );
   }

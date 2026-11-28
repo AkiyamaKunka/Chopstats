@@ -16,7 +16,9 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show HapticFeedback;
 
+import '../l10n.dart';
 import '../large_text.dart';
+import '../unit_text.dart';
 import '../theme/tokens.dart';
 
 /// Apple's ACTUAL neutral system values, not seed-derived: deriving these
@@ -172,7 +174,8 @@ class GroupedSection extends StatelessWidget {
                       : AppSpace.cellsToFooter,
                   AppSpace.footerSide,
                   0),
-              child: Text(
+              child: unitText(
+                context.l10n,
                 footer!,
                 style: theme.textTheme.bodySmall
                     ?.copyWith(color: colors.secondaryLabel),
@@ -344,7 +347,8 @@ class GroupedRow extends StatelessWidget {
             if (value != null)
               Padding(
                 padding: const EdgeInsets.only(top: 2),
-                child: Text(value!, style: valueStyle),
+                // Two lines may hold it here: the number keeps its unit.
+                child: unitText(context.l10n, value!, style: valueStyle),
               ),
           ],
         );
