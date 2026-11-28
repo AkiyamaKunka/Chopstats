@@ -840,8 +840,9 @@ void main() {
     // 2026-11-28: "3 left for later" said nothing about why. On
     // 2026-11-27 the phone could not answer "why was nothing logged".
     // The words for "unreachable" and "deadline" in the lines below
-    // changed with the review of 2026-11-28: each now says both cases it
-    // is recorded for (the test after "in Chinese" says why).
+    // changed with the review of 2026-11-28, and those for "busy" with its
+    // second round: each now says both cases it is recorded for (the test
+    // after "in Chinese" says why).
     group('why photos were left for later', () {
       BackgroundRunRecord left(Map<String, int> why, {int? released}) =>
           BackgroundRunRecord(
@@ -869,10 +870,10 @@ void main() {
             find.text('Photos: 6 listed, 2 read, 1 processed, 0 logged, '
                 '5 left for later'),
             findsOneWidget);
-        final why = find.text('Why they were left: the AI service was busy '
-            '(1); the scan\'s time ran out before the AI service answered, '
-            'or before its answer was saved (1); not started, the scan\'s '
-            'time was over (3)');
+        final why = find.text('Why they were left: the AI service was busy, '
+            'or a rate limit was hit (1); the scan\'s time ran out before the '
+            'AI service answered, or before its answer was saved (1); not '
+            'started, the scan\'s time was over (3)');
         expect(why, findsOneWidget);
         expect(
             tester.getTopLeft(why).dy,
@@ -899,17 +900,24 @@ void main() {
       });
 
       // Review, 2026-11-28: a label has to be true of every case its
-      // reason is recorded for, and two reasons cover two cases each.
+      // reason is recorded for, and three reasons cover two cases each.
       // "Unreachable" is no answer at all, or a server error (a 5xx that
       // is not "busy": run_traffic.dart, and the analyzers' own "network
       // or service issue"). "Deadline" is a request out and unanswered, or
       // an answer that had come and was not saved yet (CutOffAt.waiting).
       // The labels said only the first half: "could not be reached" of a
       // server that answered 500, and "before the AI service answered" of
-      // an answer that was in.
+      // an answer that was in. "Busy" (its second round) is a busy server,
+      // or a rate limit: a 429 heard before the cut (run_traffic.dart), and
+      // the verdicts of a key over its limit, such as Gemini's per-minute
+      // one (backgroundLeftFor: rateLimited). The label said only "busy"
+      // of a rate limit, which the app calls rate-limiting everywhere else
+      // (errRateLimited, reasonRateLimited).
       test('a reason that covers two cases says both, in both languages',
           () {
         final en = AppLocalizationsEn(), zh = AppLocalizationsZh();
+        expect(en.diagBgLeftBusy(1),
+            'the AI service was busy, or a rate limit was hit (1)');
         expect(
             en.diagBgLeftUnreachable(2),
             'the AI service could not be reached, or answered with an error '
@@ -918,6 +926,7 @@ void main() {
             en.diagBgLeftDeadline(1),
             'the scan\'s time ran out before the AI service answered, or '
             'before its answer was saved (1)');
+        expect(zh.diagBgLeftBusy(1), 'AI 服务繁忙，或正在限流（1）');
         expect(zh.diagBgLeftUnreachable(2), '连不上 AI 服务，或 AI 服务返回了错误（2）');
         expect(zh.diagBgLeftDeadline(1), 'AI 服务还没回复，或回复还没存好，扫描时间就用完了（1）');
       });
@@ -959,7 +968,7 @@ void main() {
             backgroundRunLeftLine(AppLocalizationsZh(),
                 left({BackgroundLeft.busy: 1, BackgroundLeft.deadline: 1,
                     BackgroundLeft.notOffered: 2})),
-            '留待之后的原因：AI 服务繁忙（1）；'
+            '留待之后的原因：AI 服务繁忙，或正在限流（1）；'
             'AI 服务还没回复，或回复还没存好，扫描时间就用完了（1）；'
             '扫描时间已到，没有开始（2）');
       });

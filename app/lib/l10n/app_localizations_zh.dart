@@ -1296,7 +1296,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String diagBgLeftBusy(int count) {
-    return 'AI 服务繁忙（$count）';
+    return 'AI 服务繁忙，或正在限流（$count）';
   }
 
   @override

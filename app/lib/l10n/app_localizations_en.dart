@@ -1395,7 +1395,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String diagBgLeftBusy(int count) {
-    return 'the AI service was busy ($count)';
+    return 'the AI service was busy, or a rate limit was hit ($count)';
   }
 
   @override

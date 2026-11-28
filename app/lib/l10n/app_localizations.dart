@@ -2262,10 +2262,10 @@ abstract class AppLocalizations {
   /// **'; '**
   String get diagBgLeftJoin;
 
-  /// A reason in diagBgRunLeftWhy: the AI service (the user's own server, or a provider) answered that it was busy or over its rate limit. {count} is how many photos.
+  /// A reason in diagBgRunLeftWhy: the AI service (the user's own server, or a provider) answered that it was busy, or that a rate limit was hit (HTTP 429: the provider's rate or spend limit). The app records both under this one reason, so the words must say both. {count} is how many photos.
   ///
   /// In en, this message translates to:
-  /// **'the AI service was busy ({count})'**
+  /// **'the AI service was busy, or a rate limit was hit ({count})'**
   String diagBgLeftBusy(int count);
 
   /// A reason in diagBgRunLeftWhy: no connection to the AI service, or it answered with a server error. The app records both under this one reason, so the words must say both.

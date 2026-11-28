@@ -380,7 +380,7 @@
   "diagBgRunAlreadyLogged": "之前已记录，不再读取：{count}",
   "diagBgRunLeftWhy": "留待之后的原因：{reasons}",
   "diagBgLeftJoin": "；",
-  "diagBgLeftBusy": "AI 服务繁忙（{count}）",
+  "diagBgLeftBusy": "AI 服务繁忙，或正在限流（{count}）",
   "diagBgLeftUnreachable": "连不上 AI 服务，或 AI 服务返回了错误（{count}）",
   "diagBgLeftDeadline": "AI 服务还没回复，或回复还没存好，扫描时间就用完了（{count}）",
   "diagBgLeftPreparing": "照片还没发出，扫描时间就用完了（{count}）",
