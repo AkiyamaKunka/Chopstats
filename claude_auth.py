@@ -34,6 +34,8 @@ import time
 from pathlib import Path
 from typing import Dict, Optional
 
+import claude_analyzer
+
 log = logging.getLogger("claude_auth")
 
 SESSION_TTL_SECONDS = 600  # the authorize page's code is short-lived anyway
@@ -290,8 +292,14 @@ def complete_session(code: str, apply_token) -> Dict:
 
 def apply_token_to_env(token: str, env_path: Optional[Path] = None) -> None:
     """Make [token] effective NOW (os.environ → next CLI child inherits)
-    and persist it to .env for the next boot. Never logs the value."""
+    and persist it to .env for the next boot. Never logs the value.
+
+    The analyzer's answer memo is emptied too: the new token may be
+    another account, whose default model is another one, so no answer
+    worked out with the old token is handed out after this (review
+    2026-11-28)."""
     os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = token
+    claude_analyzer.clear_answer_memo()
     path = env_path or Path(__file__).resolve().parent / ".env"
     try:
         lines = path.read_text(encoding="utf-8").splitlines(True) \

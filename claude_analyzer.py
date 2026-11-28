@@ -36,6 +36,10 @@ Configuration (env / .env):
   CLAUDE_API_BUSY_WAIT_SECONDS      how long an app request waits for a busy
                                     CLI before its 503 (default: 20, 0 = no
                                     wait; see busy_wait_seconds)
+  CLAUDE_API_ANSWER_MEMO_SECONDS    how long the answer of an app photo or
+                                    leftover analysis is kept in memory for
+                                    the same request sent again (default:
+                                    600, 0 = off; see answer_memo_seconds)
   CLAUDE_CODE_OAUTH_TOKEN           subscription token (read by the CLI itself)
   GLM_PLAN_KEY                      Zhipu GLM Coding Plan key → 'glm' backend
   DOUBAO_PLAN_KEY                   Volcengine Agent Plan key → 'doubao' backend
@@ -63,6 +67,8 @@ Subscription backends (the [backend] parameter):
 """
 
 import base64
+import copy
+import hashlib
 import json
 import logging
 import os
@@ -75,6 +81,7 @@ import subprocess
 import tempfile
 import threading
 import time
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
@@ -143,6 +150,11 @@ class AnalyzerTimeout(Exception):
 #    on a 1 GB server — one more than that is refused at once, as before.
 #    A Telegram or /upload photo still never waits for another analysis.
 #
+# An app photo or leftover request that is the same, in everything that
+# can change the answer, as one this server finished analyzing in the
+# last answer_memo_seconds() is given that answer and takes no lock at
+# all (the answer memo, above analyze_text_prompt).
+#
 # A lookup takes AND releases _CLI_LOCK only while holding
 # _LOOKUP_STATE_LOCK, so a foreground caller that holds the state lock
 # sees a stable owner. While a foreground caller waits for the lock
@@ -188,36 +200,46 @@ _LOOKUP_STATE: Dict[str, object] = {
     "fg_waiting": 0}
 
 
-# Values of CLAUDE_API_BUSY_WAIT_SECONDS that were not a number and that
-# the journal has been told about (_warn_busy_wait_junk). The knob is read
-# for every app request, and the environment of a running server does
-# not change: one line for the value, not one for each request.
+# Values of the two app-request knobs that were not a number and that the
+# journal has been told about (_warn_knob_junk), one set for each knob:
+# CLAUDE_API_BUSY_WAIT_SECONDS and CLAUDE_API_ANSWER_MEMO_SECONDS. Both
+# are read for every app request, and nothing sets them while the server
+# runs: one line for the value, not one for each request.
 _BUSY_WAIT_JUNK_SEEN: set = set()
-_BUSY_WAIT_JUNK_LOCK = threading.Lock()
+_ANSWER_MEMO_JUNK_SEEN: set = set()
+_KNOB_JUNK_LOCK = threading.Lock()
 
 
-def _warn_busy_wait_junk(raw: str) -> None:
-    """One WARNING for a CLAUDE_API_BUSY_WAIT_SECONDS that is not a whole
-    number, once for each such value.
+def _warn_knob_junk(knob: str, raw: str, seen: set, stays: str) -> None:
+    """One WARNING for a value of [knob] that is not a whole number, once
+    for each such value ([seen] holds the values named already). [stays]
+    says what the server does instead.
 
-    Junk used to read as the default in silence, and the default is
-    "wait". systemd's EnvironmentFile keeps a comment after a value as
-    part of the value, so a line `…=0   # off` left the wait on and
-    nothing said so (review 2026-11-28).
+    Junk used to read as the default in silence. systemd's EnvironmentFile
+    keeps a comment after a value as part of the value, so a line
+    `…=0   # off` left the busy wait on and nothing said so (review
+    2026-11-28).
 
     The line shows this knob's own value, cut to 40 characters: enough to
     know the line by, and a limit on what a mangled env file can put in
     the journal. Nothing else from the environment is in it."""
-    with _BUSY_WAIT_JUNK_LOCK:
-        if raw in _BUSY_WAIT_JUNK_SEEN:
+    with _KNOB_JUNK_LOCK:
+        if raw in seen:
             return
-        _BUSY_WAIT_JUNK_SEEN.add(raw)
+        seen.add(raw)
     shown = repr(raw[:40]) + ("…" if len(raw) > 40 else "")
     log.warning(
-        f"CLAUDE_API_BUSY_WAIT_SECONDS is not a whole number: {shown}. "
-        f"The wait stays at its default, {BUSY_WAIT_SECONDS_DEFAULT} s. "
+        f"{knob} is not a whole number: {shown}. {stays} "
         "Write the number alone on its line: systemd keeps a comment "
         "after it as part of the value.")
+
+
+def _warn_busy_wait_junk(raw: str) -> None:
+    """_warn_knob_junk for CLAUDE_API_BUSY_WAIT_SECONDS, whose default is
+    "wait"."""
+    _warn_knob_junk(
+        "CLAUDE_API_BUSY_WAIT_SECONDS", raw, _BUSY_WAIT_JUNK_SEEN,
+        f"The wait stays at its default, {BUSY_WAIT_SECONDS_DEFAULT} s.")
 
 
 def busy_wait_seconds() -> int:
@@ -498,6 +520,19 @@ CLAUDE_PLAN_MODELS = ("opus", "sonnet", "haiku", "fable")
 CLAUDE_PLAN_EFFORTS = ("low", "medium", "high")
 
 
+def _plan_choice(backend: str, model: Optional[str],
+                 effort: Optional[str]) -> Tuple[str, str]:
+    """The (model, effort) of a request that a run of [backend] is given:
+    a whitelisted value on the claude backend, else "" (the server's
+    default). The one rule for the argv (_append_model_and_extra_flags)
+    and for the answer memo's key (_answer_memo_key), so a value the run
+    ignores can never split the memo."""
+    if backend != "claude":
+        return "", ""
+    return ((model or "").strip() if model in CLAUDE_PLAN_MODELS else "",
+            effort if effort in CLAUDE_PLAN_EFFORTS else "")
+
+
 def _append_model_and_extra_flags(
     cmd: list, backend: str = "claude",
     model: Optional[str] = None, effort: Optional[str] = None,
@@ -512,13 +547,13 @@ def _append_model_and_extra_flags(
     knob remains the owner's default when no request override arrives.
     """
     if backend == "claude":
-        chosen = (model or "").strip() if model in CLAUDE_PLAN_MODELS else ""
+        chosen, chosen_effort = _plan_choice(backend, model, effort)
         if not chosen:
             chosen = (os.environ.get("CLAUDE_ANALYZER_MODEL") or "").strip()
         if chosen:
             cmd += ["--model", chosen]
-        if effort in CLAUDE_PLAN_EFFORTS:
-            cmd += ["--effort", effort]
+        if chosen_effort:
+            cmd += ["--effort", chosen_effort]
     cmd += _extra_flags()
 
 
@@ -1010,6 +1045,211 @@ def _attempt_file(
                 pass
 
 
+# ─── The answer memo: an app photo sent again (2026-11-28) ────────────
+#
+# Why. An iPhone background scan gives up on its request 22 s after the
+# scan began (iosRunDeadline in the app's background_glue.dart), and the
+# open app's scan stops when its user leaves it. The server cannot see a
+# phone hang up: werkzeug runs the view to its end and only then finds
+# the connection gone. So the analysis was finished and its answer thrown
+# away, and a phone that sent the same photo again soon paid for a second
+# full run on the owner's plan: the open app's scan when its user came
+# back, the app's own retry seconds later, a copy that waited behind its
+# first. One background scan to the next is not soon: the app asks iOS
+# for the next one no sooner than 30 minutes after one begins
+# (AppDelegate.swift's frequency, which workmanager_apple re-submits at
+# the start of each run), past the default window, so that send is a run
+# of its own.
+#
+# What. The answer of each app photo or leftover analysis that succeeded
+# is kept in memory for answer_memo_seconds() (default 600), at most
+# ANSWER_MEMO_MAX_ENTRIES of them, the oldest dropped first. A request
+# that is the same in everything that goes into the run gets that answer
+# as it is (the endpoint's usual 200 body) and no CLI run. It is looked up
+# twice: before the request waits for the CLI (a hit takes no lock and is
+# no waiter), and again once the request holds the lock (a duplicate that
+# waited behind its own first run does not start a second one).
+#
+# The key is a SHA-256 over what goes into the run and over nothing else:
+# the kind of analysis, the endpoint and which of the two upload keys
+# authenticated the request (memo_scope), the backend, the model and
+# effort the run is given (_plan_choice), whether the Read-tool path is
+# allowed, the prompt as composed (the profile, the recent meals and the
+# reply language are all in it) and the image bytes as the analyzer gets
+# them. What a caller sends and the server ignores (an unknown field, a
+# blank profile, the client header) is not in it. The server's own
+# settings are not in it. They change with a restart, which empties the
+# memo; the plan's token also with a sign-in from the phone
+# (claude_auth.apply_token_to_env), which empties it too
+# (clear_answer_memo), since the new token may be another account with
+# another default model. A key also holds _ANSWER_MEMO_EPOCH, which
+# clear_answer_memo moves on: an analysis still running with the old
+# token stores its answer under a key that no later request makes.
+#
+# The memo keeps only the hash and the answer: never the photo, never on
+# disk, never in a log. The journal's line for a hit says how old the
+# answer is, nothing more. Telegram and /upload photos and text requests
+# pass no memo_scope and never use it (a person may type the same words
+# twice on purpose).
+ANSWER_MEMO_SECONDS_DEFAULT = 600
+ANSWER_MEMO_SECONDS_MAX = 3600
+# One analysis takes 8-15 s, so 64 answers are 8 to 16 minutes of
+# analyses back to back: about the default window. Each is a small JSON
+# object.
+ANSWER_MEMO_MAX_ENTRIES = 64
+_ANSWER_MEMO_KEY_VERSION = "chopstats answer memo 1"
+
+# key (SHA-256 digest) -> (_memo_clock() when stored, the answer)
+_ANSWER_MEMO: "OrderedDict[bytes, Tuple[float, Dict]]" = OrderedDict()
+_ANSWER_MEMO_LOCK = threading.Lock()
+# A part of every key; clear_answer_memo moves it on.
+_ANSWER_MEMO_EPOCH = 0
+
+
+def _memo_clock() -> float:
+    """The memo's clock, in seconds (monotonic). A function of its own so
+    that a test can move time on without waiting for it."""
+    return time.monotonic()
+
+
+def answer_memo_seconds() -> int:
+    """CLAUDE_API_ANSWER_MEMO_SECONDS: how long the answer of an app photo
+    or leftover analysis is kept for the same request sent again (default
+    600, clamp 0..3600). 0 = off: nothing is kept and nothing is looked
+    up. Junk reads as the default, and the journal says so once
+    (_warn_knob_junk). An empty value is a knob left unset."""
+    raw = os.environ.get("CLAUDE_API_ANSWER_MEMO_SECONDS",
+                         str(ANSWER_MEMO_SECONDS_DEFAULT))
+    try:
+        value = int(raw)
+    except ValueError:
+        if raw.strip():
+            _warn_knob_junk(
+                "CLAUDE_API_ANSWER_MEMO_SECONDS", raw, _ANSWER_MEMO_JUNK_SEEN,
+                "Answers are still kept for its default, "
+                f"{ANSWER_MEMO_SECONDS_DEFAULT} s.")
+        return ANSWER_MEMO_SECONDS_DEFAULT
+    return min(max(value, 0), ANSWER_MEMO_SECONDS_MAX)
+
+
+def _answer_memo_key(kind: str, scope: Optional[Tuple[str, ...]],
+                     image_bytes: bytes, prompt: str, backend: str,
+                     model: Optional[str], effort: Optional[str],
+                     read_fallback: bool) -> Optional[bytes]:
+    """The memo key of one run (the section comment says what is in it),
+    or None when the caller passed no [scope]: then there is no memo for
+    the call."""
+    if scope is None:
+        return None
+    chosen_model, chosen_effort = _plan_choice(backend, model, effort)
+    digest = hashlib.sha256()
+
+    def part(value) -> None:
+        # Each part with its length in front, so that two different
+        # requests can never run together into the same bytes.
+        # surrogatepass: caller text can hold a lone surrogate (JSON
+        # carries one as an escape), which strict UTF-8 refuses to encode.
+        # This encodes every str, and two different ones never alike.
+        data = value if isinstance(value, bytes) else str(value).encode(
+            "utf-8", "surrogatepass")
+        digest.update(len(data).to_bytes(8, "big"))
+        digest.update(data)
+
+    part(_ANSWER_MEMO_KEY_VERSION)
+    part(_ANSWER_MEMO_EPOCH)
+    part(kind)
+    part(len(scope))
+    for item in scope:
+        part(item)
+    part(backend)
+    part(chosen_model)
+    part(chosen_effort)
+    part("read fallback" if read_fallback else "no read fallback")
+    part(prompt)
+    part(image_bytes)
+    return digest.digest()
+
+
+def _remembered_answer(key: Optional[bytes], kind: str) -> Optional[Dict]:
+    """The answer kept under [key] if it is no older than
+    answer_memo_seconds(), as a copy, with one journal line that says how
+    old it is; else None. An entry past the limit is dropped here."""
+    if key is None:
+        return None
+    limit = answer_memo_seconds()
+    if limit <= 0:
+        return None
+    with _ANSWER_MEMO_LOCK:
+        entry = _ANSWER_MEMO.get(key)
+        if entry is None:
+            return None
+        stored_at, kept = entry
+        # The clock is read with the lock held. Read before it, a store
+        # that took the lock first looked younger than "now", and its
+        # answer was dropped as if it came from the future (review
+        # 2026-11-28).
+        age = _memo_clock() - stored_at
+        if age < 0 or age > limit:
+            del _ANSWER_MEMO[key]
+            return None
+        answer = copy.deepcopy(kept)
+    # A second lookup runs with _CLI_LOCK held, and the caller's finally
+    # gives it back; still, an answer in hand is not lost to a logger.
+    try:
+        log.info(f"Answered from memory — app {kind} request: the answer is "
+                 f"{age:.0f} s old, and the CLI did not run.")
+    except Exception:
+        pass
+    return answer
+
+
+def _remember_answer(key: Optional[bytes], answer) -> None:
+    """Keep a copy of [answer] under [key]: a successful analysis only, a
+    non-empty dict (a busy, refused or timed-out request raised before
+    this, and an empty one is None). Called as the run returns, before the
+    endpoint answers, so it happens also when the phone has gone. The
+    oldest entries go first: those past the limit, then any past
+    ANSWER_MEMO_MAX_ENTRIES."""
+    if key is None or not isinstance(answer, dict) or not answer:
+        return
+    limit = answer_memo_seconds()
+    if limit <= 0:
+        return
+    try:
+        kept = copy.deepcopy(answer)
+    except Exception as e:  # pragma: no cover - parsed JSON always copies
+        # The request keeps its answer; the memo does without this one.
+        log.warning(f"Answer memo: an answer could not be kept "
+                    f"({type(e).__name__}).")
+        return
+    with _ANSWER_MEMO_LOCK:
+        # With the lock held, as in _remembered_answer: the memo is then
+        # oldest first in time as well as in order, and the pruning below
+        # can stop at the first answer still in time.
+        now = _memo_clock()
+        _ANSWER_MEMO.pop(key, None)
+        _ANSWER_MEMO[key] = (now, kept)
+        while _ANSWER_MEMO:
+            oldest, (stored_at, _) = next(iter(_ANSWER_MEMO.items()))
+            if (len(_ANSWER_MEMO) > ANSWER_MEMO_MAX_ENTRIES
+                    or now - stored_at > limit):
+                del _ANSWER_MEMO[oldest]
+            else:
+                break
+
+
+def clear_answer_memo() -> None:
+    """Forget every kept answer, and every answer still being worked out:
+    the epoch moves on, so a run that ends after this stores its answer
+    under a key that no later request makes. A sign-in from the phone
+    calls this (claude_auth.apply_token_to_env), and so do the tests; a
+    restart does the same."""
+    global _ANSWER_MEMO_EPOCH
+    with _ANSWER_MEMO_LOCK:
+        _ANSWER_MEMO.clear()
+        _ANSWER_MEMO_EPOCH += 1
+
+
 def analyze_text_prompt(prompt: str, backend: str = "claude",
                         model: Optional[str] = None,
                         effort: Optional[str] = None,
@@ -1104,6 +1344,7 @@ def analyze_leftover_photo(
     raise_on_busy: bool = False,
     model: Optional[str] = None,
     effort: Optional[str] = None,
+    memo_scope: Optional[Tuple[str, ...]] = None,
 ) -> Optional[Dict]:
     """Estimate leftover fractions for a previously analyzed meal.
 
@@ -1113,6 +1354,10 @@ def analyze_leftover_photo(
     the network, so the exfiltration rule for analyze_food_photo applies
     with no exceptions. The reply skips the is_food gate (leftover
     contract); every numeric clamp lives in the app's pure apply layer.
+
+    [memo_scope] as for analyze_food_photo: the app's endpoint passes it,
+    and the same leftover request sent again within answer_memo_seconds()
+    gets the answer already worked out.
     """
     if backend not in SUBSCRIPTION_BACKENDS:
         return None
@@ -1121,24 +1366,35 @@ def analyze_leftover_photo(
     cli = _cli_path()
     if cli is None or not image_bytes or not (prompt or "").strip():
         return None
+    memo_key = _answer_memo_key("leftover", memo_scope, image_bytes, prompt,
+                                backend, model, effort, read_fallback=False)
+    remembered = _remembered_answer(memo_key, "leftover")
+    if remembered is not None:
+        return remembered  # no lock taken, no waiter counted
     if not _cli_for_request(raise_on_busy, "leftover",
                             "leftover estimation declined."):
         return None
-    start = time.time()
     try:
+        # Again with the lock held: the run this request waited behind
+        # may have been its own first copy.
+        remembered = _remembered_answer(memo_key, "leftover")
+        if remembered is not None:
+            return remembered
+        start = time.time()
         env = _cli_env(backend)
         if backend == "glm":
-            return _attempt_glm_vision(cli, image_bytes, env, start, prompt,
-                                       require_is_food=False)
-        try:
-            analysis, _retry = _attempt_stream(cli, image_bytes, env, start,
-                                               prompt, backend,
-                                               require_is_food=False,
-                                               model=model, effort=effort)
-        except PlanRefused:
-            if raise_on_busy:
-                raise
-            return None
+            analysis = _attempt_glm_vision(cli, image_bytes, env, start,
+                                           prompt, require_is_food=False)
+        else:
+            try:
+                analysis, _retry = _attempt_stream(
+                    cli, image_bytes, env, start, prompt, backend,
+                    require_is_food=False, model=model, effort=effort)
+            except PlanRefused:
+                if raise_on_busy:
+                    raise
+                return None
+        _remember_answer(memo_key, analysis)
         return analysis
     except AnalyzerTimeout:
         # Same opt-in as PlanRefused: only the API endpoints want the
@@ -1150,6 +1406,61 @@ def analyze_leftover_photo(
         _CLI_LOCK.release()
 
 
+def _food_photo_run(
+    cli: str, image_bytes: bytes, prompt: Optional[str],
+    allow_file_fallback: bool, backend: str, raise_on_busy: bool,
+    model: Optional[str], effort: Optional[str],
+) -> Optional[Dict]:
+    """One photo run, with _CLI_LOCK held by analyze_food_photo (which
+    also turns AnalyzerTimeout into None for callers without
+    raise_on_busy): the GLM vision path, the Doubao stream, or the stream
+    with its file fallback."""
+    start = time.time()
+    env = _cli_env(backend)
+    if backend == "glm":
+        # Text-only Anthropic endpoint: the stream dispatch cannot
+        # carry the image; the vision MCP path is the ONLY photo path.
+        return _attempt_glm_vision(cli, image_bytes, env, start, prompt)
+    if backend == "doubao":
+        try:
+            analysis, _ = _attempt_stream(
+                cli, image_bytes, env, start, prompt, backend)
+        except PlanRefused:
+            if raise_on_busy:
+                raise
+            return None
+        return analysis
+    # A caller-influenced prompt (allow_file_fallback=False) always takes
+    # the tools-off stream dispatch, even under the 'file' rollback knob:
+    # the Read-enabled path must never see network text.
+    if _dispatch_mode() == "stream" or not allow_file_fallback:
+        try:
+            analysis, retry_via_file = _attempt_stream(
+                cli, image_bytes, env, start, prompt,
+                model=model, effort=effort)
+        except PlanRefused:
+            # Only API callers want the reason; the Telegram path keeps
+            # its documented "None -> fall back to Gemini" contract.
+            if raise_on_busy:
+                raise
+            return None
+        if not retry_via_file:
+            return analysis
+        if not allow_file_fallback:
+            # Caller-influenced prompt: refuse the Read-enabled path.
+            log.warning(
+                "Claude stream dispatch failed for an API-originated "
+                "request — NOT falling back to the Read-tool path."
+            )
+            return None
+        log.warning(
+            "Claude stream-json dispatch failed — retrying once via the "
+            "two-turn Read-file path."
+        )
+    return _attempt_file(cli, image_bytes, env, start, prompt,
+                         model=model, effort=effort)
+
+
 def analyze_food_photo(
     image_bytes: bytes,
     prompt: Optional[str] = None,
@@ -1158,11 +1469,19 @@ def analyze_food_photo(
     raise_on_busy: bool = False,
     model: Optional[str] = None,
     effort: Optional[str] = None,
+    memo_scope: Optional[Tuple[str, ...]] = None,
 ) -> Optional[Dict]:
     """Analyze a food photo via the Claude Code CLI; None means 'use Gemini'.
 
     [prompt] overrides the built-in FOOD_DETECTION_PROMPT (the API endpoint
     composes one from the app's dietary profile).
+
+    [memo_scope] turns the answer memo on for this call (the section above
+    analyze_text_prompt): the endpoint and which upload key authenticated
+    the request, the caller's part of the memo key. The same request sent
+    again within answer_memo_seconds() then gets the answer already worked
+    out, without a run. Only the app's endpoints pass it; None (Telegram,
+    /upload) keeps every call a run of its own.
 
     [allow_file_fallback] MUST be False whenever any part of the prompt came
     from a network caller. The stream dispatch runs with `--tools ""`, but
@@ -1188,6 +1507,13 @@ def analyze_food_photo(
     if cli is None or not image_bytes:
         return None
 
+    memo_key = _answer_memo_key(
+        "photo", memo_scope, image_bytes, prompt or FOOD_DETECTION_PROMPT,
+        backend, model, effort, read_fallback=allow_file_fallback)
+    remembered = _remembered_answer(memo_key, "photo")
+    if remembered is not None:
+        return remembered  # no lock taken, no waiter counted
+
     # Contended-CLI bypass: another photo already owns the (up to 120s) CLI
     # run. Don't queue behind it — Gemini answers this photo in seconds.
     # Default False keeps the TELEGRAM contract ("None → use Gemini")
@@ -1202,51 +1528,17 @@ def analyze_food_photo(
     # One photo = one CLI occupancy: the lock is held across BOTH attempts
     # of the stream→file fallback chain, so a burst can never stack the
     # memory-heavy CLI even mid-fallback.
-    start = time.time()
     try:
-        env = _cli_env(backend)
-        if backend == "glm":
-            # Text-only Anthropic endpoint: the stream dispatch cannot
-            # carry the image; the vision MCP path is the ONLY photo path.
-            return _attempt_glm_vision(cli, image_bytes, env, start, prompt)
-        if backend == "doubao":
-            try:
-                analysis, _ = _attempt_stream(
-                    cli, image_bytes, env, start, prompt, backend)
-            except PlanRefused:
-                if raise_on_busy:
-                    raise
-                return None
-            return analysis
-        # A caller-influenced prompt (allow_file_fallback=False) always takes
-        # the tools-off stream dispatch, even under the 'file' rollback knob:
-        # the Read-enabled path must never see network text.
-        if _dispatch_mode() == "stream" or not allow_file_fallback:
-            try:
-                analysis, retry_via_file = _attempt_stream(
-                    cli, image_bytes, env, start, prompt,
-                    model=model, effort=effort)
-            except PlanRefused:
-                # Only API callers want the reason; the Telegram path keeps
-                # its documented "None -> fall back to Gemini" contract.
-                if raise_on_busy:
-                    raise
-                return None
-            if not retry_via_file:
-                return analysis
-            if not allow_file_fallback:
-                # Caller-influenced prompt: refuse the Read-enabled path.
-                log.warning(
-                    "Claude stream dispatch failed for an API-originated "
-                    "request — NOT falling back to the Read-tool path."
-                )
-                return None
-            log.warning(
-                "Claude stream-json dispatch failed — retrying once via the "
-                "two-turn Read-file path."
-            )
-        return _attempt_file(cli, image_bytes, env, start, prompt,
-                             model=model, effort=effort)
+        # Again with the lock held: the run this request waited behind
+        # may have been its own first copy.
+        remembered = _remembered_answer(memo_key, "photo")
+        if remembered is not None:
+            return remembered
+        analysis = _food_photo_run(cli, image_bytes, prompt,
+                                   allow_file_fallback, backend,
+                                   raise_on_busy, model, effort)
+        _remember_answer(memo_key, analysis)
+        return analysis
     except AnalyzerTimeout:
         # Every dispatch (stream, file, GLM vision) raises this on the
         # wall-clock limit. Only API callers want it as a signal — the

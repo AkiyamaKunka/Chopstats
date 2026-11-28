@@ -1562,6 +1562,18 @@ def _authorized_api_request() -> bool:
     return ok_current or ok_retiring
 
 
+def _api_key_identity() -> str:
+    """Which accepted upload key this request carries: "current"
+    (ANDROID_API_KEY) or "retiring" (ANDROID_API_KEY_RETIRING, the
+    rotation grace window). Only for a request _authorized_api_request
+    already let in. Part of the answer memo's key (memo_scope), so an
+    answer worked out for one key is never handed to the other."""
+    provided_b = str(request.headers.get("X-API-Key", "")).encode("utf-8")
+    current = hmac.compare_digest(
+        provided_b, str(ANDROID_API_KEY or "").encode("utf-8"))
+    return "current" if current else "retiring"
+
+
 def _vpn_check_reliable_from_request(vpn_active: Optional[bool], vpn_check: str) -> bool:
     explicit = _parse_boolish(request.headers.get("X-VPN-Check-Reliable"))
     if explicit is None:
@@ -5229,7 +5241,9 @@ def _build_api_app(bot: TelegramBot, gemini_client) -> Flask:
         this: the CLI runs under the owner's Claude subscription on this VM,
         so phone analyses cost no API money. Unlike /upload this endpoint is
         PURE — no meal row, no ledger entry, no Telegram card: the app owns
-        its own database and decides what to keep.
+        its own database and decides what to keep. The answer is kept in
+        memory for a few minutes, for the same request sent again
+        (claude_analyzer's answer memo; the memo_scope below).
         """
         prompt = None
         backend = "claude"
@@ -5290,11 +5304,16 @@ def _build_api_app(bot: TelegramBot, gemini_client) -> Flask:
         if not claude_analyzer.backend_available(backend, for_photo=True):
             return _backend_unavailable("analyze_photo", backend)
         # allow_file_fallback=False: never run a network-influenced prompt
-        # on the Read-tool path.
+        # on the Read-tool path. memo_scope: the same request sent again
+        # within minutes (the open app after a scan was cut off, the app's
+        # retry, a copy behind its first) gets the answer this server
+        # already worked out.
+        memo_scope = ("analyze_photo", _api_key_identity())
         analysis, refused = _cli_result(
             lambda: claude_analyzer.analyze_food_photo(
                 data, prompt, allow_file_fallback=False, backend=backend,
-                raise_on_busy=True, model=model, effort=effort),
+                raise_on_busy=True, model=model, effort=effort,
+                memo_scope=memo_scope),
             busy_reason="the analyzer is busy with another photo",
             empty_reason="the analysis ran but produced no usable result")
         if refused is not None:
@@ -5347,10 +5366,14 @@ def _build_api_app(bot: TelegramBot, gemini_client) -> Flask:
         # for Chinese invites translated names that silently match nothing
         # and fall back to the meal-level fraction.
         prompt = LEFTOVER_PROMPT_TEMPLATE.format(original_analysis=compact)
+        # The same answer memo as analyze_photo: a leftover photo picked
+        # again after the app lost the reply gets the estimate already
+        # worked out, not a second run.
+        memo_scope = ("analyze_leftover", _api_key_identity())
         leftover, refused = _cli_result(
             lambda: claude_analyzer.analyze_leftover_photo(
                 data, prompt, backend=backend, raise_on_busy=True,
-                model=model, effort=effort),
+                model=model, effort=effort, memo_scope=memo_scope),
             busy_reason="the analyzer is busy with another photo",
             empty_reason="the estimation ran but produced no usable result")
         if refused is not None:

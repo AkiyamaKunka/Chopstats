@@ -7,7 +7,8 @@ that changes in claude_analyzer.py or lookup_jobs.py must change there
 too. These tests fail when one side moves without the other.
 
 The same holds for the app's busy wait, CLAUDE_API_BUSY_WAIT_SECONDS
-(2026-11-28): its tests are at the end of this file.
+(2026-11-28), and for the answer memo, CLAUDE_API_ANSWER_MEMO_SECONDS
+(2026-11-28): their tests are at the end of this file.
 """
 import os
 import re
@@ -262,3 +263,254 @@ def test_the_deploy_guide_quotes_the_journal_lines_the_code_writes():
                  "Restaurant lookup pre-empted by a foreground request."):
         assert "`%s`" % line in guide, line
         assert '"%s' % line in source, line
+
+
+# ─── CLAUDE_API_ANSWER_MEMO_SECONDS: the answer kept for the same request
+# (2026-11-28) ─────────────────────────────────────────────────────────
+#
+# SERVER_DEPLOY.md gives the knob a table of its own ("The same photo
+# again"), SERVER.md repeats the numbers in its response contract, and
+# .env.example lists the knob after the busy wait.
+
+MEMO_KNOB = "CLAUDE_API_ANSWER_MEMO_SECONDS"
+
+
+def _knob_deploy_row(knob):
+    """(default cell, meaning cell) of [knob]'s row in SERVER_DEPLOY.md."""
+    rows = [m.groups() for m in (
+        re.match(r"^\| `%s` \| ([^|]+) \| (.*) \|$" % knob, line)
+        for line in _read("docs", "SERVER_DEPLOY.md").splitlines()) if m]
+    assert len(rows) == 1, rows
+    return rows[0][0].strip().strip("`"), rows[0][1]
+
+
+def _knob_env_comment(knob):
+    lines = re.findall(r"(?m)^# %s=\s*#\s*(.*)$" % knob,
+                       _read(".env.example"))
+    assert len(lines) == 1, lines
+    return lines[0]
+
+
+def _flat(text):
+    return " ".join(text.replace("\n# ", " ").split())
+
+
+def test_both_files_state_the_answer_memo_default_and_clamp(monkeypatch):
+    monkeypatch.delenv(MEMO_KNOB, raising=False)
+    default = claude_analyzer.answer_memo_seconds()
+    assert default == claude_analyzer.ANSWER_MEMO_SECONDS_DEFAULT
+    low, high = _clamp(claude_analyzer.answer_memo_seconds, monkeypatch,
+                       MEMO_KNOB)
+    assert (low, high) == (0, claude_analyzer.ANSWER_MEMO_SECONDS_MAX)
+
+    cell, meaning = _knob_deploy_row(MEMO_KNOB)
+    assert cell == str(default)
+    assert "(%d–%d)" % (low, high) in meaning
+    # 0 is a documented setting, not only the bottom of the clamp.
+    assert "`0` switches it off" in meaning
+    assert ("(%d, clamp %d..%d)" % (default, low, high)
+            in _knob_env_comment(MEMO_KNOB))
+    # The same systemd trap as the busy wait's: a comment after the value
+    # makes it junk, and junk reads as the default, which is "on". The
+    # journal's line for it is pinned in tests/test_answer_memo.py.
+    advice = ("Write the number alone on its line: systemd keeps a comment "
+              "after it as part of the value, the value is then not a "
+              "number, and answers are still kept for %d s" % default)
+    assert advice in meaning
+    assert advice in _flat(_read(".env.example"))
+
+
+def test_the_guides_state_the_answer_memo_numbers_the_code_uses():
+    """How long an answer is kept and how many: in both guides and in
+    .env.example, from the code's constants. The 10 minutes of the smoke
+    test F paragraph and of the "on purpose" paragraph are the default,
+    said in minutes."""
+    seconds = claude_analyzer.ANSWER_MEMO_SECONDS_DEFAULT
+    assert seconds % 60 == 0, seconds
+    minutes = seconds // 60
+    entries = claude_analyzer.ANSWER_MEMO_MAX_ENTRIES
+    deploy = _flat(_read("docs", "SERVER_DEPLOY.md"))
+    assert ("the default is %d s (%d minutes). At most %d answers are kept"
+            % (seconds, minutes, entries)) in deploy
+    assert "A repeat within %d minutes proves nothing new" % minutes in deploy
+    assert ("A request you repeat on purpose within the %d minutes"
+            % minutes) in deploy
+    server = _flat(_read("docs", "SERVER.md"))
+    assert ("keep each answer in memory for %d minutes" % minutes) in server
+    assert ("(the default is %d s, at most %d answers)" % (seconds, entries)
+            ) in server
+    assert "at most %d answers" % entries in _flat(_read(".env.example"))
+
+
+def test_the_memo_section_gives_the_iphone_scan_deadline_the_app_has():
+    """The reason the memo exists is the app's deadline, as for the busy
+    wait: the new section in the deploy guide quotes it too."""
+    seconds = _iphone_scan_deadline()
+    assert ("an iPhone background scan gives up on its request %d s after "
+            "the scan began, and the app's own scan stops when you leave "
+            "the app" % seconds) in _flat(_read("docs", "SERVER_DEPLOY.md"))
+
+
+def test_the_deploy_guide_quotes_the_memo_line_the_code_writes(monkeypatch,
+                                                               caplog):
+    """The deploy guide's example of the journal's line for an answer
+    from memory is what the analyzer writes for an answer 42 s old,
+    word for word."""
+    import logging
+    monkeypatch.delenv(MEMO_KNOB, raising=False)
+    now = [5000.0]
+    monkeypatch.setattr(claude_analyzer, "_memo_clock", lambda: now[0])
+    key = b"k" * 32
+    claude_analyzer.clear_answer_memo()
+    claude_analyzer._remember_answer(key, {"is_food": True})
+    now[0] += 42
+    with caplog.at_level(logging.INFO, logger="claude_analyzer"):
+        assert claude_analyzer._remembered_answer(key, "photo") == {
+            "is_food": True}
+    claude_analyzer.clear_answer_memo()
+    lines = [r.getMessage() for r in caplog.records
+             if r.name == "claude_analyzer"]
+    assert len(lines) == 1, lines
+    assert "`%s`" % lines[0] in _flat(_read("docs", "SERVER_DEPLOY.md"))
+    assert lines[0].startswith("Answered from memory — app photo request")
+
+
+# ─── What the memo serves, and what the endpoints write (review
+# 2026-11-28) ──────────────────────────────────────────────────────────
+
+def _ios_background_gap_seconds():
+    """How long after one iPhone background scan begins the next may: the
+    frequency AppDelegate.swift registers with workmanager_apple, whose
+    task handler (0.9.1+2, handlePeriodicTask) submits the next request
+    that far ahead as each run starts."""
+    found = re.findall(
+        r"(?m)^\s*frequency: NSNumber\(value: (\d+) \* 60\)\)$",
+        _read("app", "ios", "Runner", "AppDelegate.swift"))
+    assert len(found) == 1, (
+        "app/ios/Runner/AppDelegate.swift should register the background "
+        "scan with exactly one `frequency: NSNumber(value: N * 60))` and "
+        "has %d. The guides say the memo does not reach from one "
+        "background scan to the next because of that gap: read it from "
+        "where it is now." % len(found))
+    return int(found[0]) * 60
+
+
+def test_the_guides_say_the_memo_does_not_reach_the_next_background_scan():
+    """The memo serves a photo sent again within its window: the open app,
+    the app's retry, a copy behind its first. It does not serve one iPhone
+    background scan to the next, which comes no sooner than the app's gap
+    after one begins: past the default window. The guides said "the phone
+    sends the same photo again at its next scan" and "That answer is not
+    lost" (review 2026-11-28). Now they give the gap, from the app; and
+    while the default window is not shorter than it, the sentence is not
+    true, so this pin fails before the guides can say it."""
+    gap = _ios_background_gap_seconds()
+    assert gap % 60 == 0, gap
+    assert claude_analyzer.ANSWER_MEMO_SECONDS_DEFAULT < gap
+    sentence = ("no sooner than %d minutes after one begins" % (gap // 60))
+    deploy = _flat(_read("docs", "SERVER_DEPLOY.md"))
+    assert ("It does not serve one background scan to the next. The app "
+            "asks iOS for the next background scan " + sentence) in deploy
+    assert ("is past the default %d minutes, and it is analyzed again"
+            % (claude_analyzer.ANSWER_MEMO_SECONDS_DEFAULT // 60)) in deploy
+    assert "sends the same photo again at its next scan" not in deploy
+    server = _flat(_read("docs", "SERVER.md"))
+    assert ("It does not serve the next background scan: the app asks iOS "
+            "for the next one " + sentence) in server
+    assert "That answer is not lost" not in server
+    assert sentence in _flat(_read(".env.example"))
+
+
+def _app_string(key):
+    """[key]'s English text in the app (app/lib/l10n/app_en.arb)."""
+    import json
+    return json.loads(_read("app", "lib", "l10n", "app_en.arb"))[key]
+
+
+def test_the_deploy_guide_names_every_place_that_repeats_a_request():
+    """A request repeated on purpose within the window gets the same
+    answer back. The guide named two places that do that and missed the
+    third, the one a user reaches for after a meal was taken for not food:
+    Log › From recent photos picks the photo again, reads the same
+    original bytes and sends the same request (review 2026-11-28). The
+    names are the app's own."""
+    deploy = _flat(_read("docs", "SERVER_DEPLOY.md"))
+    start = deploy.index("A request you repeat on purpose within the")
+    paragraph = deploy[start:deploy.index("Set the knob to `0`", start)]
+    assert "Three places in the app do that" in paragraph
+    for label in (_app_string("testProvider"),
+                  _app_string("covAnalyzeAgain"),
+                  "%s › %s" % (_app_string("fabLog"),
+                               _app_string("addFromPhotos"))):
+        assert "**%s**" % label in paragraph, label
+
+
+def _api_view_docstring(name):
+    """The docstring of the app endpoint [name] in telegram_bot.py."""
+    import ast
+    tree = ast.parse(_read("telegram_bot.py"))
+    found = [ast.get_docstring(node) for node in ast.walk(tree)
+             if isinstance(node, ast.FunctionDef) and node.name == name]
+    assert len(found) == 1, found
+    return found[0]
+
+
+def test_the_guides_promise_no_meal_row_not_nothing_on_disk(monkeypatch):
+    """An app analysis does leave files on the server, so the endpoints'
+    contract is "no meal row, no ledger entry", and "nothing on disk" is
+    said of the answer memo alone (review 2026-11-28). The two reasons, as
+    the code has them:
+
+      * the photo, leftover and text runs start the CLI without
+        --no-session-persistence, which only the lookup passes; without it
+        the CLI saves each session to disk (claude --help), and a photo
+        run's session holds the prompt and the photo;
+      * the GLM path writes the photo to a temp file for its run.
+
+    When neither holds any more, this pin changes with the guides."""
+    seen = []
+
+    def run(cmd, **kwargs):
+        seen.append(cmd)
+        if "--mcp-config" in cmd:
+            path = re.search(r"image file at (\S+), then answer",
+                             cmd[2]).group(1)
+            with open(path, "rb") as f:
+                seen.append(f.read())
+        return type("Proc", (), {"returncode": 1, "stdout": "",
+                                 "stderr": ""})()
+
+    for knob in ("CLAUDE_ANALYZER_EXTRA_FLAGS", "CLAUDE_ANALYZER_MODEL"):
+        monkeypatch.delenv(knob, raising=False)
+    monkeypatch.setenv("GLM_PLAN_KEY", "test-plan-key")
+    monkeypatch.setattr(claude_analyzer, "_npx_path",
+                        lambda: "/usr/local/bin/npx")
+    monkeypatch.setattr(claude_analyzer.subprocess, "run", run)
+    photo = b"\xff\xd8\xff" + b"a photo"
+    claude_analyzer._attempt_stream("/usr/local/bin/claude", photo, {}, 0.0,
+                                    "the prompt")
+    claude_analyzer._attempt_glm_vision("/usr/local/bin/claude", photo, {},
+                                        0.0, "the prompt")
+    stream, glm, glm_file = seen
+    assert "--input-format" in stream
+    assert "--no-session-persistence" not in stream
+    assert "--no-session-persistence" in claude_analyzer.build_lookup_argv(
+        "claude", "{}", "sonnet")
+    assert "--mcp-config" in glm and glm_file == photo
+
+    server = _flat(_read("docs", "SERVER.md"))
+    assert ("analysis routes are *pure* — they return the analysis and "
+            "write no meal row and no ledger entry;") in server
+    deploy = _read("docs", "SERVER_DEPLOY.md")
+    assert ("# F. one whole analysis through the API (ONE plan run; no meal "
+            "row): expect http 200") in deploy
+    for text in (server, _flat(deploy)):
+        assert "nothing to disk" not in text
+        assert "writes nothing to disk" not in text
+    doc = _api_view_docstring("api_analyze_photo")
+    assert "no meal row, no ledger entry, no Telegram card:" in doc
+    assert "disk" not in doc
+    # The memo itself keeps nothing on disk, and the guides say so of it.
+    assert ("The memo holds only the answer and a hash of the request, "
+            "never the photo, and only in memory: none of it goes to disk"
+            ) in _flat(deploy)

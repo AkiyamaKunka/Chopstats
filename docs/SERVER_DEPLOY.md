@@ -208,7 +208,7 @@ printf 'X-API-Key: %s\n' "$K" | curl -s -w ' %{http_code}\n' -X POST -H @- -H 'C
 #    (a 404 means the old code is still running)
 printf 'X-API-Key: %s\n' "$K" | curl -s -w ' %{http_code}\n' -X POST -H @- -H 'Content-Type: application/json' \
   -H 'X-Client-Platform: smoke' --data '{"items":[]}' $B/api/restaurant_lookup
-# F. one whole analysis through the API (ONE plan run; the endpoint stores nothing): expect http 200
+# F. one whole analysis through the API (ONE plan run; no meal row): expect http 200
 #    (curl gives it 200 s: the longest wait for a busy CLI, 60 s, then one analysis at its limit, 120 s, and 20 s to spare)
 sudo cat /home/ubuntu/CalorieTracker/app/test_live/fixtures/plate.jpg \
   | python3 -c 'import base64,json,sys; json.dump({"image_b64": base64.b64encode(sys.stdin.buffer.read()).decode()}, open("/tmp/photo_body.json","w"))'
@@ -228,8 +228,11 @@ picture that ships with the code (a drawing of a plate). Expect
 the prompt allows: then F prints `F http 200` with `is_food= False`, the
 three fields `None` and `item keys= []`. That is a pass too, for the
 endpoint, the CLI and the JSON contract. Do not roll back for it and do
-not repeat F (each try is one plan run): the meal-context fields are
-then proven by the phone photo.
+not repeat F: the meal-context fields are then proven by the phone
+photo. A repeat within 10 minutes proves nothing new, because the
+server gives the same request the answer it already worked out (see
+[The same photo again](#the-same-photo-again-the-answer-memo)), and
+a later one is one more plan run.
 
 Then take one food photo with the phone. That is not optional for this
 deploy either: it is the only end-to-end proof for the app build that is
@@ -283,6 +286,76 @@ Telegram or `/upload` photo that then gets it has no line of its own.
 The wait needs no setting and no app update. It starts when the server
 is deployed: until then the server on your VM still answers a busy
 request at once.
+
+## The same photo again (the answer memo)
+
+A phone can give up on a request before its answer comes: an iPhone
+background scan gives up on its request 22 s after the scan began, and
+the app's own scan stops when you leave the app. The server cannot see
+that, so it finishes the analysis all the same, and the answer was
+thrown away. When the phone sent the same photo again soon after, that
+was one more run of your plan for the same photo. Server code of
+2026-11-28 or later keeps the answer for a while:
+
+- The answer of each app photo or leftover analysis that succeeded is
+  kept in memory for `CLAUDE_API_ANSWER_MEMO_SECONDS`; the default is
+  600 s (10 minutes). At most 64 answers are kept, and the oldest goes
+  first.
+- A request that is the same in everything that goes into the analysis
+  gets that answer at once: the same `200` reply, and no CLI run, also
+  while another analysis is running. Everything counts: the photo as
+  sent, the dietary profile, that day's earlier meals, the reply
+  language, the plan, model and effort, the endpoint, and which upload
+  key sent it (the current one or the retiring one). What the server
+  does not read, such as a field it does not know, does not count.
+- This serves a photo sent again within that time: when you open the
+  app (or come back to it) and its scan sends the photo again, when the
+  app tries a request again on its own a few seconds later, and when a
+  copy waits behind its first copy (next point).
+- A copy of a photo that arrives while its first copy is still being
+  analyzed waits for the CLI as before (the busy wait), and then gets
+  the first copy's answer instead of a second run.
+- It does not serve one background scan to the next. The app asks iOS
+  for the next background scan no sooner than 30 minutes after one
+  begins, so a photo cut off in one background scan and sent again by
+  the next is past the default 10 minutes, and it is analyzed again.
+- Only an answer that succeeded is kept. After a busy, refused,
+  timed-out or empty answer the same photo is analyzed again.
+- The memo holds only the answer and a hash of the request, never the
+  photo, and only in memory: none of it goes to disk or to the journal.
+  A restart empties it, and so does **Connect Claude** in the app,
+  because the new sign-in may be another Claude account.
+- Text requests (`/api/text_intent`) and Telegram and `/upload` photos
+  never use it: each one is a run of its own, as before.
+
+| Knob | Default | Meaning |
+|---|---|---|
+| `CLAUDE_API_ANSWER_MEMO_SECONDS` | `600` | Seconds an answer is kept for the same request sent again (0–3600). `0` switches it off: every request is a run of its own, as before. Write the number alone on its line: systemd keeps a comment after it as part of the value, the value is then not a number, and answers are still kept for 600 s (the journal says so once, in a warning). |
+
+The phone builds its request again for each send. When nothing changed
+in between, the request is the same and the answer comes from memory.
+When something did change (you logged another meal from earlier that
+day, edited your dietary profile, switched the model, or the phone read
+the photo with another decoder), it is a new request and is analyzed.
+
+A request you repeat on purpose within the 10 minutes gets the same
+answer back, without a run. Three places in the app do that: **Test
+This Provider** run twice (its photo check sends the same test picture
+each time; its text check is always a real run); **Analyze again** on
+Photo coverage for a photo judged "not food" in the last 10 minutes;
+and **Log › From recent photos** when you pick a photo again that was
+judged "not food" in the last 10 minutes. The last one is the usual way
+to try again after a meal was taken for not food, and it gets the same
+"not food" back. Set the knob to `0` if every request must reach the
+model.
+
+The journal has one line for each answer given from memory, for
+example `Answered from memory — app photo request: the answer is 42 s
+old, and the CLI did not run.` (`leftover` for a leftover photo). It says
+how old the answer is and nothing else: no food, no photo, no hash.
+
+The memo needs no setting and no app update. It starts when the server
+is deployed.
 
 ## Restaurant lookup (WebSearch on your server)
 
