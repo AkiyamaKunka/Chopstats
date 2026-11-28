@@ -335,13 +335,13 @@ When merging #22 after this PR:
 - **Never hand-merge the generated `app_localizations*.dart`.** Take
   either side, then run `flutter gen-l10n` in `app/`.
 - `app/test/ui/usual_copy_test.dart` pins the number of keys in each ARB
-  file: 809 on `main` since #22 merged, 1022 on the iCloud Backup branch
+  file: 809 on `main` since #22 merged, 1029 on the iCloud Backup branch
   merged with #33, the review-171 fixes, the Android photos, privacy,
   background and ui lanes, the Play channel, the Android
   look-and-defaults branch, the Android lows lane, the legacy upload
   key lane, the refused-share lane, the Android View-after-share lane,
-  the Android meal-cards group lane, the Edit meal note lane and the
-  background-scan robustness lane
+  the Android meal-cards group lane, the Edit meal note lane, the
+  background-scan robustness lane and Today's photo-scan row
   (`feat/icloud-backup`
   adds 72 `backup*` and `import*` keys, #33's source-link label 1, the
   Test AI provider page's three `diagStatus*` check states 3, the Body
@@ -372,7 +372,9 @@ When merging #22 after this PR:
   scheduled and its two footer lines; `diagBgSchedule*` 3, the Next scan
   line of Recent background scans; `diagBgRunAlreadyLogged` 1;
   `diagBgRunLeftWhy`, `diagBgLeftJoin` and the six `diagBgLeft*` reasons
-  8, why photos were left for later), none shared;
+  8, why photos were left for later), Today's photo-scan row's seven
+  `todayScan*` lines 7 (photos still being checked, checked, or not
+  checked yet), none shared;
   review r171 deleted
   `bodyEmptyHintImperial`, the same text as `bodyEmptyHint`). If either
   side adds keys before both merge, change the number in that test to the

@@ -19,6 +19,7 @@ import '../services/photo/background_schedule.dart'
     show BackgroundSchedule;
 import '../services/photo/coverage.dart';
 import '../services/photo/photo_library.dart';
+import '../services/photo/scan_status.dart' show PhotoScanStatus;
 import '../services/usual/usual_foods.dart' show UsualFoods;
 import 'ai_consent.dart' show SharedPhotoConsentGate;
 import 'meal_in_use.dart';
@@ -505,6 +506,13 @@ class UiServices {
   /// in most tests.
   final MealReveals? mealReveals;
 
+  /// What the automatic photo scan is doing now, for Today's "Checking
+  /// photos" row (services/photo/scan_status.dart), and that row's Retry:
+  /// the catch-up again, for photos a scan let go unchecked. Null in the
+  /// Google Play build and in most tests: no row.
+  final PhotoScanStatus? photoScanStatus;
+  final Future<void> Function()? retryPhotoScan;
+
   const UiServices({
     required this.dao,
     required this.analyzer,
@@ -545,5 +553,7 @@ class UiServices {
     this.watchRetiredNotice,
     this.lateSaveResult,
     this.mealReveals,
+    this.photoScanStatus,
+    this.retryPhotoScan,
   });
 }

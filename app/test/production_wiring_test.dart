@@ -16,6 +16,8 @@ import 'dart:io';
 
 import 'package:calorie_tracker/services/photo/photo_changes.dart'
     show recordLateImportPass;
+import 'package:calorie_tracker/services/photo/scan_status.dart'
+    show PhotoScanStatus;
 import 'package:calorie_tracker/services/photo/watcher.dart';
 import 'package:calorie_tracker/services/settings/app_settings.dart';
 import 'package:flutter/widgets.dart' show AppLifecycleState;
@@ -284,14 +286,89 @@ void main() {
     // G1b: without it every late import is read in full, logged or not.
     // Review r171: without liveHeld the live watcher read every photo an
     // iCloud Backup hold kept back again at each library change.
+    // 2026-11-28: the call has two more arguments (Today's "Checking
+    // photos" row, below), so liveHeld no longer closes it; the two this
+    // test is about are pinned as before.
     test('late imports skip photos a meal already names, without a read, '
         'and the live watcher reads nothing while iCloud Backup holds it', () {
       expect(
         init(),
         _wired(
           r'createPhotoIntake\(settings, loggedAssetIds: dao\.loggedAssetIds, '
-          r'liveHeld: \(\) => cloudBackup\?\.holdsPhotosNow \?\? false\)',
+          r'liveHeld: \(\) => cloudBackup\?\.holdsPhotosNow \?\? false,',
         ),
+      );
+    });
+
+    // 2026-11-27: Today read "0 kcal" while the catch-up worked through a
+    // day's photos, and a photo the server refused was dropped without a
+    // word. The row is behaviour-tested on a rig that wires the intake
+    // and the pipeline the way these lines do (test/support/
+    // photo_scan_rig.dart); without them the phone shows no row, or one
+    // that never moves, with every test green.
+    test('Today\'s "Checking photos" row: one status hears the intake\'s '
+        'scans and the pipeline\'s photos, and reaches Today with its Retry',
+        () {
+      expect(init(), _wired(r'final scanStatus = PhotoScanStatus\(\);'));
+      expect('PhotoScanStatus('.allMatches(_source('lib/ui/di.dart')),
+          hasLength(1), reason: 'one status for the engine');
+      final intake = _call(init(), 'createPhotoIntake(');
+      expect(intake, _wired(r'scanStatus: scanStatus,'));
+      // The estimate of what looks unchecked: against the watermark, read
+      // without a reload of the store.
+      expect(
+        intake,
+        _wired(r'checkedThrough: \(\) => cachedBackgroundWatermark\(prefs\)\)'),
+      );
+      // What the pipeline reports of each photo's turn is behaviour-tested
+      // (scan_verdict_test: scanStatusReports).
+      final pipeline = _call(init(), 'PhotoPipeline(');
+      expect(
+        pipeline,
+        _wired(r'scanReports: scanStatusReports\(scanStatus\),'),
+      );
+      // Retry: nothing while iCloud Backup holds the catch-up, else the
+      // catch-up the hold's release runs (pinned above).
+      final retry = _body(
+        init(),
+        'Future<void> retryPhotoScan() async {',
+        indent: '    ',
+      );
+      expect(
+        retry,
+        _wired(
+          r'if \(await cloudBackup\?\.holdsCatchUp\(\) \?\? false\) return; '
+          r'await catchUpAfterHold\(\);',
+        ),
+      );
+      final services = _call(init(), 'UiServices(');
+      expect(
+        services,
+        _wired(r'photoScanStatus: photoLibraryInBuild \? scanStatus : null,'),
+      );
+      expect(
+        services,
+        _wired(
+          r'retryPhotoScan: photoLibraryInBuild \? retryPhotoScan : null,',
+        ),
+      );
+      final today = _call(_source('lib/ui/app.dart'), 'TodayScreen(');
+      expect(today, _wired(r'scanStatus: s\.photoScanStatus,'));
+      expect(today, _wired(r'onRetryScan: s\.retryPhotoScan,'));
+    });
+
+    // The catch-up holds one round over the window scan and the late-import
+    // pass, so the row comes once and goes once (scan_status_test).
+    test('the catch-up holds the row from its start to its end', () {
+      final catchUp = _body(
+        _source('lib/ui/background_glue.dart'),
+        'Future<DateTime?> foregroundCatchUp(',
+      );
+      expect(catchUp, _wired(r'final round = beginCatchUpRound\(intake\);'));
+      expect('round?.end();'.allMatches(catchUp), hasLength(1));
+      expect(
+        catchUp.indexOf('round?.end();'),
+        greaterThan(catchUp.indexOf('await intake.lateImportScan(')),
       );
     });
 
@@ -1886,6 +1963,33 @@ void main() {
               as LibraryPhotoIntake;
       expect(intake.scanSkipsLogged, isTrue);
       expect(intake.onScanSkippedLogged, same(skipped));
+    },
+  );
+
+  test(
+    'createPhotoIntake hands the scan status and the checked-through mark '
+    'to the intake, and gives it neither unless asked',
+    () async {
+      SharedPreferences.setMockInitialValues({});
+      final settings = await AppSettings.load(
+        prefs: await SharedPreferences.getInstance(),
+        keyStore: _Keys(),
+      );
+      final status = PhotoScanStatus();
+      DateTime? through() => DateTime(2026, 11, 27, 8, 33);
+      final intake =
+          createPhotoIntake(
+                settings,
+                scanStatus: status,
+                checkedThrough: through,
+              )
+              as LibraryPhotoIntake;
+      expect(intake.scanStatus, same(status));
+      expect(intake.checkedThrough, same(through));
+      // The background run's intake reports nothing.
+      final headless = createPhotoIntake(settings) as LibraryPhotoIntake;
+      expect(headless.scanStatus, isNull);
+      expect(headless.checkedThrough, isNull);
     },
   );
 

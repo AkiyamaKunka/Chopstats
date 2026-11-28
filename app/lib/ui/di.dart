@@ -51,6 +51,7 @@ import '../services/photo/photo_hash.dart' show originalBytesMd5;
 import '../services/photo/origin_cache.dart' show pruneOriginCacheAtLaunch;
 import '../services/photo/photo_library.dart';
 import '../services/photo/photo_location.dart';
+import '../services/photo/scan_status.dart' show PhotoScanStatus;
 import '../services/photo/share_intake.dart';
 import '../services/places/places.dart' show MapKitPlaces;
 import '../services/photo/watcher.dart';
@@ -177,9 +178,16 @@ class AppServices {
     // While iCloud Backup holds the automatic intake the live watcher reads
     // no photo: the pipeline would let each one go untouched (intakeHeld
     // below), and the scan would read it again at every library change.
+    // Today's "Checking photos" row (scan_status.dart) hears each scan from
+    // the intake and each photo's turn from the pipeline below. Which
+    // photos look unchecked is judged against the background watermark as
+    // this engine last read or wrote it (cachedBackgroundWatermark).
+    final scanStatus = PhotoScanStatus();
     final photoIntake = createPhotoIntake(settings,
         loggedAssetIds: dao.loggedAssetIds,
-        liveHeld: () => cloudBackup?.holdsPhotosNow ?? false);
+        liveHeld: () => cloudBackup?.holdsPhotosNow ?? false,
+        scanStatus: scanStatus,
+        checkedThrough: () => cachedBackgroundWatermark(prefs));
     final shareIntake = createShareIntake(settings);
     // Android: "show me that meal" (meal_reveal.dart), from the View on a
     // shared photo's snackbar and a tap on a Logged meals card; the shell
@@ -358,6 +366,8 @@ class AppServices {
         // corrected, meal for it. The catch-up below offers it again once
         // the hold ends.
         intakeHeld: () => cloudBackup?.holdsPhotosNow ?? false,
+        // Today's "Checking photos" row hears each automatic photo's turn.
+        scanReports: scanStatusReports(scanStatus),
         // A photo the background run kept deferring is forgotten once it
         // has a verdict here. 'Already logged' was settled by an earlier
         // run, which forgot it then.
@@ -538,6 +548,14 @@ class AppServices {
           .then((_) {}, onError: (Object _) {});
     }
 
+    // Retry on Today's row (photos a scan let go unchecked): the same
+    // catch-up again, under the resume's conditions. Nothing while iCloud
+    // Backup holds it; that one is caught up when the hold ends.
+    Future<void> retryPhotoScan() async {
+      if (await cloudBackup?.holdsCatchUp() ?? false) return;
+      await catchUpAfterHold();
+    }
+
     // iCloud Backup (iPhone, 1.7.0): the user's own iCloud Drive, ON by
     // default, nothing uploaded before the notice is answered. The shell
     // starts it after the first frame. Android has no automatic file.
@@ -662,6 +680,10 @@ class AppServices {
       // A Save to Device that outlived its engine (MainActivity).
       lateSaveResult: Platform.isAndroid ? takeLateSaveResult : null,
       mealReveals: mealReveals,
+      // Today's "Checking photos" row and its Retry. Not in the Play
+      // build, which scans nothing (core/app_channel.dart).
+      photoScanStatus: photoLibraryInBuild ? scanStatus : null,
+      retryPhotoScan: photoLibraryInBuild ? retryPhotoScan : null,
     );
     pipeline.bind(photoIntake); // automated watch (deliberate=false)
     // Share sheet (deliberate), each photo held until its AI recipient is

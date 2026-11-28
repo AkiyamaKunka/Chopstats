@@ -1844,6 +1844,61 @@ class AppLocalizationsEn extends AppLocalizations {
   String get todayLoadFailed => 'Couldn\'t load today\'s meals.';
 
   @override
+  String todayScanChecking(int current, int total) {
+    String _temp0 = intl.Intl.pluralLogic(
+      total,
+      locale: localeName,
+      other: 'Checking photos: $current of $total',
+      one: 'Checking 1 photo',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get todayScanKeepOpen => 'Keep Chopstats open.';
+
+  @override
+  String get todayScanCheckingLabel => 'Checking photos. Keep Chopstats open.';
+
+  @override
+  String todayScanCheckingValue(int current, int total) {
+    return '$current of $total';
+  }
+
+  @override
+  String todayScanDone(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count photos checked.',
+      one: '1 photo checked.',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String todayScanWaiting(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count photos are not checked yet.',
+      one: '1 photo is not checked yet.',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String todayScanWaitingReason(int count, String reason) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count photos are not checked yet ($reason).',
+      one: '1 photo is not checked yet ($reason).',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get historyLoadFailed => 'Couldn\'t load your history.';
 
   @override

@@ -212,8 +212,11 @@ final _placeholderRe = RegExp(r'\{(\w+)\}');
 /// (diagBgScheduleOk, …Unavailable, …Refused), its count of photos a
 /// scan did not read again (diagBgRunAlreadyLogged), and why photos were
 /// left for later (diagBgRunLeftWhy, diagBgLeftJoin and the six
-/// diagBgLeft* reasons).
-const _keyCount = 1022;
+/// diagBgLeft* reasons); and the seven of Today's photo-scan row
+/// (todayScanChecking, todayScanKeepOpen, todayScanCheckingLabel,
+/// todayScanCheckingValue, todayScanDone, todayScanWaiting,
+/// todayScanWaitingReason).
+const _keyCount = 1029;
 
 Directory _appRoot() {
   var dir = Directory.current;

@@ -367,6 +367,16 @@ Future<({DateTime? written, DateTime? stored})> _advanceWatermark(
   return (written: capped, stored: cur);
 }
 
+/// The background watermark as this engine's preferences hold it, with no
+/// re-read from disk: what the app's intake compares photo dates with to
+/// tell which photos look unchecked, for Today's "Checking photos" row
+/// (LibraryPhotoIntake.checkedThrough). Every catch-up re-reads the store
+/// as it checkpoints ([foregroundCatchUp]), so this is at worst as old as
+/// the app's last one, and an older value only makes more photos look
+/// unchecked, which the ledger then answers for.
+DateTime? cachedBackgroundWatermark(SharedPreferences prefs) =>
+    readStoredInstant(prefs.getString(backgroundWatermarkPrefsKey));
+
 /// The app's launch/resume catch-up over the full lookback window — the
 /// pipeline [PhotoPipeline.bind] attached processes each photo — which
 /// also moves the BACKGROUND watermark over what it covered. It used to
@@ -390,10 +400,17 @@ Future<({DateTime? written, DateTime? stored})> _advanceWatermark(
 /// still in the foreground" (appEngineBackgrounded): once the user leaves,
 /// the photo in flight finishes in its background task and nothing more
 /// is read (2026-10-19).
+///
+/// One round for Today's "Checking photos" row (scan_status.dart) when the
+/// intake reports its scans: the window scan and the late-import pass each
+/// report their own photos, and a row the first one brought up stays, on
+/// its last count, until both are over, instead of going away after the
+/// last photo it expected and coming back for the photos imported late.
 Future<DateTime?> foregroundCatchUp(PhotoIntake intake,
     {DateTime Function() clock = DateTime.now,
     Future<SharedPreferences> Function()? loadPrefs,
     bool Function()? shouldContinue}) async {
+  final round = beginCatchUpRound(intake);
   final scanStart = clock();
   // The latest mark this catch-up knows the store holds, read or written.
   // A covered photo at or before it would move nothing, so it costs no
@@ -424,13 +441,20 @@ Future<DateTime?> foregroundCatchUp(PhotoIntake intake,
     if (frontier != null) await checkpoint(frontier);
     return frontier;
   } finally {
-    // Photos other apps imported late (design G1b): after the window, so
-    // today's photos still go first. Never a watermark; never a throw. A
-    // truncated window still gets it. Not once the user has left (iOS).
-    if (shouldContinue?.call() ?? true) {
-      try {
-        await intake.lateImportScan(shouldContinue: shouldContinue);
-      } catch (_) {}
+    try {
+      // Photos other apps imported late (design G1b): after the window, so
+      // today's photos still go first. Never a watermark; never a throw. A
+      // truncated window still gets it. Not once the user has left (iOS).
+      if (shouldContinue?.call() ?? true) {
+        try {
+          await intake.lateImportScan(shouldContinue: shouldContinue);
+        } catch (_) {}
+      }
+    } finally {
+      // Whatever happened above ([shouldContinue] is the caller's, and may
+      // throw): a round left open would hold the row on its last count for
+      // the rest of the session.
+      round?.end();
     }
   }
 }

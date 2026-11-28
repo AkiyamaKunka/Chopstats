@@ -1150,6 +1150,8 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
                 restaurantAssist: s.restaurantAssist,
                 settings: s.settings,
                 noteCorrector: noteCorrectorOf(s.executor),
+                scanStatus: s.photoScanStatus,
+                onRetryScan: s.retryPhotoScan,
                 usual: s.usualFoods),
             HistoryScreen(
                 key: _historyKey,
