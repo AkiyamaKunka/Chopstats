@@ -105,6 +105,36 @@ void main() {
         .stopReason, BackgroundStop.budget);
   });
 
+  // Review, 2026-11-28, second round. The deadline's wrap-up writes
+  // "budget" once the photo in flight is released, but the run itself can
+  // close the entry first: the photo the deadline cut off was its last,
+  // and its verdict, landing during the release, let the run reach its
+  // own end. The entry read "Finished." over a photo left because the
+  // time ran out; the same run read "budget" when the release was quick.
+  test('once the deadline has come, the run ends as budget whoever closes '
+      'the entry; before it, the run\'s own reason stands', () async {
+    final prefs = await _prefs();
+    final rec = BackgroundRunRecorder(prefs, platform: 'ios', clock: () => t0);
+    await rec.begin();
+    await rec.offered();
+    rec.deadlineReached();
+    await rec.cutOff(BackgroundLeft.deadline);
+    await rec.finish(BackgroundStop.done); // the run, on its way out
+    await rec.finish(BackgroundStop.budget); // the deadline's, too late
+    expect(rec.current!.stopReason, BackgroundStop.budget);
+    expect(decodeBackgroundRuns(prefs.getString(backgroundRunsPrefsKey))
+        .single
+        .stopReason, BackgroundStop.budget);
+
+    final before =
+        BackgroundRunRecorder(await _prefs(), platform: 'ios', clock: () => t0);
+    await before.begin();
+    await before.finish(BackgroundStop.paused);
+    before.deadlineReached(); // too late: the entry is final
+    await before.finish(BackgroundStop.budget);
+    expect(before.current!.stopReason, BackgroundStop.paused);
+  });
+
   test('newest first, and only the last 20 are kept', () async {
     final prefs = await _prefs();
     for (var i = 0; i < 23; i++) {

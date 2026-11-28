@@ -531,13 +531,25 @@ class BackgroundRunRecorder {
   Future<void> checkpoint(DateTime watermark) => _update((r) => r.copyWith(
       stage: BackgroundRunStage.checkpoint, watermarkAfter: watermark.toUtc()));
 
+  /// The run's deadline has come (finishWithinGrant, before its wrap-up:
+  /// the release of the photo in flight, and on Android the summary's
+  /// re-arm). From now on the entry ends as [BackgroundStop.budget],
+  /// whoever finishes it. The run itself can, during that wrap-up: the
+  /// photo the deadline cut off was its last, its verdict landed, and the
+  /// run reached its own end. The entry then read "done" over a photo
+  /// left because the time ran out (review, 2026-11-28). A finished entry
+  /// stays as it is.
+  void deadlineReached() => _deadlineReached = true;
+  bool _deadlineReached = false;
+
   Future<void> finish(String stopReason, {DateTime? watermarkAfter}) =>
       _update((r) => r.finished
           ? r
           : r.copyWith(
               end: _clock().toUtc(),
               stage: BackgroundRunStage.done,
-              stopReason: stopReason,
+              stopReason:
+                  _deadlineReached ? BackgroundStop.budget : stopReason,
               watermarkAfter: watermarkAfter?.toUtc()));
 
   /// A finished entry is final: a run abandoned at the iOS deadline

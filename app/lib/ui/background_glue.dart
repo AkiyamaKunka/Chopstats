@@ -907,8 +907,10 @@ class RunInFlight {
     // The photo's answer can land while it is being released, or on
     // Android during the summary's re-arm after it; the abandoned run
     // then reports the same photo "left for later" (one photo showed as
-    // two), and can run on to its own end and close the entry. The write
-    // is awaited last, behind what the next run goes by.
+    // two), and can run on to its own end and close the entry. The
+    // entry's write starts here, ahead of the release and of the deferral
+    // the next run goes by, and is awaited only at the end: neither of
+    // them waits for it.
     final log = recorder;
     final noted = log != null && log.photoInFlight
         ? log.cutOff(backgroundLeftForCut(cutAt))
@@ -1272,6 +1274,9 @@ Future<bool> finishWithinGrant(Future<bool> run,
   final done = Completer<bool>();
   final timer = Timer(left.isNegative ? Duration.zero : left, () {
     if (done.isCompleted) return;
+    // Out of time from here, whoever closes the entry: the run itself
+    // may, during the wrap-up below.
+    recorder.deadlineReached();
     done.complete(() async {
       if (abandon != null) {
         try {

@@ -1516,6 +1516,12 @@ void main() {
               expect((r.offered, r.analyzed, r.saved, r.released),
                   (1, 0, 0, 1));
               expect(r.left, {BackgroundLeft.deadline: 1});
+              // The deadline cut the run, so it ends as budget ("Used its
+              // time"), as when the release is quick. Closed by the run
+              // itself, it said done ("Finished.") over a photo left
+              // because the time ran out (review, 2026-11-28, second
+              // round).
+              expect(r.stopReason, BackgroundStop.budget);
             });
 
             test('Android: its answer lands during the summary\'s re-arm, '
