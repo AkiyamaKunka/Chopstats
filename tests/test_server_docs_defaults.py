@@ -204,13 +204,61 @@ def _iphone_scan_deadline():
 def test_the_guides_give_the_iphone_scan_deadline_the_app_has():
     """The reason to keep the wait near 20 s is a number of the app's, not
     of the server's: how long an iPhone background scan gives its request.
-    The deploy guide and .env.example quote it. When the app changes it,
-    these sentences change with it, and the default wait is looked at
-    again (tests/test_claude_analyzer.py compares the two)."""
+    The deploy guide and .env.example quote it, and so does SERVER.md,
+    where it says that such a scan often does not get its answer in time.
+    When the app changes the number, these sentences change with it, and
+    the default wait is looked at again (tests/test_claude_analyzer.py
+    compares the two)."""
     seconds = _iphone_scan_deadline()
     assert ("An iPhone background scan gives up on its request %d s after "
             "the scan began." % seconds) in " ".join(
                 _read("docs", "SERVER_DEPLOY.md").split())
+    assert ("it gives up on its request %d s after the scan began"
+            % seconds) in " ".join(_read("docs", "SERVER.md").split())
     assert ("an iPhone background scan gives up on its request after %d s"
             % seconds) in " ".join(
                 _read(".env.example").replace("\n# ", " ").split())
+
+
+def test_the_guides_say_how_long_a_reply_can_take(monkeypatch):
+    """A reply to the app can take the wait for a busy CLI and then one
+    whole analysis. SERVER_TLS.md gives those numbers to whoever puts a
+    proxy in front: it said "about two minutes", which was the analysis
+    alone. And curl in the deploy guide's smoke test F must be given more
+    than the longest case, or a slow pass is cut off and reads as a
+    failure: its 170 s were set before the wait existed (review
+    2026-11-28)."""
+    monkeypatch.delenv("CLAUDE_ANALYZER_TIMEOUT_SECONDS", raising=False)
+    analysis = claude_analyzer._timeout_seconds()
+    wait = claude_analyzer.BUSY_WAIT_SECONDS_DEFAULT
+    highest = claude_analyzer.BUSY_WAIT_SECONDS_MAX
+    tls = " ".join(_read("docs", "SERVER_TLS.md").split())
+    assert ("a photo or text analysis is given up to %d s" % analysis) in tls
+    assert ("first waits for it, up to %d s." % wait) in tls
+    assert ("So a reply can take up to %d s, and up to %d s with `%s` at "
+            "its highest (%d)." % (analysis + wait, analysis + highest,
+                                   BUSY_KNOB, highest)) in tls
+
+    deploy = _read("docs", "SERVER_DEPLOY.md")
+    limits = re.findall(
+        r"curl -s -m (\d+) -o /tmp/photo_reply\.json[^\n]*\\\n"
+        r"[^\n]*/api/analyze_photo\n", deploy)
+    assert len(limits) == 1, limits
+    assert int(limits[0]) > analysis + highest
+    assert ("curl gives it %s s: the longest wait for a busy CLI, %d s, "
+            "then one analysis at its limit, %d s" % (
+                limits[0], highest, analysis)) in deploy
+
+
+def test_the_deploy_guide_quotes_the_journal_lines_the_code_writes():
+    """The busy-wait section tells the owner what to look for in the
+    journal: the start of every line about a request that found another
+    analysis on the CLI, and the line of a lookup that a request stopped
+    (a Telegram photo that stopped one and then ran has no other line:
+    tests/test_claude_analyzer.py). Both are the analyzer's own words."""
+    guide = " ".join(_read("docs", "SERVER_DEPLOY.md").split())
+    source = _read("claude_analyzer.py")
+    for line in ("Claude CLI busy",
+                 "Restaurant lookup pre-empted by a foreground request."):
+        assert "`%s`" % line in guide, line
+        assert '"%s' % line in source, line

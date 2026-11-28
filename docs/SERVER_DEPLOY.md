@@ -209,9 +209,10 @@ printf 'X-API-Key: %s\n' "$K" | curl -s -w ' %{http_code}\n' -X POST -H @- -H 'C
 printf 'X-API-Key: %s\n' "$K" | curl -s -w ' %{http_code}\n' -X POST -H @- -H 'Content-Type: application/json' \
   -H 'X-Client-Platform: smoke' --data '{"items":[]}' $B/api/restaurant_lookup
 # F. one whole analysis through the API (ONE plan run; the endpoint stores nothing): expect http 200
+#    (curl gives it 200 s: the longest wait for a busy CLI, 60 s, then one analysis at its limit, 120 s, and 20 s to spare)
 sudo cat /home/ubuntu/CalorieTracker/app/test_live/fixtures/plate.jpg \
   | python3 -c 'import base64,json,sys; json.dump({"image_b64": base64.b64encode(sys.stdin.buffer.read()).decode()}, open("/tmp/photo_body.json","w"))'
-printf 'X-API-Key: %s\n' "$K" | curl -s -m 170 -o /tmp/photo_reply.json -w 'F http %{http_code} in %{time_total}s\n' -X POST -H @- \
+printf 'X-API-Key: %s\n' "$K" | curl -s -m 200 -o /tmp/photo_reply.json -w 'F http %{http_code} in %{time_total}s\n' -X POST -H @- \
   -H 'Content-Type: application/json' -H 'X-Client-Platform: smoke' --data-binary @/tmp/photo_body.json $B/api/analyze_photo
 python3 -c 'import json; d=json.load(open("/tmp/photo_reply.json")); a=d.get("analysis") or {}; i=(a.get("food_items") or [{}])[0]; print("F analyzed_by=",d.get("analyzed_by"),"is_food=",a.get("is_food"),"estimate_confidence=",a.get("estimate_confidence"),"restaurant_context=",a.get("restaurant_context"),"portion_state=",a.get("portion_state"),"item keys=",sorted(i))'
 rm -f /tmp/photo_body.json /tmp/photo_reply.json
@@ -264,13 +265,20 @@ Keep it near 20. An iPhone background scan gives up on its request 22 s
 after the scan began. A request that has waited longer than that is
 analyzed for a phone that no longer listens: that is one run of your
 plan for an answer nobody reads, and the next photo waits behind it. A
-higher value only makes sense on a server that no iPhone uses.
+higher value only makes sense on a server that no iPhone uses. The limit
+only bounds that waste: the server cannot see a phone hang up, so a
+request whose phone gave up while it waited is still analyzed in full
+when its turn comes.
 
-The journal has one line for each request that met a busy CLI, and it
-starts with `Claude CLI busy`. It says what happened to that request: it
-waited so many seconds and then ran; or it was refused, after the wait
-or at once (two were already waiting, or the wait is off); or, for a
-Telegram or `/upload` photo, it went to Gemini.
+The journal has one line for each request that found another analysis
+on the CLI, and it starts with `Claude CLI busy`. It says what happened
+to that request: it waited so many seconds and then ran; or it was
+refused, after the wait or at once (two were already waiting, or the
+wait is off); or, for a Telegram or `/upload` photo, it went to Gemini.
+A request that found a restaurant lookup there stops the lookup, and the
+journal says `Restaurant lookup pre-empted by a foreground request.` An
+app request that then gets the CLI has its "waited" line as well; a
+Telegram or `/upload` photo that then gets it has no line of its own.
 
 The wait needs no setting and no app update. It starts when the server
 is deployed: until then the server on your VM still answers a busy

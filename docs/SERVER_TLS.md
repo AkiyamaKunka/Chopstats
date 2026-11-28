@@ -395,10 +395,14 @@ That is the whole configuration:
 - **No access log**: the Caddyfile has no `log` directive, so Caddy does
   not record requests. Keep it that way. The service's journal already
   has one line per refusal, without the payload.
-- **Slow replies**: a photo or text analysis can take up to about two
-  minutes. In the first rollout a test request whose answer started
-  only after 100 seconds came back through Caddy 2.11.9 with its default
-  timeouts, so there is nothing to tune.
+- **Slow replies**: with the default settings a photo or text analysis
+  is given up to 120 s, and a request that arrives during another one
+  first waits for it, up to 20 s. So a reply can take up to 140 s, and
+  up to 180 s with `CLAUDE_API_BUSY_WAIT_SECONDS` at its highest (60).
+  Caddy's reverse proxy sets no time limit on an answer by default, and
+  in the first rollout a test request whose answer started only after
+  100 seconds came back through Caddy 2.11.9 with its default timeouts,
+  so there is nothing to tune.
 - **Upload size**: Caddy imposes no body limit by default; Flask's own
   `MAX_API_UPLOAD_BYTES` (25 MB) stays in charge.
 
