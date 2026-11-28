@@ -500,7 +500,15 @@ void main() {
         after,
         _wired(r'pipeline: \(\) async => inFlight\.pipeline = PhotoPipeline\('),
       );
-      expect(after, _wired(r'analyzer: createMultiProviderAnalyzer\(settings\),'));
+      // 2026-11-28: the same analyzer, now sending through the run's own
+      // client (the pin on that argument is with the headless run's, below).
+      expect(
+        after,
+        _wired(
+          r'analyzer: createMultiProviderAnalyzer\(settings, '
+          r'client: inFlight\.traffic\),',
+        ),
+      );
     });
 
     test('the pipeline constructor takes nothing from the assist', () {
@@ -1171,7 +1179,8 @@ void main() {
       for (final later in [
         'final notifier = ReportNotifier(',
         'ok = await headlessBackfillWith(',
-        'createMultiProviderAnalyzer(settings)',
+        // Its second argument is the run's client (2026-11-28).
+        'createMultiProviderAnalyzer(settings,',
       ]) {
         expect(flat.indexOf(later), greaterThan(at), reason: later);
       }
@@ -1327,6 +1336,39 @@ void main() {
       );
       expect(after(), _wired(r'\n\s*finishBy: inFlight\.deadline,'));
       expect(after(), _wired(r'\n\s*photoOffered: inFlight\.offered,'));
+    });
+
+    // 2026-11-28: a cut with the full window counted whatever the run had
+    // been waiting for, so three hung or busy runs passed a photo over.
+    // The run's deadline now goes by what its analyzer sent for the photo
+    // (RunInFlight.abandon, behaviour-tested in background_glue_test with
+    // a real analyzer). That evidence exists only if the analyzer sends
+    // through the run's client: without this argument nothing is ever
+    // seen as sent, and every cut counts again, with the suite green.
+    test('the run\'s analyzer sends through the run\'s own client, which the '
+        'deadline reads', () {
+      expect(
+        after(),
+        _wired(
+          r'analyzer: createMultiProviderAnalyzer\(settings, '
+          r'client: inFlight\.traffic\),',
+        ),
+      );
+      final inFlight = _body(glue(), 'class RunInFlight {');
+      expect(
+        inFlight,
+        _wired(r'void offered\(\) \{ _offeredAt = _clock\(\); '
+            r'traffic\.next\(\); \}'),
+      );
+      expect(
+        inFlight,
+        _wired(r'final cutAt = traffic\.cutOffAt; '
+            r'final assetId = await pipeline\?\.abandon\(\);'),
+      );
+      expect(
+        inFlight,
+        _wired(r'if \(cutAt != CutOffAt\.preparing\) return;'),
+      );
     });
   });
 

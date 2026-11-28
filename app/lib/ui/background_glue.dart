@@ -22,6 +22,7 @@ import 'dart:ui' show Locale, PlatformDispatcher;
 
 import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:flutter/widgets.dart' show WidgetsBinding;
+import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart' show getTemporaryDirectory;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:workmanager/workmanager.dart';
@@ -41,6 +42,7 @@ import '../services/photo/deferred_assets.dart';
 import '../services/photo/food_prefilter.dart' show foodScoreViaImageIO;
 import '../services/photo/glasses_check.dart' show recordGlassesCheckLocally;
 import '../services/photo/photo_library.dart' show photoLibraryAccess;
+import '../services/photo/run_traffic.dart';
 import '../services/photo/watcher.dart';
 import '../services/report/notifications.dart';
 import '../l10n/app_localizations.dart';
@@ -761,27 +763,35 @@ const Duration androidDeadlineWrapUp = Duration(seconds: 30);
 /// deadline, for a cut-off to count against it ([DeferredAssets.cutOff]):
 /// offered no later than 7 s into the run. Most first photos of a run have
 /// it; a photo offered after another was processed mostly has not, and its
-/// cut-off says nothing about the photo (review, 2026-10-19).
+/// cut-off says nothing about the photo (review, 2026-10-19). The window
+/// is necessary, not sufficient: the cut must also have come before
+/// anything was sent for the photo ([RunInFlight.abandon]).
 const Duration slowPhotoWindow = Duration(seconds: 15);
 
-/// Android's [slowPhotoWindow]: one full attempt of the slowest analyzer
-/// (ServerAnalyzer.deadline, 5 minutes) before [androidRunDeadline], so
+/// Android's [slowPhotoWindow]: 5 minutes before [androidRunDeadline], so
 /// offered no later than 4 minutes into the run. iOS's 15 s counted every
 /// Android cut — offers stop 2 minutes before the deadline — and a photo
 /// offered late while the server hung was passed over (review
-/// 2026-11-19).
+/// 2026-11-19). The length was chosen as one full attempt of the slowest
+/// analyzer (ServerAnalyzer.deadline); a cut that comes with a request
+/// out no longer counts at all, so it now only says how long the phone
+/// must have been preparing the photo.
 const Duration androidSlowPhotoWindow = Duration(minutes: 5);
 
 /// What the run's deadline needs from a run still going: its pipeline
-/// once built, its deferral notes once loaded, and when the photo in
-/// flight was offered.
+/// once built, its deferral notes once loaded, when the photo in flight
+/// was offered, and what has been sent for it since.
 @visibleForTesting
 class RunInFlight {
+  /// [client]: where the run's analyzer sends (tests); the run's own
+  /// [http.Client] otherwise, made at its first request.
   RunInFlight(
       {this.deadline,
       this.window = slowPhotoWindow,
-      DateTime Function()? clock})
-      : _clock = clock ?? DateTime.now;
+      DateTime Function()? clock,
+      http.Client? client})
+      : _clock = clock ?? DateTime.now,
+        traffic = RunTraffic(client);
 
   /// When the run must be over ([iosRunDeadline] or [androidRunDeadline]
   /// from its start); null: no deadline (tests).
@@ -794,6 +804,11 @@ class RunInFlight {
   PhotoPipeline? pipeline;
   DeferredAssets? deferred;
   DateTime? _offeredAt;
+
+  /// The HTTP client the run's analyzer sends through, whichever AI
+  /// service it is: what was sent for the photo in flight, and what came
+  /// back, is the evidence [abandon] goes by (run_traffic.dart).
+  final RunTraffic traffic;
 
   /// The summary's re-arm ([rearmSummaryAfterRun]), set once the run has
   /// its settings and notifier: Android's deadline runs it
@@ -815,7 +830,10 @@ class RunInFlight {
 
   /// A photo was handed to the pipeline: the one in flight from now on
   /// (the background pipeline takes one photo at a time).
-  void offered() => _offeredAt = _clock();
+  void offered() {
+    _offeredAt = _clock();
+    traffic.next();
+  }
 
   /// MealsDao.loggedAssetIds through the run's own database handle (the
   /// pipeline's): the late-import pass opens no second one. Nothing is
@@ -827,16 +845,35 @@ class RunInFlight {
   }
 
   /// Releases the photo in flight ([PhotoPipeline.abandon]). It stays
-  /// eligible, and the next run offers it again. When it had at least
-  /// [window] to itself, the cut also counts against it: after
-  /// [cutsBeforePassOver] of those, later runs pass it over (the app's
-  /// catch-up still logs it), so a photo too slow for any run does not hold
-  /// the watermark — and every photo after it — until the app opens. A
-  /// photo offered late, or cut off while the server or the network hung,
-  /// costs nothing more than the retry.
+  /// eligible, and the next run offers it again.
+  ///
+  /// The cut also counts against the photo only when the run's own
+  /// evidence points at it (2026-11-28): it had at least [window] to
+  /// itself, and in all that time nothing was sent for it
+  /// ([CutOffAt.preparing]: the phone was still on its food check or its
+  /// decode). After [cutsBeforePassOver] of those, later runs pass it over
+  /// (the app's catch-up still logs it), so one photo this engine cannot
+  /// get ready does not eat every run and hold the watermark, and every
+  /// photo after it, until the app opens.
+  ///
+  /// Every other cut costs the photo nothing more than the retry: offered
+  /// late; cut off with its request out and unanswered; cut off after the
+  /// AI service said it was busy, or could not be reached. A busy server,
+  /// a hung network and a slow answer all cut off whatever photo the run
+  /// meets, and a full window used to count each one against the photo
+  /// (three, and it got no background log until the app was opened).
+  ///
+  /// What that leaves, knowingly: a photo the AI service answers too
+  /// slowly for in every run is sent again by each one and holds the
+  /// watermark until the app opens. From the phone it looks the same as a
+  /// hung network, and the run cannot tell which it is.
   Future<void> abandon() async {
+    // Read before the release, which awaits: an answer that lands
+    // meanwhile is not what the photo was cut off at.
+    final cutAt = traffic.cutOffAt;
     final assetId = await pipeline?.abandon();
     if (assetId == null || assetId.isEmpty) return;
+    if (cutAt != CutOffAt.preparing) return;
     final at = _offeredAt, end = deadline;
     if (at == null || end == null || end.difference(at) < window) return;
     await deferred?.cutOff(assetId);
@@ -934,7 +971,11 @@ Future<bool> _runAfterLaunch({
           dao: await createMealsDao(),
           // B14's previous-night candidates, under the consent that says so.
           previousDayContext: () => settings.previousDayLeftoverContext,
-          analyzer: createMultiProviderAnalyzer(settings),
+          // Through the run's own client, whichever AI service it is: what
+          // was sent for the photo in flight is what the deadline goes by
+          // (RunInFlight.abandon).
+          analyzer:
+              createMultiProviderAnalyzer(settings, client: inFlight.traffic),
           latch: autoScanLatchFor(settings),
           // The AI consent at each send, re-read from disk: the open app
           // may have stopped sharing since this run loaded its settings.
