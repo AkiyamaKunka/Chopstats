@@ -589,6 +589,10 @@ class _BackgroundRuns extends StatelessWidget {
                   if (r.alreadyLogged > 0)
                     Text(l.diagBgRunAlreadyLogged(r.alreadyLogged),
                         style: muted),
+                  // Why the photos left for later were left: the phone's
+                  // own answer to "why was nothing logged" (2026-11-28).
+                  if (backgroundRunLeftLine(l, r) case final why?)
+                    Text(why, style: muted),
                   Text(
                       l.diagBgRunWatermark(_stamp(l, r.watermarkBefore),
                           _stamp(l, r.watermarkAfter)),
@@ -622,6 +626,34 @@ String backgroundScheduleLine(AppLocalizations l, BackgroundSchedule s) {
   return refusal == null || refusal == BackgroundRefusal.unavailable
       ? l.diagBgScheduleUnavailable(checked)
       : l.diagBgScheduleRefused(refusal, checked);
+}
+
+/// Why the photos [r] left for later were left ([BackgroundLeft]), each
+/// reason with its count, in one line; null for a run that left none or
+/// recorded no reasons (every run before 2026-11-28). A reason this
+/// version has no words for (a later version's) counts as "another
+/// reason".
+String? backgroundRunLeftLine(AppLocalizations l, BackgroundRunRecord r) {
+  final counts = <String, int>{};
+  r.left.forEach((reason, count) {
+    final known =
+        BackgroundLeft.all.contains(reason) ? reason : BackgroundLeft.other;
+    counts[known] = (counts[known] ?? 0) + count;
+  });
+  if (counts.isEmpty) return null;
+  final parts = [
+    for (final reason in BackgroundLeft.all)
+      if (counts[reason] case final count?)
+        switch (reason) {
+          BackgroundLeft.busy => l.diagBgLeftBusy(count),
+          BackgroundLeft.unreachable => l.diagBgLeftUnreachable(count),
+          BackgroundLeft.deadline => l.diagBgLeftDeadline(count),
+          BackgroundLeft.preparing => l.diagBgLeftPreparing(count),
+          BackgroundLeft.notOffered => l.diagBgLeftNotOffered(count),
+          _ => l.diagBgLeftOther(count),
+        },
+  ];
+  return l.diagBgRunLeftWhy(parts.join(l.diagBgLeftJoin));
 }
 
 /// One line on how [r] ended: its stop reason, or — for a run with no end —

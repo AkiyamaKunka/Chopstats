@@ -1386,6 +1386,44 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String diagBgRunLeftWhy(String reasons) {
+    return 'Why they were left: $reasons';
+  }
+
+  @override
+  String get diagBgLeftJoin => '; ';
+
+  @override
+  String diagBgLeftBusy(int count) {
+    return 'the AI service was busy ($count)';
+  }
+
+  @override
+  String diagBgLeftUnreachable(int count) {
+    return 'the AI service could not be reached ($count)';
+  }
+
+  @override
+  String diagBgLeftDeadline(int count) {
+    return 'the scan\'s time ran out before the AI service answered ($count)';
+  }
+
+  @override
+  String diagBgLeftPreparing(int count) {
+    return 'the scan\'s time ran out before the photo was sent ($count)';
+  }
+
+  @override
+  String diagBgLeftNotOffered(int count) {
+    return 'not started, the scan\'s time was over ($count)';
+  }
+
+  @override
+  String diagBgLeftOther(int count) {
+    return 'another reason ($count)';
+  }
+
+  @override
   String diagBgRunKilled(String step) {
     return 'Ended by the system before it finished — last step: $step.';
   }

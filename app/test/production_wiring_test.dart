@@ -1425,7 +1425,33 @@ void main() {
       );
       expect(
         inFlight,
-        _wired(r'if \(cutAt != CutOffAt\.preparing\) return;'),
+        _wired(
+          r'if \(cutAt == CutOffAt\.preparing && at != null && end != null && '
+          r'end\.difference\(at\) >= window\) \{ '
+          r'await deferred\?\.cutOff\(assetId\); \}',
+        ),
+      );
+    });
+
+    // 2026-11-28: a run's entry said how many photos it left for later,
+    // never why. The reasons are behaviour-tested through the seams
+    // (background_glue_test); these lines hand the seams to the run.
+    test('the run records why each photo was left for later', () {
+      expect(launch(), _wired(r'inFlight\.recorder = recorder;'));
+      final headless = _body(glue(), 'Future<bool> headlessBackfillWith({');
+      expect(
+        headless,
+        _wired(
+          r'released: o\.retryable, '
+          r'left: o\.retryable \? backgroundLeftFor\(o\) : null\);',
+        ),
+      );
+      expect(
+        _body(glue(), 'class RunInFlight {'),
+        _wired(
+          r'final noted = '
+          r'recorder\?\.cutOff\(backgroundLeftForCut\(cutAt\)\);',
+        ),
       );
     });
   });

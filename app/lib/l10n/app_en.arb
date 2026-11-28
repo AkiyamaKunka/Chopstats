@@ -1013,6 +1013,73 @@
       }
     }
   },
+  "diagBgRunLeftWhy": "Why they were left: {reasons}",
+  "@diagBgRunLeftWhy": {
+    "description": "Diagnostics › Recent background scans, under the counts line of a scan that left photos for later (the 'left for later' number of diagBgRunCounts). {reasons} is one or more of the diagBgLeft* phrases, each with its count, joined by diagBgLeftJoin.",
+    "placeholders": {
+      "reasons": {
+        "type": "String"
+      }
+    }
+  },
+  "diagBgLeftJoin": "; ",
+  "@diagBgLeftJoin": {
+    "description": "What goes between two reasons in diagBgRunLeftWhy."
+  },
+  "diagBgLeftBusy": "the AI service was busy ({count})",
+  "@diagBgLeftBusy": {
+    "description": "A reason in diagBgRunLeftWhy: the AI service (the user's own server, or a provider) answered that it was busy or over its rate limit. {count} is how many photos.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "diagBgLeftUnreachable": "the AI service could not be reached ({count})",
+  "@diagBgLeftUnreachable": {
+    "description": "A reason in diagBgRunLeftWhy: no connection to the AI service, or it answered with a server error.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "diagBgLeftDeadline": "the scan's time ran out before the AI service answered ({count})",
+  "@diagBgLeftDeadline": {
+    "description": "A reason in diagBgRunLeftWhy: the photo had been sent, and the background scan had to end (iOS gives it about 30 seconds) before an answer came.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "diagBgLeftPreparing": "the scan's time ran out before the photo was sent ({count})",
+  "@diagBgLeftPreparing": {
+    "description": "A reason in diagBgRunLeftWhy: the background scan had to end while the phone was still preparing the photo (decoding it); nothing had been sent.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "diagBgLeftNotOffered": "not started, the scan's time was over ({count})",
+  "@diagBgLeftNotOffered": {
+    "description": "A reason in diagBgRunLeftWhy: the photos the scan listed and never started, because its time for starting photos was over.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "diagBgLeftOther": "another reason ({count})",
+  "@diagBgLeftOther": {
+    "description": "A reason in diagBgRunLeftWhy: any other reason a photo waits for a later scan (it waits for the app to be opened, another scan holds it, …).",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "diagBgRunKilled": "Ended by the system before it finished — last step: {step}.",
   "@diagBgRunKilled": {
     "placeholders": {

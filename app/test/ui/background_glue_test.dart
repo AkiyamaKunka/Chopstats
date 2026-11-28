@@ -610,6 +610,7 @@ void main() {
       final r = stored();
       expect(r.stopReason, BackgroundStop.budget);
       expect((r.offered, r.analyzed, r.saved, r.released), (1, 1, 1, 1));
+      expect(r.left, {BackgroundLeft.notOffered: 1});
     });
 
     test('a deferred photo (retryable) counts as left for later', () async {
@@ -629,6 +630,90 @@ void main() {
         recorder: recorder,
       );
       expect((stored().analyzed, stored().released), (1, 1));
+    });
+
+    // 2026-11-28: the entry said how many photos were left for later and
+    // never why, so the phone could not answer "why was nothing logged".
+    test('each photo left for later is recorded with its reason', () async {
+      final settings = await settingsWith(key: 'k');
+      final recorder = await begun();
+      PhotoOutcome kept(String message, AnalysisErrorKind kind) =>
+          PhotoOutcome(PhotoOutcomeKind.failed, message,
+              retryable: true, errorKind: kind);
+      await headlessBackfillWith(
+        settings: settings,
+        prefs: prefs,
+        intake: EmittingIntake()
+          ..batch = [for (var n = 1; n <= 7; n++) photo(n)],
+        pipeline: () async => _ScriptedPipeline([
+          kept('busy', AnalysisErrorKind.serverBusy),
+          kept('over the limit', AnalysisErrorKind.rateLimited),
+          kept('no connection', AnalysisErrorKind.network),
+          // Left for the app (a decode this engine cannot do), and held
+          // by another run: neither is the AI service's doing.
+          kept('decode failed', AnalysisErrorKind.badPhoto),
+          const PhotoOutcome(PhotoOutcomeKind.inFlight, 'held',
+              retryable: true),
+          // Verdicts: not left at all.
+          const PhotoOutcome(PhotoOutcomeKind.skipped, 'not food'),
+          const PhotoOutcome(PhotoOutcomeKind.failed, 'bad reply',
+              errorKind: AnalysisErrorKind.badResponse),
+        ]),
+        showMealCard: (_, _, {payload}) async {},
+        clock: () => t0,
+        recorder: recorder,
+      );
+      final r = stored();
+      expect(r.left, {
+        BackgroundLeft.busy: 2,
+        BackgroundLeft.unreachable: 1,
+        BackgroundLeft.other: 2,
+      });
+      expect((r.analyzed, r.released), (7, 5));
+    });
+
+    // The same, from what a real analyzer says: the own server's "busy"
+    // (after its in-place tries) and a server that cannot be reached.
+    test('a busy server and an unreachable one are told apart from what the '
+        'analyzer answers', () async {
+      final settings =
+          await AppSettings.load(prefs: prefs, keyStore: MemoryKeyStore());
+      await settings.setProvider(AiProvider.server);
+      await settings.setServerBaseUrl('https://10.0.0.5');
+      await settings.setServerApiKey('k');
+      await settings.setWatcherEnabled(true);
+      var requests = 0;
+      final server = MockClient((_) async {
+        // The first photo's three tries meet a busy server; the second
+        // photo's meet none at all.
+        if (requests++ < 3) {
+          return http.Response(
+              jsonEncode({'reason': 'Claude CLI busy', 'retry': true}), 503);
+        }
+        throw http.ClientException('Connection refused');
+      });
+      final recorder = await begun();
+      final dao = FakeDao();
+      await headlessBackfillWith(
+        settings: settings,
+        prefs: prefs,
+        intake: EmittingIntake()..batch = [photo(1), photo(2)],
+        pipeline: () async => PhotoPipeline(
+            dao: dao,
+            analyzer: ServerAnalyzer(settings,
+                client: server,
+                normalizer: (b) async => b,
+                sleep: (_) async {}),
+            hasher: (b) async => md5.convert(b).toString()),
+        showMealCard: (_, _, {payload}) async {},
+        clock: () => t0,
+        recorder: recorder,
+      );
+      final r = stored();
+      expect(r.left,
+          {BackgroundLeft.busy: 1, BackgroundLeft.unreachable: 1});
+      expect((r.offered, r.analyzed, r.saved, r.released), (2, 2, 0, 2));
+      expect(dao.ledger, isEmpty, reason: 'both released for the next run');
     });
 
     test('the guards name themselves: watcher off, no key, paused',
@@ -1031,12 +1116,14 @@ void main() {
             required bool Function() reached,
             Future<Uint8List?> Function(Uint8List)? decode,
             Future<void> Function(Duration)? wait,
+            BackgroundRunRecorder? recorder,
           }) async {
             final run = RunInFlight(
                 deadline: deadline,
                 clock: () => t0.add(const Duration(seconds: 5)),
                 client: server)
-              ..deferred = await DeferredAssets.load(prefs);
+              ..deferred = await DeferredAssets.load(prefs)
+              ..recorder = recorder;
             final pipeline = run.pipeline = PhotoPipeline(
                 dao: dao,
                 analyzer: ServerAnalyzer(await ownServer(),
@@ -1149,6 +1236,86 @@ void main() {
                     .single
                     .cuts,
                 3);
+          });
+
+          // The run's record: why the photo the deadline cut off was
+          // left. It used to show only as "1 read, 0 processed".
+          test('the run\'s entry says what the cut photo was waiting for, '
+              'and counts it as left for later', () async {
+            Future<BackgroundRunRecord> entryAfter(
+                Future<CutOffAt> Function(BackgroundRunRecorder r)
+                    cutOnce) async {
+              SharedPreferences.setMockInitialValues({});
+              prefs = await SharedPreferences.getInstance();
+              final recorder = await begun();
+              await recorder.offered();
+              await cutOnce(recorder);
+              // As finishWithinGrant does right after the release.
+              await recorder.finish(BackgroundStop.budget);
+              return stored();
+            }
+
+            Future<void> forever(Duration _) => Completer<void>().future;
+
+            var asked = false;
+            var e = await entryAfter((r) => cut(FakeDao(),
+                server: MockClient((_) {
+                  asked = true;
+                  return Completer<http.Response>().future;
+                }),
+                reached: () => asked,
+                recorder: r));
+            expect(e.left, {BackgroundLeft.deadline: 1});
+            expect((e.offered, e.analyzed, e.released, e.stopReason),
+                (1, 0, 1, BackgroundStop.budget));
+
+            var waiting = false;
+            e = await entryAfter((r) => cut(FakeDao(),
+                server: MockClient((_) async => busy()),
+                wait: (d) {
+                  waiting = true;
+                  return forever(d);
+                },
+                reached: () => waiting,
+                recorder: r));
+            expect(e.left, {BackgroundLeft.busy: 1});
+
+            waiting = false;
+            e = await entryAfter((r) => cut(FakeDao(),
+                server: MockClient((_) async =>
+                    throw http.ClientException('Connection refused')),
+                wait: (d) {
+                  waiting = true;
+                  return forever(d);
+                },
+                reached: () => waiting,
+                recorder: r));
+            expect(e.left, {BackgroundLeft.unreachable: 1});
+
+            var decoding = false;
+            e = await entryAfter((r) => cut(FakeDao(),
+                server: MockClient((_) async => fail('nothing may be sent')),
+                decode: (_) {
+                  decoding = true;
+                  return Completer<Uint8List?>().future;
+                },
+                reached: () => decoding,
+                recorder: r));
+            expect(e.left, {BackgroundLeft.preparing: 1});
+            expect(e.released, 1);
+          });
+
+          test('no photo held when the deadline comes (the scan was still '
+              'listing, or the run past its last photo): nothing is said',
+              () async {
+            final recorder = await begun();
+            final run = RunInFlight(deadline: deadline)..recorder = recorder;
+            await run.abandon(); // no pipeline yet
+            run.pipeline = PhotoPipeline(dao: FakeDao(), analyzer: FakeAnalyzer());
+            await run.abandon(); // a pipeline holding nothing
+            await recorder.finish(BackgroundStop.budget);
+            expect(stored().left, isEmpty);
+            expect(stored().released, 0);
           });
 
           // The night of 2026-11-27, as it would have gone on: three runs

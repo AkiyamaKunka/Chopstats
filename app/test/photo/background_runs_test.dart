@@ -170,6 +170,135 @@ void main() {
         [0, 0, 0]);
   });
 
+  // 2026-11-28: a run said how many photos it left for later, never why.
+  // On 2026-11-27 the phone could not answer "why was nothing logged".
+  group('why photos were left for later', () {
+    test('each one is counted under its reason, and the reasons add up to '
+        '"left for later"', () async {
+      final prefs = await _prefs();
+      final rec =
+          BackgroundRunRecorder(prefs, platform: 'ios', clock: () => t0);
+      await rec.begin();
+      await rec.processed(
+          saved: false, released: true, left: BackgroundLeft.busy);
+      await rec.processed(
+          saved: false, released: true, left: BackgroundLeft.busy);
+      await rec.processed(
+          saved: false, released: true, left: BackgroundLeft.unreachable);
+      // A caller that does not say why: still counted, as another reason.
+      await rec.processed(saved: false, released: true);
+      // A photo that got its verdict was not left, whatever is handed in.
+      await rec.processed(
+          saved: true, released: false, left: BackgroundLeft.busy);
+      await rec.releasedUnprocessed(3);
+      await rec.releasedUnprocessed(0);
+      await rec.cutOff(BackgroundLeft.deadline);
+      final r = decodeBackgroundRuns(prefs.getString(backgroundRunsPrefsKey))
+          .single;
+      expect(r.left, {
+        BackgroundLeft.busy: 2,
+        BackgroundLeft.unreachable: 1,
+        BackgroundLeft.other: 1,
+        BackgroundLeft.notOffered: 3,
+        BackgroundLeft.deadline: 1,
+      });
+      expect(r.released, 8);
+      expect(r.left.values.fold<int>(0, (a, b) => a + b), r.released);
+      expect((r.analyzed, r.saved), (5, 1),
+          reason: 'the cut photo and the ones not started were never '
+              'processed');
+      expect(BackgroundLeft.all.toSet(), hasLength(6));
+      expect(BackgroundLeft.all, containsAll(r.left.keys));
+    });
+
+    // The stored format stays readable both ways: the key is there only
+    // when a run left something, every older key keeps its meaning, and
+    // an older version ignores the new one.
+    test('stored as "left", only when there is something to say', () async {
+      final prefs = await _prefs();
+      final rec =
+          BackgroundRunRecorder(prefs, platform: 'ios', clock: () => t0);
+      await rec.begin();
+      await rec.processed(saved: true, released: false);
+      expect(_stored(prefs).single.containsKey('left'), isFalse);
+      await rec.processed(
+          saved: false, released: true, left: BackgroundLeft.busy);
+      await rec.finish(BackgroundStop.done);
+      final entry = _stored(prefs).single;
+      expect(entry['left'], {'busy': 1});
+      expect(entry.keys.toSet(), {
+        'start', 'end', 'platform', 'stage', 'enumerated', 'offered',
+        'analyzed', 'saved', 'released', 'stop', 'wm_before', 'wm_after',
+        'left',
+      });
+      expect((entry['analyzed'], entry['saved'], entry['released']),
+          (2, 1, 1));
+    });
+
+    test('an entry from before reads as no reasons; junk is dropped; a '
+        'reason a later version adds is kept', () {
+      List<Map<String, int>> leftOf(Object? left) => [
+            for (final r in decodeBackgroundRuns(jsonEncode([
+              {
+                'start': t0.toIso8601String(),
+                'released': 2,
+                'left': ?left,
+              },
+            ])))
+              r.left,
+          ];
+      expect(leftOf(null), [isEmpty]);
+      for (final junk in ['busy', 3, ['busy'], true]) {
+        expect(leftOf(junk), [isEmpty], reason: '$junk');
+      }
+      expect(
+          leftOf({
+            'busy': 0,
+            'unreachable': -1,
+            'deadline': 'two',
+            'not_offered': 1.5,
+            '': 4,
+            'x' * 25: 4,
+            'a_later_reason': 2,
+            'other': 1,
+          }),
+          [
+            {'a_later_reason': 2, 'other': 1},
+          ]);
+      // The count keeps its own word either way.
+      expect(
+          decodeBackgroundRuns(jsonEncode([
+            {'start': t0.toIso8601String(), 'released': 2, 'left': 'junk'},
+          ])).single.released,
+          2);
+    });
+
+    // RunInFlight.abandon says why at the deadline, moments before
+    // finishWithinGrant finishes the entry; nothing waits for its write.
+    test('a cut said just before the entry is finished is in the final '
+        'entry, and nothing said after it is', () async {
+      final prefs = await _prefs();
+      final rec =
+          BackgroundRunRecorder(prefs, platform: 'ios', clock: () => t0);
+      await rec.begin();
+      await rec.offered();
+      final said = rec.cutOff(BackgroundLeft.preparing); // not awaited
+      await rec.finish(BackgroundStop.budget);
+      await said;
+      var r = decodeBackgroundRuns(prefs.getString(backgroundRunsPrefsKey))
+          .single;
+      expect(r.stopReason, BackgroundStop.budget);
+      expect((r.offered, r.analyzed, r.released), (1, 0, 1));
+      expect(r.left, {BackgroundLeft.preparing: 1});
+      await rec.cutOff(BackgroundLeft.busy);
+      await rec.releasedUnprocessed(2);
+      r = decodeBackgroundRuns(prefs.getString(backgroundRunsPrefsKey))
+          .single;
+      expect(r.left, {BackgroundLeft.preparing: 1});
+      expect(r.released, 1);
+    });
+  });
+
   test('a damaged store reads as what it can: bad entries skipped, bad JSON '
       'empty, and a new run still records', () async {
     expect(decodeBackgroundRuns('not json'), isEmpty);

@@ -2250,6 +2250,54 @@ abstract class AppLocalizations {
   /// **'Already logged, not read again: {count}'**
   String diagBgRunAlreadyLogged(int count);
 
+  /// Diagnostics › Recent background scans, under the counts line of a scan that left photos for later (the 'left for later' number of diagBgRunCounts). {reasons} is one or more of the diagBgLeft* phrases, each with its count, joined by diagBgLeftJoin.
+  ///
+  /// In en, this message translates to:
+  /// **'Why they were left: {reasons}'**
+  String diagBgRunLeftWhy(String reasons);
+
+  /// What goes between two reasons in diagBgRunLeftWhy.
+  ///
+  /// In en, this message translates to:
+  /// **'; '**
+  String get diagBgLeftJoin;
+
+  /// A reason in diagBgRunLeftWhy: the AI service (the user's own server, or a provider) answered that it was busy or over its rate limit. {count} is how many photos.
+  ///
+  /// In en, this message translates to:
+  /// **'the AI service was busy ({count})'**
+  String diagBgLeftBusy(int count);
+
+  /// A reason in diagBgRunLeftWhy: no connection to the AI service, or it answered with a server error.
+  ///
+  /// In en, this message translates to:
+  /// **'the AI service could not be reached ({count})'**
+  String diagBgLeftUnreachable(int count);
+
+  /// A reason in diagBgRunLeftWhy: the photo had been sent, and the background scan had to end (iOS gives it about 30 seconds) before an answer came.
+  ///
+  /// In en, this message translates to:
+  /// **'the scan\'s time ran out before the AI service answered ({count})'**
+  String diagBgLeftDeadline(int count);
+
+  /// A reason in diagBgRunLeftWhy: the background scan had to end while the phone was still preparing the photo (decoding it); nothing had been sent.
+  ///
+  /// In en, this message translates to:
+  /// **'the scan\'s time ran out before the photo was sent ({count})'**
+  String diagBgLeftPreparing(int count);
+
+  /// A reason in diagBgRunLeftWhy: the photos the scan listed and never started, because its time for starting photos was over.
+  ///
+  /// In en, this message translates to:
+  /// **'not started, the scan\'s time was over ({count})'**
+  String diagBgLeftNotOffered(int count);
+
+  /// A reason in diagBgRunLeftWhy: any other reason a photo waits for a later scan (it waits for the app to be opened, another scan holds it, …).
+  ///
+  /// In en, this message translates to:
+  /// **'another reason ({count})'**
+  String diagBgLeftOther(int count);
+
   /// No description provided for @diagBgRunKilled.
   ///
   /// In en, this message translates to:

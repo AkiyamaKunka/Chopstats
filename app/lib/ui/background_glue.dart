@@ -550,7 +550,8 @@ Future<bool> headlessBackfillWith({
       await recorder?.processed(
           saved: o.kind == PhotoOutcomeKind.saved ||
               o.kind == PhotoOutcomeKind.leftoverApplied,
-          released: o.retryable);
+          released: o.retryable,
+          left: o.retryable ? backgroundLeftFor(o) : null);
       // A photo this engine could not decode (deferUndecodable) is counted;
       // twice, and later runs pass it over instead of halting on it again.
       if (o.retryable && o.errorKind == AnalysisErrorKind.badPhoto) {
@@ -628,6 +629,28 @@ Future<bool> headlessBackfillWith({
   }
   return true;
 }
+
+/// Why a photo whose verdict keeps it for later was left, for the run's
+/// record ([BackgroundLeft]): the AI service was busy or over its limit,
+/// it could not be reached, or anything else.
+@visibleForTesting
+String backgroundLeftFor(PhotoOutcome o) => switch (o.errorKind) {
+      AnalysisErrorKind.serverBusy ||
+      AnalysisErrorKind.rateLimited =>
+        BackgroundLeft.busy,
+      AnalysisErrorKind.network => BackgroundLeft.unreachable,
+      _ => BackgroundLeft.other,
+    };
+
+/// Why the photo the run's deadline cut off was left, from what the run
+/// was waiting for then ([RunTraffic.cutOffAt]).
+@visibleForTesting
+String backgroundLeftForCut(CutOffAt at) => switch (at) {
+      CutOffAt.preparing => BackgroundLeft.preparing,
+      CutOffAt.busy => BackgroundLeft.busy,
+      CutOffAt.unreachable => BackgroundLeft.unreachable,
+      CutOffAt.waiting => BackgroundLeft.deadline,
+    };
 
 /// The body of a background meal card: the meal itself ('Pasta — ~650
 /// kcal'), under a title that already says what happened. It used to be
@@ -736,6 +759,7 @@ Future<bool> runHeadlessBackfill({
       deadline: startedAt.add(runDeadline),
       window: ios ? slowPhotoWindow : androidSlowPhotoWindow,
       clock: clock);
+  inFlight.recorder = recorder;
   final run = _runAfterLaunch(
       ios: ios,
       prefs: prefs,
@@ -807,6 +831,10 @@ class RunInFlight {
   DeferredAssets? deferred;
   DateTime? _offeredAt;
 
+  /// The run's diagnostics entry: [abandon] says in it why the photo the
+  /// deadline cut off was left. Null (tests): nothing is said.
+  BackgroundRunRecorder? recorder;
+
   /// The HTTP client the run's analyzer sends through, whichever AI
   /// service it is: what was sent for the photo in flight, and what came
   /// back, is the evidence [abandon] goes by (run_traffic.dart).
@@ -875,10 +903,17 @@ class RunInFlight {
     final cutAt = traffic.cutOffAt;
     final assetId = await pipeline?.abandon();
     if (assetId == null || assetId.isEmpty) return;
-    if (cutAt != CutOffAt.preparing) return;
+    // Why it was left, for the run's record. In the entry from this call
+    // on; its write is awaited last, behind what the next run goes by.
+    final noted = recorder?.cutOff(backgroundLeftForCut(cutAt));
     final at = _offeredAt, end = deadline;
-    if (at == null || end == null || end.difference(at) < window) return;
-    await deferred?.cutOff(assetId);
+    if (cutAt == CutOffAt.preparing &&
+        at != null &&
+        end != null &&
+        end.difference(at) >= window) {
+      await deferred?.cutOff(assetId);
+    }
+    await noted;
   }
 }
 

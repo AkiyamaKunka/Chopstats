@@ -1287,6 +1287,44 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
+  String diagBgRunLeftWhy(String reasons) {
+    return '留待之后的原因：$reasons';
+  }
+
+  @override
+  String get diagBgLeftJoin => '；';
+
+  @override
+  String diagBgLeftBusy(int count) {
+    return 'AI 服务繁忙（$count）';
+  }
+
+  @override
+  String diagBgLeftUnreachable(int count) {
+    return '连不上 AI 服务（$count）';
+  }
+
+  @override
+  String diagBgLeftDeadline(int count) {
+    return 'AI 服务还没回复，扫描时间就用完了（$count）';
+  }
+
+  @override
+  String diagBgLeftPreparing(int count) {
+    return '照片还没发出，扫描时间就用完了（$count）';
+  }
+
+  @override
+  String diagBgLeftNotOffered(int count) {
+    return '扫描时间已到，没有开始（$count）';
+  }
+
+  @override
+  String diagBgLeftOther(int count) {
+    return '其他原因（$count）';
+  }
+
+  @override
   String diagBgRunKilled(String step) {
     return '在完成前被系统结束，最后一步：$step。';
   }
