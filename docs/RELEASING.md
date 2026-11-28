@@ -385,6 +385,7 @@ When merging #22 after this PR:
   and the own-server bullet on what the phone supplies (当天的餐食摘要).
   Use the wording `docs/SERVER.md` already has: "that day's meal
   summaries, plus the day before's for a photo taken before 4 a.m.".
+  Done when 1.8.0, the first App Store version with run 7, was live.
 
 **After #22, one restyle commit:** **done 2026-11-11** on branch
 `chore/usual-foods-run7-kit` (from `main` at 2b85014, a few small
@@ -1216,11 +1217,14 @@ live next to the app in
    only as well. Android 1.8.0 followed on 2026-11-25 (`android-v1.8.0`,
    build 213), also on GitHub only, since there is no Play account yet
    (§ 6.6). The first Play upload, still to come, is the bundle of the
-   newest Android release at the time of that upload (§ 6.3). The iPhone
-   1.7.0, 1.7.1 and 1.7.2 never shipped (1.6.0 is live), and pubspec is
-   1.8.0 since PR #97, so the iPhone's next tag from `main` is `v1.8.0`:
-   `v1.7.0`, `v1.7.1` and `v1.7.2` stay unused (§ 6.6). A 1.6.x hotfix is
-   tagged on its own branch instead (§ 6.6, *A 1.6.x hotfix*).
+   newest Android release at the time of that upload (§ 6.3). On
+   2026-11-27 the tag `v1.8.0`'s run 15 put the same Android app on the
+   `v1.8.0` release as build 215 (§ 6.6), so that bundle is now run 15's.
+   The iPhone 1.7.0, 1.7.1 and 1.7.2 never shipped (1.6.0 is live), and
+   pubspec is 1.8.0 since PR #97, so the iPhone's next tag from `main` was
+   `v1.8.0`, pushed on 2026-11-27: `v1.7.0`, `v1.7.1` and `v1.7.2` stay
+   unused (§ 6.6). A 1.6.x hotfix is tagged on its own branch instead
+   (§ 6.6, *A 1.6.x hotfix*).
 
 **The owner's decisions (2026-11-20):**
 
@@ -1576,39 +1580,45 @@ Android release at the time of that upload (decided on 2026-11-23 by
 Claude on the owner's delegation), so that Play starts at the version
 and build number GitHub users already have: an older bundle would be a
 downgrade for a phone moving from the GitHub APK (§ 6.6, *The friends
-and the GitHub APK*). Since `android-v1.8.0` went out on 2026-11-25,
-that is 1.8.0: the bundle of Release run 13 (lane `play`, from `main` at
-`83e95ea1`, where the tag `android-v1.8.0` is), build 213, the same
-build number as the GitHub APK `android-v1.8.0` (same run, same signer;
-the bundle is the Play build, without Watch Camera Roll), in the
-artifact `android-1.8.0-213`, which GitHub keeps 90 days.
+and the GitHub APK*). That release is the newest GitHub release with an
+Android APK, a hand-made `android-v*` one or a `v*` tag's. Since the
+`v1.8.0` release went out on 2026-11-27, that is 1.8.0: the bundle of
+Release run 15 (the tag `v1.8.0`'s run, both lanes, from `main` at
+`7493b009`), build 215, the same build number as the GitHub APK on
+`v1.8.0` (same run, same signer; the bundle is the Play build, without
+Watch Camera Roll), in the artifact `android-1.8.0-215`, which GitHub
+keeps 90 days. Run 13's bundle (`android-1.8.0-213`, from the run of
+`android-v1.8.0`) would now be below the APK that `v1.8.0`'s users
+have. Run 15's bundle and APK are the same Android app as run 13's, with
+a higher build number (§ 6.6, *The iPhone tag `v1.8.0`*).
 
 `android-v1.7.0` (build 207), `android-v1.7.1` (build 209),
 `android-v1.7.2` (build 210) and `android-v1.8.0` (build 213) went out on
-GitHub only: there is no Play account yet (§ 6.6). The steps name run 13;
-for a later release, take its run, artifact, build number and name
-instead.
+GitHub only: there is no Play account yet (§ 6.6). So did the APK of
+`v1.8.0` (build 215): its run's Play job was skipped, with no
+`PLAY_SERVICE_ACCOUNT_JSON` (§ 6.4). The steps name run 15; for a later
+release, take its run, artifact, build number and name instead.
 
-1. Actions › Release › run 13. Its plan summary says build name `1.8.0`
-   and build number 213 (`BUILD_NUMBER_OFFSET` 200 + run 13), the build
-   number GitHub `android-v1.8.0` users have, above `android-v1.7.2`'s 210
-   (runs 11 and 12 built release candidates of 1.8.0 that were never
-   released). Never upload a Mac hand build: it gets pubspec's `+12`,
-   below 207. The run page keeps the artifact 90 days (§ 8): GitHub
-   deletes `android-1.8.0-213` at 05:07 UTC on 2027-02-23 (23:07 CST on
-   2027-02-22), and a later release's artifact 90 days after its run. If
-   the artifact is gone, no run can make that bundle again, so make a new
-   Android release (§ 6.6, steps 1 to 5; a dispatch alone creates no tag
-   and no GitHub Release) and upload its bundle: Run workflow › branch
-   `main` › lane `play` builds pubspec's version with a higher number.
-   Once a GitHub release holds pubspec's version, as `android-v1.8.0`
-   holds 1.8.0, bump pubspec first, with the owner's OK (§ 6.6).
-2. Download the artifact `android-1.8.0-213` and take `app-release.aab`.
+1. Actions › Release › run 15. Its plan summary says build name `1.8.0`
+   and build number 215 (`BUILD_NUMBER_OFFSET` 200 + run 15), the build
+   number GitHub `v1.8.0` users have, above `android-v1.8.0`'s 213 (run
+   14 built only an iPhone build, for TestFlight). Never upload a Mac
+   hand build: it gets pubspec's `+12`, below 207. The run page keeps the
+   artifact 90 days (§ 8): GitHub deletes `android-1.8.0-215` at 22:29
+   UTC on 2027-02-25 (16:29 CST on 2027-02-25), and a later release's
+   artifact 90 days after its run. If the artifact is gone, no run can
+   make that bundle again, so make a new Android release (§ 6.6, steps 1
+   to 5; a dispatch alone creates no tag and no GitHub Release) and
+   upload its bundle: Run workflow › branch `main` › lane `play` builds
+   pubspec's version with a higher number. Once a GitHub release holds
+   pubspec's version, as `android-v1.8.0` holds 1.8.0, bump pubspec
+   first, with the owner's OK (§ 6.6).
+2. Download the artifact `android-1.8.0-215` and take `app-release.aab`.
 3. Play Console › *Test and release* › *Testing* › *Internal testing* ›
    *Create new release* › upload it. **Do not roll it out yet.** First
    change the signing key (above) and clear every App content alert
    (§ 6.5).
-4. Name the release `1.8.0 (213)`, paste the release notes from
+4. Name the release `1.8.0 (215)`, paste the release notes from
    `app/android/whatsnew/`, *Save* › *Review* › *Roll out*, and add
    testers by email list.
 
@@ -1801,8 +1811,7 @@ read 2026-11-13):
   rollout (for example 20%, then 100%).
 
 **An Android-only version (decision 4).** release.yml runs both lanes on
-any `v*` tag, and the iOS lane stops until the iCloud container exists
-(§ 11.1). So Android goes first without a `v*` tag. Android 1.7.0 went
+any `v*` tag, so an Android-only version goes out without one. Android 1.7.0 went
 out this way on 2026-11-19 (`android-v1.7.0`, build 207, GitHub only).
 Android 1.7.1 followed on 2026-11-22 (`android-v1.7.1`, build 209 from
 run 9, GitHub only). Android 1.7.2 followed on 2026-11-24
@@ -1810,10 +1819,10 @@ run 9, GitHub only). Android 1.7.2 followed on 2026-11-24
 version from PR #93 until PR #97. Android 1.8.0 followed on 2026-11-25
 (`android-v1.8.0`, build 213 from run 13, GitHub only), pubspec's
 version since PR #97. The next one is pubspec's version at that time,
-bumped first (`X.Y.Z` in the steps): `android-v1.8.0` holds 1.8.0, and
-a version that a GitHub release already holds is not built again under
-its name. So, with the owner's OK, raise `version:` in
-`app/pubspec.yaml` and `kAppVersion`
+bumped first (`X.Y.Z` in the steps): `android-v1.8.0` holds 1.8.0 (as
+does `v1.8.0`, below), and a version that a GitHub release already holds
+is not built again under its name. So, with the owner's OK, raise
+`version:` in `app/pubspec.yaml` and `kAppVersion`
 (`lib/services/backup/backup_files.dart`) above 1.8.0 before the run,
 as PR #97 raised them from 1.7.2 to 1.8.0. The bump also names `main`'s
 next iPhone version (*Pubspec and the versions the policy names*,
@@ -1822,8 +1831,9 @@ below). It goes out on GitHub only while there is no Play account.
 1. Actions › Release › Run workflow › `main` › lane **`play`**. The plan
    summary says build name `X.Y.Z`, and the artifact `android-X.Y.Z-2xx`
    holds the bundle and the arm64 APK, with one build number
-   (`BUILD_NUMBER_OFFSET` 200 + the run's number, above
-   `android-v1.8.0`'s 213) and one signer (the verify step checks both).
+   (`BUILD_NUMBER_OFFSET` 200 + the run's number, above `v1.8.0`'s 215,
+   the newest APK on GitHub) and one signer (the verify step checks
+   both).
 2. The bundle goes to Play by hand (§ 6.3). Until the first Play
    upload, § 6.3 says which release's bundle that upload is.
 3. The APK goes on a GitHub Release made by hand: tag the run's commit
@@ -1841,32 +1851,49 @@ below). It goes out on GitHub only while there is no Play account.
    1.7.0 that was 1.6.0, with PR #60's fix to shared photos; for 1.7.1 it
    was `android-v1.7.0`; for 1.7.2 it was `android-v1.7.1`, build 209;
    for 1.8.0 it was `android-v1.7.2`, build 210; for the next one it is
-   `android-v1.8.0`, build 213);
-   installing over a GitHub build from 1.5.0 or later keeps the data. Say
-   that the GitHub APK and the Play build can replace each other **only
-   after** the signing-key check of § 6.3 (*Play App Signing*, step 3)
-   has passed, and say that the Play build has no Watch Camera Roll.
+   `v1.8.0`, build 215, the same Android app as `android-v1.8.0`, build
+   213); installing over a GitHub build from 1.5.0 or later keeps the
+   data. Say that the GitHub APK and the Play build can replace each
+   other **only after** the signing-key check of § 6.3 (*Play App
+   Signing*, step 3) has passed, and say that the Play build has no
+   Watch Camera Roll.
 5. README: once the release is out, update the Android section of
    `README.md` and `README.zh-CN.md` in one commit, as README.md's
    maintainer notes say (*Lines tied to a release*, item 5): the release
    and its tag, and the APK's name and size.
 
-Later, when the iPhone version is ready, tag `main` as usual with
-pubspec's version, `v1.8.0` (but read the next paragraph first): the
-iPhone 1.7.0, 1.7.1 and 1.7.2 never shipped (1.6.0 is live), so
-`main`'s next iPhone version is 1.8.0 (a 1.6.x hotfix is tagged on its
-own branch, below), and `v1.7.0`, `v1.7.1` and `v1.7.2` stay unused.
-That run also builds Android again, with a higher build number: it puts
-that APK on the `v1.8.0` release and, with `PLAY_SERVICE_ACCOUNT_JSON`
-set, sends the bundle to the internal track. Both are harmless (an
-upgrade for anyone who installs them). This is the one exception to "a
-version that a GitHub release already holds is not built again under its
-name": the iPhone version must match pubspec, so the tag's Android build
-carries `android-v1.8.0`'s name. It holds only while it behaves as
-`android-v1.8.0` does, so code that changes Android merges after the tag
-(the iPhone-only fix of PR #103 may land before it: the backup
-coordinator never runs on Android). Edit that release's notes to say it
-is the same app as `android-v1.8.0`.
+**The iPhone tag `v1.8.0` (2026-11-27).** `main` was tagged as usual
+with pubspec's version, `v1.8.0`, at `7493b009`: the iPhone 1.7.0, 1.7.1
+and 1.7.2 never shipped, so `main`'s next iPhone version was 1.8.0 (a
+1.6.x hotfix is tagged on its own branch, below), and `v1.7.0`, `v1.7.1`
+and `v1.7.2` stay unused. Its run, Release run 15, built both lanes as
+build 215 (`BUILD_NUMBER_OFFSET` 200 + run 15). The iOS job uploaded
+1.8.0 (215) to TestFlight, external-eligible (§ 4.1). The Android job
+built Android 1.8.0 again with that higher number and passed every check
+of an Android run: the pinned upload certificate signs the bundle and the
+APK, `kRequireHttpsServer = true` at the tag, and the bundle asks for no
+photo permission while the APK keeps `READ_MEDIA_IMAGES` (§ 6.3, *CI*).
+The Play job was skipped, since there is no Play account and so no
+`PLAY_SERVICE_ACCOUNT_JSON` (§ 6.4): no bundle reached Play. The GitHub
+Release job published *Chopstats v1.8.0* with that APK,
+`Chopstats-v1.8.0-b215-arm64-v8a.apk` (22,833,670 bytes, the size of
+`android-v1.8.0`'s), and it became the repository's Latest release in
+place of `android-v1.8.0`. This is the one exception to "a version that
+a GitHub release already holds is not built again under its name": the
+iPhone version must match pubspec, so the tag's Android build carries
+`android-v1.8.0`'s name. It held because that build behaves as
+`android-v1.8.0` does: the only `app/lib` change between that release's
+commit, `83e95ea1`, and the tag is PR #103's iPhone-only fix to the
+backup coordinator, which never runs on Android (`lib/ui/di.dart`
+creates it on iOS only). So run 15's bundle and APK are the same Android
+app as run 13's, with a higher build number (an upgrade for anyone who
+installs them). The release's notes were edited to say so: they call it
+the iPhone release, and its APK the same app as `android-v1.8.0` (build
+213), built again with build number 215. A later iPhone tag that follows
+an `android-v*` release of its own version gets the same exception on
+the same terms: code that changes Android merges only after that tag
+(iPhone-only code may land before it), and the tag's release notes call
+its APK the same app as that release's.
 
 **Pubspec and the versions the policy names.** The privacy policy dates
 changes by version ("From version X.Y.Z"), and every build opens it from
@@ -1908,18 +1935,20 @@ tagged). A `v1.6.1` tag needs no § 11, since that branch has no iCloud
 entitlement, and it runs that branch's own `release.yml`: both lanes on
 a tag push, `BUILD_NUMBER_OFFSET` 100, and none of the checks added
 since 1.6.0 (the run floor and the `+N` tag check of § 5, the policy
-check above). So its build is numbered 100 + its run number (114 or
-more: run 13 built `android-v1.8.0`), inside § 11.2's 107–199: on a phone
-that installs it, later device test builds go above it. It also puts an
+check above). So its build is numbered 100 + its run number (116 or
+more: run 15 built `v1.8.0`), inside § 11.2's 107–199: on a phone that
+installs it, later device test builds go above it. It also puts an
 Android 1.6.1 APK with that number on a new GitHub Release, `v1.6.1`.
-That is below `android-v1.8.0`'s 213, `android-v1.7.2`'s 210,
-`android-v1.7.1`'s 209 and `android-v1.7.0`'s 207, so Android refuses it
-on a phone with 1.7.0, 1.7.1, 1.7.2 or 1.8.0: say so in that release's
-notes, and leave the README's Android section on the newest Android
-release. Keep that branch's own `release.yml`: `main`'s would stop its
-Android job (the branch has no `kRequireHttpsServer`), and its offset
-200 would number the APK above 213, so Android would install 1.6.1
-(database schema 3) over 1.7.x or 1.8.0 (schema 4).
+That is below `v1.8.0`'s 215, `android-v1.8.0`'s 213, `android-v1.7.2`'s
+210, `android-v1.7.1`'s 209 and `android-v1.7.0`'s 207, so Android
+refuses it on a phone with 1.7.0, 1.7.1, 1.7.2 or 1.8.0: say so in that
+release's notes, and leave the README's Android section on the release
+it names. Keep that branch's own `release.yml`: `main`'s would
+stop its Android job (the branch has no `kRequireHttpsServer`), and its
+offset 200 would number the APK above 215, so Android would install 1.6.1
+(database schema 3) over 1.7.x or 1.8.0 (schema 4). All of this is moot
+once 1.8.0 is in the App Store, since a 1.6.x would be below the live
+version; what happens to `release/1.6.1` and PR #86 is the owner's call.
 
 **Developer verification and the GitHub APK.** Because the package
 shipped as GitHub APKs before it existed on Play, Play Console may ask,
@@ -2035,9 +2064,9 @@ the screenshots:
    it and `kAppVersion` first, with the owner's OK (§ 6.6); release.yml's
    plan step refuses the Android lane until then.
 9. Run workflow › `main` › lane `play` (for the first upload, the run of
-   the newest Android release instead, § 6.3: run 13, build 213, which
-   built `android-v1.8.0`); check the plan summary's build name (pubspec's
-   version at the run's commit: 1.8.0 for run 13) and number, the
+   the newest Android release instead, § 6.3: run 15, build 215, which
+   built `v1.8.0`); check the plan summary's build name (pubspec's
+   version at the run's commit: 1.8.0 for run 15) and number, the
    bundle's permissions (§ 6.3), and that
    `app/lib/core/server_transport.dart` says `kRequireHttpsServer = true`
    at the run's commit (the Android job's *Check the app refuses plain-http
@@ -2052,12 +2081,14 @@ the screenshots:
 13. Done on 2026-11-25: run 13's GitHub APK went out by hand as
     `android-v1.8.0` (build 213), before any Play upload, and the README's
     Android section names it (§ 6.6, steps 1 to 5). It did not wait for
-    Play (decision 4); its run is step 9's as long as it is the newest
-    Android release (§ 6.3). Before it, run 10's GitHub APK went out by
-    hand as `android-v1.7.2` (build 210) on 2026-11-24, before any Play
-    upload. Run 9's GitHub APK went out by hand as `android-v1.7.1` (build
-    209) on 2026-11-22, before any Play upload too. `android-v1.7.0`
-    (build 207) is already out, since 2026-11-19.
+    Play (decision 4). Before it, run 10's GitHub APK went out by hand as
+    `android-v1.7.2` (build 210) on 2026-11-24, before any Play upload.
+    Run 9's GitHub APK went out by hand as `android-v1.7.1` (build 209) on
+    2026-11-22, before any Play upload too. `android-v1.7.0` (build 207)
+    is already out, since 2026-11-19. On 2026-11-27 the tag `v1.8.0`'s
+    run 15 put the same Android app on the `v1.8.0` release as build 215
+    (§ 6.6), so step 9's run is run 15, not run 13, as long as that
+    release is the newest Android release (§ 6.3).
 
 Optional, only after the first manual rollout:
 
@@ -2137,13 +2168,12 @@ the README, not this page.
 
 ## 8. Running a release (cheat sheet)
 
-(Before the first tag from `main` since 1.6.0, `v1.8.0` (the iPhone
-skips 1.7.0, 1.7.1 and 1.7.2, § 6.6): § 11, the iCloud container, or the
-iOS lane stops at "Check the Runner profile allows the iCloud
-container". Once that version is in the App Store: § 12, the support
-page, whose "1.7.0" means it. A 1.6.x hotfix is tagged on its own branch
-and needs neither: § 6.6, *A 1.6.x hotfix*. An Android-only version goes
-first without a `v*` tag: § 6.6.)
+(Every tag from `main` builds with the iCloud container of § 11, set up
+for 1.8.0: if the Runner profile loses it, the iOS lane stops at "Check
+the Runner profile allows the iCloud container". On the day a new App
+Store version is live: § 12, the support page, and the README's and the
+slides' release lists it names. An Android-only version goes first
+without a `v*` tag: § 6.6.)
 
 ```bash
 # 1. in the shipping PR: app/pubspec.yaml  version: 1.8.0+12   (the +N is for hand builds only;
@@ -2338,7 +2368,7 @@ raw file instead of its base64 text. Re-create it with `base64 -i <file>`.
 
 ---
 
-## 11. iCloud container (1.7.0 iCloud Backup)
+## 11. iCloud container (iCloud Backup, from 1.8.0)
 
 iCloud Backup writes the meal record into the user's **own** iCloud Drive
 (a *Chopstats* folder they see in the Files app). The code is split in two
@@ -2491,65 +2521,23 @@ phone, with Part B and § 11.1 done:
 
 ---
 
-## 12. When 1.7.0 ships: the support page
+## 12. The support page
 
 `docs/SUPPORT.md` is the support URL of both store listings, so, like the
-README, it describes the version in the App Store (1.6.0 today). What only
-`main` has is written here instead and goes onto the page in a PR once
-1.7.0 is in the App Store. (The iPhone skips 1.7.0, 1.7.1 and 1.7.2,
-§ 6.6: "1.7.0" in this section and in the test named below means the
-first App Store version built from `main` after 1.6.0, now 1.8.0, not a 1.6.x
-hotfix such as 1.6.1, which has none of this.) The labels are the app's on
-`main`: `app/test/ui/copy_consistency_test.dart` checks them against
-`app_en.arb`, and checks that `SUPPORT.md` does not name them yet; drop
-that check ("names no 1.7.0 control …") in the same PR. If 1.7.0 ships
-without Part B (§ 11), leave out the iCloud Backup text (steps 1, 3
-and 4) and keep steps 2, 5 and 6.
-
-1. **Intro**: "your meal log stays on your phone" becomes "your meal log
-   stays on your phone (and, with iCloud Backup, in your own iCloud
-   Drive)".
-2. **Export and import**, under *Your data*: Settings › Your Data ›
-   **Export Data…** "saves your meals and their pictures, weight, body
-   measurements, workouts and activities, fitness profile and the list of
-   processed photos to a file you can share or keep (API keys are not
-   included)": an export now carries the meal pictures, with the data a
-   camera can embed in them removed. The Import sentence becomes:
-   "**Import Data…** restores it: tap **Choose File…** and pick the file
-   (a full export with its pictures is too big for the clipboard), paste a
-   small export's text, or tap **Import from clipboard**. Meals already
-   here are kept, and pictures are added to meals that have none."
-3. **A new bullet after Export**: "**iCloud Backup** (Settings › Your
-   Data): on by default, after a notice; nothing is uploaded before you
-   answer it. It copies everything an export holds, the meal pictures
-   included, to a *Chopstats* folder in your own iCloud Drive, and after
-   a reinstall, or on a new iPhone with the same Apple Account, Chopstats
-   offers to restore the backup. API keys are never included, and the
-   developer receives nothing. Turning the **iCloud Backup** switch off
-   asks whether to **Keep the Backup in iCloud** or **Delete It…**."
-4. **Delete everything** gains, after the backups sentence: "The copy
-   iCloud Backup keeps in your iCloud Drive stays too. Uninstalling does
-   not delete it: delete it in Settings › Your Data (turning **iCloud
-   Backup** off offers **Delete It…**; with the switch already off, tap
-   **Delete iCloud Backup…**), or in the Files app under iCloud Drive ›
-   Chopstats."
-5. **Delete everything**'s Keychain sentence ends as `docs/PRIVACY.md`'s
-   does: "(and the **Server upload key** under *Your own server*; when
-   that page says a key was *Saved without its server address*, its field
-   is empty, so tap **Remove this key** under it instead)". In 1.6.0 the
-   field always shows the key, so clearing it is enough there.
-6. **Correct with a note** (1.8.0), which the page does not mention yet.
-   In *What it does*, the bullet on fixing a meal becomes: "open a meal to
-   edit its items and numbers, or, under **Correct with a note**, tell
-   your AI what was different (such as "only half the rice") and tap
-   **Correct with AI**; the answer fills in the numbers, and nothing is
-   saved until you tap **Save**. Or use *Fix or delete a meal* …". Under
-   *Your data*, after deleting a meal: "Deleting a meal also deletes the
-   notes you sent about it. To remove one note, tap the × next to it in
-   **Edit meal** (VoiceOver calls it **Remove this note**), then
-   **Save**." (`docs/PRIVACY.md` describes the notes kept on a meal.)
+README, it describes the version in the App Store. What only `main` has
+goes onto the page on the day an App Store version that has it is live,
+in one docs PR with the README. 1.8.0, the first App Store version built
+from `main` after 1.6.0 (the iPhone skips 1.7.0, 1.7.1 and 1.7.2, § 6.6),
+was the first: its text waited in this section until 1.8.0 was live, and
+the page has it since. That is iCloud Backup (in the intro, as a bullet
+after *Export* and under *Delete everything*), the meal pictures in an
+export and **Choose File…** for an import, **Remove this key** for an
+upload key *Saved without its server address*, and *Correct with a note*,
+with how to remove a note. `app/test/ui/copy_consistency_test.dart`
+checks that the page names these controls as `app_en.arb` spells them,
+that its export list names every table an export holds, and that its
+iCloud Backup bullet says the backup copies everything an export holds.
 
 The README has its own list (*Lines tied to a release*, in its maintainer
 notes; go through all of it, for README.zh-CN.md too) and so do the slides
-(`docs/readme/src/README.md`, *Slides tied to a release*);
-`docs/PRIVACY.md` already describes 1.7.0.
+(`docs/readme/src/README.md`, *Slides tied to a release*).

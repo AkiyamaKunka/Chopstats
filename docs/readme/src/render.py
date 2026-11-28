@@ -28,6 +28,10 @@ Every slide
   note      footer note ("Demo data")   footer true/false   footer_pos bottom|top
   footer_side left|right   ring true/false   frame "dashed"   style (extra CSS)
   format    png | jpg | auto (auto = PNG when it fits --max-kb, else JPEG)
+  screen_top  screenshot rows every phone leaves out at the top (the status
+            bar, and Flutter's DEBUG ribbon in a debug build): the phone shows
+            the capture from this row down, over the colour of that row.
+            Every zoom crop and highlight must start at or below it.
 Extras, on any layout (all positions in slide pixels):
   free_phones [{"src", "x", "y", "sw" (screen width), "r" (deg), "z",
                 "hl": [[x, y, w, h], ..] (screenshot pixels: spotlight),
@@ -36,7 +40,8 @@ Extras, on any layout (all positions in slide pixels):
                 "radius", "print": true (white border), "cap", "cap_top": true,
                 "badge": true}]
   zooms       [{"src", "crop": [x, y, w, h] (screenshot pixels), "x", "y",
-                "w" (card width), "r", "z", "label", "label_below": true}]
+                "w" (card width), "r", "z", "label", "label_below": true,
+                "radius" (corner radius, default 22: match a cropped card's own)}]
   tiles       {"x", "y", "w" (tile width), "gap", "items": [{"src" | "art",
                 "pos", "status", "ok": true/false}]}
   nodes       [{"x", "y", "w", "h", "kind": ok|no|ghost|row, "icon",
@@ -105,6 +110,10 @@ ICONS = {
     "cross": '<svg viewBox="0 0 32 32"><path d="M10 10l12 12M22 10L10 22"/></svg>',
     "cloud": '<svg viewBox="0 0 32 32"><path d="M10 24.5h13a5.5 5.5 0 0 0 .6-11A7.5 7.5 0 0 0 9.4 12 6.3 6.3 0 0 0 10 24.5z"/>'
              '<path d="M13.5 18.5l2.5 2.5 4-4.5"/></svg>',
+    "backup": '<svg viewBox="0 0 32 32"><path d="M10 24.5h13a5.5 5.5 0 0 0 .6-11A7.5 7.5 0 0 0 9.4 12 6.3 6.3 0 0 0 10 24.5z"/>'
+              '<path d="M16 21.5v-7M13 17.3l3-3 3 3"/></svg>',
+    "ai": '<svg viewBox="0 0 32 32"><path d="M13.5 7c1 5 3 7 8 8-5 1-7 3-8 8-1-5-3-7-8-8 5-1 7-3 8-8z"/>'
+          '<path d="M23.5 4.5c.45 2.2 1.3 3.05 3.5 3.5-2.2.45-3.05 1.3-3.5 3.5-.45-2.2-1.3-3.05-3.5-3.5 2.2-.45 3.05-1.3 3.5-3.5z"/></svg>',
     "server": '<svg viewBox="0 0 32 32"><rect x="6" y="6" width="20" height="8.5" rx="2.5"/>'
               '<rect x="6" y="17.5" width="20" height="8.5" rx="2.5"/><path d="M10.5 10.2h.1M10.5 21.7h.1"/>'
               '<path d="M4 28L28 4"/></svg>',
@@ -132,6 +141,8 @@ PARK = ('<svg viewBox="0 0 150 150" preserveAspectRatio="xMidYMid slice">'
 class Ctx:
     def __init__(self, deck_dir: Path, html_dir: Path, screens: Path, photos: Path, lang: str):
         self.deck_dir, self.html_dir, self.screens, self.photos, self.lang = deck_dir, html_dir, screens, photos, lang
+        self.top = 0       # the slide's screen_top (set per slide by page())
+        self.slide = ""
 
     def path(self, p: str) -> Path:
         p = p.replace("{lang}", self.lang)
@@ -157,6 +168,24 @@ def img_size(path: Path) -> tuple[int, int]:
         return im.size
 
 
+@lru_cache(maxsize=None)
+def row_colour(path: Path, y: int) -> str:
+    """The most common colour of screenshot row y: what a phone shows above
+    screen_top, so the left-out status bar reads as the screen's own
+    background."""
+    with Image.open(path) as im:
+        rgb = im.convert("RGB")
+        row = [rgb.getpixel((x, y)) for x in range(rgb.width)]
+    r, g, b = max(set(row), key=row.count)
+    return f"#{r:02X}{g:02X}{b:02X}"
+
+
+def below_top(c: "Ctx", src: str, y, what: str) -> None:
+    if y < c.top:
+        raise SystemExit(f"slide {c.slide}: {what} in {src} starts at y={y}, above "
+                         f"screen_top {c.top} (the status bar and the DEBUG ribbon)")
+
+
 def px(v) -> str:
     return f"{v:.1f}px" if isinstance(v, float) else f"{v}px"
 
@@ -168,14 +197,20 @@ def rot(r) -> str:
 # ------------------------------------------------------------------ pieces
 def phone(c: Ctx, src: str, cls: str = "", label: str | None = None, style: str = "", hl=None) -> str:
     lab = f'<div class="label">{label}</div>' if label else ""
+    iw, ih = img_size(c.path(src))
     hls = ""
-    if hl:
-        iw, ih = img_size(c.path(src))
-        for x, y, w, h in hl:
-            hls += (f'<div class="hl" style="left:{x / iw * 100:.3f}%;top:{y / ih * 100:.3f}%;'
-                    f'width:{w / iw * 100:.3f}%;height:{h / ih * 100:.3f}%"></div>')
+    for x, y, w, h in hl or []:
+        below_top(c, src, y, "a highlight")
+        hls += (f'<div class="hl" style="left:{x / iw * 100:.3f}%;top:{y / ih * 100:.3f}%;'
+                f'width:{w / iw * 100:.3f}%;height:{h / ih * 100:.3f}%"></div>')
     st = f' style="{style}"' if style else ""
-    return (f'<div class="phone {cls}"{st}><div class="screen"><img src="{c.url(src)}" alt="">'
+    screen_st = img_st = ""
+    if c.top:
+        # Leave the status bar out: the capture shows from row c.top down,
+        # over that row's own colour (the screen's background).
+        screen_st = f' style="background:{row_colour(c.path(src), c.top)}"'
+        img_st = f' style="clip-path:inset({c.top / ih * 100:.3f}% 0 0 0)"'
+    return (f'<div class="phone {cls}"{st}><div class="screen"{screen_st}><img src="{c.url(src)}" alt=""{img_st}>'
             f'{hls}<div class="island"></div><div class="glare"></div></div>{lab}</div>')
 
 
@@ -204,11 +239,13 @@ def photos(c: Ctx, s: dict) -> str:
     return "".join(out)
 
 
-def zoom_box(c: Ctx, src: str, crop, w: float) -> str:
+def zoom_box(c: Ctx, src: str, crop, w: float, radius=None) -> str:
     iw, ih = img_size(c.path(src))
     x, y, cw, ch = crop
+    below_top(c, src, y, "a zoom crop")
     k = w / cw
-    return (f'<div class="zbox" style="width:{px(float(w))};height:{px(ch * k)}">'
+    zr = f";--zr:{px(radius)}" if radius is not None else ""
+    return (f'<div class="zbox" style="width:{px(float(w))};height:{px(ch * k)}{zr}">'
             f'<img src="{c.url(src)}" alt="" style="left:{px(-x * k)};top:{px(-y * k)};'
             f'width:{px(iw * k)};height:{px(ih * k)}"></div>')
 
@@ -218,7 +255,7 @@ def zooms(c: Ctx, s: dict) -> str:
     for z in s.get("zooms", []):
         st = f'left:{px(z["x"])};top:{px(z["y"])};' + rot(z.get("r")) + (f'z-index:{z["z"]};' if "z" in z else "")
         lab = f'<div class="zlabel"><i></i>{z["label"]}</div>' if z.get("label") else ""
-        box = zoom_box(c, z["src"], z["crop"], z["w"])
+        box = zoom_box(c, z["src"], z["crop"], z["w"], z.get("radius"))
         cls = "zoom lab-below" if z.get("label_below") else "zoom"
         out.append(f'<div class="{cls}" style="{st}">' + (box + lab if z.get("label_below") else lab + box) + "</div>")
     return "".join(out)
@@ -411,6 +448,7 @@ def body_for(c: Ctx, s: dict) -> tuple[str, str]:
 
 
 def page(c: Ctx, s: dict, size: tuple[int, int]) -> str:
+    c.top, c.slide = int(s.get("screen_top", 0)), s["id"]
     extra, inner = body_for(c, s)
     lang = "zh-Hans" if c.lang == "zh" else "en"
     theme = s.get("theme", "light")

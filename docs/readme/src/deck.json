@@ -1,12 +1,13 @@
 {
   "defaults": {
     "en": {
-      "note": "Version 1.6 · demo data"
+      "note": "Version 1.8 · demo data"
     },
     "zh": {
-      "note": "1.6 版本 · 演示数据"
+      "note": "1.8 版本 · 演示数据"
     },
-    "format": "jpg"
+    "format": "jpg",
+    "screen_top": 200
   },
   "slides": [
     {
@@ -22,7 +23,7 @@
           "No subscription",
           "No account",
           "No ads",
-          "Log stays on your phone"
+          "Developer never sees your log"
         ],
         "photos": [
           {
@@ -45,10 +46,10 @@
             "sw": 330,
             "hl": [
               [
-                40,
-                1395,
-                1240,
-                490
+                48,
+                1323,
+                1224,
+                522
               ]
             ]
           }
@@ -58,17 +59,18 @@
             "src": "$screens/en/01_today.png",
             "label": "Example estimate",
             "crop": [
-              40,
-              1395,
-              1240,
-              490
+              48,
+              1323,
+              1224,
+              522
             ],
             "x": 866,
             "y": 498,
-            "w": 672
+            "w": 672,
+            "radius": 28.5
           }
         ],
-        "html": "<div class=\"cnote\">Version 1.6 · demo data</div>"
+        "html": "<div class=\"cnote\">Version 1.8 · demo data</div>"
       },
       "zh": {
         "tagline": "让食物照片<br>变成你的<em>热量记录</em>。",
@@ -77,7 +79,7 @@
           "无订阅",
           "无需账户",
           "无广告",
-          "记录留在手机上"
+          "开发者看不到你的记录"
         ],
         "photos": [
           {
@@ -100,10 +102,10 @@
             "sw": 330,
             "hl": [
               [
-                40,
-                1395,
-                1240,
-                490
+                48,
+                1323,
+                1224,
+                522
               ]
             ]
           }
@@ -113,17 +115,18 @@
             "src": "$screens/zh/01_today.png",
             "label": "估算示例",
             "crop": [
-              40,
-              1395,
-              1240,
-              490
+              48,
+              1323,
+              1224,
+              522
             ],
             "x": 866,
             "y": 498,
-            "w": 672
+            "w": 672,
+            "radius": 28.5
           }
         ],
-        "html": "<div class=\"cnote\">1.6 版本 · 演示数据</div>"
+        "html": "<div class=\"cnote\">1.8 版本 · 演示数据</div>"
       }
     },
     {
@@ -175,13 +178,13 @@
           {
             "title": "Estimate",
             "text": "Your AI names each food and estimates its calories and macros.",
-            "screen": "$screens/en/02_today_meals_chipotle_usual_chip.png",
+            "screen": "$screens/en/02_today_meals.png",
             "hl": [
               [
-                40,
-                1720,
-                1240,
-                650
+                48,
+                1110,
+                1224,
+                521
               ]
             ]
           },
@@ -235,14 +238,14 @@
           },
           {
             "title": "估算",
-            "text": "AI 识别每样食物，估算热量、蛋白质、碳水和脂肪。",
+            "text": "AI 识别每样食物，<br>估算热量、蛋白质、碳水和脂肪。",
             "screen": "$screens/zh/01_today.png",
             "hl": [
               [
-                40,
-                1395,
-                1240,
-                490
+                48,
+                1323,
+                1224,
+                522
               ]
             ]
           },
@@ -277,10 +280,10 @@
             "sw": 320,
             "hl": [
               [
-                40,
-                1575,
-                1250,
-                345
+                36,
+                1488,
+                1248,
+                328
               ]
             ]
           }
@@ -289,10 +292,10 @@
           {
             "src": "$screens/en/05_meal_editor.png",
             "crop": [
-              40,
-              1575,
-              1250,
-              345
+              24,
+              1478,
+              1272,
+              348
             ],
             "x": 706,
             "y": 368,
@@ -320,9 +323,9 @@
             "hl": [
               [
                 40,
-                1765,
-                1250,
-                345
+                1490,
+                1240,
+                320
               ]
             ]
           }
@@ -331,10 +334,10 @@
           {
             "src": "$screens/zh/05_meal_editor.png",
             "crop": [
-              40,
-              1765,
-              1250,
-              345
+              24,
+              1480,
+              1272,
+              346
             ],
             "x": 706,
             "y": 414,
@@ -342,7 +345,7 @@
             "label": "AI 假设的分量"
           }
         ],
-        "html": "<div class=\"bubble\" style=\"left:706px;top:640px\"><div class=\"zlabel muted\"><i></i>或者直接打一句</div><br><div class=\"bt\">「那份沙拉其实没放酱」</div></div>"
+        "html": "<div class=\"bubble\" style=\"left:706px;top:640px\"><div class=\"zlabel muted\"><i></i>或者直接打一句</div><br><div class=\"bt\">「酸奶其实是脱脂的」</div></div>"
       }
     },
     {
@@ -350,33 +353,18 @@
       "layout": "free",
       "theme": "light",
       "copy_style": "left:112px;top:92px;width:860px",
-      "links": [
-        {
-          "d": "M 560 560 L 1000 560"
-        },
-        {
-          "d": "M 560 718 L 712 718",
-          "class": "dash mute",
-          "arrow": false
-        },
-        {
-          "d": "M 850 718 L 1000 718",
-          "class": "dash mute",
-          "arrow": false
-        }
-      ],
       "en": {
         "eyebrow": "Privacy",
-        "headline": "Your log stays <em>on your phone.</em>",
-        "sub": "No account, no ads, no tracking. The developer receives none of your data.",
+        "headline": "The developer<br><em>never sees your log.</em>",
+        "sub": "No account, no ads, no tracking. The photos and text you log go to the AI you pick, and a backup of your log to your own iCloud Drive.",
         "zooms": [
           {
-            "src": "$screens/en/11_settings_watch_camera_roll_glasses.png",
+            "src": "$screens/en/11_settings_ai.png",
             "crop": [
-              20,
-              780,
-              1260,
-              400
+              24,
+              643,
+              1272,
+              429
             ],
             "x": 1040,
             "y": 104,
@@ -387,8 +375,9 @@
         "nodes": [
           {
             "x": 112,
-            "y": 452,
+            "y": 440,
             "w": 440,
+            "h": 310,
             "icon": "phone",
             "title": "On your iPhone",
             "list": [
@@ -400,16 +389,25 @@
           },
           {
             "x": 1010,
-            "y": 470,
+            "y": 440,
             "w": 480,
             "kind": "row",
-            "icon": "cloud",
+            "icon": "ai",
             "title": "Your AI provider",
             "text": "or your own server. Its terms apply."
           },
           {
             "x": 1010,
-            "y": 650,
+            "y": 556,
+            "w": 480,
+            "kind": "row",
+            "icon": "backup",
+            "title": "Your iCloud Drive",
+            "text": "On by default, after a notice."
+          },
+          {
+            "x": 1010,
+            "y": 672,
             "w": 480,
             "kind": "row ghost",
             "icon": "server",
@@ -420,36 +418,59 @@
         "linklabels": [
           {
             "x": 780,
-            "y": 515,
+            "y": 444,
             "text": "The photo or text you log,<br>plus the context it needs"
           },
           {
             "x": 780,
-            "y": 718,
+            "y": 560,
+            "text": "iCloud Backup copies your log,<br>never your API key"
+          },
+          {
+            "x": 780,
+            "y": 721,
             "text": "Nothing"
           }
         ],
         "smallprint": [
           {
             "x": 1010,
-            "y": 768,
+            "y": 790,
             "w": 480,
             "text": "Restaurant nutrition, if you turn it on, has its own recipients. The privacy policy lists them."
+          }
+        ],
+        "links": [
+          {
+            "d": "M 560 489 L 1000 489"
+          },
+          {
+            "d": "M 560 605 L 1000 605"
+          },
+          {
+            "d": "M 560 721 L 712 721",
+            "class": "dash mute",
+            "arrow": false
+          },
+          {
+            "d": "M 850 721 L 1000 721",
+            "class": "dash mute",
+            "arrow": false
           }
         ]
       },
       "zh": {
         "eyebrow": "隐私",
-        "headline": "饮食记录<em>保存在你的手机上。</em>",
-        "sub": "无需账户，没有广告，不做追踪。开发者收不到你的任何数据。",
+        "headline": "饮食记录，<em>开发者看不到。</em>",
+        "sub": "无需账户，没有广告，不做追踪。<br>你记录的照片和文字会发给你选的 AI，<br>记录的备份存进你自己的 iCloud 云盘。",
         "zooms": [
           {
-            "src": "$screens/zh/11a_settings_top_welcome.png",
+            "src": "$screens/zh/11_settings_ai.png",
             "crop": [
-              20,
-              1300,
-              1260,
-              400
+              24,
+              643,
+              1272,
+              429
             ],
             "x": 1040,
             "y": 104,
@@ -460,8 +481,9 @@
         "nodes": [
           {
             "x": 112,
-            "y": 452,
+            "y": 430,
             "w": 440,
+            "h": 330,
             "icon": "phone",
             "title": "在你的 iPhone 上",
             "list": [
@@ -473,16 +495,25 @@
           },
           {
             "x": 1010,
-            "y": 470,
+            "y": 430,
             "w": 480,
             "kind": "row",
-            "icon": "cloud",
+            "icon": "ai",
             "title": "你选的 AI 服务商",
             "text": "或者你自己的服务器。<br>以它的条款为准。"
           },
           {
             "x": 1010,
-            "y": 650,
+            "y": 570,
+            "w": 480,
+            "kind": "row",
+            "icon": "backup",
+            "title": "你自己的 iCloud 云盘",
+            "text": "默认开启，会先显示一条说明。"
+          },
+          {
+            "x": 1010,
+            "y": 684,
             "w": 480,
             "kind": "row ghost",
             "icon": "server",
@@ -493,21 +524,44 @@
         "linklabels": [
           {
             "x": 780,
-            "y": 515,
+            "y": 447,
             "text": "你记录的照片或文字，<br>以及必要的上下文"
           },
           {
             "x": 780,
-            "y": 718,
+            "y": 574,
+            "text": "「iCloud 备份」复制你的记录，<br>不含 API Key"
+          },
+          {
+            "x": 780,
+            "y": 733,
             "text": "什么都不发"
           }
         ],
         "smallprint": [
           {
             "x": 1010,
-            "y": 768,
+            "y": 798,
             "w": 480,
-            "text": "「餐厅营养」打开后另有接收方，详见隐私政策。"
+            "text": "「餐厅营养」打开后另有接收方，<br>详见隐私政策。"
+          }
+        ],
+        "links": [
+          {
+            "d": "M 560 492 L 1000 492"
+          },
+          {
+            "d": "M 560 619 L 1000 619"
+          },
+          {
+            "d": "M 560 733 L 712 733",
+            "class": "dash mute",
+            "arrow": false
+          },
+          {
+            "d": "M 850 733 L 1000 733",
+            "class": "dash mute",
+            "arrow": false
           }
         ]
       }
