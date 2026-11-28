@@ -54,6 +54,18 @@ void main() {
         await tester.pumpAndSettle();
         expect(_materialColorIn(tester, find.byType(Dialog)), dialog,
             reason: 'was #F7E4DF / #322825 (seed-tinted)');
+        expect(
+            tester
+                .widget<Material>(find
+                    .descendant(
+                        of: find.byType(Dialog),
+                        matching: find.byType(Material))
+                    .first)
+                .clipBehavior,
+            Clip.antiAlias,
+            reason: 'its rounded corners clip what scrolls inside: a '
+                'scrolled dialog at the largest text size painted past them '
+                '(IOS-180 B2)');
         final title = tester.widget<RichText>(find.descendant(
             of: find.text('Delete this meal?'), matching: find.byType(RichText)));
         expect(title.text.style?.fontSize, 17,

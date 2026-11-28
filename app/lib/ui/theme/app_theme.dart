@@ -225,6 +225,11 @@ abstract final class AppTheme {
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         barrierColor: c.scrim,
+        // The rounded corners clip what scrolls inside: at the largest text
+        // sizes the dialog's side padding shrinks, and the line cut off at
+        // the top of a scrolled dialog painted past its corners (IOS-180
+        // B2; Material's default is Clip.none).
+        clipBehavior: Clip.antiAlias,
         shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(AppRadius.xl)),
         insetPadding: const EdgeInsets.symmetric(
