@@ -21,8 +21,10 @@ def _photo_payload(**over):
 def _stub(monkeypatch):
     captured = {}
 
+    # **kw: the endpoint also passes memo_scope (the answer memo,
+    # 2026-11-28), which this stand-in has no use for.
     def fake(b, p=None, allow_file_fallback=True, backend="claude",
-             raise_on_busy=False, model=None, effort=None):
+             raise_on_busy=False, model=None, effort=None, **kw):
         captured.update(model=model, effort=effort, backend=backend)
         return dict(ANALYSIS)
 

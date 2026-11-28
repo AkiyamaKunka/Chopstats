@@ -78,6 +78,20 @@ def _empty_parked_photo_queue():
         tb._parked_photo_paths.clear()
 
 
+@pytest.fixture(autouse=True)
+def _empty_answer_memo():
+    """claude_analyzer keeps the answers of app photo and leftover
+    analyses in a module-level memo (2026-11-28). A test that analyzed a
+    request through the real analyzer left its answer there, and the next
+    test that sent the same request got it back without a CLI run: one of
+    the busy-wait tests then saw a 200 where it holds the lock to get a
+    503. Empty on both sides, as the parked-photo queue is."""
+    import claude_analyzer
+    claude_analyzer.clear_answer_memo()
+    yield
+    claude_analyzer.clear_answer_memo()
+
+
 # ─── Shared app-API test harness (moved from test_api_analyze_endpoints.py:
 # fixtures in conftest need no imports, which keeps ruff F811 quiet in every
 # suite that uses them) ───
