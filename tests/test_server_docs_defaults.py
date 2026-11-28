@@ -158,6 +158,17 @@ def test_both_files_state_the_busy_wait_default_and_clamp(monkeypatch):
     # 0 is a documented setting, not only the bottom of the clamp.
     assert "`0` switches the wait off" in meaning
     assert "(%d, clamp %d..%d)" % (default, low, high) in _busy_env_comment()
+    # Under systemd a comment after the number is part of the value, the
+    # value is then junk, and junk reads as the default: `…=0   # off`
+    # left the wait on. Both entries say so, with the default (review
+    # 2026-11-28). The journal's line for it is pinned in
+    # tests/test_claude_analyzer.py.
+    advice = ("Write the number alone on its line: systemd keeps a comment "
+              "after it as part of the value, the value is then not a "
+              "number, and the wait stays at %d s" % default)
+    assert advice in meaning
+    assert advice in " ".join(
+        _read(".env.example").replace("\n# ", " ").split())
 
 
 def test_the_guides_state_the_busy_wait_numbers_the_code_uses():

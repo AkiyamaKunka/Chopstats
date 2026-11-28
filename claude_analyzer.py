@@ -188,14 +188,50 @@ _LOOKUP_STATE: Dict[str, object] = {
     "fg_waiting": 0}
 
 
+# Values of CLAUDE_API_BUSY_WAIT_SECONDS that were not a number and that
+# the journal has been told about (_warn_busy_wait_junk). The knob is read
+# for every app request, and the environment of a running server does
+# not change: one line for the value, not one for each request.
+_BUSY_WAIT_JUNK_SEEN: set = set()
+_BUSY_WAIT_JUNK_LOCK = threading.Lock()
+
+
+def _warn_busy_wait_junk(raw: str) -> None:
+    """One WARNING for a CLAUDE_API_BUSY_WAIT_SECONDS that is not a whole
+    number, once for each such value.
+
+    Junk used to read as the default in silence, and the default is
+    "wait". systemd's EnvironmentFile keeps a comment after a value as
+    part of the value, so a line `…=0   # off` left the wait on and
+    nothing said so (review 2026-11-28).
+
+    The line shows this knob's own value, cut to 40 characters: enough to
+    know the line by, and a limit on what a mangled env file can put in
+    the journal. Nothing else from the environment is in it."""
+    with _BUSY_WAIT_JUNK_LOCK:
+        if raw in _BUSY_WAIT_JUNK_SEEN:
+            return
+        _BUSY_WAIT_JUNK_SEEN.add(raw)
+    shown = repr(raw[:40]) + ("…" if len(raw) > 40 else "")
+    log.warning(
+        f"CLAUDE_API_BUSY_WAIT_SECONDS is not a whole number: {shown}. "
+        f"The wait stays at its default, {BUSY_WAIT_SECONDS_DEFAULT} s. "
+        "Write the number alone on its line: systemd keeps a comment "
+        "after it as part of the value.")
+
+
 def busy_wait_seconds() -> int:
     """CLAUDE_API_BUSY_WAIT_SECONDS: how long an app request waits for a
     busy CLI before it is told "busy". 0 = not at all (the answer at once,
-    as before 2026-11-28); junk reads as the default."""
+    as before 2026-11-28); junk reads as the default, and the journal says
+    so (_warn_busy_wait_junk). An empty value is a knob left unset."""
+    raw = os.environ.get("CLAUDE_API_BUSY_WAIT_SECONDS",
+                         str(BUSY_WAIT_SECONDS_DEFAULT))
     try:
-        value = int(os.environ.get("CLAUDE_API_BUSY_WAIT_SECONDS",
-                                   str(BUSY_WAIT_SECONDS_DEFAULT)))
+        value = int(raw)
     except ValueError:
+        if raw.strip():
+            _warn_busy_wait_junk(raw)
         return BUSY_WAIT_SECONDS_DEFAULT
     return min(max(value, 0), BUSY_WAIT_SECONDS_MAX)
 

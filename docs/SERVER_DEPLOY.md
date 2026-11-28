@@ -258,7 +258,7 @@ analysis is running used to be answered `503` at once. Server code of
 
 | Knob | Default | Meaning |
 |---|---|---|
-| `CLAUDE_API_BUSY_WAIT_SECONDS` | `20` | Seconds an app request waits for a busy CLI (0–60). `0` switches the wait off: the `503` comes at once, as before. |
+| `CLAUDE_API_BUSY_WAIT_SECONDS` | `20` | Seconds an app request waits for a busy CLI (0–60). `0` switches the wait off: the `503` comes at once, as before. Write the number alone on its line: systemd keeps a comment after it as part of the value, the value is then not a number, and the wait stays at 20 s (the journal says so once, in a warning). |
 
 Keep it near 20. An iPhone background scan gives up on its request 22 s
 after the scan began. A request that has waited longer than that is

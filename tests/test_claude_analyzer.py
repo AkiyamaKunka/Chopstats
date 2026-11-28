@@ -1212,6 +1212,60 @@ def test_busy_wait_knob_default_zero_clamp_and_junk(monkeypatch):
         assert claude_analyzer.busy_wait_seconds() == seconds, raw
 
 
+def test_a_busy_wait_value_that_is_not_a_number_is_named_in_the_journal(
+        monkeypatch, caplog):
+    """A value that is not a whole number reads as the default, and the
+    default is "wait". systemd's EnvironmentFile keeps a comment after a
+    value as part of the value, so `…=0   # off` did not switch the wait
+    off, and nothing said so (review 2026-11-28).
+
+    The journal now has one WARNING for such a value: it names the knob,
+    shows the value as it was read, and says how long the wait is. One
+    line for each such value, however often the knob is read (it is read
+    for every app request), and nothing else from the environment is in
+    it. A number, also one outside 0..60, is not junk; neither is an
+    empty value, which is a knob left unset."""
+    knob = "CLAUDE_API_BUSY_WAIT_SECONDS"
+    monkeypatch.setattr(claude_analyzer, "_BUSY_WAIT_JUNK_SEEN", set())
+    monkeypatch.setenv("ANDROID_API_KEY", "upload-key-stays-out")
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "plan-token-stays-out")
+
+    def warnings():
+        return [r.getMessage() for r in caplog.records
+                if r.name == "claude_analyzer"
+                and r.levelno == logging.WARNING]
+
+    with caplog.at_level(logging.INFO, logger="claude_analyzer"):
+        monkeypatch.setenv(knob, "0   # off")
+        for _ in range(3):
+            assert claude_analyzer.busy_wait_seconds() == 20
+        assert warnings() == [
+            "CLAUDE_API_BUSY_WAIT_SECONDS is not a whole number: "
+            "'0   # off'. The wait stays at its default, 20 s. Write the "
+            "number alone on its line: systemd keeps a comment after it "
+            "as part of the value."]
+
+        monkeypatch.setenv(knob, "20s")  # another such value: its own line
+        assert claude_analyzer.busy_wait_seconds() == 20
+        monkeypatch.setenv(knob, "0   # off")  # the first again: no line
+        assert claude_analyzer.busy_wait_seconds() == 20
+        assert len(warnings()) == 2 and ": '20s'. " in warnings()[1]
+
+        for raw in ("0", "7", "-5", "999999", "", "   "):
+            monkeypatch.setenv(knob, raw)
+            claude_analyzer.busy_wait_seconds()
+        monkeypatch.delenv(knob)
+        claude_analyzer.busy_wait_seconds()
+        assert len(warnings()) == 2
+
+        # A long value is cut: enough to know the line by, and a limit on
+        # what a mangled env file can put in the journal.
+        monkeypatch.setenv(knob, "x" * 40 + "the-rest-stays-out")
+        assert claude_analyzer.busy_wait_seconds() == 20
+        assert ": '" + "x" * 40 + "'…. " in warnings()[2]
+    assert "stays-out" not in caplog.text
+
+
 def _ios_run_deadline_seconds():
     """iosRunDeadline as the app's source states it: how long after its
     start an iPhone background scan gives up on a request still running."""
