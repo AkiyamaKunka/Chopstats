@@ -1083,8 +1083,9 @@ def _attempt_file(
 # purpose).
 ANSWER_MEMO_SECONDS_DEFAULT = 600
 ANSWER_MEMO_SECONDS_MAX = 3600
-# One analysis takes 8-15 s, so 64 answers are more than ten minutes of
-# analyses back to back. Each is a small JSON object.
+# One analysis takes 8-15 s, so 64 answers are 8 to 16 minutes of
+# analyses back to back: about the default window. Each is a small JSON
+# object.
 ANSWER_MEMO_MAX_ENTRIES = 64
 _ANSWER_MEMO_KEY_VERSION = "chopstats answer memo 1"
 
