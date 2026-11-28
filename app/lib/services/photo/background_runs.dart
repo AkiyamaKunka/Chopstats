@@ -85,8 +85,9 @@ abstract final class BackgroundLeft {
   static const deadline = 'deadline';
 
   /// The run's deadline cut it off before anything was sent for it: the
-  /// phone was still preparing it (its food check, its decode). The one
-  /// cut that can count against the photo (deferred_assets.dart).
+  /// phone was still preparing it (its hash and reservation, its food
+  /// check, its decode). The one cut that can count against the photo,
+  /// once it holds its reservation (deferred_assets.dart).
   static const preparing = 'preparing';
 
   /// Listed, never started: the run's time for starting photos was over.

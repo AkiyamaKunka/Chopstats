@@ -915,11 +915,22 @@ class RunInFlight {
         : null;
     final assetId = await pipeline?.abandon();
     if (assetId == null || assetId.isEmpty) {
-      // Nothing was held to release. As before, nothing is said of the
-      // photo here (the pipeline was done with it, or had not reserved it
-      // yet): the count above is taken back, and the photo's own verdict,
-      // when it comes, counts as any other.
-      if (noted != null) await log?.cutWithdrawn();
+      // Nothing was held to release. With nothing sent either, the photo
+      // had not been reserved yet (it was still being hashed, or the
+      // database had not answered): left like any other, and the entry
+      // says so (it used to read "1 read, 0 processed, 0 left for
+      // later"); no cut counts against it, as before. With something
+      // sent, the pipeline was done with the photo before the deadline: a
+      // meal saved and its thumbnail still coming, or a verdict it has
+      // yet to report. That photo was not cut off, so the count above is
+      // taken back and its own stands. (A verdict that needed nothing
+      // sent, such as "already logged" or a glasses photo the on-phone
+      // check turned away, reads as "not reserved yet" until it is
+      // counted: the run cannot tell the two apart. One that keeps the
+      // photo then takes the cut back: BackgroundRunRecorder.processed.)
+      if (noted != null && cutAt != CutOffAt.preparing) {
+        await log?.cutWithdrawn();
+      }
       await noted;
       return;
     }

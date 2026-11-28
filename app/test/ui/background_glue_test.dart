@@ -1554,6 +1554,115 @@ void main() {
               expect(r.left, {BackgroundLeft.deadline: 1});
               expect(r.stopReason, BackgroundStop.budget);
             });
+
+            // Review, 2026-11-28: a photo cut off before its reservation
+            // holds nothing to release, so nothing was said of it at all
+            // ("1 read, 0 processed, 0 left for later"). It was left like
+            // any other. No cut counts against it, as before: only a photo
+            // that held its reservation can be passed over for cuts.
+            test('cut off while it was still being hashed: left, as not '
+                'sent yet, and nothing counts against it', () async {
+              final dao = _SlowDao();
+              var hashing = false;
+              final s = await started(dao,
+                  server:
+                      MockClient((_) async => fail('nothing may be sent')),
+                  hasher: (_) {
+                    hashing = true;
+                    return Completer<String>().future;
+                  });
+              await until(() => hashing, 'the hash');
+              await s.inFlight.abandon();
+              // As finishWithinGrant does right after.
+              await s.recorder.finish(BackgroundStop.budget);
+              final r = stored();
+              expect((r.offered, r.analyzed, r.released), (1, 0, 1));
+              expect(r.left, {BackgroundLeft.preparing: 1});
+              expect(dao.reserves, 0);
+              expect(prefs.getString(deferredAssetsPrefsKey), isNull,
+                  reason: 'the full window, and still no cut against it');
+            });
+
+            test('cut off while the database had not answered its '
+                'reservation: the same, and the reservation that comes '
+                'later is given back without a second count', () async {
+              final dao = _SlowDao()..reserveGate = Completer<void>();
+              final s = await started(dao,
+                  server:
+                      MockClient((_) async => fail('nothing may be sent')));
+              await until(() => dao.reserves == 1, 'the reservation');
+              await s.inFlight.abandon();
+              expect(s.recorder.current!.left, {BackgroundLeft.preparing: 1});
+              // The database answers after all.
+              dao.reserveGate!.complete();
+              await s.intake.delivered.future;
+              expect(dao.releases, 1, reason: 'the pipeline gave it back');
+              expect(dao.ledger.values,
+                  isNot(contains(IngestionStatus.processing)));
+              final r = s.recorder.current!;
+              expect((r.offered, r.analyzed, r.released), (1, 0, 1));
+              expect(r.left, {BackgroundLeft.preparing: 1});
+              expect(prefs.getString(deferredAssetsPrefsKey), isNull);
+            });
+
+            // The answer that comes after the cut can also say the photo
+            // was done with already: a not-food photo of the hour the run
+            // starts behind, read again (only a meal names its photo), whose
+            // reservation the database answers "already logged". Counted
+            // on top of the cut, it read as left for later and processed.
+            test('cut off while the database had not answered its '
+                'reservation, which then says "already logged": counted '
+                'once, as processed, not left', () async {
+              final dao = _SlowDao()..reserveGate = Completer<void>();
+              dao.ledger[md5.convert(photo(1).bytes).toString()] =
+                  IngestionStatus.skipped;
+              final s = await started(dao,
+                  server:
+                      MockClient((_) async => fail('nothing may be sent')));
+              await until(() => dao.reserves == 1, 'the reservation');
+              await s.inFlight.abandon();
+              expect(s.recorder.current!.left, {BackgroundLeft.preparing: 1},
+                  reason: 'all the run can tell at the deadline');
+              dao.reserveGate!.complete();
+              await s.intake.delivered.future;
+              final r = s.recorder.current!;
+              expect((r.offered, r.analyzed, r.saved, r.released),
+                  (1, 1, 0, 0));
+              expect(r.left, isEmpty);
+              expect(dao.releases, 0, reason: 'it never held a reservation');
+              expect(prefs.getString(deferredAssetsPrefsKey), isNull);
+              s.intake.end.complete();
+              await s.run;
+            });
+
+            // What "nothing held" must NOT be read as. A meal is committed
+            // before process() returns: its thumbnail comes after (up to
+            // 8 s in the iOS run). A deadline in that time finds nothing
+            // held either, and that photo was not left.
+            test('a photo whose meal is already saved when the deadline '
+                'comes (its thumbnail still on its way) was not left: '
+                'nothing is said, and its own verdict counts', () async {
+              final dao = _SlowDao();
+              final thumb = Completer<Uint8List?>();
+              final s = await started(dao,
+                  server: MockClient((_) async => answer()),
+                  thumbnailer: (_) => thumb.future);
+              await until(() => dao.meals.isNotEmpty, 'the save');
+              await s.inFlight.abandon();
+              var r = stored();
+              expect((r.offered, r.analyzed, r.released), (1, 0, 0));
+              expect(r.left, isEmpty);
+              expect(prefs.getString(deferredAssetsPrefsKey), isNull);
+              // Android's engine lives on through the re-arm, so the
+              // verdict can still come: counted as what it is.
+              thumb.complete(null);
+              s.intake.end.complete();
+              await s.run;
+              r = stored();
+              expect((r.offered, r.analyzed, r.saved, r.released),
+                  (1, 1, 1, 0));
+              expect(r.left, isEmpty);
+            });
           });
 
           // The night of 2026-11-27, as it would have gone on: three runs

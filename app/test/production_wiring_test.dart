@@ -1456,8 +1456,9 @@ void main() {
         ),
       );
       // Review, 2026-11-28: said only for a photo the record shows in
-      // flight (one handed over, with no verdict counted yet); where it
-      // sits in the deadline's steps is pinned with them, above.
+      // flight (one handed over, with no verdict counted yet), so a cut
+      // before the photo's reservation is said too; where it sits in the
+      // deadline's steps is pinned with them, above.
       expect(
         _body(glue(), 'class RunInFlight {'),
         _wired(
