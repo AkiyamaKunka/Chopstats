@@ -330,6 +330,89 @@ def test_the_key_covers_each_part_and_lets_none_run_together():
     assert key(scope=None) is None
 
 
+# ─── Caller text that strict UTF-8 cannot encode ─────────────────────
+#
+# A lone surrogate is a str Python holds and strict UTF-8 refuses to
+# encode. JSON carries one as an escape (`\ud83c`), and json.loads reads
+# it back as one. The app writes one that way: dart:convert's jsonEncode
+# escapes an unpaired surrogate, and the leftover compact cuts a long
+# meal_description at 200 UTF-16 units (compactOriginalAnalysis in
+# app/lib/core/leftover_logic.dart), which can split an emoji in two.
+# main analyzed such a request; the memo's key turned it into a 500 that
+# the app retried at every scan (review 2026-11-28).
+
+LONE = "\ud83c"        # the first half of a food emoji, cut off
+OTHER_LONE = "\ud83d"  # the first half of another one
+
+# where the text is -> (path, the request with [lone] in that place)
+_LONE_SURROGATE_REQUESTS = {
+    "profile": ("/api/analyze_photo", lambda lone: _photo_body(
+        dietary_profile="No pork " + lone)),
+    "recent meal": ("/api/analyze_photo", lambda lone: _photo_body(
+        recent_meals=[{"time": "08:10", "meal_description": "Congee " + lone,
+                       "total_calories": 300,
+                       "food_items": [{"name": "congee",
+                                       "estimated_calories": 300}]}])),
+    "leftover original": ("/api/analyze_leftover", lambda lone: _leftover_body(
+        original_analysis=json.dumps({
+            "meal_description": "Char siu rice " + lone,
+            "total_calories": 640,
+            "food_items": [{"name": "rice", "estimated_calories": 300}]}))),
+}
+
+
+@pytest.mark.parametrize("where", sorted(_LONE_SURROGATE_REQUESTS))
+def test_a_lone_surrogate_in_caller_text_is_analyzed_and_remembered(
+        client, monkeypatch, where):
+    """A lone surrogate in the profile, in a recent meal or in the leftover
+    request's meal is analyzed as on main: a 200, and the CLI is given the
+    text. The key stays exact: the same request again is a hit, and one
+    with another lone surrogate is a run of its own."""
+    cli = _fake_cli(monkeypatch)
+    path, build = _LONE_SURROGATE_REQUESTS[where]
+
+    def send(lone):
+        raw = json.dumps(build(lone))  # ensure_ascii: escapes, as Dart's
+        assert "\\" + "ud83" in raw and lone not in raw
+        return client.http.post(path, headers=KEY, data=raw,
+                                content_type="application/json")
+
+    first = send(LONE)
+    assert first.status_code == 200, first.get_data(as_text=True)[:200]
+    assert len(cli.starts) == 1
+    assert "\\" + "ud83c" in cli.starts[0]["input"]
+    again = send(LONE)
+    assert again.status_code == 200
+    assert again.get_data() == first.get_data()
+    assert len(cli.starts) == 1, "the same request was analyzed again"
+    other = send(OTHER_LONE)
+    assert other.status_code == 200
+    assert len(cli.starts) == 2, "another lone surrogate was a hit"
+    assert len(claude_analyzer._ANSWER_MEMO) == 2
+
+
+def test_the_key_takes_any_text_python_can_hold():
+    """At the key itself: lone surrogates of either half give a key, each
+    its own, and none is the key of the text without it. Two lone halves
+    side by side are not the character they would make together; the
+    JSON reader never gives that pair as two (it joins an escaped pair
+    into one character), and two keys for one prompt cost a run at most."""
+    def key(prompt):
+        return claude_analyzer._answer_memo_key(
+            "photo", ("analyze_photo", "current"), JPEG, prompt, "claude",
+            None, None, read_fallback=False)
+
+    # Joined at run time: a literal "🍔" is the one character.
+    halves = "No pork " + LONE + "\udf54"
+    assert len(halves) == len("No pork ") + 2
+    texts = ["No pork", "No pork " + LONE, "No pork " + OTHER_LONE,
+             "No pork \udf54", halves, "No pork \U0001f354"]
+    keys = [key(text) for text in texts]
+    assert all(isinstance(k, bytes) and len(k) == 32 for k in keys)
+    assert len(set(keys)) == len(texts)
+    assert key("No pork " + LONE) == keys[1]
+
+
 # ─── Only a success is kept ──────────────────────────────────────────
 
 def _plan_refused(cmd, kwargs):

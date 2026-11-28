@@ -1135,8 +1135,11 @@ def _answer_memo_key(kind: str, scope: Optional[Tuple[str, ...]],
     def part(value) -> None:
         # Each part with its length in front, so that two different
         # requests can never run together into the same bytes.
+        # surrogatepass: caller text can hold a lone surrogate (JSON
+        # carries one as an escape), which strict UTF-8 refuses to encode.
+        # This encodes every str, and two different ones never alike.
         data = value if isinstance(value, bytes) else str(value).encode(
-            "utf-8")
+            "utf-8", "surrogatepass")
         digest.update(len(data).to_bytes(8, "big"))
         digest.update(data)
 
