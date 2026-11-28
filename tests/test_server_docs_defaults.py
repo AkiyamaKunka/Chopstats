@@ -174,3 +174,32 @@ def test_the_guides_state_the_busy_wait_numbers_the_code_uses():
         assert header in text, name
     assert places in " ".join(
         _read(".env.example").replace("\n# ", " ").split())
+
+
+def _iphone_scan_deadline():
+    """Seconds after which an iPhone background scan gives up on a request
+    still running: iosRunDeadline in the app's background scan code."""
+    found = re.findall(
+        r"(?m)^const Duration iosRunDeadline = Duration\(seconds: (\d+)\);$",
+        _read("app", "lib", "ui", "background_glue.dart"))
+    assert len(found) == 1, (
+        "app/lib/ui/background_glue.dart should have exactly one line "
+        "`const Duration iosRunDeadline = Duration(seconds: N);` and has "
+        "%d. The guides quote that deadline as the reason to keep the "
+        "wait near 20 s: read it from where it is now." % len(found))
+    return int(found[0])
+
+
+def test_the_guides_give_the_iphone_scan_deadline_the_app_has():
+    """The reason to keep the wait near 20 s is a number of the app's, not
+    of the server's: how long an iPhone background scan gives its request.
+    The deploy guide and .env.example quote it. When the app changes it,
+    these sentences change with it, and the default wait is looked at
+    again (tests/test_claude_analyzer.py compares the two)."""
+    seconds = _iphone_scan_deadline()
+    assert ("An iPhone background scan gives up on its request %d s after "
+            "the scan began." % seconds) in " ".join(
+                _read("docs", "SERVER_DEPLOY.md").split())
+    assert ("an iPhone background scan gives up on its request after %d s"
+            % seconds) in " ".join(
+                _read(".env.example").replace("\n# ", " ").split())

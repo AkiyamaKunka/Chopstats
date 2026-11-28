@@ -1212,14 +1212,49 @@ def test_busy_wait_knob_default_zero_clamp_and_junk(monkeypatch):
         assert claude_analyzer.busy_wait_seconds() == seconds, raw
 
 
+def _ios_run_deadline_seconds():
+    """iosRunDeadline as the app's source states it: how long after its
+    start an iPhone background scan gives up on a request still running."""
+    path = os.path.join(os.path.dirname(__file__), "..", "app", "lib", "ui",
+                        "background_glue.dart")
+    try:
+        with open(path, encoding="utf-8") as f:
+            source = f.read()
+    except OSError:
+        source = ""
+    found = re.findall(
+        r"(?m)^const Duration iosRunDeadline = Duration\(seconds: (\d+)\);$",
+        source)
+    assert len(found) == 1, (
+        "app/lib/ui/background_glue.dart should have exactly one line "
+        "`const Duration iosRunDeadline = Duration(seconds: N);` and has "
+        f"{len(found)}. The server's default busy wait must end before "
+        "that deadline, so this test reads it from the app. If the "
+        "deadline moved or changed its form, read it from where it is "
+        "now and compare BUSY_WAIT_SECONDS_DEFAULT with it again.")
+    return int(found[0])
+
+
 def test_the_default_wait_ends_before_an_iphone_background_scan_gives_up():
     """The reason the default is not longer (the comment on
     BUSY_WAIT_SECONDS_DEFAULT): an iPhone background scan abandons its
     request 22 s after the scan began, and a request that had waited
     longer would be analyzed for a phone that no longer listens. Whoever
-    raises the default past that should have a reason that beats it."""
+    raises the default past that should have a reason that beats it.
+
+    The deadline is read from the app's own source. This test used to
+    carry the 22 itself, and went on passing whatever the app did to its
+    deadline (review 2026-11-28)."""
+    deadline = _ios_run_deadline_seconds()
     assert claude_analyzer.BUSY_WAIT_SECONDS_DEFAULT == 20
-    assert claude_analyzer.BUSY_WAIT_SECONDS_DEFAULT < 22
+    assert claude_analyzer.BUSY_WAIT_SECONDS_DEFAULT < deadline, (
+        "An iPhone background scan now gives up after %d s (iosRunDeadline "
+        "in app/lib/ui/background_glue.dart), and the server's default "
+        "busy wait is %d s: a request could wait for longer than its "
+        "phone listens. Lower BUSY_WAIT_SECONDS_DEFAULT; the pins in "
+        "tests/test_server_docs_defaults.py then name the sentences that "
+        "state it."
+        % (deadline, claude_analyzer.BUSY_WAIT_SECONDS_DEFAULT))
 
 
 @pytest.mark.parametrize("kind", ["photo", "leftover", "text"])
