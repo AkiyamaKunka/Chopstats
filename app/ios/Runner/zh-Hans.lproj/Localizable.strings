@@ -1,0 +1,24 @@
+/* 「检查新照片」操作（CheckNewPhotosIntent.swift）：它在「快捷指令」里的名称和说明，
+   以及结束时「快捷指令」显示、Siri 读出的那一句。与 en.lproj/Localizable.strings 保持一致。 */
+
+"Check new photos" = "检查新照片";
+"Checks new photos for meals and logs them, as Chopstats' background scan does. Needs Watch Camera Roll on." = "检查新照片里的餐食并记录下来，与筷拍的后台扫描相同。需要开启「监控相册」。";
+
+"check.appOpen" = "筷拍已打开，会自己检查照片。";
+"check.anotherCheck" = "另一次照片检查正在进行，请稍后再试。";
+"check.notReady" = "请先打开一次筷拍，然后再试。";
+"check.logged.one" = "已记录 1 餐。";
+"check.logged.many" = "已记录 %lld 餐。";
+"check.logged.one.more" = "已记录 1 餐，还有照片留待下一次检查。";
+"check.logged.many.more" = "已记录 %lld 餐，还有照片留待下一次检查。";
+"check.nothingNew" = "没有新的餐食照片。";
+"check.waiting.one" = "还没有记录餐食：1 张照片留待下一次检查。";
+"check.waiting.many" = "还没有记录餐食：%lld 张照片留待下一次检查。";
+"check.watcherOff" = "筷拍的「监控相册」已关闭，没有检查照片。";
+"check.noAI" = "筷拍还没有设置 AI 服务，没有发送任何内容。";
+"check.needsHttps" = "筷拍里你的服务器地址必须以 https:// 开头，没有发送任何内容。";
+"check.paused" = "筷拍的自动分析已暂停，打开筷拍查看原因。";
+"check.sharingStopped" = "筷拍已停止向你的 AI 服务发送内容，没有发送任何照片。";
+"check.noPhotoAccess" = "筷拍没有照片访问权限，请在 iPhone 的「设置」中允许。";
+"check.outOfTime" = "这次检查的时间用完了，剩下的照片留待下一次检查。";
+"check.failed" = "这次检查提前停止了，详见筷拍的「最近的后台扫描」。";

@@ -1,0 +1,25 @@
+/* The Check new photos action (CheckNewPhotosIntent.swift): its name and
+   description in Shortcuts, then the line Shortcuts shows and Siri says when
+   it ends. Keep zh-Hans.lproj/Localizable.strings in step. */
+
+"Check new photos" = "Check new photos";
+"Checks new photos for meals and logs them, as Chopstats' background scan does. Needs Watch Camera Roll on." = "Checks new photos for meals and logs them, as Chopstats' background scan does. Needs Watch Camera Roll on.";
+
+"check.appOpen" = "Chopstats is open and checks your photos itself.";
+"check.anotherCheck" = "Another photo check is running. Try again in a moment.";
+"check.notReady" = "Open Chopstats once, then try again.";
+"check.logged.one" = "Logged 1 meal.";
+"check.logged.many" = "Logged %lld meals.";
+"check.logged.one.more" = "Logged 1 meal. More photos wait for the next check.";
+"check.logged.many.more" = "Logged %lld meals. More photos wait for the next check.";
+"check.nothingNew" = "No new meal photos.";
+"check.waiting.one" = "No meal logged yet: 1 photo waits for the next check.";
+"check.waiting.many" = "No meal logged yet: %lld photos wait for the next check.";
+"check.watcherOff" = "Watch Camera Roll is off in Chopstats, so no photo was checked.";
+"check.noAI" = "Chopstats has no AI service set up yet, so nothing was sent.";
+"check.needsHttps" = "Your server's address in Chopstats must start with https://, so nothing was sent.";
+"check.paused" = "Automatic analysis is paused in Chopstats. Open it to see why.";
+"check.sharingStopped" = "Sharing with your AI service is stopped in Chopstats, so nothing was sent.";
+"check.noPhotoAccess" = "Chopstats may not read your photos. Allow access in iPhone Settings.";
+"check.outOfTime" = "The check ran out of time. Photos left wait for the next check.";
+"check.failed" = "The check stopped early. See Recent background scans in Chopstats.";

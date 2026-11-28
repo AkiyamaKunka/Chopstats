@@ -478,6 +478,18 @@ class AppLocalizationsEn extends AppLocalizations {
       'Background scan is stuck — opening Chopstats once catches up.';
 
   @override
+  String get backgroundScanNotScheduled => 'Not scheduled';
+
+  @override
+  String get backgroundScanNotScheduledUnavailable =>
+      'The next background scan is not scheduled: iOS is not taking background requests from Chopstats right now. Chopstats asks again each time you open or leave it; until then, new photos are logged when you open the app.';
+
+  @override
+  String backgroundScanNotScheduledRefused(String code) {
+    return 'The next background scan is not scheduled: iOS refused the request ($code). Chopstats asks again each time you open or leave it; until then, new photos are logged when you open the app.';
+  }
+
+  @override
   String get settingsSectionProfile => 'Profile';
 
   @override
@@ -1369,6 +1381,52 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String get diagBgRunByShortcuts => 'Started by Shortcuts';
+
+  @override
+  String diagBgRunAlreadyLogged(int count) {
+    return 'Already logged, not read again: $count';
+  }
+
+  @override
+  String diagBgRunLeftWhy(String reasons) {
+    return 'Why they were left: $reasons';
+  }
+
+  @override
+  String get diagBgLeftJoin => '; ';
+
+  @override
+  String diagBgLeftBusy(int count) {
+    return 'the AI service was busy ($count)';
+  }
+
+  @override
+  String diagBgLeftUnreachable(int count) {
+    return 'the AI service could not be reached ($count)';
+  }
+
+  @override
+  String diagBgLeftDeadline(int count) {
+    return 'the scan\'s time ran out before the AI service answered ($count)';
+  }
+
+  @override
+  String diagBgLeftPreparing(int count) {
+    return 'the scan\'s time ran out before the photo was sent ($count)';
+  }
+
+  @override
+  String diagBgLeftNotOffered(int count) {
+    return 'not started, the scan\'s time was over ($count)';
+  }
+
+  @override
+  String diagBgLeftOther(int count) {
+    return 'another reason ($count)';
+  }
+
+  @override
   String diagBgRunKilled(String step) {
     return 'Ended by the system before it finished — last step: $step.';
   }
@@ -1422,6 +1480,21 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get diagBgRunWatermarkNone => 'none';
+
+  @override
+  String diagBgScheduleOk(String time) {
+    return 'Next scan: scheduled. iOS holds the request and picks the time. Checked $time.';
+  }
+
+  @override
+  String diagBgScheduleUnavailable(String time) {
+    return 'Next scan: not scheduled. iOS is not taking background requests from Chopstats right now. Checked $time.';
+  }
+
+  @override
+  String diagBgScheduleRefused(String code, String time) {
+    return 'Next scan: not scheduled. iOS refused the request ($code). Checked $time.';
+  }
 
   @override
   String get diagLateImportsTitle => 'Late imports (other apps, glasses)';
@@ -1772,6 +1845,61 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get todayLoadFailed => 'Couldn\'t load today\'s meals.';
+
+  @override
+  String todayScanChecking(int current, int total) {
+    String _temp0 = intl.Intl.pluralLogic(
+      total,
+      locale: localeName,
+      other: 'Checking photos: $current of $total',
+      one: 'Checking 1 photo',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get todayScanKeepOpen => 'Keep Chopstats open.';
+
+  @override
+  String get todayScanCheckingLabel => 'Checking photos. Keep Chopstats open.';
+
+  @override
+  String todayScanCheckingValue(int current, int total) {
+    return '$current of $total';
+  }
+
+  @override
+  String todayScanDone(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count photos checked.',
+      one: '1 photo checked.',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String todayScanWaiting(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count photos are not checked yet.',
+      one: '1 photo is not checked yet.',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String todayScanWaitingReason(int count, String reason) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count photos are not checked yet ($reason).',
+      one: '1 photo is not checked yet ($reason).',
+    );
+    return '$_temp0';
+  }
 
   @override
   String get historyLoadFailed => 'Couldn\'t load your history.';

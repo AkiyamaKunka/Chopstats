@@ -16,6 +16,8 @@ import 'dart:io';
 
 import 'package:calorie_tracker/services/photo/photo_changes.dart'
     show recordLateImportPass;
+import 'package:calorie_tracker/services/photo/scan_status.dart'
+    show PhotoScanStatus;
 import 'package:calorie_tracker/services/photo/watcher.dart';
 import 'package:calorie_tracker/services/settings/app_settings.dart';
 import 'package:flutter/widgets.dart' show AppLifecycleState;
@@ -196,6 +198,54 @@ void main() {
       expect(init(), _wired(r'backgroundScanStuck: backgroundScanStuckNow,'));
     });
 
+    // 2026-11-28: the request for the next background scan used to be made
+    // at a cold start only, and a submit iOS refused was only logged by
+    // the plugin. iOS only: handed a hook or a probe, Android's shell and
+    // Settings would start asking a channel that does not exist there
+    // (background_schedule.dart answers nothing on Android even so, which
+    // background_glue_test proves).
+    test('iOS: the shell keeps the request for the next background scan '
+        'alive and Settings reads what iOS said; Android gets neither', () {
+      expect(
+        init(),
+        _wired(
+          r'keepBackgroundScan: Platform\.isIOS \? \(\) => '
+          r'keepBackgroundScanScheduled\(settings\) : null,',
+        ),
+      );
+      expect(
+        init(),
+        _wired(
+          r'backgroundSchedule: Platform\.isIOS \? lastBackgroundSchedule : '
+          r'null,',
+        ),
+      );
+      final shell = _source('lib/ui/app.dart');
+      expect(shell, _wired(r'backgroundSchedule: s\.backgroundSchedule,'));
+      expect(
+        shell,
+        _wired(
+          r'if \(state == AppLifecycleState\.resumed \|\| '
+          r'state == AppLifecycleState\.hidden \|\| '
+          r'state == AppLifecycleState\.paused\) \{ '
+          r'final keep = s\.keepBackgroundScan;',
+        ),
+      );
+      // The launch and every Watch Camera Roll or look-back edit: what iOS
+      // made of workmanager's submit is asked right behind it.
+      final sync = _body(
+        _source('lib/ui/background_glue.dart'),
+        'Future<void> syncBackgroundScan(AppSettings settings) async {',
+      );
+      expect(
+        sync,
+        _wired(
+          r'await enableBackgroundScan\([^;]*\); '
+          r'await keepBackgroundScanScheduled\(settings\);',
+        ),
+      );
+    });
+
     // G2b: without it every glasses preview copy is analyzed at once.
     test('a glasses preview copy waits once for its full-size one', () {
       expect(init(), _wired(r'previewHold: holdGlassesPreview,'));
@@ -236,14 +286,89 @@ void main() {
     // G1b: without it every late import is read in full, logged or not.
     // Review r171: without liveHeld the live watcher read every photo an
     // iCloud Backup hold kept back again at each library change.
+    // 2026-11-28: the call has two more arguments (Today's "Checking
+    // photos" row, below), so liveHeld no longer closes it; the two this
+    // test is about are pinned as before.
     test('late imports skip photos a meal already names, without a read, '
         'and the live watcher reads nothing while iCloud Backup holds it', () {
       expect(
         init(),
         _wired(
           r'createPhotoIntake\(settings, loggedAssetIds: dao\.loggedAssetIds, '
-          r'liveHeld: \(\) => cloudBackup\?\.holdsPhotosNow \?\? false\)',
+          r'liveHeld: \(\) => cloudBackup\?\.holdsPhotosNow \?\? false,',
         ),
+      );
+    });
+
+    // 2026-11-27: Today read "0 kcal" while the catch-up worked through a
+    // day's photos, and a photo the server refused was dropped without a
+    // word. The row is behaviour-tested on a rig that wires the intake
+    // and the pipeline the way these lines do (test/support/
+    // photo_scan_rig.dart); without them the phone shows no row, or one
+    // that never moves, with every test green.
+    test('Today\'s "Checking photos" row: one status hears the intake\'s '
+        'scans and the pipeline\'s photos, and reaches Today with its Retry',
+        () {
+      expect(init(), _wired(r'final scanStatus = PhotoScanStatus\(\);'));
+      expect('PhotoScanStatus('.allMatches(_source('lib/ui/di.dart')),
+          hasLength(1), reason: 'one status for the engine');
+      final intake = _call(init(), 'createPhotoIntake(');
+      expect(intake, _wired(r'scanStatus: scanStatus,'));
+      // The estimate of what looks unchecked: against the watermark, read
+      // without a reload of the store.
+      expect(
+        intake,
+        _wired(r'checkedThrough: \(\) => cachedBackgroundWatermark\(prefs\)\)'),
+      );
+      // What the pipeline reports of each photo's turn is behaviour-tested
+      // (scan_verdict_test: scanStatusReports).
+      final pipeline = _call(init(), 'PhotoPipeline(');
+      expect(
+        pipeline,
+        _wired(r'scanReports: scanStatusReports\(scanStatus\),'),
+      );
+      // Retry: nothing while iCloud Backup holds the catch-up, else the
+      // catch-up the hold's release runs (pinned above).
+      final retry = _body(
+        init(),
+        'Future<void> retryPhotoScan() async {',
+        indent: '    ',
+      );
+      expect(
+        retry,
+        _wired(
+          r'if \(await cloudBackup\?\.holdsCatchUp\(\) \?\? false\) return; '
+          r'await catchUpAfterHold\(\);',
+        ),
+      );
+      final services = _call(init(), 'UiServices(');
+      expect(
+        services,
+        _wired(r'photoScanStatus: photoLibraryInBuild \? scanStatus : null,'),
+      );
+      expect(
+        services,
+        _wired(
+          r'retryPhotoScan: photoLibraryInBuild \? retryPhotoScan : null,',
+        ),
+      );
+      final today = _call(_source('lib/ui/app.dart'), 'TodayScreen(');
+      expect(today, _wired(r'scanStatus: s\.photoScanStatus,'));
+      expect(today, _wired(r'onRetryScan: s\.retryPhotoScan,'));
+    });
+
+    // The catch-up holds one round over the window scan and the late-import
+    // pass, so the row comes once and goes once (scan_status_test).
+    test('the catch-up holds the row from its start to its end', () {
+      final catchUp = _body(
+        _source('lib/ui/background_glue.dart'),
+        'Future<DateTime?> foregroundCatchUp(',
+      );
+      expect(catchUp, _wired(r'final round = beginCatchUpRound\(intake\);'));
+      expect('round?.end();'.allMatches(catchUp), hasLength(1));
+      expect(
+        catchUp.indexOf('round?.end();'),
+        greaterThan(catchUp.indexOf('await intake.lateImportScan(')),
       );
     });
 
@@ -452,7 +577,15 @@ void main() {
         after,
         _wired(r'pipeline: \(\) async => inFlight\.pipeline = PhotoPipeline\('),
       );
-      expect(after, _wired(r'analyzer: createMultiProviderAnalyzer\(settings\),'));
+      // 2026-11-28: the same analyzer, now sending through the run's own
+      // client (the pin on that argument is with the headless run's, below).
+      expect(
+        after,
+        _wired(
+          r'analyzer: createMultiProviderAnalyzer\(settings, '
+          r'client: inFlight\.traffic\),',
+        ),
+      );
     });
 
     test('the pipeline constructor takes nothing from the assist', () {
@@ -1123,7 +1256,8 @@ void main() {
       for (final later in [
         'final notifier = ReportNotifier(',
         'ok = await headlessBackfillWith(',
-        'createMultiProviderAnalyzer(settings)',
+        // Its second argument is the run's client (2026-11-28).
+        'createMultiProviderAnalyzer(settings,',
       ]) {
         expect(flat.indexOf(later), greaterThan(at), reason: later);
       }
@@ -1156,15 +1290,32 @@ void main() {
       }
     });
 
-    test('the intake passes over what the run deferred too often, and the '
-        'run notes what it defers', () {
+    // 2026-11-28: the call gained two arguments. On iOS the scan counts a
+    // photo a meal already names covered without reading it (it used to be
+    // only the late-import pass that did), and the record hears how many;
+    // Android's run still reads them (scanSkipsLogged: ios, never true).
+    test('the intake passes over what the run deferred too often, skips '
+        'what a meal already names on iOS only, and the run notes what it '
+        'defers', () {
       expect(
         after(),
         _wired(
           r'intake: createPhotoIntake\(settings, onBackfillListed: '
           r'recorder\.listed, passOver: deferred\.passOver, '
-          r'loggedAssetIds: inFlight\.loggedAssetIds\)',
+          r'loggedAssetIds: inFlight\.loggedAssetIds, '
+          r'(//[^\n]*\n\s*)*'
+          r'scanSkipsLogged: ios, '
+          r'onScanSkippedLogged: recorder\.alreadyLogged\)',
         ),
+      );
+      // The app's own engine does not: its scans are as they were.
+      expect(
+        _body(
+          _source('lib/ui/di.dart'),
+          'static Future<AppServices> init(',
+          indent: '  ',
+        ),
+        isNot(contains('scanSkipsLogged')),
       );
       expect(after(), _wired(r'\n\s*deferred: deferred,'));
       expect(
@@ -1205,11 +1356,20 @@ void main() {
       expect(
         launch(),
         _wired(
-          r'return finishWithinGrant\(run, left: startedAt\.add\(runDeadline\)'
+          r'final finished = finishWithinGrant\(run, '
+          r'left: startedAt\.add\(runDeadline\)'
           r'\.difference\(clock\(\)\), recorder: recorder, '
           r'abandon: ios \? inFlight\.abandon : inFlight\.endAtDeadline, '
           r'abandonLimit: ios \? iosAbandonLimit : androidDeadlineWrapUp\);',
         ),
+      );
+      // The Check new photos trial (2026-11-28): only a run the action
+      // started waits for the wrapper and then answers it; every other run
+      // returns the wrapper's own future, as before.
+      expect(
+        launch(),
+        _wired(r'if \(hint == null \|\| !byShortcut\) return finished; '
+            r'return _answerShortcut\(finished,'),
       );
       expect(launch(), isNot(contains('if (!ios) return run;')));
     });
@@ -1262,6 +1422,123 @@ void main() {
       );
       expect(after(), _wired(r'\n\s*finishBy: inFlight\.deadline,'));
       expect(after(), _wired(r'\n\s*photoOffered: inFlight\.offered,'));
+    });
+
+    // 2026-11-28: the run's own meals-changed signal has no listener (it
+    // is another engine), so a meal it saved while the app was open stayed
+    // invisible until the next return to the app. The run leaves a note
+    // and the app looks for it (refresh_signal.dart; the note, the look
+    // and the shell are behaviour-tested in other_engine_meals_test).
+    // Without these lines nothing is ever written or looked for, and that
+    // suite stays green.
+    test('the run leaves word of a meal it saved, and the app looks for it '
+        'after each photo of its scan and from the shell', () {
+      expect(
+        after(),
+        _wired(r'final localStore = LocalNoBackupStore\.platform\(\);'),
+      );
+      expect(
+        after(),
+        _wired(
+          r'onMealSaved: \(\) => '
+          r'unawaited\(noteMealsChangedForOtherEngine\(localStore\)\),',
+        ),
+      );
+      final init = _body(
+        _source('lib/ui/di.dart'),
+        'static Future<AppServices> init(',
+        indent: '  ',
+      );
+      expect(
+        init,
+        _wired(
+          r'final otherEngineMeals = '
+          r'OtherEngineMeals\(store: LocalNoBackupStore\.platform\(\)\); '
+          r'await otherEngineMeals\.prime\(\);',
+        ),
+      );
+      // Primed before the pipeline, the scans and the screens exist.
+      expect(
+        init.indexOf('await otherEngineMeals.prime();'),
+        lessThan(init.indexOf('final pipeline = PhotoPipeline(')),
+      );
+      expect(
+        init,
+        _wired(
+          r'unawaited\(clearDeferredAsset\(photo\.assetId\)\); \} '
+          r'(//[^\n]*\n\s*)*'
+          r'unawaited\(otherEngineMeals\.check\(\)\); \},',
+        ),
+      );
+      // The shell's looks: only while a background scan can exist.
+      expect(
+        init,
+        _wired(
+          r'mealsChangedElsewhere: photoLibraryInBuild \? \(\) => '
+          r'settings\.watcherEnabled \? '
+          r'otherEngineMeals\.check\(force: true\) : '
+          r'Future<bool>\.value\(false\) : null,',
+        ),
+      );
+    });
+
+    // 2026-11-28: a cut with the full window counted whatever the run had
+    // been waiting for, so three hung or busy runs passed a photo over.
+    // The run's deadline now goes by what its analyzer sent for the photo
+    // (RunInFlight.abandon, behaviour-tested in background_glue_test with
+    // a real analyzer). That evidence exists only if the analyzer sends
+    // through the run's client: without this argument nothing is ever
+    // seen as sent, and every cut counts again, with the suite green.
+    test('the run\'s analyzer sends through the run\'s own client, which the '
+        'deadline reads', () {
+      expect(
+        after(),
+        _wired(
+          r'analyzer: createMultiProviderAnalyzer\(settings, '
+          r'client: inFlight\.traffic\),',
+        ),
+      );
+      final inFlight = _body(glue(), 'class RunInFlight {');
+      expect(
+        inFlight,
+        _wired(r'void offered\(\) \{ _offeredAt = _clock\(\); '
+            r'traffic\.next\(\); \}'),
+      );
+      expect(
+        inFlight,
+        _wired(r'final cutAt = traffic\.cutOffAt; '
+            r'final assetId = await pipeline\?\.abandon\(\);'),
+      );
+      expect(
+        inFlight,
+        _wired(
+          r'if \(cutAt == CutOffAt\.preparing && at != null && end != null && '
+          r'end\.difference\(at\) >= window\) \{ '
+          r'await deferred\?\.cutOff\(assetId\); \}',
+        ),
+      );
+    });
+
+    // 2026-11-28: a run's entry said how many photos it left for later,
+    // never why. The reasons are behaviour-tested through the seams
+    // (background_glue_test); these lines hand the seams to the run.
+    test('the run records why each photo was left for later', () {
+      expect(launch(), _wired(r'inFlight\.recorder = recorder;'));
+      final headless = _body(glue(), 'Future<bool> headlessBackfillWith({');
+      expect(
+        headless,
+        _wired(
+          r'released: o\.retryable, '
+          r'left: o\.retryable \? backgroundLeftFor\(o\) : null\);',
+        ),
+      );
+      expect(
+        _body(glue(), 'class RunInFlight {'),
+        _wired(
+          r'final noted = '
+          r'recorder\?\.cutOff\(backgroundLeftForCut\(cutAt\)\);',
+        ),
+      );
     });
   });
 
@@ -1670,6 +1947,58 @@ void main() {
               as LibraryPhotoIntake;
       expect(intake.passOver, same(passOver));
       expect(intake.onBackfillListed, same(listed));
+      // 2026-11-28: off unless asked for (the app's own engine, Android).
+      expect(intake.scanSkipsLogged, isFalse);
+      expect(intake.onScanSkippedLogged, isNull);
+    },
+  );
+
+  test(
+    'createPhotoIntake hands scanSkipsLogged and its count hook to the '
+    'intake',
+    () async {
+      SharedPreferences.setMockInitialValues({});
+      final settings = await AppSettings.load(
+        prefs: await SharedPreferences.getInstance(),
+        keyStore: _Keys(),
+      );
+      void skipped(int n) {}
+      final intake =
+          createPhotoIntake(
+                settings,
+                scanSkipsLogged: true,
+                onScanSkippedLogged: skipped,
+              )
+              as LibraryPhotoIntake;
+      expect(intake.scanSkipsLogged, isTrue);
+      expect(intake.onScanSkippedLogged, same(skipped));
+    },
+  );
+
+  test(
+    'createPhotoIntake hands the scan status and the checked-through mark '
+    'to the intake, and gives it neither unless asked',
+    () async {
+      SharedPreferences.setMockInitialValues({});
+      final settings = await AppSettings.load(
+        prefs: await SharedPreferences.getInstance(),
+        keyStore: _Keys(),
+      );
+      final status = PhotoScanStatus();
+      DateTime? through() => DateTime(2026, 11, 27, 8, 33);
+      final intake =
+          createPhotoIntake(
+                settings,
+                scanStatus: status,
+                checkedThrough: through,
+              )
+              as LibraryPhotoIntake;
+      expect(intake.scanStatus, same(status));
+      expect(intake.checkedThrough, same(through));
+      // The background run's intake reports nothing.
+      final headless = createPhotoIntake(settings) as LibraryPhotoIntake;
+      expect(headless.scanStatus, isNull);
+      expect(headless.checkedThrough, isNull);
     },
   );
 

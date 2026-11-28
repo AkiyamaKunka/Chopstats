@@ -7,6 +7,10 @@ import 'package:calorie_tracker/services/analyzer/platform_decode.dart'
     show imageIOChannelName;
 import 'package:calorie_tracker/services/local_store.dart'
     show localStoreDirName;
+import 'package:calorie_tracker/services/photo/background.dart'
+    show photoBackfillUniqueName;
+import 'package:calorie_tracker/services/photo/background_schedule.dart'
+    show backgroundScheduleChannelName;
 import 'package:calorie_tracker/services/photo/background_time.dart'
     show backgroundTimeChannelName;
 import 'package:calorie_tracker/services/photo/photo_changes.dart'
@@ -587,6 +591,90 @@ void main() {
         .firstMatch(delegate)
         ?.group(0);
     expect(register, contains('BackgroundTimePlugin.register(with:'));
+  });
+
+  // The request iOS holds for the next background scan is counted, and
+  // made again when it is gone, through BackgroundSchedulePlugin.swift
+  // (2026-11-28). A Swift file missing from Runner answers
+  // MissingPluginException, which the Dart side reads as "iOS could not be
+  // asked" and says nothing about: the request would again be made at a
+  // cold start only, with the whole suite green. And the plugin submits
+  // for the one identifier workmanager's launch handler is registered for,
+  // never one Dart names, and never cancels a request.
+  test('the background-schedule plugin is built into Runner, registered, '
+      'and submits only the photo scan\'s own request', () {
+    final ios = '${_appRoot().path}/ios';
+    final swift = File('$ios/Runner/BackgroundSchedulePlugin.swift');
+    expect(swift.existsSync(), isTrue, reason: '${swift.path} missing');
+    final source = swift.readAsStringSync();
+    expect(source, contains('"$backgroundScheduleChannelName"'));
+    // The code, without its comments.
+    final code = source
+        .split('\n')
+        .map((line) => line.replaceFirst(RegExp(r'//.*'), ''))
+        .join('\n');
+    expect(code,
+        contains('let identifier = AppDelegate.photoBackfillIdentifier'));
+    expect(code, isNot(contains('call.arguments')),
+        reason: 'no identifier, delay or anything else from Dart');
+    expect(code, isNot(contains('cancel')),
+        reason: 'it only ever adds a request where there is none');
+    expect('BGTaskScheduler.shared.submit('.allMatches(code), hasLength(1));
+    expect(code, contains('BGAppRefreshTaskRequest(identifier: identifier)'));
+    expect(code, isNot(contains('earliestBeginDate')),
+        reason: 'a request made here has no earliest time to push later');
+
+    final delegate =
+        File('$ios/Runner/AppDelegate.swift').readAsStringSync();
+    expect(
+        delegate,
+        contains('static let photoBackfillIdentifier = '
+            '"$photoBackfillUniqueName"'));
+    expect(
+        _plistStrings(File('$ios/Runner/Info.plist').readAsStringSync(),
+            'BGTaskSchedulerPermittedIdentifiers'),
+        contains(photoBackfillUniqueName));
+    final register = RegExp(
+            r'static func registerAppPlugins\(.*?\n  \}',
+            dotAll: true)
+        .firstMatch(delegate)
+        ?.group(0);
+    expect(register,
+        contains('registrar(forPlugin: "BackgroundSchedulePlugin")'));
+    expect(register, contains('BackgroundSchedulePlugin.register(with:'));
+
+    final pbxproj =
+        File('$ios/Runner.xcodeproj/project.pbxproj').readAsStringSync();
+    final fileRef = RegExp(r'([0-9A-F]{24}) /\* BackgroundSchedulePlugin.swift '
+            r'\*/ = \{isa = PBXFileReference;')
+        .firstMatch(pbxproj)
+        ?.group(1);
+    expect(fileRef, isNotNull, reason: 'no PBXFileReference');
+    expect(_pbxObject(pbxproj, comment: 'Runner', isa: 'PBXGroup'),
+        contains('$fileRef /* BackgroundSchedulePlugin.swift */'),
+        reason: 'not in the Runner group, so its path resolves elsewhere');
+    final buildFile = RegExp(
+            r'([0-9A-F]{24}) /\* BackgroundSchedulePlugin.swift '
+            'in Sources \\*/ = \\{isa = PBXBuildFile; fileRef = $fileRef')
+        .firstMatch(pbxproj)
+        ?.group(1);
+    expect(buildFile, isNotNull, reason: 'no PBXBuildFile');
+    String sourcesOf(String target) {
+      final phaseId = RegExp(r'([0-9A-F]{24}) /\* Sources \*/')
+          .firstMatch(_pbxObject(pbxproj,
+              comment: target, isa: 'PBXNativeTarget'))
+          ?.group(1);
+      expect(phaseId, isNotNull, reason: '$target has no Sources phase');
+      return _pbxObject(pbxproj,
+          id: phaseId!, comment: 'Sources', isa: 'PBXSourcesBuildPhase');
+    }
+
+    expect(
+        sourcesOf('Runner'),
+        contains(
+            '$buildFile /* BackgroundSchedulePlugin.swift in Sources */'));
+    expect(sourcesOf('ShareExtension'),
+        isNot(contains('BackgroundSchedulePlugin')));
   });
 
   // The photo library's change history (PhotoChangesPlugin.swift, design

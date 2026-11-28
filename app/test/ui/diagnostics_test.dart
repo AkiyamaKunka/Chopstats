@@ -809,6 +809,156 @@ void main() {
       expect(find.textContaining('未完成'), findsOneWidget);
     });
 
+    // 2026-11-28, the Check new photos trial: a scan the action started
+    // says so under its time; a scan iOS started says nothing more.
+    testWidgets('a scan Shortcuts started says so, in both languages',
+        (tester) async {
+      final byShortcuts = BackgroundRunRecord(
+          start: t0.add(const Duration(minutes: 5)),
+          end: t0.add(const Duration(minutes: 5, seconds: 12)),
+          platform: 'ios',
+          stage: BackgroundRunStage.done,
+          stopReason: BackgroundStop.done,
+          enumerated: 1,
+          offered: 1,
+          analyzed: 1,
+          saved: 1,
+          trigger: BackgroundTrigger.shortcuts);
+      await pump(tester, [byShortcuts, budget, failed]);
+      expect(find.text('Started by Shortcuts'), findsOneWidget,
+          reason: 'only under the scan the action started');
+      expect(find.byKey(const Key('diagBgRunTrigger')), findsOneWidget);
+      await pump(tester, [byShortcuts, budget], locale: const Locale('zh'));
+      expect(find.text('由「快捷指令」启动'), findsOneWidget);
+    });
+
+    // 2026-11-28 (iOS): the scan no longer reads a photo a meal already
+    // names, so "listed" and "read" drift apart; the card says where the
+    // difference went, and says nothing when there is none.
+    testWidgets('photos already logged and not read again get their own '
+        'line, only when there are any', (tester) async {
+      final skipped = BackgroundRunRecord(
+          start: t0,
+          end: t0.add(const Duration(seconds: 3)),
+          platform: 'ios',
+          stage: BackgroundRunStage.done,
+          stopReason: BackgroundStop.done,
+          enumerated: 5,
+          offered: 1,
+          analyzed: 1,
+          saved: 1,
+          alreadyLogged: 4);
+      await pump(tester, [skipped, budget]);
+      expect(
+          find.text('Photos: 5 listed, 1 read, 1 processed, 1 logged, '
+              '0 left for later'),
+          findsOneWidget);
+      expect(find.text('Already logged, not read again: 4'), findsOneWidget);
+      expect(find.textContaining('Already logged'), findsOneWidget,
+          reason: 'not under the run that skipped none');
+      await pump(tester, [skipped], locale: const Locale('zh'));
+      expect(find.text('之前已记录，不再读取：4'), findsOneWidget);
+    });
+
+    // 2026-11-28: "3 left for later" said nothing about why. On
+    // 2026-11-27 the phone could not answer "why was nothing logged".
+    group('why photos were left for later', () {
+      BackgroundRunRecord left(Map<String, int> why, {int? released}) =>
+          BackgroundRunRecord(
+              start: t0,
+              end: t0.add(const Duration(seconds: 22)),
+              platform: 'ios',
+              stage: BackgroundRunStage.done,
+              stopReason: BackgroundStop.budget,
+              enumerated: 6,
+              offered: 2,
+              analyzed: 1,
+              released: released ?? why.values.fold<int>(0, (a, b) => a + b),
+              left: why);
+
+      testWidgets('each reason with its count, under the counts',
+          (tester) async {
+        await pump(tester, [
+          left({
+            BackgroundLeft.busy: 1,
+            BackgroundLeft.notOffered: 3,
+            BackgroundLeft.deadline: 1,
+          }),
+        ]);
+        expect(
+            find.text('Photos: 6 listed, 2 read, 1 processed, 0 logged, '
+                '5 left for later'),
+            findsOneWidget);
+        final why = find.text('Why they were left: the AI service was busy '
+            '(1); the scan\'s time ran out before the AI service answered '
+            '(1); not started, the scan\'s time was over (3)');
+        expect(why, findsOneWidget);
+        expect(
+            tester.getTopLeft(why).dy,
+            greaterThan(tester
+                .getTopLeft(find.textContaining('5 left for later'))
+                .dy));
+      });
+
+      testWidgets('in Chinese', (tester) async {
+        await pump(
+            tester,
+            [
+              left({
+                BackgroundLeft.unreachable: 2,
+                BackgroundLeft.preparing: 1,
+                BackgroundLeft.other: 1,
+              }),
+            ],
+            locale: const Locale('zh'));
+        expect(
+            find.text('留待之后的原因：连不上 AI 服务（2）；'
+                '照片还没发出，扫描时间就用完了（1）；其他原因（1）'),
+            findsOneWidget);
+      });
+
+      testWidgets('a run that recorded none (every earlier version) gets no '
+          'line', (tester) async {
+        await pump(tester, [left(const {}, released: 2), killed]);
+        expect(find.textContaining('2 left for later'), findsOneWidget);
+        expect(find.textContaining('Why they were left'), findsNothing);
+      });
+
+      test('every reason has its own words, in both languages; one this '
+          'version does not know is "another reason"', () {
+        for (final l in <AppLocalizations>[
+          AppLocalizationsEn(),
+          AppLocalizationsZh(),
+        ]) {
+          final lines = {
+            for (final reason in BackgroundLeft.all)
+              backgroundRunLeftLine(l, left({reason: 4})),
+          };
+          expect(lines, hasLength(BackgroundLeft.all.length));
+          for (final line in lines) {
+            expect(line, contains('4'));
+          }
+          expect(backgroundRunLeftLine(l, left(const {})), isNull);
+          // A later version's reason, next to this version's "other".
+          expect(
+              backgroundRunLeftLine(
+                  l, left({'a_later_reason': 2, BackgroundLeft.other: 1})),
+              backgroundRunLeftLine(l, left({BackgroundLeft.other: 3})));
+        }
+        expect(
+            backgroundRunLeftLine(AppLocalizationsEn(),
+                left({BackgroundLeft.preparing: 1, BackgroundLeft.other: 2})),
+            'Why they were left: the scan\'s time ran out before the photo '
+            'was sent (1); another reason (2)');
+        expect(
+            backgroundRunLeftLine(AppLocalizationsZh(),
+                left({BackgroundLeft.busy: 1, BackgroundLeft.deadline: 1,
+                    BackgroundLeft.notOffered: 2})),
+            '留待之后的原因：AI 服务繁忙（1）；AI 服务还没回复，扫描时间就用完了（1）；'
+            '扫描时间已到，没有开始（2）');
+      });
+    });
+
     testWidgets('only the latest five are listed', (tester) async {
       final runs = [
         for (var i = 0; i < 7; i++)

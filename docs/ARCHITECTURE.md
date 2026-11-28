@@ -137,6 +137,15 @@ against the local database. The automatic path applies a leftover only when
 the model's confidence is at least 0.75. The manual Leftovers flow is the
 fallback and the repair path.
 
+The automatic path can only match a meal that is already logged when the
+leftovers photo is checked. Scans check photos in the order they were taken,
+with one exception: the app's catch-up (at launch and on a return to the app)
+starts with the newest day, and within that day checks screenshots after the
+other photos, so a short visit reaches a photographed meal sooner. A meal that
+exists only as a screenshot (an order confirmation) is therefore logged after
+that day's photos, and leftovers photographed after it and checked in the same
+visit are logged as a meal of their own.
+
 ### Today and History
 
 Today compares the running total with a typical day, which is the median of
@@ -145,6 +154,16 @@ the previous 7 days, so under-logged days do not drag it down. History covers
 and does not vanish, so a broken watcher looks broken. The meal screen draws
 protein, carbs and fat as shares of energy (4, 4 and 9 kcal per gram) and
 updates as you edit.
+
+A photo becomes a meal only when its analysis answers, one photo at a time, so
+a day's backlog used to read as an empty day while the catch-up worked through
+it. While the automatic scan is sending photos that had no verdict yet, Today
+shows a row under the totals ("Checking photos: 3 of 12", "Keep Chopstats
+open."). When photos were let go because the analysis could not be had (the
+server unreachable or busy, a rate limit), the row says how many are not
+checked yet and why, with Retry, which starts the catch-up again. A photo that
+is not food is a photo checked and says nothing. The row is fed by
+`app/lib/services/photo/scan_status.dart`.
 
 ### Tests and CI
 

@@ -35,6 +35,8 @@ import 'package:calorie_tracker/core/shared_generated.dart'
 import 'package:calorie_tracker/l10n/app_localizations.dart';
 import 'package:calorie_tracker/services/assist/clients/lookup_client.dart'
     show LookupRecipient, LookupSupport;
+import 'package:calorie_tracker/services/photo/background_schedule.dart'
+    show BackgroundRefusal, BackgroundSchedule;
 import 'package:calorie_tracker/ui/restaurant_assist_controls.dart';
 import 'package:calorie_tracker/ui/format.dart' show isoDate;
 import 'package:calorie_tracker/ui/screens/leftover_flow.dart';
@@ -404,6 +406,41 @@ void main() {
             expect(tester.takeException(), isNull);
           }, variant: TargetPlatformVariant.only(platform));
         }
+
+        // 2026-11-28: iOS holds no request for the next background scan,
+        // so the row says 'Not scheduled' / '未安排' where the last run's
+        // time was. The title must still read in full beside it.
+        testWidgets('background scan row (not scheduled), $lang at $width pt',
+            (tester) async {
+          _phone(tester, width);
+          await tester.pumpWidget(_app(
+              Locale(lang),
+              SettingsScreen(
+                settings: FakeSettings(apiKey: 'k', watcherEnabled: true),
+                analyzer: FakeAnalyzer(),
+                dao: FakeDao(),
+                requestPhotoPermission: () async => true,
+                lastBackgroundScan: () async => DateTime.now(),
+                backgroundRefreshEnabled: () async => true,
+                backgroundSchedule: () async => BackgroundSchedule(
+                    at: DateTime.now(),
+                    scheduled: false,
+                    refusal: BackgroundRefusal.unavailable),
+              ),
+              theme: iphoneTheme));
+          await tester.pumpAndSettle();
+          final row = find.byKey(const Key('backgroundScanRow'));
+          await tester.ensureVisible(row);
+          await tester.pumpAndSettle();
+          expect(
+              find.descendant(
+                  of: row,
+                  matching: find.text(lang == 'zh' ? '未安排' : 'Not scheduled')),
+              findsOneWidget);
+          expect(_ellipsised(tester, row), isEmpty,
+              reason: 'the background scan row must read in full');
+          expect(tester.takeException(), isNull);
+        }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
 
         // Round 4b (2026-10-08): a NEW meal's empty macro fields show
         // their labels resting inside a third of the row, and

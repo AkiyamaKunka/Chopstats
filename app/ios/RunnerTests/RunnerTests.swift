@@ -1,3 +1,4 @@
+import BackgroundTasks
 import CryptoKit
 import CoreLocation
 import CoreVideo
@@ -1225,6 +1226,108 @@ class BackgroundTimePluginTests: XCTestCase {
   func testUnknownMethodIsNotImplemented() {
     let reply = call(BackgroundTimePlugin(), "nope", nil)
     XCTAssertTrue((reply as AnyObject?) === FlutterMethodNotImplemented)
+  }
+}
+
+/// The background-schedule channel (Runner/BackgroundSchedulePlugin.swift):
+/// how many requests iOS holds for the photo scan's BGAppRefreshTask, and
+/// one more when Dart asks (lib/services/photo/background_schedule.dart).
+/// The simulator refuses every submit, so the scheduler is a fake here; the
+/// real one is asked for its count only.
+class BackgroundSchedulePluginTests: XCTestCase {
+  /// BGTaskScheduler as the plugin sees it.
+  private final class FakeScheduler {
+    var held: [String] = []
+    var submitted: [String] = []
+    var refusal: Error?
+
+    var queue: BackgroundSchedulePlugin.Queue {
+      BackgroundSchedulePlugin.Queue(
+        pending: { done in done(self.held) },
+        submit: { identifier in
+          if let refusal = self.refusal { throw refusal }
+          self.submitted.append(identifier)
+          self.held.append(identifier)
+        })
+    }
+  }
+
+  /// One channel call; the reply must arrive on the main thread.
+  private func call(
+    _ plugin: BackgroundSchedulePlugin, _ method: String, _ args: Any? = nil
+  ) -> Any? {
+    let replied = expectation(description: method)
+    var reply: Any? = "unset"
+    plugin.handle(FlutterMethodCall(methodName: method, arguments: args)) {
+      XCTAssertTrue(Thread.isMainThread)
+      reply = $0
+      replied.fulfill()
+    }
+    wait(for: [replied], timeout: 5)
+    return reply
+  }
+
+  func testChannelNameMatchesDart() {
+    XCTAssertEqual(BackgroundSchedulePlugin.channelName, "dev.calorietracker/bgschedule")
+  }
+
+  func testPendingCountsOnlyThePhotoScansRequests() {
+    let scheduler = FakeScheduler()
+    let plugin = BackgroundSchedulePlugin(queue: scheduler.queue)
+    XCTAssertEqual(call(plugin, "pending") as? Int, 0)
+    scheduler.held = ["some.other.task", AppDelegate.photoBackfillIdentifier]
+    XCTAssertEqual(call(plugin, "pending") as? Int, 1)
+    XCTAssertTrue(scheduler.submitted.isEmpty, "asking never submits")
+  }
+
+  func testSubmitIsForThePhotoScansIdentifierWhateverDartSends() {
+    let scheduler = FakeScheduler()
+    let plugin = BackgroundSchedulePlugin(queue: scheduler.queue)
+    XCTAssertNil(call(plugin, "submit", ["identifier": "some.other.task", "delay": 3600]))
+    XCTAssertEqual(scheduler.submitted, [AppDelegate.photoBackfillIdentifier])
+    XCTAssertEqual(call(plugin, "pending") as? Int, 1)
+  }
+
+  func testARefusedSubmitRepliesTheDomainAndCodeIOSThrew() {
+    let scheduler = FakeScheduler()
+    scheduler.refusal = BGTaskScheduler.Error(.unavailable)
+    let plugin = BackgroundSchedulePlugin(queue: scheduler.queue)
+    let reply = call(plugin, "submit") as? [String: Any]
+    XCTAssertEqual(reply?["domain"] as? String, "BGTaskSchedulerErrorDomain")
+    XCTAssertEqual(reply?["code"] as? Int, 1)
+    XCTAssertEqual(call(plugin, "pending") as? Int, 0)
+    // Any other error keeps its own domain and code.
+    scheduler.refusal = NSError(domain: "SomeOtherDomain", code: 7)
+    let other = call(plugin, "submit") as? [String: Any]
+    XCTAssertEqual(other?["domain"] as? String, "SomeOtherDomain")
+    XCTAssertEqual(other?["code"] as? Int, 7)
+  }
+
+  /// The codes Dart names (BackgroundRefusal.of).
+  func testTheErrorCodesAreTheOnesDartNames() {
+    XCTAssertEqual(BGTaskScheduler.Error.errorDomain, "BGTaskSchedulerErrorDomain")
+    XCTAssertEqual(BGTaskScheduler.Error.Code.unavailable.rawValue, 1)
+    XCTAssertEqual(BGTaskScheduler.Error.Code.tooManyPendingTaskRequests.rawValue, 2)
+    XCTAssertEqual(BGTaskScheduler.Error.Code.notPermitted.rawValue, 3)
+  }
+
+  func testUnknownMethodIsNotImplemented() {
+    var reply: Any? = "unset"
+    BackgroundSchedulePlugin(queue: FakeScheduler().queue)
+      .handle(FlutterMethodCall(methodName: "cancel", arguments: nil)) { reply = $0 }
+    XCTAssertTrue((reply as AnyObject?) === FlutterMethodNotImplemented)
+  }
+
+  /// Hosted in the running app, so the scheduler is real: it answers a
+  /// count, and the identifier is one this build may schedule.
+  func testTheRealSchedulerAnswersACountForAPermittedIdentifier() {
+    let count = call(BackgroundSchedulePlugin(), "pending") as? Int
+    XCTAssertNotNil(count)
+    XCTAssertGreaterThanOrEqual(count ?? -1, 0)
+    let permitted =
+      Bundle.main.object(forInfoDictionaryKey: "BGTaskSchedulerPermittedIdentifiers")
+      as? [String]
+    XCTAssertEqual(permitted?.contains(AppDelegate.photoBackfillIdentifier), true)
   }
 }
 
@@ -2694,5 +2797,346 @@ class CloudQueryPlanTests: XCTestCase {
     XCTAssertEqual(plan.fetched(found: true, accountChanged: true), .none)
     plan.watch()
     XCTAssertEqual(plan.fetched(found: true), .start)
+  }
+}
+
+/// The Check new photos trial action (Runner/CheckNewPhotosIntent.swift,
+/// 2026-11-28): what it says for each way a check ends, in both languages;
+/// that it starts nothing while the app is on screen; and that it waits
+/// for the answer of the run it started and of no other.
+@available(iOS 16.0, *)
+class CheckNewPhotosTests: XCTestCase {
+  private var suite = ""
+  private var defaults: UserDefaults!
+
+  override func setUp() {
+    super.setUp()
+    suite = "CheckNewPhotosTests.\(UUID().uuidString)"
+    defaults = UserDefaults(suiteName: suite)
+  }
+
+  override func tearDown() {
+    defaults.removePersistentDomain(forName: suite)
+    super.tearDown()
+  }
+
+  /// The app and the system, faked: [answer] is what the started run
+  /// leaves (given the action's hint) once the action has slept
+  /// [answerAfterSleeps] times.
+  private final class Rig {
+    var state: UIApplication.State = .background
+    var ready = true
+    var now = Date(timeIntervalSince1970: 1_800_000_000)
+    var starts = 0
+    var sleeps = 0
+    var answerAfterSleeps = 0
+    var answer: ((String) -> String)?
+    let defaults: UserDefaults
+    init(_ defaults: UserDefaults) { self.defaults = defaults }
+
+    private func deliver() {
+      guard let answer = answer, starts > 0, sleeps >= answerAfterSleeps,
+        let hint = defaults.string(forKey: CheckNewPhotos.hintDefaultsKey)
+      else { return }
+      defaults.set(answer(hint), forKey: CheckNewPhotos.resultDefaultsKey)
+      self.answer = nil
+    }
+
+    var env: CheckNewPhotos.Environment {
+      CheckNewPhotos.Environment(
+        appState: { self.state },
+        defaults: defaults,
+        now: { self.now },
+        dispatcherReady: { self.ready },
+        startRun: {
+          self.starts += 1
+          self.deliver()
+        },
+        sleep: { seconds in
+          self.sleeps += 1
+          self.now = self.now.addingTimeInterval(seconds)
+          self.deliver()
+          return true
+        },
+        uptime: { 1.25 })
+    }
+  }
+
+  private func result(
+    hint: String, saved: Int = 0, left: Int = 0, stop: String = "done", sharing: Bool? = true
+  ) -> String {
+    var json: [String: Any] = [
+      "hint": hint, "at": "2027-01-15T08:00:05.000Z", "saved": saved, "left": left, "stop": stop,
+    ]
+    if let sharing = sharing { json["sharing"] = sharing }
+    let data = try! JSONSerialization.data(withJSONObject: json)
+    return String(data: data, encoding: .utf8)!
+  }
+
+  private func english(_ outcome: CheckNewPhotos.Outcome) -> String {
+    var line = outcome.line
+    line.locale = Locale(identifier: "en")
+    return String(localized: line)
+  }
+
+  private func chinese(_ outcome: CheckNewPhotos.Outcome) -> String {
+    var line = outcome.line
+    line.locale = Locale(identifier: "zh-Hans")
+    return String(localized: line)
+  }
+
+  private let every: [CheckNewPhotos.Outcome] = [
+    .appOpen, .anotherCheck, .notReady, .logged(meals: 1, waiting: 0),
+    .logged(meals: 3, waiting: 0), .logged(meals: 1, waiting: 2), .logged(meals: 2, waiting: 1),
+    .nothingNew, .waiting(photos: 1), .waiting(photos: 4), .watcherOff, .noAI, .needsHttps,
+    .paused, .sharingStopped, .noPhotoAccess, .outOfTime, .failed,
+  ]
+
+  func testEachOutcomeHasItsEnglishLine() {
+    let want: [String] = [
+      "Chopstats is open and checks your photos itself.",
+      "Another photo check is running. Try again in a moment.",
+      "Open Chopstats once, then try again.",
+      "Logged 1 meal.",
+      "Logged 3 meals.",
+      "Logged 1 meal. More photos wait for the next check.",
+      "Logged 2 meals. More photos wait for the next check.",
+      "No new meal photos.",
+      "No meal logged yet: 1 photo waits for the next check.",
+      "No meal logged yet: 4 photos wait for the next check.",
+      "Watch Camera Roll is off in Chopstats, so no photo was checked.",
+      "Chopstats has no AI service set up yet, so nothing was sent.",
+      "Your server's address in Chopstats must start with https://, so nothing was sent.",
+      "Automatic analysis is paused in Chopstats. Open it to see why.",
+      "Sharing with your AI service is stopped in Chopstats, so nothing was sent.",
+      "Chopstats may not read your photos. Allow access in iPhone Settings.",
+      "The check ran out of time. Photos left wait for the next check.",
+      "The check stopped early. See Recent background scans in Chopstats.",
+    ]
+    XCTAssertEqual(every.count, want.count)
+    for (outcome, line) in zip(every, want) {
+      XCTAssertEqual(english(outcome), line, outcome.name)
+    }
+  }
+
+  func testEachOutcomeHasItsChineseLine() {
+    let want: [String] = [
+      "筷拍已打开，会自己检查照片。",
+      "另一次照片检查正在进行，请稍后再试。",
+      "请先打开一次筷拍，然后再试。",
+      "已记录 1 餐。",
+      "已记录 3 餐。",
+      "已记录 1 餐，还有照片留待下一次检查。",
+      "已记录 2 餐，还有照片留待下一次检查。",
+      "没有新的餐食照片。",
+      "还没有记录餐食：1 张照片留待下一次检查。",
+      "还没有记录餐食：4 张照片留待下一次检查。",
+      "筷拍的「监控相册」已关闭，没有检查照片。",
+      "筷拍还没有设置 AI 服务，没有发送任何内容。",
+      "筷拍里你的服务器地址必须以 https:// 开头，没有发送任何内容。",
+      "筷拍的自动分析已暂停，打开筷拍查看原因。",
+      "筷拍已停止向你的 AI 服务发送内容，没有发送任何照片。",
+      "筷拍没有照片访问权限，请在 iPhone 的「设置」中允许。",
+      "这次检查的时间用完了，剩下的照片留待下一次检查。",
+      "这次检查提前停止了，详见筷拍的「最近的后台扫描」。",
+    ]
+    XCTAssertEqual(every.count, want.count)
+    for (outcome, line) in zip(every, want) {
+      XCTAssertEqual(chinese(outcome), line, outcome.name)
+    }
+  }
+
+  func testTheActionsNameIsLocalizedToo() {
+    var title = CheckNewPhotosIntent.title
+    title.locale = Locale(identifier: "zh-Hans")
+    XCTAssertEqual(String(localized: title), "检查新照片")
+    title.locale = Locale(identifier: "en")
+    XCTAssertEqual(String(localized: title), "Check new photos")
+  }
+
+  func testTheRunsAnswerBecomesAnOutcome() {
+    func outcome(_ saved: Int, _ left: Int, _ stop: String, sharing: Bool? = true)
+      -> CheckNewPhotos.Outcome
+    {
+      CheckNewPhotos.outcome(
+        for: CheckNewPhotos.RunResult(hint: "h", saved: saved, left: left, stop: stop, sharing: sharing))
+    }
+    XCTAssertEqual(CheckNewPhotos.outcome(for: nil), .outOfTime, "no answer in time")
+    XCTAssertEqual(outcome(1, 0, "done"), .logged(meals: 1, waiting: 0))
+    XCTAssertEqual(outcome(2, 3, "budget"), .logged(meals: 2, waiting: 3), "meals first")
+    XCTAssertEqual(outcome(0, 0, "done"), .nothingNew)
+    XCTAssertEqual(outcome(0, 2, "done"), .waiting(photos: 2))
+    XCTAssertEqual(outcome(0, 0, "watcher_off"), .watcherOff)
+    XCTAssertEqual(outcome(0, 0, "no_key"), .noAI)
+    XCTAssertEqual(outcome(0, 0, "needs_https"), .needsHttps)
+    XCTAssertEqual(outcome(0, 0, "no_permission"), .noPhotoAccess)
+    XCTAssertEqual(outcome(0, 0, "paused"), .paused)
+    XCTAssertEqual(outcome(0, 3, "done", sharing: false), .sharingStopped)
+    XCTAssertEqual(outcome(0, 0, "watcher_off", sharing: false), .watcherOff, "the guard first")
+    XCTAssertEqual(outcome(0, 1, "budget"), .outOfTime)
+    XCTAssertEqual(outcome(0, 0, "error:PlatformException", sharing: nil), .failed)
+    XCTAssertEqual(outcome(0, 0, "error:MissingPluginException", sharing: false), .failed)
+    XCTAssertEqual(outcome(0, 0, "paused", sharing: false), .paused, "nothing was read")
+    XCTAssertEqual(outcome(0, 2, "budget", sharing: false), .sharingStopped)
+    XCTAssertEqual(outcome(0, 0, "system_stop"), .failed)
+    XCTAssertEqual(outcome(0, 0, "a_later_reason"), .failed)
+
+    let parsed = CheckNewPhotos.parseResult(result(hint: "h", saved: 1, left: 2, stop: "budget"))
+    XCTAssertEqual(
+      parsed, CheckNewPhotos.RunResult(hint: "h", saved: 1, left: 2, stop: "budget", sharing: true))
+    XCTAssertNil(CheckNewPhotos.parseResult(nil))
+    XCTAssertNil(CheckNewPhotos.parseResult("not json"))
+    XCTAssertNil(CheckNewPhotos.parseResult("{\"saved\": 1}"), "no hint, no stop")
+    XCTAssertNil(CheckNewPhotos.parseResult(result(hint: "h", sharing: nil))?.sharing)
+  }
+
+  @MainActor
+  func testOnScreenItStartsNothingAndAnswersAtOnce() async {
+    CheckNewPhotos.checking = false
+    let rig = Rig(defaults)
+    rig.state = .active
+    rig.answer = { self.result(hint: $0, saved: 1) }
+    defaults.set("an older answer", forKey: CheckNewPhotos.resultDefaultsKey)
+    let outcome = await CheckNewPhotos.check(rig.env)
+    XCTAssertEqual(outcome, .appOpen)
+    XCTAssertEqual(outcome.meals, 0)
+    XCTAssertEqual(rig.starts, 0, "no run started")
+    XCTAssertEqual(rig.sleeps, 0, "no wait")
+    XCTAssertNil(defaults.string(forKey: CheckNewPhotos.hintDefaultsKey), "no hint for a run")
+    XCTAssertEqual(defaults.string(forKey: CheckNewPhotos.resultDefaultsKey), "an older answer")
+    XCTAssertEqual(english(outcome), "Chopstats is open and checks your photos itself.")
+  }
+
+  @MainActor
+  func testInTheBackgroundItStartsTheScanAndWaitsForItsAnswer() async {
+    for state in [UIApplication.State.background, .inactive] {
+      CheckNewPhotos.checking = false
+      defaults.removeObject(forKey: CheckNewPhotos.hintDefaultsKey)
+      let rig = Rig(defaults)
+      rig.state = state
+      rig.answerAfterSleeps = 3
+      rig.answer = { self.result(hint: $0, saved: 1) }
+      let started = rig.now
+      let outcome = await CheckNewPhotos.check(rig.env)
+      XCTAssertEqual(outcome, .logged(meals: 1, waiting: 0))
+      XCTAssertEqual(outcome.meals, 1, "the intent's value")
+      XCTAssertEqual(rig.starts, 1)
+      XCTAssertEqual(rig.sleeps, 3, "polled every half second until it came")
+      let hint = defaults.string(forKey: CheckNewPhotos.hintDefaultsKey)
+      XCTAssertEqual(hint, CheckNewPhotos.iso(started))
+      XCTAssertEqual(CheckNewPhotos.parseInstant(hint ?? ""), started, "Dart reads this format")
+      XCTAssertFalse(CheckNewPhotos.checking)
+    }
+  }
+
+  @MainActor
+  func testAnAnswerLeftByAnotherRunIsNotThisChecksAndItStopsAt25Seconds() async {
+    CheckNewPhotos.checking = false
+    let rig = Rig(defaults)
+    rig.answer = { _ in self.result(hint: "2027-01-15T07:59:00.000Z", saved: 2) }
+    let started = rig.now
+    let outcome = await CheckNewPhotos.check(rig.env)
+    XCTAssertEqual(outcome, .outOfTime)
+    XCTAssertEqual(rig.starts, 1)
+    XCTAssertEqual(rig.now.timeIntervalSince(started), 25, accuracy: 0.001)
+    XCTAssertEqual(rig.sleeps, 50)
+  }
+
+  @MainActor
+  func testAnOlderAnswerIsClearedBeforeTheRunStarts() async {
+    CheckNewPhotos.checking = false
+    let rig = Rig(defaults)
+    defaults.set(result(hint: "whatever", saved: 5), forKey: CheckNewPhotos.resultDefaultsKey)
+    rig.answerAfterSleeps = 1
+    rig.answer = { self.result(hint: $0, saved: 0, left: 0, stop: "watcher_off") }
+    let outcome = await CheckNewPhotos.check(rig.env)
+    XCTAssertEqual(outcome, .watcherOff)
+    XCTAssertEqual(
+      english(outcome), "Watch Camera Roll is off in Chopstats, so no photo was checked.")
+  }
+
+  @MainActor
+  func testWithoutAStoredDispatcherItStartsNothing() async {
+    CheckNewPhotos.checking = false
+    let rig = Rig(defaults)
+    rig.ready = false
+    let outcome = await CheckNewPhotos.check(rig.env)
+    XCTAssertEqual(outcome, .notReady)
+    XCTAssertEqual(rig.starts, 0)
+    XCTAssertNil(defaults.string(forKey: CheckNewPhotos.hintDefaultsKey))
+  }
+
+  @MainActor
+  func testARunStillGoingOrACheckStillWaitingIsAnotherCheck() async {
+    let rig = Rig(defaults)
+    func runs(start: Date, finished: Bool) {
+      var entry: [String: Any] = ["start": "\(CheckNewPhotos.iso(start).dropLast())456Z", "platform": "ios"]
+      if finished {
+        entry["end"] = CheckNewPhotos.iso(start.addingTimeInterval(10))
+        entry["stop"] = "done"
+      }
+      let data = try! JSONSerialization.data(withJSONObject: [entry])
+      defaults.set(String(data: data, encoding: .utf8)!, forKey: CheckNewPhotos.runsDefaultsKey)
+    }
+    CheckNewPhotos.checking = false
+    runs(start: rig.now.addingTimeInterval(-5), finished: false)
+    var outcome = await CheckNewPhotos.check(rig.env)
+    XCTAssertEqual(outcome, .anotherCheck, "a background run began 5 s ago and has not ended")
+    XCTAssertEqual(rig.starts, 0)
+
+    runs(start: rig.now.addingTimeInterval(-60), finished: false)
+    XCTAssertFalse(
+      CheckNewPhotos.runStillGoing(in: defaults, now: rig.now), "a minute old: iOS stopped it")
+    runs(start: rig.now.addingTimeInterval(-5), finished: true)
+    XCTAssertFalse(CheckNewPhotos.runStillGoing(in: defaults, now: rig.now), "it ended")
+
+    CheckNewPhotos.checking = true
+    outcome = await CheckNewPhotos.check(rig.env)
+    XCTAssertEqual(outcome, .anotherCheck, "this action's own check is still waiting")
+    XCTAssertEqual(rig.starts, 0)
+    CheckNewPhotos.checking = false
+  }
+
+  @MainActor
+  func testEachCheckLeavesOneTrialLogEntry() async throws {
+    CheckNewPhotos.checking = false
+    let rig = Rig(defaults)
+    rig.state = .active
+    _ = await CheckNewPhotos.check(rig.env)
+    rig.state = .background
+    rig.now = rig.now.addingTimeInterval(60)
+    rig.answer = { self.result(hint: $0, saved: 2) }
+    _ = await CheckNewPhotos.check(rig.env)
+    let raw = try XCTUnwrap(defaults.string(forKey: CheckNewPhotos.trialLogDefaultsKey))
+    let log = try XCTUnwrap(
+      JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [[String: Any]])
+    XCTAssertEqual(log.count, 2, "one entry per check, rewritten at its end")
+    XCTAssertEqual(log[0]["state"] as? String, "background")
+    XCTAssertEqual(log[0]["outcome"] as? String, "logged")
+    XCTAssertEqual(log[0]["meals"] as? Int, 2)
+    XCTAssertEqual(log[0]["uptime_s"] as? Double, 1.3)
+    XCTAssertEqual(log[1]["state"] as? String, "active")
+    XCTAssertEqual(log[1]["outcome"] as? String, "app_open")
+  }
+
+  func testDartsInstantsAreRead() {
+    let want = Date(timeIntervalSince1970: 1_800_000_000.123)
+    for text in [
+      "2027-01-15T08:00:00.123Z", "2027-01-15T08:00:00.123456Z",
+    ] {
+      let date = CheckNewPhotos.parseInstant(text)
+      XCTAssertNotNil(date, text)
+      XCTAssertEqual(date?.timeIntervalSince1970 ?? 0, want.timeIntervalSince1970, accuracy: 0.001, text)
+    }
+    XCTAssertEqual(
+      CheckNewPhotos.parseInstant("2027-01-15T08:00:00Z")?.timeIntervalSince1970, 1_800_000_000)
+    XCTAssertNil(CheckNewPhotos.parseInstant("yesterday"))
+  }
+
+  func testTheProcessUptimeIsRead() {
+    let uptime = CheckNewPhotos.processUptime()
+    XCTAssertNotNil(uptime)
+    XCTAssertGreaterThan(uptime ?? -1, 0)
+    XCTAssertLessThan(uptime ?? .infinity, 24 * 3600, "this test process, not the system")
   }
 }

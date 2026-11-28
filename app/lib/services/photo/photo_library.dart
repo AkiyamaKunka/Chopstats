@@ -27,6 +27,50 @@ abstract class LibraryAsset {
   Future<Uint8List?> originBytes();
 }
 
+/// A [LibraryAsset] whose library can say that it is a screenshot. Its own
+/// interface, not a [LibraryAsset] member: that one has a dozen test fakes,
+/// and only the app's catch-up asks (LibraryPhotoIntake.backfillScan checks
+/// the newest day's other photos before its screenshots).
+abstract class ScreenshotMarked {
+  /// The library marks this image as a screenshot.
+  bool get isScreenshot;
+}
+
+/// iOS's PHAssetMediaSubtypePhotoScreenshot, a bit of PHAsset.mediaSubtypes,
+/// which photo_manager hands on unchanged as AssetEntity.subtype (3.10.0,
+/// PMConvertUtils.m). Always 0 on Android.
+const int iosScreenshotSubtype = 1 << 2;
+
+/// Whether [relativePath] names a folder called Screenshots (or
+/// Screenshot), in any case: where Android keeps the screenshots the user
+/// takes (Environment.DIRECTORY_SCREENSHOTS, under Pictures/ or DCIM/ by
+/// maker). photo_manager gives each image's MediaStore RELATIVE_PATH there
+/// (below Android 10 its parent folder's path), and null on iOS. Android's
+/// library has no screenshot mark of its own; a maker that names the
+/// folder otherwise gets no screenshots told apart, which only keeps the
+/// scan's order as it was.
+@visibleForTesting
+bool inScreenshotsFolder(String? relativePath) {
+  if (relativePath == null) return false;
+  for (final part in relativePath.split('/')) {
+    final name = part.toLowerCase();
+    if (name == 'screenshots' || name == 'screenshot') return true;
+  }
+  return false;
+}
+
+/// Whether the library marks [asset] as a screenshot. False wherever it
+/// cannot say (a test fake that is not [ScreenshotMarked]); then scans
+/// keep their order. Never throws.
+bool isScreenshotAsset(LibraryAsset asset) {
+  try {
+    return asset is ScreenshotMarked &&
+        (asset as ScreenshotMarked).isScreenshot;
+  } catch (_) {
+    return false;
+  }
+}
+
 abstract class PhotoLibrary {
   /// Request read access; limited/partial grants count as access.
   Future<bool> requestPermission();
@@ -113,12 +157,17 @@ abstract class AssetLocationSource {
   Future<({double latitude, double longitude})?> assetLatLng(String assetId);
 }
 
-class _PhotoManagerAsset implements LibraryAsset {
+class _PhotoManagerAsset implements LibraryAsset, ScreenshotMarked {
   _PhotoManagerAsset(this._entity);
   final AssetEntity _entity;
 
   @override
   String get id => _entity.id;
+
+  @override
+  bool get isScreenshot =>
+      _entity.subtype & iosScreenshotSubtype != 0 ||
+      inScreenshotsFolder(_entity.relativePath);
 
   @override
   DateTime get createDateTime => _entity.createDateTime;
@@ -129,6 +178,11 @@ class _PhotoManagerAsset implements LibraryAsset {
   @override
   Future<Uint8List?> originBytes() => _entity.originBytes;
 }
+
+/// [entity] as the scans see it (tests: what the library says of an
+/// asset, without a platform channel).
+@visibleForTesting
+LibraryAsset libraryAssetOf(AssetEntity entity) => _PhotoManagerAsset(entity);
 
 /// Whether the app may read the photo library at all (full or limited),
 /// asked WITHOUT a prompt; null when the platform cannot say. The background

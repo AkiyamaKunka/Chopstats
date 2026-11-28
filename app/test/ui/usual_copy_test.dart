@@ -205,8 +205,19 @@ final _placeholderRe = RegExp(r'\{(\w+)\}');
 /// mealGroupSummaryBody); and the Edit meal note lane's 31: the note
 /// section, its changes card and replies, the unsent-note question and
 /// the notes kept on a meal (mealNoteHeader … mealNoteRemoveLabel), and
-/// the consent update's note line (aiConsentUpdateLeadMealNote).
-const _keyCount = 1007;
+/// the consent update's note line (aiConsentUpdateLeadMealNote); and the
+/// background-scan robustness lane's 15 (2026-11-28): Settings' Not
+/// scheduled and its two footer lines (backgroundScanNotScheduled,
+/// …Unavailable, …Refused), Recent background scans' Next scan line
+/// (diagBgScheduleOk, …Unavailable, …Refused), its count of photos a
+/// scan did not read again (diagBgRunAlreadyLogged), and why photos were
+/// left for later (diagBgRunLeftWhy, diagBgLeftJoin and the six
+/// diagBgLeft* reasons); and the seven of Today's photo-scan row
+/// (todayScanChecking, todayScanKeepOpen, todayScanCheckingLabel,
+/// todayScanCheckingValue, todayScanDone, todayScanWaiting,
+/// todayScanWaitingReason); and the Check new photos trial's line on a
+/// scan Shortcuts started (diagBgRunByShortcuts).
+const _keyCount = 1030;
 
 Directory _appRoot() {
   var dir = Directory.current;

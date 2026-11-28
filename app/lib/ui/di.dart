@@ -33,8 +33,11 @@ import '../services/backup/cloud_backup_channel.dart';
 import '../services/backup/save_file_channel.dart' show takeLateSaveResult;
 import '../services/nl/executor.dart';
 import '../services/garmin_client.dart';
+import '../services/local_store.dart' show LocalNoBackupStore;
 import '../services/photo/background_restriction.dart'
     show androidBackgroundAllowed;
+import '../services/photo/background_schedule.dart'
+    show lastBackgroundSchedule;
 import '../services/photo/background_time.dart';
 import '../services/photo/deferred_assets.dart'
     show clearDeferredAsset, holdGlassesPreview;
@@ -48,6 +51,7 @@ import '../services/photo/photo_hash.dart' show originalBytesMd5;
 import '../services/photo/origin_cache.dart' show pruneOriginCacheAtLaunch;
 import '../services/photo/photo_library.dart';
 import '../services/photo/photo_location.dart';
+import '../services/photo/scan_status.dart' show PhotoScanStatus;
 import '../services/photo/share_intake.dart';
 import '../services/places/places.dart' show MapKitPlaces;
 import '../services/photo/watcher.dart';
@@ -174,9 +178,16 @@ class AppServices {
     // While iCloud Backup holds the automatic intake the live watcher reads
     // no photo: the pipeline would let each one go untouched (intakeHeld
     // below), and the scan would read it again at every library change.
+    // Today's "Checking photos" row (scan_status.dart) hears each scan from
+    // the intake and each photo's turn from the pipeline below. Which
+    // photos look unchecked is judged against the background watermark as
+    // this engine last read or wrote it (cachedBackgroundWatermark).
+    final scanStatus = PhotoScanStatus();
     final photoIntake = createPhotoIntake(settings,
         loggedAssetIds: dao.loggedAssetIds,
-        liveHeld: () => cloudBackup?.holdsPhotosNow ?? false);
+        liveHeld: () => cloudBackup?.holdsPhotosNow ?? false,
+        scanStatus: scanStatus,
+        checkedThrough: () => cachedBackgroundWatermark(prefs));
     final shareIntake = createShareIntake(settings);
     // Android: "show me that meal" (meal_reveal.dart), from the View on a
     // shared photo's snackbar and a tap on a Logged meals card; the shell
@@ -300,6 +311,15 @@ class AppServices {
       }
     }());
 
+    // A meal a background run saves while the app is open reaches no
+    // listener here: that run is another engine, with its own signal. It
+    // leaves a note instead, which this engine looks for after each photo
+    // of its own scan (below) and from the shell (refresh_signal.dart).
+    // Primed now, before any screen reads the meals.
+    final otherEngineMeals =
+        OtherEngineMeals(store: LocalNoBackupStore.platform());
+    await otherEngineMeals.prime();
+
     // Photo pipeline glue (spec §2.3/§3/§6): intake streams → md5 → reserve
     // → analyze → save/skip/fail, notification-style snackbar on save.
     // Worded HERE, in the app language read live at each call, so a
@@ -346,6 +366,8 @@ class AppServices {
         // corrected, meal for it. The catch-up below offers it again once
         // the hold ends.
         intakeHeld: () => cloudBackup?.holdsPhotosNow ?? false,
+        // Today's "Checking photos" row hears each automatic photo's turn.
+        scanReports: scanStatusReports(scanStatus),
         // A photo the background run kept deferring is forgotten once it
         // has a verdict here. 'Already logged' was settled by an earlier
         // run, which forgot it then.
@@ -353,6 +375,9 @@ class AppServices {
           if (!o.retryable && o.kind != PhotoOutcomeKind.alreadyTracked) {
             unawaited(clearDeferredAsset(photo.assetId));
           }
+          // The background run may have saved a meal while this photo was
+          // being analyzed here (at most one look every two seconds).
+          unawaited(otherEngineMeals.check());
         },
         // A glasses preview copy waits once for its full-size one (G2b).
         previewHold: holdGlassesPreview,
@@ -523,6 +548,14 @@ class AppServices {
           .then((_) {}, onError: (Object _) {});
     }
 
+    // Retry on Today's row (photos a scan let go unchecked): the same
+    // catch-up again, under the resume's conditions. Nothing while iCloud
+    // Backup holds it; that one is caught up when the hold ends.
+    Future<void> retryPhotoScan() async {
+      if (await cloudBackup?.holdsCatchUp() ?? false) return;
+      await catchUpAfterHold();
+    }
+
     // iCloud Backup (iPhone, 1.7.0): the user's own iCloud Drive, ON by
     // default, nothing uploaded before the notice is answered. The shell
     // starts it after the first frame. Android has no automatic file.
@@ -605,6 +638,21 @@ class AppServices {
       // Read fresh: the background engine writes the runs, and a catch-up
       // here that moved the watermark since clears it.
       backgroundScanStuck: backgroundScanStuckNow,
+      // iOS: the request for the next background scan (2026-11-28). The
+      // shell asks for it again, when iOS holds none, on every return to
+      // the app and every leave, and Settings shows a refusal. Android's
+      // WorkManager chain is left exactly as it was: no hook, no probe.
+      keepBackgroundScan:
+          Platform.isIOS ? () => keepBackgroundScanScheduled(settings) : null,
+      backgroundSchedule: Platform.isIOS ? lastBackgroundSchedule : null,
+      // Both phones: a background run can save a meal while the app is
+      // open. Only while Watch Camera Roll is on, which is the only time
+      // one scans; never in the Play build, which has none.
+      mealsChangedElsewhere: photoLibraryInBuild
+          ? () => settings.watcherEnabled
+              ? otherEngineMeals.check(force: true)
+              : Future<bool>.value(false)
+          : null,
       // BGTaskScheduler refuses every request (error 1, swallowed by the
       // plugin) while Background App Refresh is off — without this the
       // row would say "not run yet" forever and never say why. Android's
@@ -632,6 +680,10 @@ class AppServices {
       // A Save to Device that outlived its engine (MainActivity).
       lateSaveResult: Platform.isAndroid ? takeLateSaveResult : null,
       mealReveals: mealReveals,
+      // Today's "Checking photos" row and its Retry. Not in the Play
+      // build, which scans nothing (core/app_channel.dart).
+      photoScanStatus: photoLibraryInBuild ? scanStatus : null,
+      retryPhotoScan: photoLibraryInBuild ? retryPhotoScan : null,
     );
     pipeline.bind(photoIntake); // automated watch (deliberate=false)
     // Share sheet (deliberate), each photo held until its AI recipient is

@@ -21,6 +21,8 @@ import '../../services/analysis_keep_alive.dart' show AnalysisKeepAlive;
 import '../../services/backup/backup_coordinator.dart';
 
 import '../../services/analyzer/platform_decode.dart';
+import '../../services/photo/background_schedule.dart'
+    show BackgroundRefusal, BackgroundSchedule;
 import '../../services/photo/coverage.dart';
 import '../../services/photo/photo_library.dart';
 import '../../services/report/notification_permission.dart';
@@ -58,6 +60,16 @@ final Uri privacyPolicyUri = Uri.parse(
 
 /// How long a snackbar that carries an action stays up.
 const _actionSnackBarDuration = Duration(seconds: 8);
+
+/// The Photos footer line for a background scan iOS holds no request for:
+/// why iOS refused the last one ([BackgroundRefusal]), that the app asks
+/// again by itself, and what still logs photos meanwhile. 'unavailable' is
+/// iOS not taking background requests from the app at the moment; any
+/// other refusal is said with its code.
+String backgroundNotScheduledLine(AppLocalizations l, String? refusal) =>
+    refusal == null || refusal == BackgroundRefusal.unavailable
+        ? l.backgroundScanNotScheduledUnavailable
+        : l.backgroundScanNotScheduledRefused(refusal);
 
 /// `SnackBar.persist` for a snackbar that may carry an action.
 ///
@@ -109,6 +121,12 @@ class SettingsScreen extends StatefulWidget {
   /// turns red and the Photos footer says to open the app once.
   final Future<bool> Function()? backgroundScanStuck;
 
+  /// iOS: what iOS last said about the request for the next background
+  /// scan (background_schedule.dart). Refused: the row reads 'Not
+  /// scheduled' and the Photos footer says why. Null probe or answer
+  /// (Android, tests): nothing is said.
+  final Future<BackgroundSchedule?> Function()? backgroundSchedule;
+
   /// Coverage-audit pieces; all three null in tests → the tile is hidden.
   final CoverageAuditor? coverage;
   final Future<PhotoOutcome> Function(IntakePhoto photo)? processPhoto;
@@ -158,6 +176,7 @@ class SettingsScreen extends StatefulWidget {
     this.lastBackgroundScan,
     this.backgroundRefreshEnabled,
     this.backgroundScanStuck,
+    this.backgroundSchedule,
     this.changes,
     this.restaurantAssist,
     this.cloudBackup,
@@ -205,6 +224,16 @@ class _SettingsScreenState extends State<SettingsScreen>
   /// The recorded runs show no progress (backgroundScanLooksStuck).
   bool _backgroundStuck = false;
 
+  /// iOS's last answer about the request for the next background scan;
+  /// null: not asked, or not known.
+  BackgroundSchedule? _backgroundSchedule;
+
+  /// iOS holds no request for the next background scan: it refused the
+  /// last one. Under the Off remedy this says nothing (that row already
+  /// names the switch, and iOS refuses every request while it is off).
+  bool get _backgroundNotScheduled =>
+      !_backgroundRefreshOff && _backgroundSchedule?.scheduled == false;
+
   @override
   void initState() {
     super.initState();
@@ -234,10 +263,12 @@ class _SettingsScreenState extends State<SettingsScreen>
     DateTime? when;
     bool? refresh;
     var stuck = false;
+    BackgroundSchedule? schedule;
     try {
       when = await probe?.call();
       refresh = await refreshProbe?.call();
       stuck = await widget.backgroundScanStuck?.call() ?? false;
+      schedule = await widget.backgroundSchedule?.call();
     } catch (_) {
       return;
     }
@@ -247,6 +278,7 @@ class _SettingsScreenState extends State<SettingsScreen>
       _lastBackgroundProbed = true;
       _backgroundRefreshOff = refresh == false;
       _backgroundStuck = stuck;
+      _backgroundSchedule = schedule;
     });
   }
 
@@ -817,6 +849,13 @@ class _SettingsScreenState extends State<SettingsScreen>
             widget.lastBackgroundScan != null
         ? l10n.backgroundScanStuck
         : null;
+    // iOS holds no request for the next background scan (it refused the
+    // last one): until it takes one, no background scan can run, and the
+    // row's time would only say when the last one did (2026-11-28). Said
+    // with what the app does about it and what still works.
+    final notScheduled = _showBackgroundScanRow && _backgroundNotScheduled
+        ? backgroundNotScheduledLine(l10n, _backgroundSchedule?.refusal)
+        : null;
     // Not full access: the switch is on, but photos taken from now on are
     // outside what the app may read, so they are never logged.
     // Android: the link under the footer fixes it in place, so the line
@@ -831,7 +870,8 @@ class _SettingsScreenState extends State<SettingsScreen>
     final glasses = defaultTargetPlatform == TargetPlatform.android
         ? l10n.watchGlassesAndroidNote
         : null;
-    return [?limited, ?paused, ?stuck, footer, ?glasses].join('\n');
+    return [?limited, ?paused, ?notScheduled, ?stuck, footer, ?glasses]
+        .join('\n');
   }
 
   /// Whether the 后台扫描 row (and its iOS footer line) shows: only while
@@ -943,6 +983,7 @@ class _SettingsScreenState extends State<SettingsScreen>
                 icon: Icons.update,
                 // Stuck only while the watcher is on, like its footer line.
                 iconColor: _backgroundRefreshOff ||
+                        _backgroundNotScheduled ||
                         (_watcherEnabled && _backgroundStuck)
                     ? theme.colorScheme.error
                     : theme.colorScheme.secondary,
@@ -957,11 +998,16 @@ class _SettingsScreenState extends State<SettingsScreen>
                 // the row showed 尚未运行 / a frozen time with no hint; the
                 // chevron now lands on App info, where that switch is one
                 // tap away.
+                // iOS holds no request for the next scan: that beats the
+                // last run's time too, which says nothing about the next
+                // one (the footer says why and what happens now).
                 value: _backgroundRefreshOff
                     ? _backgroundOffLabel()
-                    : _lastBackgroundProbed
-                        ? _lastBackgroundLabel(_lastBackgroundScan)
-                        : '…',
+                    : _backgroundNotScheduled
+                        ? context.l10n.backgroundScanNotScheduled
+                        : _lastBackgroundProbed
+                            ? _lastBackgroundLabel(_lastBackgroundScan)
+                            : '…',
                 onTap: _backgroundRefreshOff && widget.openSystemSettings != null
                     ? () => widget.openSystemSettings!()
                     : null,

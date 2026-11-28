@@ -447,6 +447,23 @@
   "@backgroundScanStuck": {
     "description": "Photos footer line in Settings when the recorded background runs keep starting but log nothing."
   },
+  "backgroundScanNotScheduled": "Not scheduled",
+  "@backgroundScanNotScheduled": {
+    "description": "iPhone, Settings › Photos: the Background scan row's value while iOS holds no request for the next background scan (it refused the last one the app made). Short: it shares the row with the title. The footer line under the group says why (backgroundScanNotScheduledUnavailable or backgroundScanNotScheduledRefused)."
+  },
+  "backgroundScanNotScheduledUnavailable": "The next background scan is not scheduled: iOS is not taking background requests from Chopstats right now. Chopstats asks again each time you open or leave it; until then, new photos are logged when you open the app.",
+  "@backgroundScanNotScheduledUnavailable": {
+    "description": "iPhone, Settings › Photos footer line while the Background scan row reads backgroundScanNotScheduled and iOS answered the request with 'unavailable' (BGTaskScheduler error 1). It must not name a cause the app cannot see: with Background App Refresh off the row shows the Off remedy instead."
+  },
+  "backgroundScanNotScheduledRefused": "The next background scan is not scheduled: iOS refused the request ({code}). Chopstats asks again each time you open or leave it; until then, new photos are logged when you open the app.",
+  "@backgroundScanNotScheduledRefused": {
+    "description": "As backgroundScanNotScheduledUnavailable, for any other refusal. {code} is the error's name as iOS gives it (notPermitted, tooManyPendingTaskRequests) or 'error 7'; never translated.",
+    "placeholders": {
+      "code": {
+        "type": "String"
+      }
+    }
+  },
   "settingsSectionProfile": "Profile",
   "settingsRowDietaryProfile": "Dietary Profile",
   "profileSet": "Set",
@@ -987,6 +1004,86 @@
       }
     }
   },
+  "diagBgRunByShortcuts": "Started by Shortcuts",
+  "@diagBgRunByShortcuts": {
+    "description": "Diagnostics › Recent background scans, under a scan's time: this scan was started by the Check new photos action (from the Shortcuts app, an automation or Siri), not by iOS. iPhone only. Shortcuts is the name of Apple's app; in Chinese it is 快捷指令, inside 「」."
+  },
+  "diagBgRunAlreadyLogged": "Already logged, not read again: {count}",
+  "@diagBgRunAlreadyLogged": {
+    "description": "Diagnostics › Recent background scans, under the counts line (diagBgRunCounts), only when the number is above 0: photos the scan listed and did not read again because a meal already has each one as its photo. iPhone only.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "diagBgRunLeftWhy": "Why they were left: {reasons}",
+  "@diagBgRunLeftWhy": {
+    "description": "Diagnostics › Recent background scans, under the counts line of a scan that left photos for later (the 'left for later' number of diagBgRunCounts). {reasons} is one or more of the diagBgLeft* phrases, each with its count, joined by diagBgLeftJoin.",
+    "placeholders": {
+      "reasons": {
+        "type": "String"
+      }
+    }
+  },
+  "diagBgLeftJoin": "; ",
+  "@diagBgLeftJoin": {
+    "description": "What goes between two reasons in diagBgRunLeftWhy."
+  },
+  "diagBgLeftBusy": "the AI service was busy ({count})",
+  "@diagBgLeftBusy": {
+    "description": "A reason in diagBgRunLeftWhy: the AI service (the user's own server, or a provider) answered that it was busy or over its rate limit. {count} is how many photos.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "diagBgLeftUnreachable": "the AI service could not be reached ({count})",
+  "@diagBgLeftUnreachable": {
+    "description": "A reason in diagBgRunLeftWhy: no connection to the AI service, or it answered with a server error.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "diagBgLeftDeadline": "the scan's time ran out before the AI service answered ({count})",
+  "@diagBgLeftDeadline": {
+    "description": "A reason in diagBgRunLeftWhy: the photo had been sent, and the background scan had to end (iOS gives it about 30 seconds) before an answer came.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "diagBgLeftPreparing": "the scan's time ran out before the photo was sent ({count})",
+  "@diagBgLeftPreparing": {
+    "description": "A reason in diagBgRunLeftWhy: the background scan had to end while the phone was still preparing the photo (decoding it); nothing had been sent.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "diagBgLeftNotOffered": "not started, the scan's time was over ({count})",
+  "@diagBgLeftNotOffered": {
+    "description": "A reason in diagBgRunLeftWhy: the photos the scan listed and never started, because its time for starting photos was over.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "diagBgLeftOther": "another reason ({count})",
+  "@diagBgLeftOther": {
+    "description": "A reason in diagBgRunLeftWhy: any other reason a photo waits for a later scan (it waits for the app to be opened, another scan holds it, …).",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "diagBgRunKilled": "Ended by the system before it finished — last step: {step}.",
   "@diagBgRunKilled": {
     "placeholders": {
@@ -1027,6 +1124,36 @@
     }
   },
   "diagBgRunWatermarkNone": "none",
+  "diagBgScheduleOk": "Next scan: scheduled. iOS holds the request and picks the time. Checked {time}.",
+  "@diagBgScheduleOk": {
+    "description": "iPhone, Diagnostics › Recent background scans, first line: iOS holds a request for the next background scan. {time} is when the app last asked iOS, as a local 'yyyy-MM-dd HH:mm'.",
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "diagBgScheduleUnavailable": "Next scan: not scheduled. iOS is not taking background requests from Chopstats right now. Checked {time}.",
+  "@diagBgScheduleUnavailable": {
+    "description": "As diagBgScheduleOk, when iOS answered the app's request with 'unavailable' and holds none.",
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "diagBgScheduleRefused": "Next scan: not scheduled. iOS refused the request ({code}). Checked {time}.",
+  "@diagBgScheduleRefused": {
+    "description": "As diagBgScheduleUnavailable, for any other refusal; {code} as in backgroundScanNotScheduledRefused.",
+    "placeholders": {
+      "code": {
+        "type": "String"
+      },
+      "time": {
+        "type": "String"
+      }
+    }
+  },
   "diagLateImportsTitle": "Late imports (other apps, glasses)",
   "@diagLateImportsTitle": {
     "description": "Diagnostics section: photos other apps (the Meta AI app for glasses, AirDrop, WeChat) added to the library after they were taken, which the automatic scan caught through the photo library's change history."
@@ -1312,6 +1439,68 @@
   "todayLoadFailed": "Couldn't load today's meals.",
   "@todayLoadFailed": {
     "description": "Today tab error state when the meals query fails; shown with a Retry button (the raw error goes to the debug log only)."
+  },
+  "todayScanChecking": "{total, plural, =1{Checking 1 photo} other{Checking photos: {current} of {total}}}",
+  "@todayScanChecking": {
+    "description": "Today, the first line of the status row under the totals while the automatic photo scan (Watch Camera Roll: at launch, on a return to the app, or as a photo arrives) is sending photos that had no verdict yet. current is the one being checked, from 1; total is how many this scan checks as far as is known, so it can change. No full stop: todayScanKeepOpen is the line under it.",
+    "placeholders": {
+      "current": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "todayScanKeepOpen": "Keep Chopstats open.",
+  "@todayScanKeepOpen": {
+    "description": "Today, the second, smaller line of the todayScanChecking row. Photos become meals one at a time, and iOS stops the scan when the app is left."
+  },
+  "todayScanCheckingLabel": "Checking photos. Keep Chopstats open.",
+  "@todayScanCheckingLabel": {
+    "description": "Screen-reader label of the todayScanChecking row, said once when the row appears: its two lines as one sentence pair, ending in todayScanKeepOpen. It carries no count on purpose: the count changes with every photo and would be said again each time (todayScanCheckingValue holds it)."
+  },
+  "todayScanCheckingValue": "{current} of {total}",
+  "@todayScanCheckingValue": {
+    "description": "Screen-reader value of the todayScanChecking row, read after todayScanCheckingLabel when the row is focused: which photo is being checked, of how many.",
+    "placeholders": {
+      "current": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "todayScanDone": "{count, plural, =1{1 photo checked.} other{{count} photos checked.}}",
+  "@todayScanDone": {
+    "description": "Today, the status row for a few seconds after the automatic photo scan has finished: how many photos got a verdict (a meal, or not food). Then the row goes away. A screen reader says it once.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "todayScanWaiting": "{count, plural, =1{1 photo is not checked yet.} other{{count} photos are not checked yet.}}",
+  "@todayScanWaiting": {
+    "description": "Today, the status row when the automatic photo scan let photos go without a verdict and no reason can be given (another run of the app is still analyzing them). A Retry button (retry) follows.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "todayScanWaitingReason": "{count, plural, =1{1 photo is not checked yet ({reason}).} other{{count} photos are not checked yet ({reason}).}}",
+  "@todayScanWaitingReason": {
+    "description": "Like todayScanWaiting, with why the photos could not be checked: reason is one of the short reason lines (reasonNetwork, reasonServerBusy, reasonServerFailed, reasonRateLimited), which start lower-case and have no full stop. A Retry button (retry) follows.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      },
+      "reason": {
+        "type": "String"
+      }
+    }
   },
   "historyLoadFailed": "Couldn't load your history.",
   "@historyLoadFailed": {

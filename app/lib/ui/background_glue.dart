@@ -17,11 +17,13 @@
 library;
 
 import 'dart:async';
+import 'dart:convert' show jsonEncode;
 import 'dart:io' show Platform;
 import 'dart:ui' show Locale, PlatformDispatcher;
 
 import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:flutter/widgets.dart' show WidgetsBinding;
+import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart' show getTemporaryDirectory;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:workmanager/workmanager.dart';
@@ -34,12 +36,15 @@ import '../services/analyzer/platform_decode.dart' show isHeadlessEngine;
 import '../services/analyzer/provider_analyzers.dart';
 import '../services/backup/backup_coordinator.dart';
 import '../services/backup/backup_prefs.dart' show backupHoldsCatchUp;
+import '../services/local_store.dart' show LocalNoBackupStore;
 import '../services/photo/background.dart';
 import '../services/photo/background_runs.dart';
+import '../services/photo/background_schedule.dart';
 import '../services/photo/deferred_assets.dart';
 import '../services/photo/food_prefilter.dart' show foodScoreViaImageIO;
 import '../services/photo/glasses_check.dart' show recordGlassesCheckLocally;
 import '../services/photo/photo_library.dart' show photoLibraryAccess;
+import '../services/photo/run_traffic.dart';
 import '../services/photo/watcher.dart';
 import '../services/report/notifications.dart';
 import '../l10n/app_localizations.dart';
@@ -51,6 +56,7 @@ import '../services/settings/app_language_sync.dart'
 import '../services/settings/app_settings.dart';
 import 'photo_pipeline.dart';
 import 'play_channel.dart' show retireWatchCameraRoll;
+import 'refresh_signal.dart' show noteMealsChangedForOtherEngine;
 import 'os_summary.dart';
 import 'outcome_text.dart';
 
@@ -80,13 +86,16 @@ DateTime? readStoredInstant(String? stored) =>
 /// photos created while the previous scan was running.
 ///
 /// The watermark is the newest COVERED photo's createDate (the intake's
-/// frontier), not the scan start, so every run re-reads and re-hashes each
-/// original from this hour before it until a newer photo is covered; the
-/// ledger answers them with no model call. Typically well under a second,
-/// but a very dense hour (100+ photos) can spend iOS's offer budget before
-/// a newer photo is reached; the next app open's catch-up clears it (run 7,
-/// P5). Narrowing the overlap waits for the iOS late-import pass (photo
-/// change history), which catches late arrivals the hour exists for.
+/// frontier), not the scan start, so every run lists each photo from this
+/// hour before it again until a newer photo is covered. On iOS the ones a
+/// meal already names are counted covered without a read (2026-11-28,
+/// LibraryPhotoIntake.scanSkipsLogged); every other one — a photo that
+/// was not food, failed or was deleted, and on Android the logged ones too
+/// — is re-read and re-hashed, and the ledger answers it with no model
+/// call. Typically well under a second, but a very dense hour of such
+/// photos (100+) can spend iOS's offer budget before a newer photo is
+/// reached; the next app open's catch-up clears it (run 7, P5). The hour
+/// itself is unchanged.
 const Duration backgroundScanOverlap = Duration(hours: 1);
 
 /// Periodic cadence. WorkManager's floor is 15 min; 30 keeps EMUI battery
@@ -152,6 +161,81 @@ DateTime backgroundRunStart(String? nativeStamp, DateTime enteredDart) {
   final lead = enteredDart.difference(native);
   if (lead.isNegative || lead > nativeLaunchMaxLead) return enteredDart;
   return native;
+}
+
+/// Written by the Check new photos action (the iPhone trial build of
+/// 2026-11-28, ios/Runner/CheckNewPhotosIntent.swift) just before it starts
+/// this very run through workmanager: when it did, as an ISO instant in
+/// [backgroundNativeLaunchPrefsKey]'s format. The run it started takes it
+/// as its own ([startedByShortcut]) and removes it.
+const String shortcutHintPrefsKey = 'background.shortcut_hint_iso';
+
+/// The answer a run the action started leaves for it; the action polls for
+/// it, at most 25 s from its own start, and words it for Shortcuts and
+/// Siri. JSON ([shortcutResultFor]): the hint it took, when it ended, the
+/// meals it saved, the photos it left for a later run, its stop reason
+/// ([BackgroundStop]) and whether its settings allowed sending to the AI
+/// service they name. Written at the run's end, also when the deadline ends
+/// it ([finishWithinGrant]) or it throws. A run the OS started never
+/// writes it.
+const String shortcutResultPrefsKey = 'background.shortcut_result';
+
+/// The most the action's hint may lead the run's start and still be its:
+/// the action writes it, then workmanager creates the engine and stamps the
+/// launch ([backgroundNativeLaunchPrefsKey]), within a second or two.
+const Duration shortcutHintMaxLead = Duration(seconds: 10);
+
+/// Whether the action's [hint] belongs to the run that started at
+/// [runStart] ([backgroundRunStart]): at most [shortcutHintMaxLead] older,
+/// and not newer.
+@visibleForTesting
+bool startedByShortcut(String? hint, DateTime runStart) {
+  final at = DateTime.tryParse(hint ?? '');
+  if (at == null) return false;
+  final lead = runStart.difference(at);
+  return !lead.isNegative && lead <= shortcutHintMaxLead;
+}
+
+/// The action's answer ([shortcutResultPrefsKey]) from [run], this run's
+/// entry as it ended. [sharing]: null when the run ended before it had its
+/// settings.
+@visibleForTesting
+Map<String, Object?> shortcutResultFor(BackgroundRunRecord? run,
+        {required String hint, required DateTime at, bool? sharing}) =>
+    {
+      'hint': hint,
+      'at': at.toUtc().toIso8601String(),
+      'saved': run?.saved ?? 0,
+      'left': run?.released ?? 0,
+      'stop': run?.stopReason ?? 'unknown',
+      'sharing': ?sharing,
+    };
+
+/// [run], then the action's answer from the run's entry as it ended: run
+/// to the end, ended by the deadline, or thrown. Never throws more than
+/// [run] does.
+Future<bool> _answerShortcut(Future<bool> run,
+    {required SharedPreferences prefs,
+    required BackgroundRunRecorder recorder,
+    required String hint,
+    required RunInFlight inFlight,
+    required DateTime Function() clock}) async {
+  try {
+    return await run;
+  } finally {
+    try {
+      bool? sharing;
+      try {
+        sharing = inFlight.sharingAllowed?.call();
+      } catch (_) {}
+      await prefs.setString(
+          shortcutResultPrefsKey,
+          jsonEncode(shortcutResultFor(recorder.current,
+              hint: hint, at: clock(), sharing: sharing)));
+    } catch (_) {
+      // The action then says the check ran out of time.
+    }
+  }
 }
 
 /// Result of one drained backfill: what happened to each photo, whether
@@ -359,6 +443,16 @@ Future<({DateTime? written, DateTime? stored})> _advanceWatermark(
   return (written: capped, stored: cur);
 }
 
+/// The background watermark as this engine's preferences hold it, with no
+/// re-read from disk: what the app's intake compares photo dates with to
+/// tell which photos look unchecked, for Today's "Checking photos" row
+/// (LibraryPhotoIntake.checkedThrough). Every catch-up re-reads the store
+/// as it checkpoints ([foregroundCatchUp]), so this is at worst as old as
+/// the app's last one, and an older value only makes more photos look
+/// unchecked, which the ledger then answers for.
+DateTime? cachedBackgroundWatermark(SharedPreferences prefs) =>
+    readStoredInstant(prefs.getString(backgroundWatermarkPrefsKey));
+
 /// The app's launch/resume catch-up over the full lookback window — the
 /// pipeline [PhotoPipeline.bind] attached processes each photo — which
 /// also moves the BACKGROUND watermark over what it covered. It used to
@@ -382,10 +476,17 @@ Future<({DateTime? written, DateTime? stored})> _advanceWatermark(
 /// still in the foreground" (appEngineBackgrounded): once the user leaves,
 /// the photo in flight finishes in its background task and nothing more
 /// is read (2026-10-19).
+///
+/// One round for Today's "Checking photos" row (scan_status.dart) when the
+/// intake reports its scans: the window scan and the late-import pass each
+/// report their own photos, and a row the first one brought up stays, on
+/// its last count, until both are over, instead of going away after the
+/// last photo it expected and coming back for the photos imported late.
 Future<DateTime?> foregroundCatchUp(PhotoIntake intake,
     {DateTime Function() clock = DateTime.now,
     Future<SharedPreferences> Function()? loadPrefs,
     bool Function()? shouldContinue}) async {
+  final round = beginCatchUpRound(intake);
   final scanStart = clock();
   // The latest mark this catch-up knows the store holds, read or written.
   // A covered photo at or before it would move nothing, so it costs no
@@ -416,13 +517,20 @@ Future<DateTime?> foregroundCatchUp(PhotoIntake intake,
     if (frontier != null) await checkpoint(frontier);
     return frontier;
   } finally {
-    // Photos other apps imported late (design G1b): after the window, so
-    // today's photos still go first. Never a watermark; never a throw. A
-    // truncated window still gets it. Not once the user has left (iOS).
-    if (shouldContinue?.call() ?? true) {
-      try {
-        await intake.lateImportScan(shouldContinue: shouldContinue);
-      } catch (_) {}
+    try {
+      // Photos other apps imported late (design G1b): after the window, so
+      // today's photos still go first. Never a watermark; never a throw. A
+      // truncated window still gets it. Not once the user has left (iOS).
+      if (shouldContinue?.call() ?? true) {
+        try {
+          await intake.lateImportScan(shouldContinue: shouldContinue);
+        } catch (_) {}
+      }
+    } finally {
+      // Whatever happened above ([shouldContinue] is the caller's, and may
+      // throw): a round left open would hold the row on its last count for
+      // the rest of the session.
+      round?.end();
     }
   }
 }
@@ -542,7 +650,8 @@ Future<bool> headlessBackfillWith({
       await recorder?.processed(
           saved: o.kind == PhotoOutcomeKind.saved ||
               o.kind == PhotoOutcomeKind.leftoverApplied,
-          released: o.retryable);
+          released: o.retryable,
+          left: o.retryable ? backgroundLeftFor(o) : null);
       // A photo this engine could not decode (deferUndecodable) is counted;
       // twice, and later runs pass it over instead of halting on it again.
       if (o.retryable && o.errorKind == AnalysisErrorKind.badPhoto) {
@@ -620,6 +729,28 @@ Future<bool> headlessBackfillWith({
   }
   return true;
 }
+
+/// Why a photo whose verdict keeps it for later was left, for the run's
+/// record ([BackgroundLeft]): the AI service was busy or over its limit,
+/// it could not be reached, or anything else.
+@visibleForTesting
+String backgroundLeftFor(PhotoOutcome o) => switch (o.errorKind) {
+      AnalysisErrorKind.serverBusy ||
+      AnalysisErrorKind.rateLimited =>
+        BackgroundLeft.busy,
+      AnalysisErrorKind.network => BackgroundLeft.unreachable,
+      _ => BackgroundLeft.other,
+    };
+
+/// Why the photo the run's deadline cut off was left, from what the run
+/// was waiting for then ([RunTraffic.cutOffAt]).
+@visibleForTesting
+String backgroundLeftForCut(CutOffAt at) => switch (at) {
+      CutOffAt.preparing => BackgroundLeft.preparing,
+      CutOffAt.busy => BackgroundLeft.busy,
+      CutOffAt.unreachable => BackgroundLeft.unreachable,
+      CutOffAt.waiting => BackgroundLeft.deadline,
+    };
 
 /// The body of a background meal card: the meal itself ('Pasta — ~650
 /// kcal'), under a title that already says what happened. It used to be
@@ -714,11 +845,23 @@ Future<bool> runHeadlessBackfill({
       ? backgroundRunStart(
           prefs.getString(backgroundNativeLaunchPrefsKey), enteredDart)
       : enteredDart;
+  // iOS: the Check new photos action started this run (the trial build):
+  // its hint is taken once, the entry says so, and the run's answer is
+  // left for the action at its end. Every other run is as before.
+  final hint = ios ? prefs.getString(shortcutHintPrefsKey) : null;
+  final byShortcut = hint != null && startedByShortcut(hint, startedAt);
+  if (byShortcut) {
+    try {
+      await prefs.remove(shortcutHintPrefsKey);
+    } catch (_) {}
+  }
   await recordBackgroundLaunch(prefs, clock);
   // This run's diagnostics entry, rewritten at every step so a run iOS
   // kills still shows how far it got (background_runs.dart).
   final recorder = BackgroundRunRecorder(prefs,
-      platform: ios ? 'ios' : 'android', clock: clock);
+      platform: ios ? 'ios' : 'android',
+      clock: clock,
+      trigger: byShortcut ? BackgroundTrigger.shortcuts : null);
   await recorder.begin(
       watermarkBefore:
           readStoredInstant(prefs.getString(backgroundWatermarkPrefsKey)),
@@ -728,6 +871,7 @@ Future<bool> runHeadlessBackfill({
       deadline: startedAt.add(runDeadline),
       window: ios ? slowPhotoWindow : androidSlowPhotoWindow,
       clock: clock);
+  inFlight.recorder = recorder;
   final run = _runAfterLaunch(
       ios: ios,
       prefs: prefs,
@@ -737,11 +881,18 @@ Future<bool> runHeadlessBackfill({
       loadSettings: loadSettings);
   // The whole run ends in its time, whatever it is stuck on: inside iOS's
   // grant, and before WorkManager's 10-minute stop on Android.
-  return finishWithinGrant(run,
+  final finished = finishWithinGrant(run,
       left: startedAt.add(runDeadline).difference(clock()),
       recorder: recorder,
       abandon: ios ? inFlight.abandon : inFlight.endAtDeadline,
       abandonLimit: ios ? iosAbandonLimit : androidDeadlineWrapUp);
+  if (hint == null || !byShortcut) return finished;
+  return _answerShortcut(finished,
+      prefs: prefs,
+      recorder: recorder,
+      hint: hint,
+      inFlight: inFlight,
+      clock: clock);
 }
 
 /// How long iOS's deadline waits for the photo in flight to be released
@@ -757,27 +908,35 @@ const Duration androidDeadlineWrapUp = Duration(seconds: 30);
 /// deadline, for a cut-off to count against it ([DeferredAssets.cutOff]):
 /// offered no later than 7 s into the run. Most first photos of a run have
 /// it; a photo offered after another was processed mostly has not, and its
-/// cut-off says nothing about the photo (review, 2026-10-19).
+/// cut-off says nothing about the photo (review, 2026-10-19). The window
+/// is necessary, not sufficient: the cut must also have come before
+/// anything was sent for the photo ([RunInFlight.abandon]).
 const Duration slowPhotoWindow = Duration(seconds: 15);
 
-/// Android's [slowPhotoWindow]: one full attempt of the slowest analyzer
-/// (ServerAnalyzer.deadline, 5 minutes) before [androidRunDeadline], so
+/// Android's [slowPhotoWindow]: 5 minutes before [androidRunDeadline], so
 /// offered no later than 4 minutes into the run. iOS's 15 s counted every
 /// Android cut — offers stop 2 minutes before the deadline — and a photo
 /// offered late while the server hung was passed over (review
-/// 2026-11-19).
+/// 2026-11-19). The length was chosen as one full attempt of the slowest
+/// analyzer (ServerAnalyzer.deadline); a cut that comes with a request
+/// out no longer counts at all, so it now only says how long the phone
+/// must have been preparing the photo.
 const Duration androidSlowPhotoWindow = Duration(minutes: 5);
 
 /// What the run's deadline needs from a run still going: its pipeline
-/// once built, its deferral notes once loaded, and when the photo in
-/// flight was offered.
+/// once built, its deferral notes once loaded, when the photo in flight
+/// was offered, and what has been sent for it since.
 @visibleForTesting
 class RunInFlight {
+  /// [client]: where the run's analyzer sends (tests); the run's own
+  /// [http.Client] otherwise, made at its first request.
   RunInFlight(
       {this.deadline,
       this.window = slowPhotoWindow,
-      DateTime Function()? clock})
-      : _clock = clock ?? DateTime.now;
+      DateTime Function()? clock,
+      http.Client? client})
+      : _clock = clock ?? DateTime.now,
+        traffic = RunTraffic(client);
 
   /// When the run must be over ([iosRunDeadline] or [androidRunDeadline]
   /// from its start); null: no deadline (tests).
@@ -791,10 +950,25 @@ class RunInFlight {
   DeferredAssets? deferred;
   DateTime? _offeredAt;
 
+  /// The run's diagnostics entry: [abandon] says in it why the photo the
+  /// deadline cut off was left. Null (tests): nothing is said.
+  BackgroundRunRecorder? recorder;
+
+  /// The HTTP client the run's analyzer sends through, whichever AI
+  /// service it is: what was sent for the photo in flight, and what came
+  /// back, is the evidence [abandon] goes by (run_traffic.dart).
+  final RunTraffic traffic;
+
   /// The summary's re-arm ([rearmSummaryAfterRun]), set once the run has
   /// its settings and notifier: Android's deadline runs it
   /// ([endAtDeadline]).
   Future<void> Function()? rearm;
+
+  /// Whether the run's settings allow sending to the AI service they name
+  /// (as the consent check at each send reads them), set once the run has
+  /// its settings: the Check new photos action's answer says so
+  /// ([shortcutResultFor]). Read by nothing else.
+  bool Function()? sharingAllowed;
 
   /// Android's end at [androidRunDeadline]: the photo in flight released
   /// ([abandon]), then the summary re-armed — the run's own re-arm sits at
@@ -811,7 +985,10 @@ class RunInFlight {
 
   /// A photo was handed to the pipeline: the one in flight from now on
   /// (the background pipeline takes one photo at a time).
-  void offered() => _offeredAt = _clock();
+  void offered() {
+    _offeredAt = _clock();
+    traffic.next();
+  }
 
   /// MealsDao.loggedAssetIds through the run's own database handle (the
   /// pipeline's): the late-import pass opens no second one. Nothing is
@@ -823,19 +1000,45 @@ class RunInFlight {
   }
 
   /// Releases the photo in flight ([PhotoPipeline.abandon]). It stays
-  /// eligible, and the next run offers it again. When it had at least
-  /// [window] to itself, the cut also counts against it: after
-  /// [cutsBeforePassOver] of those, later runs pass it over (the app's
-  /// catch-up still logs it), so a photo too slow for any run does not hold
-  /// the watermark — and every photo after it — until the app opens. A
-  /// photo offered late, or cut off while the server or the network hung,
-  /// costs nothing more than the retry.
+  /// eligible, and the next run offers it again.
+  ///
+  /// The cut also counts against the photo only when the run's own
+  /// evidence points at it (2026-11-28): it had at least [window] to
+  /// itself, and in all that time nothing was sent for it
+  /// ([CutOffAt.preparing]: the phone was still on its food check or its
+  /// decode). After [cutsBeforePassOver] of those, later runs pass it over
+  /// (the app's catch-up still logs it), so one photo this engine cannot
+  /// get ready does not eat every run and hold the watermark, and every
+  /// photo after it, until the app opens.
+  ///
+  /// Every other cut costs the photo nothing more than the retry: offered
+  /// late; cut off with its request out and unanswered; cut off after the
+  /// AI service said it was busy, or could not be reached. A busy server,
+  /// a hung network and a slow answer all cut off whatever photo the run
+  /// meets, and a full window used to count each one against the photo
+  /// (three, and it got no background log until the app was opened).
+  ///
+  /// What that leaves, knowingly: a photo the AI service answers too
+  /// slowly for in every run is sent again by each one and holds the
+  /// watermark until the app opens. From the phone it looks the same as a
+  /// hung network, and the run cannot tell which it is.
   Future<void> abandon() async {
+    // Read before the release, which awaits: an answer that lands
+    // meanwhile is not what the photo was cut off at.
+    final cutAt = traffic.cutOffAt;
     final assetId = await pipeline?.abandon();
     if (assetId == null || assetId.isEmpty) return;
+    // Why it was left, for the run's record. In the entry from this call
+    // on; its write is awaited last, behind what the next run goes by.
+    final noted = recorder?.cutOff(backgroundLeftForCut(cutAt));
     final at = _offeredAt, end = deadline;
-    if (at == null || end == null || end.difference(at) < window) return;
-    await deferred?.cutOff(assetId);
+    if (cutAt == CutOffAt.preparing &&
+        at != null &&
+        end != null &&
+        end.difference(at) >= window) {
+      await deferred?.cutOff(assetId);
+    }
+    await noted;
   }
 }
 
@@ -863,6 +1066,8 @@ Future<bool> _runAfterLaunch({
     // WorkManager retry storm helps nobody (background.dart's rule).
     return true;
   }
+  inFlight.sharingAllowed =
+      () => settings.hasAiConsent(settings.activeAiConsentRoute);
   // Android 13 and later: a language picked for the app in Android's
   // settings since the app last ran is this run's (read only).
   final languageAgreed =
@@ -888,6 +1093,10 @@ Future<bool> _runAfterLaunch({
     return true;
   }
   final deferred = inFlight.deferred = await DeferredAssets.load(prefs);
+  // Where this engine leaves word of a meal it saved: its own
+  // meals-changed signal has no listener, and the app may be open
+  // (refresh_signal.dart).
+  final localStore = LocalNoBackupStore.platform();
   // Time-derived id seed: cards from successive runs stack instead of
   // overwriting each other. Base 10000 keeps the whole range clear of the
   // fixed daily-report id 9001 (a colliding meal card would silently
@@ -918,12 +1127,28 @@ Future<bool> _runAfterLaunch({
       intake: createPhotoIntake(settings,
           onBackfillListed: recorder.listed,
           passOver: deferred.passOver,
-          loggedAssetIds: inFlight.loggedAssetIds),
+          loggedAssetIds: inFlight.loggedAssetIds,
+          // iOS: a photo a meal already names is counted covered without
+          // a read, by the scan as by the late-import pass, so the 15 s
+          // in which this run may start a photo go to new ones. Android's
+          // run reads them as it always did (LibraryPhotoIntake
+          // .scanSkipsLogged says why).
+          scanSkipsLogged: ios,
+          onScanSkippedLogged: recorder.alreadyLogged),
       pipeline: () async => inFlight.pipeline = PhotoPipeline(
           dao: await createMealsDao(),
+          // A meal saved, or cut for leftovers: the open app, if there is
+          // one, is told through a note it looks for (it used to find out
+          // at its next return, tab tap or save of its own).
+          onMealSaved: () =>
+              unawaited(noteMealsChangedForOtherEngine(localStore)),
           // B14's previous-night candidates, under the consent that says so.
           previousDayContext: () => settings.previousDayLeftoverContext,
-          analyzer: createMultiProviderAnalyzer(settings),
+          // Through the run's own client, whichever AI service it is: what
+          // was sent for the photo in flight is what the deadline goes by
+          // (RunInFlight.abandon).
+          analyzer:
+              createMultiProviderAnalyzer(settings, client: inFlight.traffic),
           latch: autoScanLatchFor(settings),
           // The AI consent at each send, re-read from disk: the open app
           // may have stopped sharing since this run loaded its settings.
@@ -1191,11 +1416,34 @@ void appBackgroundDispatcher() {
 /// daily summary too — cancelling it silently killed the notification
 /// (2026-08-16). The summary is an OS alarm now (os_summary.dart), so it
 /// no longer needs the job.
-Future<void> syncBackgroundScan(AppSettings settings) => enableBackgroundScan(
-    backgroundJobWanted(watcherEnabled: settings.watcherEnabled),
-    lookbackDays: settings.lookbackDays,
-    frequency: backgroundScanFrequency,
-    dispatcher: appBackgroundDispatcher);
+///
+/// iOS: the plugin only logs a submit iOS refuses, so what iOS made of
+/// this one is asked and recorded right after it
+/// ([keepBackgroundScanScheduled]); Android asks nothing more.
+Future<void> syncBackgroundScan(AppSettings settings) async {
+  await enableBackgroundScan(
+      backgroundJobWanted(watcherEnabled: settings.watcherEnabled),
+      lookbackDays: settings.lookbackDays,
+      frequency: backgroundScanFrequency,
+      dispatcher: appBackgroundDispatcher);
+  await keepBackgroundScanScheduled(settings);
+}
+
+/// iOS: the request for the next background scan, made again when iOS
+/// holds none, and what iOS said recorded for Settings and the diagnostics
+/// page (background_schedule.dart, 2026-11-28). Wanted under the same
+/// condition as the launch's own submit ([backgroundJobWanted]: on iOS,
+/// always). Called behind that submit ([syncBackgroundScan]) and by the
+/// shell each time the app comes to the foreground and each time it leaves
+/// (app.dart) — a return to the app used to ask for nothing, so a request
+/// lost once stayed lost until the next cold start.
+///
+/// A request iOS already holds is never replaced. Android: nothing at all
+/// — no channel call, no scheduler call, nothing written; WorkManager
+/// keeps its own chain. Never throws.
+Future<BackgroundSchedule?> keepBackgroundScanScheduled(AppSettings settings) =>
+    keepBackgroundRequest(
+        wanted: backgroundJobWanted(watcherEnabled: settings.watcherEnabled));
 
 /// Settings' "the background scan is stuck" probe (2026-10-19): the
 /// stored runs and the watermark, both read FRESH (the background engine

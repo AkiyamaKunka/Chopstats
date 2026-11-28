@@ -1,0 +1,6 @@
+/* Siri and Spotlight phrases for the Check new photos App Shortcut
+   (CheckNewPhotosIntent.swift ChopstatsShortcuts). Every phrase names the
+   app through ${applicationName}. */
+
+"Check new photos in ${applicationName}" = "Check new photos in ${applicationName}";
+"Log my meal photos with ${applicationName}" = "Log my meal photos with ${applicationName}";

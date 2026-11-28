@@ -1,6 +1,8 @@
 /// One undecodable photo must not freeze the background scan forever
 /// (2026-10-19): after two deferrals, later background runs pass it over.
-/// A photo the iOS deadline keeps cutting off takes three cuts.
+/// A photo the deadline keeps cutting off while the phone is still
+/// preparing it takes three cuts (which cuts count is RunInFlight.abandon's
+/// to decide: test/ui/background_glue_test.dart).
 library;
 
 import 'dart:convert';
@@ -107,13 +109,14 @@ void main() {
   // Review, 2026-10-19: a deadline cut is mostly the server's or the
   // network's doing, not the photo's. Two of them used to pass a photo
   // over for good (the watermark moved past it) after a slow patch of two
-  // runs.
+  // runs. Since 2026-11-28 only a cut with nothing sent reaches here at
+  // all; it still takes three.
   test('deadline cuts are counted apart, and pass a photo over only after '
       'three', () async {
     await (await run()).cutOff('A');
     await (await run()).cutOff('A');
     expect((await run()).passOver('A'), isFalse,
-        reason: 'two hung runs: the next one still offers it');
+        reason: 'cut off twice: the next run still offers it');
     var e = stored().single;
     expect((e.count, e.cuts), (0, 2));
     // A deferral is its own count: one of each passes nothing over.
@@ -126,19 +129,24 @@ void main() {
     expect((e.count, e.cuts, e.firstSeen), (1, 3, t0));
   });
 
-  test('a cut is stored as c, and an entry without one reads as no cuts',
+  // The key was c until 2026-11-28. The fact changed: a cut now counts
+  // only when nothing had been sent for the photo, and the cuts stored as
+  // c were counted for every cut with the full window, a hung network's
+  // and a busy server's included. So they are stored under a new key, and
+  // the old ones are not read (the test after this one).
+  test('a cut is stored as p, and an entry without one reads as no cuts',
       () async {
     await (await run()).cutOff('A');
     final raw = jsonDecode(prefs.getString(deferredAssetsPrefsKey)!) as List;
     expect(raw.single,
-        {'id': 'A', 'n': 0, 'first': t0.toIso8601String(), 'c': 1});
+        {'id': 'A', 'n': 0, 'first': t0.toIso8601String(), 'p': 1});
     await prefs.setString(
         deferredAssetsPrefsKey,
         jsonEncode([
           {'id': 'B', 'n': 2, 'first': t0.toIso8601String()},
-          {'id': 'C', 'n': 0, 'first': t0.toIso8601String(), 'c': 3},
+          {'id': 'C', 'n': 0, 'first': t0.toIso8601String(), 'p': 3},
           {'id': 'D', 'n': 0, 'first': t0.toIso8601String()}, // nothing
-          {'id': 'E', 'n': 1, 'first': t0.toIso8601String(), 'c': 'x'},
+          {'id': 'E', 'n': 1, 'first': t0.toIso8601String(), 'p': 'x'},
         ]));
     expect(stored().map((e) => (e.id, e.count, e.cuts)),
         [('B', 2, 0), ('C', 0, 3)]);
@@ -147,6 +155,33 @@ void main() {
     // A verdict forgets cuts like deferrals.
     await r.settled('C');
     expect(stored().map((e) => e.id), ['B']);
+  });
+
+  // What an earlier version left on the phone: cuts counted whatever the
+  // run had been waiting for. A photo three hung or busy runs had passed
+  // over is offered again by the next run; its deferrals, which never
+  // depended on the network, stand.
+  test('cuts an earlier version counted (c) are not carried over', () async {
+    await prefs.setString(
+        deferredAssetsPrefsKey,
+        jsonEncode([
+          {'id': 'hung', 'n': 0, 'first': t0.toIso8601String(), 'c': 3},
+          {'id': 'both', 'n': 1, 'first': t0.toIso8601String(), 'c': 5},
+          {'id': 'undecodable', 'n': 2, 'first': t0.toIso8601String(), 'c': 1},
+        ]));
+    expect(stored().map((e) => (e.id, e.count, e.cuts)),
+        [('both', 1, 0), ('undecodable', 2, 0)]);
+    final r = await run();
+    expect(r.passOver('hung'), isFalse, reason: 'offered again');
+    expect(r.passOver('both'), isFalse);
+    expect(r.passOver('undecodable'), isTrue);
+    // The next write drops what is not read, and counts from zero.
+    await r.cutOff('both');
+    final raw = jsonDecode(prefs.getString(deferredAssetsPrefsKey)!) as List;
+    expect(raw, [
+      {'id': 'both', 'n': 1, 'first': t0.toIso8601String(), 'p': 1},
+      {'id': 'undecodable', 'n': 2, 'first': t0.toIso8601String()},
+    ]);
   });
 
   test('a damaged store reads as empty, and damaged entries are skipped',
