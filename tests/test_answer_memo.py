@@ -5,8 +5,10 @@ Why it exists. The server runs one Claude analysis at a time, and it
 cannot see a phone hang up: the handler runs to its end. An iPhone
 background scan gives up on its request 22 s after it began, and the open
 app's scan stops when its user leaves it. The server then finished the
-analysis and threw the answer away, and the phone sent the same photo
-again at its next scan: a second full run on the owner's plan.
+analysis and threw the answer away, and a phone that sent the same photo
+again soon (the open app, the app's retry, a copy behind its first) paid
+for a second full run on the owner's plan. One iPhone background scan to
+the next is 30 minutes or more: past the window, a run of its own.
 
 The contract these tests hold (claude_analyzer, the section above
 analyze_text_prompt):
@@ -170,7 +172,7 @@ def _memo_lines(caplog):
 @pytest.mark.parametrize("path,body,field,word", ENDPOINTS, ids=ENDPOINT_IDS)
 def test_the_same_request_inside_the_limit_runs_no_cli(
         client, monkeypatch, caplog, path, body, field, word):
-    """The next scan sends the photo again 599 s later: the same 200 body,
+    """The open app sends the photo again 599 s later: the same 200 body,
     byte for byte, and no CLI run. The journal says how old the answer is
     and nothing about it: no food, no hash."""
     cli = _fake_cli(monkeypatch)

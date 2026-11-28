@@ -5240,11 +5240,10 @@ def _build_api_app(bot: TelegramBot, gemini_client) -> Flask:
         The mobile app's "my server (Claude subscription)" provider calls
         this: the CLI runs under the owner's Claude subscription on this VM,
         so phone analyses cost no API money. Unlike /upload this endpoint is
-        PURE — no meal row, no ledger entry, no Telegram card, nothing on
-        disk: the app owns its own database and decides what to keep. What
-        it does keep is in memory: the answer, for the same request sent
-        again within a few minutes (claude_analyzer's answer memo; the
-        memo_scope below).
+        PURE — no meal row, no ledger entry, no Telegram card: the app owns
+        its own database and decides what to keep. The answer is kept in
+        memory for a few minutes, for the same request sent again
+        (claude_analyzer's answer memo; the memo_scope below).
         """
         prompt = None
         backend = "claude"
@@ -5306,8 +5305,9 @@ def _build_api_app(bot: TelegramBot, gemini_client) -> Flask:
             return _backend_unavailable("analyze_photo", backend)
         # allow_file_fallback=False: never run a network-influenced prompt
         # on the Read-tool path. memo_scope: the same request sent again
-        # (an iPhone scan cut off at its deadline, an app its user left)
-        # gets the answer this server already worked out.
+        # within minutes (the open app after a scan was cut off, the app's
+        # retry, a copy behind its first) gets the answer this server
+        # already worked out.
         memo_scope = ("analyze_photo", _api_key_identity())
         analysis, refused = _cli_result(
             lambda: claude_analyzer.analyze_food_photo(

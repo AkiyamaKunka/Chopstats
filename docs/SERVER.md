@@ -399,10 +399,10 @@ For the Claude route you can pick the analysis model (fable, opus, sonnet or hai
 
 Everything the Flutter app's "your own server" provider uses. All routes
 require the `X-API-Key` header (the server's `ANDROID_API_KEY`); analysis
-routes are *pure* — they return the analysis and write no meal row, no
-ledger entry and nothing to disk, the phone owns its own database. The
-photo and leftover routes keep each answer in memory for 10 minutes, for
-the same request sent again (below).
+routes are *pure* — they return the analysis and write no meal row and no
+ledger entry; the phone owns its own database. The photo and leftover
+routes keep each answer in memory for 10 minutes, for the same request
+sent again (below).
 
 | Endpoint | Purpose |
 | --- | --- |
@@ -437,17 +437,21 @@ Response contract worth knowing:
   `/upload` photos never wait for another analysis: they go to Gemini at
   once. The knob and the reason for 20 s are in
   [SERVER_DEPLOY.md](SERVER_DEPLOY.md#two-app-requests-at-once-the-busy-wait).
-- That answer is not lost. The server keeps the answer of each photo
-  and leftover analysis that succeeded in memory for
+- The server keeps that answer for a while. It keeps the answer of each
+  photo and leftover analysis that succeeded in memory for
   `CLAUDE_API_ANSWER_MEMO_SECONDS` (the default is 600 s, at most 64
   answers), and a request that is the same in everything that goes into
   the analysis gets it at once: the same `200` reply, with no CLI run and
-  no wait, also while another analysis runs. A copy that waited behind
-  its own first copy gets that copy's answer. Only the answer and a hash
-  of the request are kept, never the photo; nothing goes to disk, and a
-  restart empties it. A busy, refused, timed-out or empty answer is not
-  kept, and text requests, Telegram and `/upload` never use it. The knob
-  and the journal's line are in
+  no wait, also while another analysis runs. That serves a photo sent
+  again within that time: by the app when you open it again, by the
+  app's own retry, or as a copy that waited behind its first copy. It
+  does not serve the next background scan: the app asks iOS for the next
+  one no sooner than 30 minutes after one begins, so that send is
+  analyzed again. The memo holds only the answer and a hash of the
+  request, never the photo, and only in memory; a restart or **Connect
+  Claude** in the app empties it. A busy, refused, timed-out or empty
+  answer is not kept, and text requests, Telegram and `/upload` never use
+  it. The knob and the journal's line are in
   [SERVER_DEPLOY.md](SERVER_DEPLOY.md#the-same-photo-again-the-answer-memo).
 
 ## Restaurant lookup (WebSearch, off by default)

@@ -1052,9 +1052,14 @@ def _attempt_file(
 # open app's scan stops when its user leaves it. The server cannot see a
 # phone hang up: werkzeug runs the view to its end and only then finds
 # the connection gone. So the analysis was finished and its answer thrown
-# away, and the phone sent the same photo again at its next scan: a
-# second full run on the owner's plan, which could be cut off the same
-# way.
+# away, and a phone that sent the same photo again soon paid for a second
+# full run on the owner's plan: the open app's scan when its user came
+# back, the app's own retry seconds later, a copy that waited behind its
+# first. One background scan to the next is not soon: the app asks iOS
+# for the next one no sooner than 30 minutes after one begins
+# (AppDelegate.swift's frequency, which workmanager_apple re-submits at
+# the start of each run), past the default window, so that send is a run
+# of its own.
 #
 # What. The answer of each app photo or leftover analysis that succeeded
 # is kept in memory for answer_memo_seconds() (default 600), at most
