@@ -21,12 +21,17 @@ analyze_text_prompt):
   * it is looked up before the request waits for the CLI (a hit takes no
     lock and is no waiter) and again once the request holds the lock;
   * a hit is the same 200 body as an analysis, with one journal line that
-    says how old the answer is and nothing else.
+    says how old the answer is and nothing else;
+  * any text a caller can send gives a key, a lone surrogate included;
+  * the memo reads its clock with its lock held;
+  * a sign-in from the phone empties it, and an analysis that was running
+    through the sign-in is not kept.
 
 Through the real endpoints and the real analyzer: only the CLI process
 (subprocess.run), the memo's clock and, where a test needs it, the wait
-for the lock are stood in for. No test sleeps: time moves on the stand-in
-clock, and threads are followed through events.
+for the CLI's lock or the memo's own lock are stood in for. No test
+sleeps: time moves on the stand-in clock, and threads are followed
+through events.
 """
 import ast
 import base64
@@ -535,6 +540,71 @@ def test_at_most_64_answers_are_kept_the_oldest_dropped_first(monkeypatch):
     assert list(memo) == [keys[1], keys[2]]
 
 
+class _LockThatLetsAStoreInFirst:
+    """A stand-in for _ANSWER_MEMO_LOCK. The first time it is taken,
+    [first] runs before the real lock is: another thread's store that got
+    to the lock first, as the scheduler may order them."""
+
+    def __init__(self, first):
+        self._lock = threading.Lock()
+        self._first = first
+
+    def __enter__(self):
+        first, self._first = self._first, None
+        if first is not None:
+            first()
+        self._lock.acquire()
+        return self
+
+    def __exit__(self, *exc_info):
+        self._lock.release()
+        return False
+
+
+def test_a_lookup_that_meets_a_store_at_the_lock_gets_the_answer(
+        monkeypatch):
+    """Copy B looks up just as copy A's run returns, and A's store takes the
+    memo's lock first. B reads the clock with the lock held, so A's answer
+    is 0 s old to it: B gets it, and it stays kept. B used to read the
+    clock before the lock, found an answer stored after that, threw it
+    away as if it were from the future and ran the photo again (review
+    2026-11-28)."""
+    monkeypatch.delenv(KNOB, raising=False)
+    clock = _Clock(monkeypatch)
+    key = hashlib.sha256(b"one request").digest()
+
+    def a_stores():
+        clock.advance(1)
+        claude_analyzer._remember_answer(key, {"n": 1})
+
+    monkeypatch.setattr(claude_analyzer, "_ANSWER_MEMO_LOCK",
+                        _LockThatLetsAStoreInFirst(a_stores))
+    assert claude_analyzer._remembered_answer(key, "photo") == {"n": 1}
+    assert list(claude_analyzer._ANSWER_MEMO) == [key]
+
+
+def test_answers_are_kept_in_the_order_of_their_clock(monkeypatch):
+    """Two stores meet at the memo's lock: B has started, and A takes the
+    lock first. Each store reads the clock with the lock held, so the memo
+    is oldest first in time as well as in order. _remember_answer's
+    pruning relies on that: it stops at the first answer still in time."""
+    monkeypatch.delenv(KNOB, raising=False)
+    clock = _Clock(monkeypatch)
+    a, b = (hashlib.sha256(name).digest() for name in (b"a", b"b"))
+
+    def a_stores():
+        clock.advance(1)
+        claude_analyzer._remember_answer(a, {"n": "a"})
+
+    monkeypatch.setattr(claude_analyzer, "_ANSWER_MEMO_LOCK",
+                        _LockThatLetsAStoreInFirst(a_stores))
+    claude_analyzer._remember_answer(b, {"n": "b"})
+    memo = claude_analyzer._ANSWER_MEMO
+    assert list(memo) == [a, b]
+    times = [stored_at for stored_at, _ in memo.values()]
+    assert times == sorted(times), times
+
+
 @pytest.mark.parametrize("path,body,field,word", ENDPOINTS, ids=ENDPOINT_IDS)
 def test_the_knob_at_zero_keeps_nothing_and_hands_nothing_out(
         client, monkeypatch, path, body, field, word):
@@ -888,6 +958,80 @@ def test_a_phone_that_hung_up_mid_run_still_leaves_its_answer(client,
     assert again.status_code == 200
     assert again.get_json()["analysis"] == ANSWER
     assert len(cli.starts) == 1
+
+
+# ─── A sign-in from the phone ────────────────────────────────────────
+#
+# /api/claude_auth/complete gives the CLI a new token while the server
+# runs (claude_auth.apply_token_to_env sets it in the environment). It may
+# be another account, whose default model is another one when the request
+# names none (review 2026-11-28).
+
+def _sign_in(monkeypatch, tmp_path):
+    """The step a sign-in from the phone ends with, writing the token to a
+    .env of the test's own. The process's own token is put back after the
+    test (monkeypatch remembers it)."""
+    import claude_auth
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "token-before-sign-in")
+    env = tmp_path / ".env"
+    env.write_text("CLAUDE_CODE_OAUTH_TOKEN=token-before-sign-in\n")
+
+    def sign_in():
+        claude_auth.apply_token_to_env("token-after-sign-in", env_path=env)
+        assert os.environ["CLAUDE_CODE_OAUTH_TOKEN"] == "token-after-sign-in"
+
+    return sign_in
+
+
+@pytest.mark.parametrize("path,body,field,word", ENDPOINTS, ids=ENDPOINT_IDS)
+def test_a_sign_in_from_the_phone_forgets_every_answer(
+        client, monkeypatch, tmp_path, path, body, field, word):
+    """No answer worked out before a sign-in is handed out after it. The
+    first answer after it is kept as usual."""
+    cli = _fake_cli(monkeypatch)
+    sign_in = _sign_in(monkeypatch, tmp_path)
+    for _ in range(2):
+        assert client.http.post(path, headers=KEY,
+                                json=body()).status_code == 200
+    assert len(cli.starts) == 1
+    sign_in()
+    assert len(claude_analyzer._ANSWER_MEMO) == 0
+    for _ in range(2):
+        assert client.http.post(path, headers=KEY,
+                                json=body()).status_code == 200
+    assert len(cli.starts) == 2, "an answer from before the sign-in was used"
+
+
+def test_an_analysis_that_ran_through_a_sign_in_is_not_kept(
+        client, monkeypatch, tmp_path):
+    """The sign-in comes while a photo is being analyzed with the old
+    token. That request still gets its answer, but the answer is not kept:
+    its key was made before the sign-in, and no request made after it has
+    that key."""
+    cli = _fake_cli(monkeypatch)
+    cli.go = threading.Event()
+    sign_in = _sign_in(monkeypatch, tmp_path)
+    app = client.http.application
+    replies = {}
+
+    def send():
+        replies["first"] = app.test_client().post(
+            "/api/analyze_photo", headers=KEY, json=_photo_body())
+
+    first = threading.Thread(target=send)
+    first.start()
+    try:
+        assert cli.entered.wait(5), "the analysis did not start"
+        sign_in()
+    finally:
+        cli.go.set()
+        first.join(10)
+    assert replies["first"].status_code == 200
+    assert replies["first"].get_json()["analysis"] == ANSWER
+    again = client.http.post("/api/analyze_photo", headers=KEY,
+                             json=_photo_body())
+    assert again.status_code == 200
+    assert len(cli.starts) == 2, "an answer from before the sign-in was used"
 
 
 # ─── Telegram, /upload and text requests never use it ────────────────

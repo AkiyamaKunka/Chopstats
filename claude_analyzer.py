@@ -203,8 +203,8 @@ _LOOKUP_STATE: Dict[str, object] = {
 # Values of the two app-request knobs that were not a number and that the
 # journal has been told about (_warn_knob_junk), one set for each knob:
 # CLAUDE_API_BUSY_WAIT_SECONDS and CLAUDE_API_ANSWER_MEMO_SECONDS. Both
-# are read for every app request, and the environment of a running server
-# does not change: one line for the value, not one for each request.
+# are read for every app request, and nothing sets them while the server
+# runs: one line for the value, not one for each request.
 _BUSY_WAIT_JUNK_SEEN: set = set()
 _ANSWER_MEMO_JUNK_SEEN: set = set()
 _KNOB_JUNK_LOCK = threading.Lock()
@@ -1073,14 +1073,19 @@ def _attempt_file(
 # reply language are all in it) and the image bytes as the analyzer gets
 # them. What a caller sends and the server ignores (an unknown field, a
 # blank profile, the client header) is not in it. The server's own
-# settings are not in it: the environment of a running server does not
-# change, and a restart empties the memo.
+# settings are not in it. They change with a restart, which empties the
+# memo; the plan's token also with a sign-in from the phone
+# (claude_auth.apply_token_to_env), which empties it too
+# (clear_answer_memo), since the new token may be another account with
+# another default model. A key also holds _ANSWER_MEMO_EPOCH, which
+# clear_answer_memo moves on: an analysis still running with the old
+# token stores its answer under a key that no later request makes.
 #
-# Only the hash and the answer are kept: never the photo, never on disk,
-# never in a log. The journal's line for a hit says how old the answer
-# is, nothing more. Telegram and /upload photos and text requests pass no
-# memo_scope and never use it (a person may type the same words twice on
-# purpose).
+# The memo keeps only the hash and the answer: never the photo, never on
+# disk, never in a log. The journal's line for a hit says how old the
+# answer is, nothing more. Telegram and /upload photos and text requests
+# pass no memo_scope and never use it (a person may type the same words
+# twice on purpose).
 ANSWER_MEMO_SECONDS_DEFAULT = 600
 ANSWER_MEMO_SECONDS_MAX = 3600
 # One analysis takes 8-15 s, so 64 answers are 8 to 16 minutes of
@@ -1092,6 +1097,8 @@ _ANSWER_MEMO_KEY_VERSION = "chopstats answer memo 1"
 # key (SHA-256 digest) -> (_memo_clock() when stored, the answer)
 _ANSWER_MEMO: "OrderedDict[bytes, Tuple[float, Dict]]" = OrderedDict()
 _ANSWER_MEMO_LOCK = threading.Lock()
+# A part of every key; clear_answer_memo moves it on.
+_ANSWER_MEMO_EPOCH = 0
 
 
 def _memo_clock() -> float:
@@ -1144,6 +1151,7 @@ def _answer_memo_key(kind: str, scope: Optional[Tuple[str, ...]],
         digest.update(data)
 
     part(_ANSWER_MEMO_KEY_VERSION)
+    part(_ANSWER_MEMO_EPOCH)
     part(kind)
     part(len(scope))
     for item in scope:
@@ -1166,13 +1174,16 @@ def _remembered_answer(key: Optional[bytes], kind: str) -> Optional[Dict]:
     limit = answer_memo_seconds()
     if limit <= 0:
         return None
-    now = _memo_clock()
     with _ANSWER_MEMO_LOCK:
         entry = _ANSWER_MEMO.get(key)
         if entry is None:
             return None
         stored_at, kept = entry
-        age = now - stored_at
+        # The clock is read with the lock held. Read before it, a store
+        # that took the lock first looked younger than "now", and its
+        # answer was dropped as if it came from the future (review
+        # 2026-11-28).
+        age = _memo_clock() - stored_at
         if age < 0 or age > limit:
             del _ANSWER_MEMO[key]
             return None
@@ -1206,8 +1217,11 @@ def _remember_answer(key: Optional[bytes], answer) -> None:
         log.warning(f"Answer memo: an answer could not be kept "
                     f"({type(e).__name__}).")
         return
-    now = _memo_clock()
     with _ANSWER_MEMO_LOCK:
+        # With the lock held, as in _remembered_answer: the memo is then
+        # oldest first in time as well as in order, and the pruning below
+        # can stop at the first answer still in time.
+        now = _memo_clock()
         _ANSWER_MEMO.pop(key, None)
         _ANSWER_MEMO[key] = (now, kept)
         while _ANSWER_MEMO:
@@ -1220,9 +1234,15 @@ def _remember_answer(key: Optional[bytes], answer) -> None:
 
 
 def clear_answer_memo() -> None:
-    """Forget every kept answer (tests; a restart does the same)."""
+    """Forget every kept answer, and every answer still being worked out:
+    the epoch moves on, so a run that ends after this stores its answer
+    under a key that no later request makes. A sign-in from the phone
+    calls this (claude_auth.apply_token_to_env), and so do the tests; a
+    restart does the same."""
+    global _ANSWER_MEMO_EPOCH
     with _ANSWER_MEMO_LOCK:
         _ANSWER_MEMO.clear()
+        _ANSWER_MEMO_EPOCH += 1
 
 
 def analyze_text_prompt(prompt: str, backend: str = "claude",
