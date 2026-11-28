@@ -1217,12 +1217,14 @@ live next to the app in
    only as well. Android 1.8.0 followed on 2026-11-25 (`android-v1.8.0`,
    build 213), also on GitHub only, since there is no Play account yet
    (§ 6.6). The first Play upload, still to come, is the bundle of the
-   newest Android release at the time of that upload (§ 6.3). The iPhone
-   1.7.0, 1.7.1 and 1.7.2 never shipped (1.6.0 is live), and pubspec is
-   1.8.0 since PR #97, so the iPhone's next tag from `main` was `v1.8.0`,
-   pushed on 2026-11-27: `v1.7.0`, `v1.7.1` and `v1.7.2` stay unused
-   (§ 6.6). A 1.6.x hotfix is tagged on its own branch instead (§ 6.6,
-   *A 1.6.x hotfix*).
+   newest Android release at the time of that upload (§ 6.3). On
+   2026-11-27 the tag `v1.8.0`'s run 15 put the same Android app on the
+   `v1.8.0` release as build 215 (§ 6.6), so that bundle is now run 15's.
+   The iPhone 1.7.0, 1.7.1 and 1.7.2 never shipped (1.6.0 is live), and
+   pubspec is 1.8.0 since PR #97, so the iPhone's next tag from `main` was
+   `v1.8.0`, pushed on 2026-11-27: `v1.7.0`, `v1.7.1` and `v1.7.2` stay
+   unused (§ 6.6). A 1.6.x hotfix is tagged on its own branch instead
+   (§ 6.6, *A 1.6.x hotfix*).
 
 **The owner's decisions (2026-11-20):**
 
@@ -1887,7 +1889,11 @@ creates it on iOS only). So run 15's bundle and APK are the same Android
 app as run 13's, with a higher build number (an upgrade for anyone who
 installs them). The release's notes were edited to say so: they call it
 the iPhone release, and its APK the same app as `android-v1.8.0` (build
-213), built again with build number 215.
+213), built again with build number 215. A later iPhone tag that follows
+an `android-v*` release of its own version gets the same exception on
+the same terms: code that changes Android merges only after that tag
+(iPhone-only code may land before it), and the tag's release notes call
+its APK the same app as that release's.
 
 **Pubspec and the versions the policy names.** The privacy policy dates
 changes by version ("From version X.Y.Z"), and every build opens it from
@@ -1936,8 +1942,8 @@ Android 1.6.1 APK with that number on a new GitHub Release, `v1.6.1`.
 That is below `v1.8.0`'s 215, `android-v1.8.0`'s 213, `android-v1.7.2`'s
 210, `android-v1.7.1`'s 209 and `android-v1.7.0`'s 207, so Android
 refuses it on a phone with 1.7.0, 1.7.1, 1.7.2 or 1.8.0: say so in that
-release's notes, and leave the README's Android section on the newest
-Android release. Keep that branch's own `release.yml`: `main`'s would
+release's notes, and leave the README's Android section on the release
+it names. Keep that branch's own `release.yml`: `main`'s would
 stop its Android job (the branch has no `kRequireHttpsServer`), and its
 offset 200 would number the APK above 215, so Android would install 1.6.1
 (database schema 3) over 1.7.x or 1.8.0 (schema 4). All of this is moot

@@ -266,7 +266,7 @@ String _pubspecVersion(String pubspec) =>
 /// went out from main at 1.8.0+12 on 2026-11-25 (run 13; runs 11 and 12
 /// were release candidates that QA superseded, never released), so the
 /// next Android-only version is bumped first again. main's next iPhone tag
-/// was v1.8.0, a version the iPhone does not skip; it went out on
+/// was v1.8.0, a version the iPhone does not skip; it was pushed on
 /// 2026-11-27 (_kTagReleases).
 const _kAndroidReleases = [
   (version: '1.7.0', build: 207, day: '2026-11-19', plus: 9, sha: '610df6c6'),
@@ -275,10 +275,11 @@ const _kAndroidReleases = [
   (version: '1.8.0', build: 213, day: '2026-11-25', plus: 12, sha: '83e95ea1'),
 ];
 
-/// The v* GitHub Releases that a tag's Release run made from main, with
-/// that run's Android APK, oldest first: each one's version, build number
-/// (200 + its run), the day it went out (in the repo's local time) and the
-/// commit its tag is on (docs/RELEASING.md § 6.6, *The iPhone tag*).
+/// The v* GitHub Releases from 1.8.0 on that a tag's Release run made from
+/// main, with that run's Android APK, oldest first: each one's version,
+/// build number (200 + its run), the day it went out (in the repo's local
+/// time) and the commit its tag is on (docs/RELEASING.md § 6.6, *The
+/// iPhone tag*).
 /// v1.8.0 (run 15, published 2026-11-27 at 16:36 CST, 22:36Z) built
 /// Android 1.8.0 again as build 215, the same Android app as
 /// android-v1.8.0's 213, and is the newest GitHub release with an Android
@@ -290,7 +291,8 @@ const _kTagReleases = [
   (version: '1.8.0', build: 215, day: '2026-11-27', sha: '7493b009'),
 ];
 
-/// Every GitHub release that holds an Android APK, android-v* and v*
+/// Every GitHub release since android-v1.7.0 that holds an Android APK
+/// (v1.6.0's b106 and older are below all of them), android-v* and v*
 /// alike, by build number: the last is the newest, whose run's bundle is
 /// § 6.3's first Play upload and whose build a new Android build clears.
 final _kApkReleases = [
@@ -1861,6 +1863,16 @@ void main() {
           expect(s6, contains(fact), reason: fact);
         }
       }
+      // The exception's terms outlive the 1.8.0 record (review of
+      // 9c68647c): the next iPhone tag may again follow an android-v*
+      // release of its own version.
+      expect(
+          s6,
+          contains('A later iPhone tag that follows an `android-v*` release '
+              'of its own version gets the same exception on the same terms: '
+              'code that changes Android merges only after that tag '
+              '(iPhone-only code may land before it), and the tag\'s release '
+              "notes call its APK the same app as that release's."));
       expect(
           s6,
           contains('so no build of `main` may be named below the newest '
@@ -1895,8 +1907,9 @@ void main() {
       // `android-v1.8.0`'s 213, `android-v1.7.2`'s 210, `android-v1.7.1`'s
       // 209 and `android-v1.7.0`'s 207, so Android refuses it on a phone
       // with 1.7.0, 1.7.1, 1.7.2 or 1.8.0". 1.8.0 keeps 1.7.x's database
-      // schema 4, and the README's Android section names whichever release
-      // is newest, no longer a 1.7.x one.
+      // schema 4, and the README's Android section stays on the release it
+      // names (android-v1.8.0, not the tag v1.8.0's newer build of the same
+      // app, review of 9c68647c), no longer a 1.7.x one.
       final apk = _kApkReleases.last;
       final apkRun = apk.build - 200;
       final below = _andList([
@@ -1916,7 +1929,7 @@ void main() {
             '$onPhone',
         '(${100 + apkRun + 1} or more: run $apkRun built `${apk.tag}`)',
         "say so in that release's notes, and leave the README's Android "
-            'section on the newest Android release.',
+            'section on the release it names.',
         'and its offset 200 would number the APK above ${apk.build}, so '
             'Android would install 1.6.1 (database schema 3) over 1.7.x or '
             '1.8.0 (schema 4)',
@@ -2005,7 +2018,7 @@ void main() {
     // history, and the sentences that gave 1.7.2 as pubspec's version or
     // the iPhone's next one are gone, as are those that gave 1.8.0 as the
     // next Android release. The tag v1.8.0 (run 15) went out on 2026-11-27
-    // (pushed about 16:27 CST, 22:27Z; its release published 16:36 CST,
+    // (pushed at 16:29 CST, 22:29Z; its release published 16:36 CST,
     // 22:36Z): every dated mention of it gives that day, and the sentences
     // that still had the tag, the v1.8.0 release or run 13 as § 6.3's run
     // to come are gone.
@@ -2388,6 +2401,12 @@ void main() {
       for (final fact in [
         'The first Play upload, still to come, is the bundle of the newest '
             'Android release at the time of that upload (§ 6.3).',
+        // Decision 4 says which release that is since a tag's release took
+        // the place (2026-11-27, review of 9c68647c), as step 13 does.
+        for (final t in _kTagReleases)
+          "On ${t.day} the tag `v${t.version}`'s run ${t.build - 200} put "
+              'the same Android app on the `v${t.version}` release as build '
+              "${t.build} (§ 6.6), so that bundle is now run $apkRun's.",
         'the first Play upload is the newest Android release\'s bundle at '
             'the time of that upload, § 6.3',
         'which went out on GitHub only, as $later did after it',
@@ -2487,6 +2506,19 @@ void main() {
         'Today that is android-v${newest.version}. Its Meta glasses sentence '
             'is true from 1.7.1, the first version in which the switch starts '
             'off on Android.',
+        // Note 5 and the intro's pointer to it (review of 9c68647c): the
+        // section names the newest Android version's release, which a v*
+        // tag's newer build of the same app (2026-11-27) does not replace.
+        '"Android" is the exception: it describes the newest Android '
+            "version's GitHub release (item 5 below).",
+        '5. "Android" names the newest Android version\'s GitHub release, '
+            'its APK file and its size.',
+        for (final t in _kTagReleases)
+          if (t.version == newest.version)
+            "The tag v${t.version}'s release (${t.day}, build ${t.build}) is "
+                "newer and the repository's Latest, but its APK is the same "
+                'Android app, so the section keeps android-v${newest.version} '
+                '(build ${newest.build}) until someone decides to switch it.',
         'Meta glasses photos are not checked for food on the phone, so Watch '
             'Camera Roll leaves them out until you turn on **Meta glasses '
             'photos** (Settings › Photos).',

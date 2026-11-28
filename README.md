@@ -7,7 +7,7 @@ sections. On 2026-11-13 the owner found the page too much like a slide deck
 and asked for fewer slides; four were kept. Add new features to the list,
 not as new slides. It describes the App Store version, 1.8.0. Merge a change that names a new version only
 once that version is live on the App Store. "Android" is the exception: it
-describes the newest GitHub release (item 5 below).
+describes the newest Android version's GitHub release (item 5 below).
 
 Lines tied to a release. Re-read them when a new App Store version ships:
 1. The hero has no "New in" line. 1.6 had one, with "new in 1.6" in the
@@ -29,13 +29,17 @@ Lines tied to a release. Re-read them when a new App Store version ships:
 4. "Privacy" and "Everything that is sent, case by case" describe the App
    Store version. Check them against docs/PRIVACY.md at that version's tag,
    because the policy on main may already describe the next version.
-5. "Android" names the newest GitHub release, its APK file and its size.
-   Update them with each release (docs/RELEASING.md § 6.6, step 5). Today
-   that is android-v1.8.0. Its Meta glasses sentence is true from 1.7.1,
-   the first version in which the switch starts off on Android. It also
-   says how that release compares with the App Store version (the same
-   version since iPhone 1.8.0; newer once an Android-only version is out),
-   and its list of differences names iCloud Backup, which Android lacks.
+5. "Android" names the newest Android version's GitHub release, its APK
+   file and its size. Update them with each release (docs/RELEASING.md
+   § 6.6, step 5). Today that is android-v1.8.0. Its Meta glasses
+   sentence is true from 1.7.1, the first version in which the switch
+   starts off on Android. The tag v1.8.0's release (2026-11-27, build
+   215) is newer and the repository's Latest, but its APK is the same
+   Android app, so the section keeps android-v1.8.0 (build 213) until
+   someone decides to switch it. It also says how that release compares
+   with the App Store version (the same version since iPhone 1.8.0; newer
+   once an Android-only version is out), and its list of differences
+   names iCloud Backup, which Android lacks.
 6. "For developers" names the tag the App Store version was built from. Its
    two test counts are dated lower bounds.
 7. "What it costs": the sentence about Gemini's free tier and what Google may
