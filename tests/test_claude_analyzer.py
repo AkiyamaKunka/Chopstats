@@ -1261,7 +1261,8 @@ def test_the_default_wait_ends_before_an_iphone_background_scan_gives_up():
 def test_an_app_request_waits_for_the_analysis_ahead_and_then_runs(
         monkeypatch, caplog, kind):
     """The holder finishes inside the limit: the waiting request gets the
-    CLI, runs once, under the lock, and is answered — no 503 at all."""
+    CLI, runs once, under the lock, and is answered — no 503 at all. The
+    journal says how long it waited: the time that passed, not the limit."""
     _configure(monkeypatch)
     monkeypatch.delenv("CLAUDE_API_BUSY_WAIT_SECONDS", raising=False)
     locked_during_run = []
@@ -1273,6 +1274,12 @@ def test_an_app_request_waits_for_the_analysis_ahead_and_then_runs(
             stdout=_envelope(json.dumps(GOOD_ANALYSIS)))
 
     monkeypatch.setattr(claude_analyzer.subprocess, "run", run)
+    # The analyzer's clock stands still, and only the wait moves it, by
+    # 3.2 s. So the journal line below can be read to the digit: a line
+    # that printed the limit (20.0) passed the looser check this test had
+    # before (review 2026-11-28).
+    clock = [1000.0]
+    monkeypatch.setattr(claude_analyzer.time, "monotonic", lambda: clock[0])
     reached_the_wait = threading.Event()
     asked = []
     real_wait = claude_analyzer._wait_for_cli
@@ -1280,7 +1287,9 @@ def test_an_app_request_waits_for_the_analysis_ahead_and_then_runs(
     def wait(seconds):
         asked.append(seconds)
         reached_the_wait.set()
-        return real_wait(seconds)
+        got = real_wait(seconds)
+        clock[0] += 3.2
+        return got
 
     monkeypatch.setattr(claude_analyzer, "_wait_for_cli", wait)
     box = {}
@@ -1314,9 +1323,8 @@ def test_an_app_request_waits_for_the_analysis_ahead_and_then_runs(
     assert locked_during_run == [True]  # one run, and it held the lock
     assert claude_analyzer._CLI_LOCK.locked() is False
     assert claude_analyzer._LOOKUP_STATE["fg_waiting"] == 0
-    assert re.search(
-        rf"Claude CLI busy — app {kind} request waited \d+\.\d s for it\.",
-        caplog.text)
+    assert (f"Claude CLI busy — app {kind} request waited 3.2 s for it."
+            in caplog.text)
     assert "refused" not in caplog.text and "Gemini" not in caplog.text
 
 
@@ -1359,8 +1367,14 @@ def test_an_app_request_still_waiting_at_the_limit_gets_the_same_busy_signal(
 
 
 def test_the_knob_sets_how_long_an_app_request_waits(monkeypatch):
+    """3 s, on purpose less than PREEMPT_WAIT_SECONDS: those 5 s are the
+    least a caller gets that has stopped a lookup, and nobody else's. A
+    request that waits for another analysis gets the knob's seconds. With
+    the 7 this test used before, a floor of 5 under every wait went
+    unseen (review 2026-11-28)."""
     _configure(monkeypatch)
-    monkeypatch.setenv("CLAUDE_API_BUSY_WAIT_SECONDS", "7")
+    assert 3 < claude_analyzer.PREEMPT_WAIT_SECONDS
+    monkeypatch.setenv("CLAUDE_API_BUSY_WAIT_SECONDS", "3")
     asked = []
     monkeypatch.setattr(claude_analyzer, "_wait_for_cli",
                         lambda seconds: asked.append(seconds) or False)
@@ -1370,7 +1384,7 @@ def test_the_knob_sets_how_long_an_app_request_waits(monkeypatch):
             _app_request("photo")
     finally:
         claude_analyzer._CLI_LOCK.release()
-    assert asked == [7]
+    assert asked == [3]
 
 
 @pytest.mark.parametrize("kind", ["photo", "leftover", "text"])
@@ -1480,6 +1494,52 @@ def test_a_request_with_its_own_way_out_never_waits_for_another_analysis(
         "Claude CLI busy — leftover estimation declined.",
         "Claude CLI busy — text intent declined.",
     ]
+
+
+def test_a_telegram_photo_that_stopped_a_lookup_has_no_busy_line(
+        monkeypatch, caplog):
+    """A Telegram or /upload photo finds a restaurant lookup on the CLI. It
+    stops the lookup, gets the CLI when the lookup lets go, and is
+    analyzed. It met no other analysis, so the journal has no "Claude CLI
+    busy" line for it: above all not "app photo request waited", which is
+    an app request's line. With the check for an app request taken out of
+    the code, that line was written for this photo too, and every test
+    passed (review 2026-11-28). What the journal has for it is the
+    lookup's own "pre-empted" line."""
+    _configure(monkeypatch)
+    monkeypatch.delenv("CLAUDE_API_BUSY_WAIT_SECONDS", raising=False)
+    # The photo's limit for the lookup to let go, raised so that a loaded
+    # machine cannot run it out; a passing run never reaches it.
+    monkeypatch.setattr(claude_analyzer, "PREEMPT_WAIT_SECONDS", 30)
+    calls = _fake_run(monkeypatch, stdout=_envelope(json.dumps(GOOD_ANALYSIS)))
+    lookup_running = threading.Event()
+
+    def lookup(prompt, schema, model=None, on_proc=None, cancel=None, **kw):
+        lookup_running.set()
+        cancel.wait(30)  # a search that goes on until a request stops it
+        return claude_analyzer.LookupRun(status="preempted",
+                                         verdict="preempted")
+
+    monkeypatch.setattr(claude_analyzer, "lookup_restaurant", lookup)
+    worker = threading.Thread(
+        target=lambda: claude_analyzer.run_lookup_exclusive("x", "{}"))
+    worker.start()
+    try:
+        assert lookup_running.wait(5), "the lookup did not start"
+        with caplog.at_level(logging.INFO, logger="claude_analyzer"):
+            answer = claude_analyzer.analyze_food_photo(b"img")
+    finally:
+        claude_analyzer.preempt_lookup()  # ends the lookup in a failing run
+        worker.join(5)
+
+    assert answer == GOOD_ANALYSIS and len(calls) == 1
+    journal = [(r.name, r.getMessage()) for r in caplog.records]
+    assert ("claude_analyzer.lookup",
+            "Restaurant lookup pre-empted by a foreground request."
+            ) in journal
+    assert [line for _, line in journal if "Claude CLI busy" in line] == []
+    assert claude_analyzer._CLI_LOCK.locked() is False
+    assert claude_analyzer._LOOKUP_STATE["fg_waiting"] == 0
 
 
 def test_three_app_requests_at_once_run_one_cli_at_a_time(monkeypatch):

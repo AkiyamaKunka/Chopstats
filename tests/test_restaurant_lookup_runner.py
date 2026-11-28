@@ -952,7 +952,12 @@ def test_an_app_request_waits_behind_a_preempting_photo_and_the_cap_counts_both(
     app request that arrives now waits as well, where every second caller
     used to be turned away. Those two fill the places: the next app
     request is told "busy" at once, and so is the next Telegram photo, as
-    ever. When the lookup lets go, both waiters get their turn."""
+    ever. When the lookup lets go, both waiters get their turn.
+
+    Each waits its own limit: the Telegram photo the pre-emption wait, the
+    app request the seconds it came with. Nothing recorded the app
+    request's limit, so the pre-emptor's 5 s in its place went unseen
+    (review 2026-11-28)."""
     # The Telegram photo's limit, raised so that a loaded machine cannot
     # run it out before the lookup lets go below.
     monkeypatch.setattr(claude_analyzer, "PREEMPT_WAIT_SECONDS", 30)
@@ -969,9 +974,11 @@ def test_an_app_request_waits_behind_a_preempting_photo_and_the_cap_counts_both(
         target=lambda: claude_analyzer.run_lookup_exclusive("first", "{}"))
 
     waiting = threading.Semaphore(0)
+    asked = []
     real_wait = claude_analyzer._wait_for_cli
 
     def wait(seconds):
+        asked.append(seconds)
         waiting.release()
         return real_wait(seconds)
 
@@ -994,6 +1001,7 @@ def test_an_app_request_waits_behind_a_preempting_photo_and_the_cap_counts_both(
         app.start()
         assert waiting.acquire(timeout=5)  # waits too
         assert claude_analyzer._LOOKUP_STATE["fg_waiting"] == 2
+        assert asked == [30, 20]  # the Telegram photo's limit, then the app's
         note = {}
         assert _turned_away(20, note)
         assert note == {"ahead": 2}
