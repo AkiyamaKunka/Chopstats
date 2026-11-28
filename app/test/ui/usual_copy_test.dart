@@ -205,8 +205,11 @@ final _placeholderRe = RegExp(r'\{(\w+)\}');
 /// mealGroupSummaryBody); and the Edit meal note lane's 31: the note
 /// section, its changes card and replies, the unsent-note question and
 /// the notes kept on a meal (mealNoteHeader … mealNoteRemoveLabel), and
-/// the consent update's note line (aiConsentUpdateLeadMealNote).
-const _keyCount = 1007;
+/// the consent update's note line (aiConsentUpdateLeadMealNote); and the
+/// seven of Today's photo-scan row (todayScanChecking, todayScanKeepOpen,
+/// todayScanCheckingLabel, todayScanCheckingValue, todayScanDone,
+/// todayScanWaiting, todayScanWaitingReason).
+const _keyCount = 1014;
 
 Directory _appRoot() {
   var dir = Directory.current;

@@ -25,6 +25,8 @@ import 'package:calorie_tracker/services/analysis_keep_alive.dart'
 import 'package:calorie_tracker/services/backup/save_file_channel.dart'
     show SaveFileStatus;
 import 'package:calorie_tracker/services/photo/photo_library.dart';
+import 'package:calorie_tracker/services/photo/scan_status.dart'
+    show PhotoScanStatus;
 import 'package:calorie_tracker/services/usual/usual_foods.dart'
     show UsualChoices, UsualFoods;
 import 'package:calorie_tracker/ui/meal_in_use.dart';
@@ -603,6 +605,8 @@ UiServices makeServices({
   UsualFoods? usualFoods,
   AnalysisKeepAlive? analysisKeepAlive,
   Future<SaveFileStatus?> Function()? lateSaveResult,
+  PhotoScanStatus? photoScanStatus,
+  Future<void> Function()? retryPhotoScan,
 }) {
   final s = settings ?? FakeSettings();
   return UiServices(
@@ -625,6 +629,8 @@ UiServices makeServices({
     usualFoods: usualFoods,
     analysisKeepAlive: analysisKeepAlive,
     lateSaveResult: lateSaveResult,
+    photoScanStatus: photoScanStatus,
+    retryPhotoScan: retryPhotoScan,
   );
 }
 

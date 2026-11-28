@@ -1055,12 +1055,13 @@ abstract class PhotoIntake {
   /// for a truncated window. A throwing callback never stops the scan.
   ///
   /// [newestDayFirst] (the app's launch/resume catch-up): the photos of the
-  /// newest day not yet handled this session go first, in shooting order,
-  /// then the usual oldest-first pass. Each photo is offered at most once
-  /// per scan, and only the second pass reports frontiers, so coverage is
-  /// exactly as without it. A whole day, in order, because the automatic
-  /// leftover check compares a photo with the meals already logged on its
-  /// own day.
+  /// newest day not yet handled this session go first, in shooting order
+  /// (where the library marks screenshots, that day's other photos before
+  /// its screenshots, each group in shooting order), then the usual
+  /// oldest-first pass. Each photo is offered at most once per scan, and
+  /// only the last pass reports frontiers, so coverage is exactly as
+  /// without it. A whole day, in order, because the automatic leftover
+  /// check compares a photo with the meals already logged on its own day.
   Future<DateTime?> backfillScan(
       {int lookbackDays,
       DateTime? since,

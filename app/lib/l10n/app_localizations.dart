@@ -2892,6 +2892,48 @@ abstract class AppLocalizations {
   /// **'Couldn\'t load today\'s meals.'**
   String get todayLoadFailed;
 
+  /// Today, the first line of the status row under the totals while the automatic photo scan (Watch Camera Roll: at launch, on a return to the app, or as a photo arrives) is sending photos that had no verdict yet. current is the one being checked, from 1; total is how many this scan checks as far as is known, so it can change. No full stop: todayScanKeepOpen is the line under it.
+  ///
+  /// In en, this message translates to:
+  /// **'{total, plural, =1{Checking 1 photo} other{Checking photos: {current} of {total}}}'**
+  String todayScanChecking(int current, int total);
+
+  /// Today, the second, smaller line of the todayScanChecking row. Photos become meals one at a time, and iOS stops the scan when the app is left.
+  ///
+  /// In en, this message translates to:
+  /// **'Keep Chopstats open.'**
+  String get todayScanKeepOpen;
+
+  /// Screen-reader label of the todayScanChecking row, said once when the row appears: its two lines as one sentence pair, ending in todayScanKeepOpen. It carries no count on purpose: the count changes with every photo and would be said again each time (todayScanCheckingValue holds it).
+  ///
+  /// In en, this message translates to:
+  /// **'Checking photos. Keep Chopstats open.'**
+  String get todayScanCheckingLabel;
+
+  /// Screen-reader value of the todayScanChecking row, read after todayScanCheckingLabel when the row is focused: which photo is being checked, of how many.
+  ///
+  /// In en, this message translates to:
+  /// **'{current} of {total}'**
+  String todayScanCheckingValue(int current, int total);
+
+  /// Today, the status row for a few seconds after the automatic photo scan has finished: how many photos got a verdict (a meal, or not food). Then the row goes away. A screen reader says it once.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 photo checked.} other{{count} photos checked.}}'**
+  String todayScanDone(int count);
+
+  /// Today, the status row when the automatic photo scan let photos go without a verdict and no reason can be given (another run of the app is still analyzing them). A Retry button (retry) follows.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 photo is not checked yet.} other{{count} photos are not checked yet.}}'**
+  String todayScanWaiting(int count);
+
+  /// Like todayScanWaiting, with why the photos could not be checked: reason is one of the short reason lines (reasonNetwork, reasonServerBusy, reasonServerFailed, reasonRateLimited), which start lower-case and have no full stop. A Retry button (retry) follows.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 photo is not checked yet ({reason}).} other{{count} photos are not checked yet ({reason}).}}'**
+  String todayScanWaitingReason(int count, String reason);
+
   /// History tab error state when the query fails; shown with a Retry button.
   ///
   /// In en, this message translates to:

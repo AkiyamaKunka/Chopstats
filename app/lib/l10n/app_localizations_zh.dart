@@ -1648,6 +1648,37 @@ class AppLocalizationsZh extends AppLocalizations {
   String get todayLoadFailed => '无法加载今天的记录。';
 
   @override
+  String todayScanChecking(int current, int total) {
+    return '正在检查照片：第 $current 张，共 $total 张';
+  }
+
+  @override
+  String get todayScanKeepOpen => '请保持筷拍打开。';
+
+  @override
+  String get todayScanCheckingLabel => '正在检查照片。请保持筷拍打开。';
+
+  @override
+  String todayScanCheckingValue(int current, int total) {
+    return '第 $current 张，共 $total 张';
+  }
+
+  @override
+  String todayScanDone(int count) {
+    return '已检查 $count 张照片。';
+  }
+
+  @override
+  String todayScanWaiting(int count) {
+    return '还有 $count 张照片没有检查。';
+  }
+
+  @override
+  String todayScanWaitingReason(int count, String reason) {
+    return '还有 $count 张照片没有检查（$reason）。';
+  }
+
+  @override
   String get historyLoadFailed => '无法加载历史记录。';
 
   @override
