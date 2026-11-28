@@ -677,6 +677,47 @@ void main() {
         isNot(contains('BackgroundSchedulePlugin')));
   });
 
+  // Review, 2026-11-28: a simulator refuses every submit (BGTaskScheduler
+  // error 1, unavailable), so with Watch Camera Roll on, Settings read a
+  // red "Not scheduled" in every simulator session, the store screenshot
+  // sessions included. In a simulator build the channel now answers "not
+  // implemented" to every call, which the Dart side reads as "iOS cannot
+  // be asked": nothing is recorded, and the row stays as it was
+  // (background_schedule_test has that end). A device build registers the
+  // plugin as before. Only the registration differs: the plugin's own
+  // code is the same in both, so RunnerTests still drive it in a
+  // simulator.
+  test('in a simulator build the background-schedule channel answers '
+      '"not implemented"; a device build registers the plugin', () {
+    final source = File(
+            '${_appRoot().path}/ios/Runner/BackgroundSchedulePlugin.swift')
+        .readAsStringSync();
+    final code = source
+        .split('\n')
+        .map((line) => line.replaceFirst(RegExp(r'//.*'), ''))
+        .join('\n');
+    final register = RegExp(
+            r'static func register\(with registrar: FlutterPluginRegistrar\) '
+            r'\{(.*?)\n  \}',
+            dotAll: true)
+        .firstMatch(code)
+        ?.group(1);
+    expect(register, isNotNull, reason: 'no register(with:)');
+    expect(
+        register!.replaceAll(RegExp(r'\s+'), ' ').trim(),
+        'let channel = FlutterMethodChannel( name: channelName, '
+        'binaryMessenger: registrar.messenger()) '
+        '#if targetEnvironment(simulator) '
+        'channel.setMethodCallHandler { _, result in '
+        'result(FlutterMethodNotImplemented) } '
+        '#else '
+        'registrar.addMethodCallDelegate('
+        'BackgroundSchedulePlugin(), channel: channel) '
+        '#endif');
+    expect('targetEnvironment'.allMatches(code), hasLength(1),
+        reason: 'the plugin itself does not know where it runs');
+  });
+
   // The photo library's change history (PhotoChangesPlugin.swift, design
   // G1a, 2026-10-23) is how photos another app imports late — glasses
   // photos the Meta AI app copies in hours later, keeping their capture

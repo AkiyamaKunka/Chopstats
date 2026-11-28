@@ -73,10 +73,23 @@ final class BackgroundSchedulePlugin: NSObject, FlutterPlugin {
     self.reply = reply
   }
 
+  /// In a simulator the channel answers "not implemented" to every call
+  /// (2026-11-28, review). A simulator refuses every submit
+  /// (BGTaskSchedulerErrorDomain 1, unavailable), so with Watch Camera Roll
+  /// on, Settings read a red "Not scheduled" in every simulator session,
+  /// the store screenshot sessions included. Dart reads "not implemented"
+  /// as "iOS cannot be asked": it records nothing, and the row stays as it
+  /// was (background_schedule.dart BackgroundRequests). Only the
+  /// registration differs; the plugin is the same in both builds, so
+  /// RunnerTests still drive it in a simulator.
   static func register(with registrar: FlutterPluginRegistrar) {
     let channel = FlutterMethodChannel(
       name: channelName, binaryMessenger: registrar.messenger())
-    registrar.addMethodCallDelegate(BackgroundSchedulePlugin(), channel: channel)
+    #if targetEnvironment(simulator)
+      channel.setMethodCallHandler { _, result in result(FlutterMethodNotImplemented) }
+    #else
+      registrar.addMethodCallDelegate(BackgroundSchedulePlugin(), channel: channel)
+    #endif
   }
 
   func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {

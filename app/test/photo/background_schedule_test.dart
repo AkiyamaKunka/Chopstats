@@ -285,6 +285,42 @@ void main() {
       },
     );
 
+    // Review, 2026-11-28: in a simulator the native side answers "not
+    // implemented" to every call (BackgroundSchedulePlugin.register; a
+    // simulator refuses every submit, and Settings read a red "Not
+    // scheduled" in every simulator session). That has to read as "iOS
+    // cannot be asked", end to end: nothing is submitted and nothing is
+    // recorded, so Settings and the diagnostics page show what they showed
+    // before (background_schedule_ui_test: no record, no line).
+    test('a native side that answers "not implemented" (a simulator): '
+        'nothing is learned and nothing is recorded', () async {
+      debugBackgroundRequestsOverride = null; // the real seam
+      final asked = <String?>[];
+      messenger.setMockMessageHandler(backgroundScheduleChannelName, (
+        message,
+      ) async {
+        asked.add(const StandardMethodCodec().decodeMethodCall(message).method);
+        return null; // what FlutterMethodNotImplemented puts on the wire
+      });
+      addTearDown(
+        () => messenger.setMockMessageHandler(
+          backgroundScheduleChannelName,
+          null,
+        ),
+      );
+      expect(await keep(), isNull);
+      expect(asked, ['pending'], reason: 'no count, so no submit either');
+      expect(prefs.getString(backgroundSchedulePrefsKey), isNull);
+      expect(await lastBackgroundSchedule(), isNull);
+      // A record from an earlier check is left exactly as it was.
+      final before = jsonEncode(
+        BackgroundSchedule(at: t0, scheduled: true).toJson(),
+      );
+      await prefs.setString(backgroundSchedulePrefsKey, before);
+      expect(await keep(), isNull);
+      expect(prefs.getString(backgroundSchedulePrefsKey), before);
+    });
+
     // The app's launch and the Watch Camera Roll switch wait for the
     // answer (syncBackgroundScan): a channel that never replies must not
     // hold either.
