@@ -8,8 +8,10 @@ or the OAuth token into a terminal transcript or a chat.
 
 "The first rollout" on this page is the deploy of 2026-11-05: commit
 f800801 on a Google Cloud e2-micro VM (Ubuntu 22.04, Python 3.10.12,
-1 GB of memory, no swap). The numbers quoted from it are what that one
-run showed, not promises.
+1 GB of memory, no swap). "The second rollout" is the deploy of
+2026-11-28 on the same VM: commit 136d8f7e, `main` with #114 merged,
+which replaced f800801. The numbers quoted from either are what that
+one run showed, not promises.
 
 ## HTTPS is the deploy path
 
@@ -33,26 +35,55 @@ The smoke tests on this page call Flask as `http://127.0.0.1:5000` on
 the VM itself: that is the VM talking to itself, never the address a
 phone uses.
 
-## What is on the VM, and what is waiting (as of 2026-11-05)
+## What is on the VM, and what is waiting (as of 2026-11-28)
 
-On the VM since the first rollout (f800801). The commits this page
-listed as waiting on 2026-10-12 are all part of it. New for the phone:
+On the VM since the second rollout (2026-11-28): 136d8f7e, `main` with
+#114 merged. `DEPLOYED_SHA` on the VM names it. It replaced f800801,
+which had run since the first rollout, and keeps everything that one
+brought: the meal-context fields in photo replies, the two lookup
+endpoints, and `features` in `/api/auth_check`.
+
+The lookups are on. The VM's `.env` sets `TELEGRAM_POLLING=0`,
+`CLAUDE_LOOKUP_ENABLED=1`, `CLAUDE_LOOKUP_MODEL=sonnet` and
+`CLAUDE_LOOKUP_TIMEOUT_SECONDS=180`, and none of
+`CLAUDE_ANALYZER_TIMEOUT_SECONDS`, `CLAUDE_ANALYZER_DISPATCH` or
+`CLAUDE_API_BUSY_WAIT_SECONDS`. So smoke C shows
+`'restaurant_lookup': True` and smoke E answers `400` there. New for
+the phone:
 
 | Commit | What changes for the phone |
 |---|---|
-| 70952e8 | Photo replies carry the meal-context fields `estimate_confidence`, `restaurant_context`, `portion_state`, `order_merchant` and, on every item, `brand` / `qty` / `unit`. The photo prompt grew to ask for them. |
-| d362226, e246648, c42c077 | `POST /api/restaurant_lookup` and `POST /api/restaurant_lookup/status`, off until you switch them on: see [Restaurant lookup](#restaurant-lookup-websearch-on-your-server). |
-| c42c077 | `/api/auth_check` also returns `features`, so the app can tell "the server needs an update" from "the feature is switched off". New knob `API_BIND_HOST`. |
+| #114 | A photo, leftover photo or text request that arrives while another analysis runs waits up to 20 s for the CLI and is analyzed when it comes free, instead of getting `503` at once. See [Two app requests at once](#two-app-requests-at-once-the-busy-wait). The busy `503` keeps its body and also carries `Retry-After: 5`. |
+| f8d0960 | A text request during a closed usage window gets the plan's own sentence, which says when it opens again, and `retry: "later"`. It used to get "the analysis ran but produced no usable result" and `retry: false`, which hid the reset time. A model that needs credits gets the CLI's words and `retry: false`. |
+| 752cc03, e60a08e, 4bb40fd | Connect Claude works to the end: the sign-in link arrives whole (it was cut after 80 characters), the pasted code is submitted, and the newest tap wins. An older start that is still running answers `502 start_failed`. |
+| 7011916 | A lookup whose CLI is slow to start ends as `failed` with `timeout`, which the app tries again. It used to end as `guard_fail`, and the app stopped looking up that meal. |
+| 3060b31, 571bcd7 | A JSON body that is not an object gets a logged `400 bad_request_shape`, never a `500`. `/ping` takes a time zone that is a string or nothing, and `/reconcile` a list of strings: what the Termux watcher sends (the app calls neither). |
 
-Waiting:
+New on the server only:
 
 | Commit | What changes |
 |---|---|
-| 3758ff7 | The default lookup limit is 180 s instead of 75 s. Until it is deployed, keep `CLAUDE_LOOKUP_TIMEOUT_SECONDS=180` in `.env`, as the first rollout did. |
+| #114 | One new knob, `CLAUDE_API_BUSY_WAIT_SECONDS` (unset: 20 s; the VM leaves it unset). The journal has a `Claude CLI busy` line for each request that found another analysis on the CLI. |
+| 3758ff7 | The default lookup limit is 180 s instead of 75 s. The `CLAUDE_LOOKUP_TIMEOUT_SECONDS=180` that the first rollout put in `.env` now says the same as the default; it can stay. |
+| c66b60b, c571116 | With `TELEGRAM_POLLING=0`, as on the VM, a stop or restart is recorded as a clean shutdown, so deploys no longer count toward the crash-loop alert, and an abandoned Connect Claude session is ended after its 10 minutes. |
+| 277d333, 4968afb | When `logs/service_health.json` cannot be written, no lookup starts: the daily cap fails closed. A finished lookup's request and answer leave memory after 24 hours, also when no later lookup comes. |
+| de00f3d | `CLAUDE_ANALYZER_DISPATCH=file` applies only to Telegram and `/upload` photos. App requests always run the no-tools stream dispatch. |
+| 0c70a46, 0d14e04, b6571cb, 3d9ea2e | The server's copy of the US chain table is the one the current apps carry. No chain key or name changed, so the server accepts the same lookups as before. |
+
+A Connect Claude that completes writes the new token into `.env`, so
+the file must stay writable by the service's user (`ubuntu`, mode
+`600`; step 0 of the VM script prints both). Otherwise the new token
+works only until the next restart, and the journal says so.
+
+Waiting: nothing. The VM runs the server code that `main` has. A server
+commit merged after #114 waits until the next deploy; one in an open
+pull request is not waiting yet.
 
 No new pip packages, no new required env vars, no database migration.
-For app builds that are already installed the changes are additive: new
-fields in a reply, and endpoints an older app never calls.
+For app builds that are already installed nothing is taken away: the
+busy reply keeps its body, and the other changes fix replies that were
+wrong (a `500`, a cut sign-in link, a text request that hid the reset
+time).
 
 ## Before you start
 
@@ -63,8 +94,9 @@ fields in a reply, and endpoints an older app never calls.
   old iOS builds trigger it.
 - Memory is the tight resource on a 1 GB VM without swap. In the first
   rollout the VM had about 380–540 MB available, and the service
-  together with one CLI run peaked at about 555 MB. So never start a
-  second CLI run next to the service's; the one exception is the
+  together with one CLI run peaked at about 555 MB; in the second, about
+  345 MB was available before the restart (step 0 prints it). So never
+  start a second CLI run next to the service's; the one exception is the
   one-second init check in step 2 of the lookup order below.
 - Importing `telegram_bot` opens `~/CalorieTracker/meals.db`. Every
   preflight/smoke import below sets `HOME` to a throwaway folder so the live
@@ -78,66 +110,143 @@ once in that Terminal window first, or each comment prints
 `command not found: #`.
 
 ```bash
-cd ~/CalorieTracker && git fetch origin
-# one exact commit: the branch of the open pull request, and origin/main once that is merged
-REF=$(git rev-parse origin/feat/glasses-restaurant-assist)
+cd ~/CalorieTracker && git fetch origin || echo "STOP: fetch failed"
+# one exact commit: the one origin/main points to now
+REF=$(git rev-parse origin/main)
 SHA=$(git rev-parse --short "$REF")
-# that commit must have the lookup routes: this prints routes ok, or STOP
+# that commit must have the lookup routes and the busy wait: this prints routes ok and busy-wait ok, or STOP
 git grep -q API_BIND_HOST "$REF" -- telegram_bot.py && echo "routes ok" || echo "STOP: $SHA has no lookup routes"
+git grep -q CLAUDE_API_BUSY_WAIT_SECONDS "$REF" -- claude_analyzer.py && echo "busy-wait ok" || echo "STOP: $SHA has no busy wait"
+# and its server code must be the code the deploy review read: this prints server code = reviewed, or STOP
+REVIEWED=b3681a7c   # the commit the deploy review read; set it for each deploy
+git diff --quiet "$REVIEWED" "$REF" -- '*.py' shared requirements.txt .env.example ':!tests' ':!scripts' ':!app' \
+  && echo "server code = reviewed $REVIEWED" || echo "STOP: $SHA has server code the review did not read"
 # the gate: the jobs CI ran on exactly this commit
 gh run view "$(gh run list --commit "$REF" --workflow Tests --limit 1 \
   --json databaseId --jq '.[0].databaseId')" --json jobs --jq '.jobs[] | "\(.name): \(.conclusion)"'
 ```
 
-Go on only if that printed `routes ok` and `test (3.10): success` (see
-"Which commit" and "The gate is CI on Python 3.10" below). Then, in the
-same terminal:
+Go on only if that printed no `STOP` line, and printed `routes ok`,
+`busy-wait ok`, `server code = reviewed` with your `REVIEWED`, and
+`test (3.10): success` (see "Which commit", "The reviewed code" and
+"The gate is CI on Python 3.10" below). Then, in the same terminal:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 python3.12 -m pytest -q -p no:cacheprovider
-bash scripts/check_public_safety.sh
+# second opinion: the tests of that commit itself, unpacked into a temporary folder
+T=$(mktemp -d); git archive "$REF" | tar -x -C "$T"
+(cd "$T" && PYTHONDONTWRITEBYTECODE=1 python3.12 -m pytest -q -p no:cacheprovider); rm -rf "$T"
 OUT="$TMPDIR/ct_deploy_$SHA.tgz"
 git archive --format=tar.gz -o "$OUT" "$REF"
+ls -l "$OUT"     # about 36 MB
 gcloud compute scp "$OUT" "$VM":/tmp/ct_deploy.tgz --zone "$ZONE" --project "$PROJECT"
 echo "$SHA"
 gcloud compute ssh "$VM" --zone "$ZONE" --project "$PROJECT"
 ```
 
-**Which commit.** `REF` is one exact commit, so the test result you read,
-the tarball and `DEPLOYED_SHA` all name the same code. While the
-restaurant-assist work is still an open pull request, `origin/main` does
-not contain it, so the block names that branch,
-`origin/feat/glasses-restaurant-assist` (the first rollout deployed
-f800801, its head at the time). Do not deploy `origin/main` until the
-pull request is merged: `main` has no lookup routes and no
-`API_BIND_HOST`, so that deploy would take both away without any error,
-and the script on the VM could not tell. The `routes ok` line is the
-check for it: it looks for `API_BIND_HOST`, which arrived with the
-lookup routes, in that commit's `telegram_bot.py`. Once the pull request
-is merged, change the `REF` line to `REF=$(git rev-parse origin/main)`;
-the check stays as it is and passes there too.
+**Which commit.** `REF` is one exact commit, so the test result you read
+and the tarball you upload name the same code. On the VM the script
+stops unless the tarball is the commit that `SHA` names (`git archive`
+writes the commit id into the tarball), so `DEPLOYED_SHA` names that
+code too. It is `origin/main`: pull request #19, the restaurant-assist
+work, was merged into `main` on 2026-11-10 (UTC), and every server
+change goes to `main` through a pull request. Do not deploy the old
+branch of #19, `origin/feat/glasses-restaurant-assist` (the first
+rollout deployed f800801, its head at the time). That branch stopped at
+7b06fbc9 on 2026-11-09 (US Central time; 05:18 UTC on 11-10, eight
+minutes before the merge). It passes `routes ok` and its CI is green,
+but it has no busy wait and none of the changes listed above except
+3758ff7: the `busy-wait ok` line stops it, and so does the
+reviewed-code line. `routes ok` looks for `API_BIND_HOST`, which
+arrived with the lookup routes, in that commit's `telegram_bot.py`, and
+stops a commit from before them; `busy-wait ok` looks for
+`CLAUDE_API_BUSY_WAIT_SECONDS`, which arrived with the busy wait
+(#114), in its `claude_analyzer.py`.
+
+**The reviewed code.** A review reads one commit, and another one is
+deployed: the review reads the head of a pull request, and `main` holds
+its squash merge. `REVIEWED` is the commit that the deploy review read,
+so set it for each deploy. The `git diff` line compares the server code
+of the two commits (the `.py` files outside `tests`, `scripts` and
+`app`, and `shared`, `requirements.txt` and `.env.example`) and prints
+`server code = reviewed …` only when it is the same. It prints `STOP`
+when `main` has server code that the review did not read, such as a
+server pull request merged after it: such a commit passes `routes ok`,
+`busy-wait ok` and CI as well. The same `git diff` with `--stat` in
+place of `--quiet` lists the files that differ; have them reviewed and
+set `REVIEWED` to the commit that review read. The second rollout
+compared b3681a7c, the reviewed head of #114, with 136d8f7e, its squash
+merge on `main`: the server code was the same.
 
 **The gate is CI on Python 3.10.** The VM runs Python 3.10 and the Mac
 runs the tests on 3.12, so the result that counts is the `test (3.10)`
 job of the Tests workflow on that commit: the `gh` line must print
 `test (3.10): success` (the commit's page on GitHub shows the same
-checks). If it prints an error instead, CI never ran on that commit:
-push it and wait. The local `pytest` and the safety check look at your
-working tree, which is a second opinion only: `git archive` ships the
-commit, not the working tree.
+checks). If it prints an error instead, CI has not run on that commit
+yet: every push to `main` starts it, so wait and run the line again. A
+job that is still running prints nothing after its colon. The same job
+runs `scripts/check_public_safety.sh` on that commit, so the safety
+check needs no run of its own here.
+
+**The second opinion** is the local `pytest`, and it tests the commit
+itself: `git archive` unpacks it into a temporary folder, the tests run
+there, and the folder is deleted. Not your working tree: the checkout in
+`~/CalorieTracker` may sit on another branch or hold changes that are
+not committed, and `git archive` ships the commit, not the working
+tree.
+
+**The tarball** is about 36 MB now, up from about 6 MB in the first
+rollout: mostly the App Store screenshots in `app/ios` and the README's
+images in `docs/readme`. Nothing on the VM runs them, but the upload
+takes longer and every copy on the VM is that much bigger: the staged
+tree, the live tree and each backup.
 
 ## On the VM
 
 Run these steps as one script, not line by line: `set -eu` and the
 explicit gates stop it before the live directory is touched. Save the
 block as `/tmp/deploy_vm.sh` on the VM and run
-`bash /tmp/deploy_vm.sh <SHA from the Mac>`.
+`bash /tmp/deploy_vm.sh <SHA from the Mac>` (with `bash`: step 3 needs
+it).
 
 ```bash
 set -eu
 SHA="$1"
 APP=/home/ubuntu/CalorieTracker; PY=$APP/venv/bin/python; TS=$(date +%Y%m%d%H%M%S)
 test -s /tmp/ct_deploy.tgz
+# the tarball must be the commit SHA names: git archive writes the commit id into it
+TAR_SHA=$(python3 -c 'import sys,tarfile; print(tarfile.open(sys.argv[1]).pax_headers.get("comment", ""))' /tmp/ct_deploy.tgz)
+case "$TAR_SHA" in "$SHA"?*) echo "tarball is $TAR_SHA" ;; *) echo "STOP: the tarball is ${TAR_SHA:-no git archive}, not $SHA"; exit 2 ;; esac
+# 0. pre-checks: each prints its result, none prints a secret
+#    free disk, or stop: the staged tree, the extracted tree and two backups need room
+df -h /tmp /home/ubuntu | awk 'NR>1 {print $6, $4, "free"}'
+FREE_KB=$(df -Pk /home/ubuntu | awk 'NR==2 {print $4}')
+[ "$FREE_KB" -gt 512000 ] || { echo "STOP: under 500 MB free on /home"; exit 6; }
+#    owners: every path the tarball writes must belong to ubuntu, who extracts it;
+#    other files that do not are listed and left alone
+sudo tar -tzf /tmp/ct_deploy.tgz | sed 's#^\./##; s#/$##' | sed "s#^#$APP/#" | sort -u > /tmp/ct_list
+sudo find $APP -path $APP/venv -prune -o ! -user ubuntu -print | sort -u > /tmp/ct_notub
+NOTUB=$(comm -12 /tmp/ct_list /tmp/ct_notub | head -5)
+OTHER=$(comm -13 /tmp/ct_list /tmp/ct_notub | head -5)
+rm -f /tmp/ct_list /tmp/ct_notub
+[ -z "$OTHER" ] || { echo "not owned by ubuntu, and the tarball does not write them (left alone):"; echo "$OTHER"; }
+[ -z "$NOTUB" ] || { echo "STOP: paths the tarball writes are not owned by ubuntu:"; echo "$NOTUB"; exit 6; }
+echo "owners ok for every path the tarball writes"
+#    .env, which the tarball does not write: a Connect Claude saves its new token there as ubuntu (expect ubuntu 600)
+echo ".env owner and mode: $(sudo stat -c '%U %a' $APP/.env)"
+#    the health ledger: the service must be able to write it, or no lookup starts
+sudo -u ubuntu sh -c 'L=/home/ubuntu/CalorieTracker/logs; test -w $L && test -w $L/service_health.json && { test ! -e $L/service_health.json.lock || test -w $L/service_health.json.lock; }' \
+  && echo "ledger writable" || { echo "STOP: ledger not writable"; exit 6; }
+#    the knobs this deploy reads, as .env sets them: those lines only (the file holds the keys)
+sudo grep -E '^(CLAUDE_ANALYZER_TIMEOUT_SECONDS|CLAUDE_ANALYZER_DISPATCH|CLAUDE_API_BUSY_WAIT_SECONDS|TELEGRAM_POLLING|CLAUDE_LOOKUP_ENABLED|CLAUDE_LOOKUP_MODEL|CLAUDE_LOOKUP_TIMEOUT_SECONDS)=' $APP/.env \
+  || echo "none of those knobs set"
+#    a time limit in Caddy would cut a slow reply: expect 0
+echo "Caddy timeout directives: $(sudo grep -ciE 'timeout' /etc/caddy/Caddyfile || true)"
+#    memory available now, with the service running (see "Before you start")
+free -m | awk 'NR==2 {print "available MB:", $7}'
+#    Telegram and /upload photos that find the CLI busy go to Gemini: expect 0 key errors
+echo "Gemini key errors in 7 days: $(sudo journalctl -u caloriebot --since '-7d' --no-pager | grep -c -E 'API_KEY_INVALID|API key not valid' || true)"
+#    the commit that runs now, which a code rollback goes back to
+echo "DEPLOYED_SHA before: $(sudo cat $APP/DEPLOYED_SHA 2>/dev/null || echo none)"
 # 1. stage the new tree outside the live directory
 sudo -u ubuntu rm -rf /tmp/ct_new /tmp/ct_preflight_home
 sudo -u ubuntu mkdir -p /tmp/ct_new /tmp/ct_preflight_home
@@ -147,12 +256,23 @@ sudo -u ubuntu tar -xzf /tmp/ct_deploy.tgz -C /tmp/ct_new
 sudo -u ubuntu $PY -c 'import sys,PIL,pillow_heif; print(sys.version.split()[0], "Pillow", PIL.__version__, "pillow_heif", pillow_heif.__version__)'
 sudo diff -q /tmp/ct_new/requirements.txt $APP/requirements.txt \
   || { echo "requirements.txt changed: stop and review"; exit 3; }
-# 3. import gate for the NEW code, throwaway HOME. The output is captured
-#    and searched for the "import ok" line: piping this command into tail
-#    would hide a failed import behind tail's own exit status.
-GATE=$( (cd /tmp/ct_new && sudo -u ubuntu env HOME=/tmp/ct_preflight_home $PY -c 'import telegram_bot; print("import ok")') 2>&1 ) \
+# 3. import gate for the NEW code, throwaway HOME: telegram_bot, and daily_report,
+#    which the 23:30 report runs and telegram_bot imports only for /report.
+#    The output is captured and searched for the "import ok" line: piping this
+#    command into tail would hide a failed import behind tail's own exit status.
+GATE=$( (cd /tmp/ct_new && sudo -u ubuntu env HOME=/tmp/ct_preflight_home $PY -c 'import telegram_bot, daily_report; print("import ok")') 2>&1 ) \
   || { echo "IMPORT GATE FAILED"; printf '%s\n' "$GATE" | tail -6; exit 4; }
 printf '%s\n' "$GATE" | grep -q '^import ok$' || { echo "IMPORT GATE: no ok line"; exit 4; }
+#    root .py files that only the live tree has: tar never deletes them. They are
+#    listed and left alone, unless the venv's Python finds a module of that name
+#    (a standard module or an installed package)
+LEFT=$(comm -23 <(sudo -u ubuntu bash -c "cd $APP && ls *.py" | sort) <(sudo -u ubuntu bash -c "cd /tmp/ct_new && ls *.py" | sort))
+echo "root .py files only in the live tree: ${LEFT:-none}"
+for F in $LEFT; do
+  if sudo -u ubuntu $PY -I -c 'import importlib.util,sys; sys.exit(importlib.util.find_spec(sys.argv[1]) is None)' "${F%.py}"; then
+    echo "STOP: $F has the name of a standard module or an installed package, which the service would import in its place"; exit 4
+  fi
+done
 # 4. backups: code-only (for rollback) and full (disaster only; contains .env)
 sudo -u ubuntu tar -czf /home/ubuntu/calorietracker_code_predeploy_$TS.tgz -C $APP \
   --exclude=./venv --exclude=./logs --exclude=./reports --exclude='./meals.db*' \
@@ -163,13 +283,17 @@ sudo chmod 600 /home/ubuntu/calorietracker_*predeploy_$TS.tgz
 # 5. quiet check: no /api/ request and no analysis line in the last 90 s, or stop
 RECENT=$(sudo journalctl -u caloriebot --since '-90s' --no-pager | grep -c -E 'POST /api/|analy' || true)
 [ "$RECENT" = "0" ] || { echo "NOT QUIET ($RECENT lines in the last 90 s): try again in a few minutes"; exit 5; }
+#    and the service's main process has no child process: every CLI run is one
+#    (a stopped service has MainPID 0, and pgrep -P 0 would list the system's own processes)
+MPID=$(systemctl show caloriebot -p MainPID --value)
+[ "$MPID" = 0 ] || [ -z "$(pgrep -P "$MPID" || true)" ] || { echo "NOT QUIET: a CLI run is in progress: try again in a few minutes"; exit 5; }
 #    then extract, record the SHA, restart
 sudo -u ubuntu tar -xzf /tmp/ct_deploy.tgz -C $APP
 echo "$SHA" | sudo -u ubuntu tee $APP/DEPLOYED_SHA >/dev/null
 sudo systemctl restart caloriebot
 sleep 6
 sudo systemctl is-active caloriebot
-sudo systemctl show caloriebot -p NRestarts -p ActiveEnterTimestamp
+sudo systemctl show caloriebot -p NRestarts -p ActiveEnterTimestamp -p Type -p WatchdogUSec
 ```
 
 Then run the smoke test below and clean up:
@@ -178,11 +302,101 @@ Then run the smoke test below and clean up:
 Do not run `pip install -r requirements.txt` unless step 2 fails: nothing
 in requirements changed, and an unpinned install could upgrade Pillow.
 
+About the tarball check and the pre-checks (step 0): the tarball, disk,
+owner and ledger checks stop the script; the other lines are only
+printed, to read once it has run.
+
+- **Tarball.** `test -s` only proves that a file is there. When the
+  upload fails (the network drops, or another ssh user cannot replace
+  the earlier user's file in `/tmp`), an older `/tmp/ct_deploy.tgz` can
+  still be there, from a deploy whose clean-up was skipped. Every other
+  check passes on it, the old code is extracted, `DEPLOYED_SHA` names
+  the new commit, and nothing after the restart tells them apart: smoke
+  C, E and F pass on f800801 as on 136d8f7e. So the script reads the
+  commit id that `git archive` writes into the tarball and goes on only
+  when it begins with the short `SHA` from the Mac.
+- **Disk.** A `tar` that runs out of room in the live directory leaves
+  it part old, part new. `set -e` stops the script before the restart,
+  but the next crash or reboot starts that mix (`Restart=always`). The
+  staged tree, the extracted tree and each backup take tens of MB now
+  that the tarball is about 36 MB, and the backups of earlier deploys
+  stay in `/home/ubuntu`.
+- **Owners.** The extraction runs as `ubuntu`. A file it writes that
+  belongs to root (after an edit with `sudo`, say) does not stop it:
+  `tar` deletes a file before it writes it, and that needs only a
+  folder that `ubuntu` can write. A folder that belongs to root does:
+  nothing can be written into it, `tar` goes on with the other paths
+  and fails at the end, and `set -e` stops the script with the tree
+  part old, part new, as above. The check stops the deploy for both,
+  but only for paths the tarball writes. The first version of this
+  check looked at every file in the folder, and it stopped the second
+  rollout for nothing: two old root-owned `telegram_bot.py.bak-…` copies
+  that no deploy writes. Such files are now listed and left alone.
+- **`.env`** is not in the tarball, so the owner check leaves it alone.
+  Its line should say `ubuntu 600`: with another owner, the token that
+  a Connect Claude saves there works only until the next restart, and
+  a wider mode lets other users of the VM read the keys.
+- **Ledger.** A lookup starts only when its run can be counted in
+  `logs/service_health.json` (since 277d333). When `ubuntu` cannot write
+  that file or its `.lock`, every lookup is refused as if the day's cap
+  were reached.
+- **Knobs.** Only the lines of these knobs are printed, never the file.
+  Look for a `CLAUDE_ANALYZER_TIMEOUT_SECONDS` above 280 (an analysis
+  that first waited 20 s could then outlast the app's 5 minutes), a
+  `CLAUDE_ANALYZER_DISPATCH` line (`file` is a rollback knob only, and
+  it now reaches Telegram and `/upload` photos alone), and anything
+  after the number of `CLAUDE_API_BUSY_WAIT_SECONDS` (see
+  [Two app requests at once](#two-app-requests-at-once-the-busy-wait)).
+  Change such a line in `.env`, then restart while the phone is idle.
+  With `CLAUDE_LOOKUP_ENABLED=1`, smoke E answers `400`.
+- **Caddy.** A reply can take up to 140 s now (SERVER_TLS.md, "Slow
+  replies"), and a `timeout` line in the Caddyfile could cut it off.
+  Where Caddy is not set up yet, the line says that the file is missing.
+- **Memory.** `available MB` is what the VM has to spare with the
+  service running. It is printed for the record: on a 1 GB VM without
+  swap, memory is the tight resource (see "Before you start").
+- **Gemini.** A Telegram or `/upload` photo that finds the CLI busy goes
+  to Gemini, and with a key that Google refuses, that photo fails. The
+  line counts the journal's key errors of the last 7 days; 0 can also
+  mean that no photo went to Gemini in that time.
+- **`DEPLOYED_SHA` before** names the code that the newest code backup
+  holds, which a rollback brings back.
+
+In the second rollout, step 0 printed about 20 GB free, the two
+`telegram_bot.py.bak-…` files as left alone, `ledger writable`, the four
+knob lines listed under "What is on the VM", no Caddy timeout directive,
+about 345 MB available, no Gemini key errors in 7 days and f800801 as
+the `DEPLOYED_SHA` before. Step 2 printed Python 3.10.12, Pillow 11.3.0
+and pillow_heif 1.4.0; step 3 listed `calorie_tracker.py` and
+`flask_app.py`, old files that nothing imports. After the restart:
+`active`, `NRestarts=0`, `Type=notify` and `WatchdogUSec=2min`. The
+tarball and `.env` lines, and step 3's question to the venv, are newer
+than that run.
+
+About the root `.py` files in step 3: the service runs from the live
+folder, and Python looks there first for a module, so a leftover can
+be imported in the place of a module of the same name, by the server
+code and by the libraries alike. The module it displaces can be a
+standard one (a leftover `functools.py`, say: the code of the second
+rollout imports three standard modules that f800801 did not,
+`functools`, `struct` and `termios`) or a package in the venv
+(`requests.py`, `flask.py`, `dotenv.py` or `google.py`). So step 3 asks
+the venv's Python whether it finds a module of each leftover's name,
+with `-I` so that it does not look in the current folder, and stops
+when it does. Any other leftover takes no module's place; it is listed
+and stays.
+
 About the quiet check: a restart cuts off a request that is being
-answered, and the journal gets its line for an analysis only when the
-analysis ends. So the check shows that the phone was idle a moment ago,
-not that nothing started in the last two minutes. If you just took a
-photo yourself, wait for it to finish first.
+answered. The journal gets its line for a request only when the answer
+goes out, and a request that waits for the busy CLI writes nothing
+until it runs, so the journal shows only that the phone was idle a
+moment ago. The child-process line covers the rest: every CLI run (a
+photo, a text or a lookup) is a process that the service starts, so
+none means that no analysis is running now. A stopped service has no
+main process (`MainPID` is 0) and runs nothing, so it passes:
+`pgrep -P 0` would list the system's own first processes and stop the
+very deploy that is meant to bring the service back. If you just took
+a photo yourself, wait for it to finish first.
 
 ## Smoke test (on the VM; A–E spend no Claude usage, F spends one run; the key is never printed)
 
@@ -194,7 +408,7 @@ sudo journalctl -u caloriebot --since '-3min' --no-pager | grep -E 'Traceback|Im
 curl -s -o /dev/null -w '%{http_code} ' -X POST $B/api/auth_check; curl -s -o /dev/null -w '%{http_code}\n' -X POST $B/ping
 # C. new code is live. The key goes in via stdin, never argv or echo. Expect
 #    features= {'estimate_confidence': True, 'lookup_jobs': True, 'restaurant_lookup': False}
-#    ('restaurant_lookup': True when CLAUDE_LOOKUP_ENABLED is already set on this server)
+#    ('restaurant_lookup': True when CLAUDE_LOOKUP_ENABLED is already set on this server, as on this page's VM)
 K=$(sudo sed -n 's/^ANDROID_API_KEY=//p' /home/ubuntu/CalorieTracker/.env | head -1 | tr -d "\"'")
 printf 'X-API-Key: %s\n' "$K" | curl -s -X POST -H @- -H 'X-Client-Platform: smoke' $B/api/auth_check \
   | python3 -c 'import json,sys; d=json.load(sys.stdin); print("C ok=",d.get("ok"),"claude_login=",d.get("claude_login"),"features=",d.get("features"))'
@@ -204,7 +418,7 @@ printf 'X-API-Key: %s\n' "$K" | curl -s -w ' %{http_code}\n' -X POST -H @- -H 'C
   -H 'X-Client-Platform: smoke' --data "{\"image_b64\":\"$IMG\"}" $B/api/analyze_photo
 # E. the lookup routes exist. The body is one the server refuses either way, so no lookup runs:
 #    lookups off: {"error":"disabled","reason":"disabled"}, then 403
-#    lookups on:  {"error":"bad_request","field":"items","reason":"bad_request"}, then 400
+#    lookups on:  {"error":"bad_request","field":"items","reason":"bad_request"}, then 400 (this page's VM)
 #    (a 404 means the old code is still running)
 printf 'X-API-Key: %s\n' "$K" | curl -s -w ' %{http_code}\n' -X POST -H @- -H 'Content-Type: application/json' \
   -H 'X-Client-Platform: smoke' --data '{"items":[]}' $B/api/restaurant_lookup
@@ -219,22 +433,48 @@ rm -f /tmp/photo_body.json /tmp/photo_reply.json
 unset K IMG
 ```
 
-F is part of this deploy, not an extra: the photo prompt grew, and a
-whole analysis is the only proof that it still works. It sends a test
-picture that ships with the code (a drawing of a plate). Expect
-`F http 200`, the three context fields filled in, and `brand`, `qty` and
-`unit` among the item keys; in the first rollout the answer came after
-12 seconds. The model may also decide that a drawing is not food, which
-the prompt allows: then F prints `F http 200` with `is_food= False`, the
-three fields `None` and `item keys= []`. That is a pass too, for the
+F is part of every deploy, not an extra: a whole analysis is the only
+proof that the photo path still works. In the first rollout the photo
+prompt had grown; in the second, the busy wait changed how an app
+request gets the CLI. F sends a test picture that ships with the code
+(a drawing of a plate). Expect `F http 200`, the three context fields
+filled in, and `brand`, `qty` and `unit` among the item keys; the answer
+came after 12 seconds in the first rollout and 12.2 s in the second.
+The model may also decide that a drawing is not food, which the prompt
+allows: then F prints `F http 200` with `is_food= False`, the three
+fields `None` and `item keys= []`. That is a pass too, for the
 endpoint, the CLI and the JSON contract. Do not roll back for it and do
 not repeat F (each try is one plan run): the meal-context fields are
 then proven by the phone photo.
 
 Then take one food photo with the phone. That is not optional for this
 deploy either: it is the only end-to-end proof for the app build that is
-installed. Check `systemctl show caloriebot -p NRestarts` is still 0 an
-hour later.
+installed.
+
+**Day one.** Look once more the next day, after the daily report has
+run: the cron starts it at 23:30 by the VM's clock, which need not be
+yours (this page's VM keeps China time). Nothing here prints a journal
+line whole:
+
+```bash
+APP=/home/ubuntu/CalorieTracker
+sudo systemctl show caloriebot -p NRestarts      # still NRestarts=0
+sudo journalctl -u caloriebot --since '-24h' --no-pager | grep -c -E 'Traceback|Unhandled error' || true    # 0
+# the busy lines, and the warnings this deploy can add, counted
+sudo journalctl -u caloriebot --since '-24h' --no-pager \
+  | grep -oE 'app [a-z]+ request (waited|refused)|falling back to Gemini for this photo|is not a whole number|daily-cap ledger could not be updated|init_timeout' \
+  | sort | uniq -c
+# the daily report's last run: the day it covered, ok= True, and when it ran
+sudo -u ubuntu $APP/venv/bin/python -c 'import json; d=json.load(open("/home/ubuntu/CalorieTracker/logs/service_health.json")).get("daily_report", {}); print("report", d.get("last_target_date"), "ok=", d.get("last_ok"), "at", d.get("last_attempt_at"))'
+```
+
+`waited` counts the app requests that the busy wait saved from a `503`,
+`refused` those that still got one, and `falling back to Gemini` the
+Telegram or `/upload` photos that found the CLI busy. `init_timeout`
+counts the lookups whose CLI was slow to start, which the app now tries
+again. `is not a whole number` (a `CLAUDE_API_BUSY_WAIT_SECONDS` that is
+not a number) and `daily-cap ledger could not be updated` (a ledger the
+service cannot write) must not appear at all.
 
 ## Two app requests at once (the busy wait)
 
@@ -558,20 +798,33 @@ both live in memory.
 APP=/home/ubuntu/CalorieTracker
 B=$(ls -t /home/ubuntu/calorietracker_code_predeploy_*.tgz | head -1); echo "$B"
 sudo systemctl stop caloriebot
+sudo -u ubuntu rm -f $APP/DEPLOYED_SHA   # first: the backup puts back the label of the code it holds
 sudo -u ubuntu tar -xzf "$B" -C $APP     # code only: meals.db, .env, venv, logs untouched
-sudo -u ubuntu rm -f $APP/DEPLOYED_SHA
+echo "DEPLOYED_SHA now: $(sudo cat $APP/DEPLOYED_SHA 2>/dev/null || echo none)"
 sudo systemctl start caloriebot
 sudo systemctl is-active caloriebot
 ```
+
+The code backup holds the `DEPLOYED_SHA` of the code it saved, so the
+label is deleted before the backup is unpacked, not after: the file
+then names the restored code (f800801, with the backup that the second
+rollout made), and the next deploy's `DEPLOYED_SHA before` names the
+code that runs. A backup without the file leaves none, rather than a
+wrong one.
 
 The deploy changes no data, so rollback has nothing else to undo. The
 full archive restores everything but also rolls `meals.db` back to before
 the deploy — last resort only.
 
 What a rollback leaves behind: the files the deploy added stay on disk,
-and so do the new `.env` knobs. The old code ignores both. Two things
-follow from that. The lookup routes are gone, so they answer `404` and
-an app with the restaurant assist says that the server needs an update.
-And `API_BIND_HOST` is ignored, so a server that listened on localhost
-only listens on every interface again: repeat the check in
-[SERVER_TLS.md](SERVER_TLS.md#6-close-plain-http) after a code rollback.
+and so do the new `.env` knobs. The old code ignores both. Since the
+second rollout, the newest code backup on this page's VM holds
+f800801. That code has the lookup routes and `API_BIND_HOST`, so the
+rollback takes away the busy wait (a busy CLI is answered `503` at once
+again) and the other changes listed under "What is on the VM". A
+rollback to code from before the lookup routes takes two more things
+with it. The lookup routes are gone, so they answer `404` and an app
+with the restaurant assist says that the server needs an update. And
+`API_BIND_HOST` is ignored, so a server that listened on localhost only
+listens on every interface again: repeat the check in
+[SERVER_TLS.md](SERVER_TLS.md#6-close-plain-http) after such a rollback.
