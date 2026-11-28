@@ -209,9 +209,10 @@ printf 'X-API-Key: %s\n' "$K" | curl -s -w ' %{http_code}\n' -X POST -H @- -H 'C
 printf 'X-API-Key: %s\n' "$K" | curl -s -w ' %{http_code}\n' -X POST -H @- -H 'Content-Type: application/json' \
   -H 'X-Client-Platform: smoke' --data '{"items":[]}' $B/api/restaurant_lookup
 # F. one whole analysis through the API (ONE plan run; the endpoint stores nothing): expect http 200
+#    (curl gives it 200 s: the longest wait for a busy CLI, 60 s, then one analysis at its limit, 120 s, and 20 s to spare)
 sudo cat /home/ubuntu/CalorieTracker/app/test_live/fixtures/plate.jpg \
   | python3 -c 'import base64,json,sys; json.dump({"image_b64": base64.b64encode(sys.stdin.buffer.read()).decode()}, open("/tmp/photo_body.json","w"))'
-printf 'X-API-Key: %s\n' "$K" | curl -s -m 170 -o /tmp/photo_reply.json -w 'F http %{http_code} in %{time_total}s\n' -X POST -H @- \
+printf 'X-API-Key: %s\n' "$K" | curl -s -m 200 -o /tmp/photo_reply.json -w 'F http %{http_code} in %{time_total}s\n' -X POST -H @- \
   -H 'Content-Type: application/json' -H 'X-Client-Platform: smoke' --data-binary @/tmp/photo_body.json $B/api/analyze_photo
 python3 -c 'import json; d=json.load(open("/tmp/photo_reply.json")); a=d.get("analysis") or {}; i=(a.get("food_items") or [{}])[0]; print("F analyzed_by=",d.get("analyzed_by"),"is_food=",a.get("is_food"),"estimate_confidence=",a.get("estimate_confidence"),"restaurant_context=",a.get("restaurant_context"),"portion_state=",a.get("portion_state"),"item keys=",sorted(i))'
 rm -f /tmp/photo_body.json /tmp/photo_reply.json
@@ -234,6 +235,54 @@ Then take one food photo with the phone. That is not optional for this
 deploy either: it is the only end-to-end proof for the app build that is
 installed. Check `systemctl show caloriebot -p NRestarts` is still 0 an
 hour later.
+
+## Two app requests at once (the busy wait)
+
+The server runs one CLI analysis at a time. A request from the app (a
+photo, a leftover photo or a text request) that arrives while another
+analysis is running used to be answered `503` at once. Server code of
+2026-11-28 or later makes it wait for the CLI first:
+
+- It waits up to `CLAUDE_API_BUSY_WAIT_SECONDS`; the default wait is
+  20 s. When the CLI comes free in that time, the request is analyzed
+  and answered as usual.
+- At most 2 requests wait at a time. One more is answered at once.
+- A request that is still waiting at the limit, or that finds both
+  places taken, gets the same `503 {"retry": true}` as before, now with
+  a `Retry-After: 5` header as well. The app builds that are installed
+  read the body, which has not changed, and ask again a few seconds
+  later, as they always did (for a photo: after 5 s and after 10 s).
+- A photo that comes through Telegram or `/upload` never waits for
+  another analysis: it goes to Gemini at once, as before.
+- A restaurant lookup still gives way to all of these, and none starts
+  while a request is waiting.
+
+| Knob | Default | Meaning |
+|---|---|---|
+| `CLAUDE_API_BUSY_WAIT_SECONDS` | `20` | Seconds an app request waits for a busy CLI (0–60). `0` switches the wait off: the `503` comes at once, as before. Write the number alone on its line: systemd keeps a comment after it as part of the value, the value is then not a number, and the wait stays at 20 s (the journal says so once, in a warning). |
+
+Keep it near 20. An iPhone background scan gives up on its request 22 s
+after the scan began. A request that has waited longer than that is
+analyzed for a phone that no longer listens: that is one run of your
+plan for an answer nobody reads, and the next photo waits behind it. A
+higher value only makes sense on a server that no iPhone uses. The limit
+only bounds that waste: the server cannot see a phone hang up, so a
+request whose phone gave up while it waited is still analyzed in full
+when its turn comes.
+
+The journal has one line for each request that found another analysis
+on the CLI, and it starts with `Claude CLI busy`. It says what happened
+to that request: it waited so many seconds and then ran; or it was
+refused, after the wait or at once (two were already waiting, or the
+wait is off); or, for a Telegram or `/upload` photo, it went to Gemini.
+A request that found a restaurant lookup there stops the lookup, and the
+journal says `Restaurant lookup pre-empted by a foreground request.` An
+app request that then gets the CLI has its "waited" line as well; a
+Telegram or `/upload` photo that then gets it has no line of its own.
+
+The wait needs no setting and no app update. It starts when the server
+is deployed: until then the server on your VM still answers a busy
+request at once.
 
 ## Restaurant lookup (WebSearch on your server)
 

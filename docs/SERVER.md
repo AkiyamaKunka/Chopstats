@@ -420,6 +420,20 @@ Response contract worth knowing:
   single-flight CLI was busy, retry in place in a few seconds;
   `retry: false` — the run happened and produced nothing usable, more
   retries would only spend the subscription for the same junk.
+- Before it answers "busy", the server makes the request wait for the
+  CLI: up to `CLAUDE_API_BUSY_WAIT_SECONDS` (the default wait is 20 s),
+  and at most 2 requests wait at a time, one more is answered at once.
+  So a second phone usually just gets its answer a little later. An
+  iPhone background scan often does not get it in time: it gives up on
+  its request 22 s after the scan began, and a photo that arrives
+  together with another one waits for that whole analysis and then
+  needs its own (roughly 8–15 s each). The server analyzes it all the
+  same, because it cannot see the phone hang up, and the phone offers
+  the photo again later. The busy `503` also carries a
+  `Retry-After: 5` header; its JSON body is unchanged. Telegram and
+  `/upload` photos never wait for another analysis: they go to Gemini at
+  once. The knob and the reason for 20 s are in
+  [SERVER_DEPLOY.md](SERVER_DEPLOY.md#two-app-requests-at-once-the-busy-wait).
 
 ## Restaurant lookup (WebSearch, off by default)
 

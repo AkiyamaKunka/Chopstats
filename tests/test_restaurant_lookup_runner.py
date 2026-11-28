@@ -857,6 +857,170 @@ def test_foreground_contention_without_a_lookup_is_unchanged():
     claude_analyzer._CLI_LOCK.release()
 
 
+# ─── an app request waits for the analysis ahead (2026-11-28) ─────────
+#
+# _acquire_cli_for_foreground(seconds) is how an app request asks: it may
+# wait that long for another foreground request. The tests above ask with
+# no argument, as Telegram and /upload do, and pin that those are still
+# answered at once. None of these tests sleeps: the instant that matters
+# is staged inside a stand-in for _wait_for_cli, or seen through a
+# semaphore the stand-in releases. Where a wait carries a number (5, 30),
+# it only bounds a failing run; a passing one never reaches it.
+
+def _turned_away(*args):
+    """True when _acquire_cli_for_foreground(*args) is told "busy". A lock
+    it was given by mistake is handed back before the assert fails, so
+    one failing test cannot leave the CLI locked for the tests after it."""
+    got = claude_analyzer._acquire_cli_for_foreground(*args)
+    if got:
+        claude_analyzer._CLI_LOCK.release()
+    return not got
+
+
+def test_a_lookup_cannot_take_the_cli_ahead_of_a_waiting_app_request(
+        monkeypatch):
+    """A photo waits for the analysis ahead of it. That analysis ends and
+    the job worker polls BEFORE the photo wakes (threading.Lock is not
+    FIFO, so the worker may be first at a free lock): it is told to poll
+    again, as while a photo waits for a pre-empted lookup. Without the
+    waiting photo in fg_waiting the lookup would start here, and the
+    photo would sit out a search of up to 180 s."""
+    calls = _stub_lookups(monkeypatch, None)
+    real_wait = claude_analyzer._wait_for_cli
+    asked, seen = [], {}
+
+    def wait(seconds):
+        asked.append(seconds)
+        claude_analyzer._CLI_LOCK.release()  # the analysis ahead ends
+        seen["waiting"] = claude_analyzer._LOOKUP_STATE["fg_waiting"]
+        seen["lock_free"] = not claude_analyzer._CLI_LOCK.locked()
+        seen["lookup"] = claude_analyzer.run_lookup_exclusive("x", "{}")
+        return real_wait(seconds)  # ...and now the photo wakes
+
+    monkeypatch.setattr(claude_analyzer, "_wait_for_cli", wait)
+    assert claude_analyzer._CLI_LOCK.acquire(blocking=False)  # ahead of it
+    got = claude_analyzer._acquire_cli_for_foreground(20)
+    try:
+        assert got is True
+        assert asked == [20]
+        assert seen == {"waiting": 1, "lock_free": True, "lookup": None}
+        assert calls == []
+    finally:
+        if got:
+            claude_analyzer._CLI_LOCK.release()
+    assert claude_analyzer._LOOKUP_STATE["fg_waiting"] == 0
+    # The photo has had its turn: the worker's next poll gets the CLI.
+    assert claude_analyzer.run_lookup_exclusive("x", "{}").status == "ok"
+    assert calls == ["x"]
+
+
+def test_an_app_request_that_preempts_a_lookup_waits_no_less_than_before(
+        monkeypatch):
+    """The caller that pre-empts a lookup always had PREEMPT_WAIT_SECONDS
+    for the lock. An app request brings its own, longer limit; a shorter
+    one, or none (the knob at 0, and Telegram), keeps the old 5 s."""
+    assert claude_analyzer.PREEMPT_WAIT_SECONDS == 5
+    release = threading.Event()
+    in_first = threading.Event()
+
+    def first():
+        in_first.set()
+        release.wait(30)
+
+    _stub_lookups(monkeypatch, first)
+    worker = threading.Thread(
+        target=lambda: claude_analyzer.run_lookup_exclusive("first", "{}"))
+    worker.start()
+    try:
+        assert in_first.wait(5)
+        asked = []
+        monkeypatch.setattr(claude_analyzer, "_wait_for_cli",
+                            lambda seconds: asked.append(seconds) or False)
+        assert _turned_away(20)
+        assert _turned_away(2)
+        assert _turned_away()
+        assert asked == [20, 5, 5]
+        assert claude_analyzer._LOOKUP_STATE["fg_waiting"] == 0
+    finally:
+        release.set()
+        worker.join(5)
+
+
+def test_an_app_request_waits_behind_a_preempting_photo_and_the_cap_counts_both(
+        monkeypatch):
+    """A lookup holds the CLI and a Telegram photo has pre-empted it. An
+    app request that arrives now waits as well, where every second caller
+    used to be turned away. Those two fill the places: the next app
+    request is told "busy" at once, and so is the next Telegram photo, as
+    ever. When the lookup lets go, both waiters get their turn.
+
+    Each waits its own limit: the Telegram photo the pre-emption wait, the
+    app request the seconds it came with. Nothing recorded the app
+    request's limit, so the pre-emptor's 5 s in its place went unseen
+    (review 2026-11-28)."""
+    # The Telegram photo's limit, raised so that a loaded machine cannot
+    # run it out before the lookup lets go below.
+    monkeypatch.setattr(claude_analyzer, "PREEMPT_WAIT_SECONDS", 30)
+    assert claude_analyzer.BUSY_WAIT_MAX_WAITERS == 2
+    release = threading.Event()
+    in_first = threading.Event()
+
+    def first():
+        in_first.set()
+        release.wait(30)
+
+    _stub_lookups(monkeypatch, first)
+    worker = threading.Thread(
+        target=lambda: claude_analyzer.run_lookup_exclusive("first", "{}"))
+
+    waiting = threading.Semaphore(0)
+    asked = []
+    real_wait = claude_analyzer._wait_for_cli
+
+    def wait(seconds):
+        asked.append(seconds)
+        waiting.release()
+        return real_wait(seconds)
+
+    monkeypatch.setattr(claude_analyzer, "_wait_for_cli", wait)
+    turns = []
+
+    def caller(name, seconds):
+        got = claude_analyzer._acquire_cli_for_foreground(seconds)
+        turns.append((name, got))
+        if got:
+            claude_analyzer._CLI_LOCK.release()  # its analysis, over at once
+
+    telegram = threading.Thread(target=caller, args=("telegram", 0))
+    app = threading.Thread(target=caller, args=("app", 20))
+    try:
+        worker.start()
+        assert in_first.wait(5)
+        telegram.start()
+        assert waiting.acquire(timeout=5)  # waits for the lookup to let go
+        app.start()
+        assert waiting.acquire(timeout=5)  # waits too
+        assert claude_analyzer._LOOKUP_STATE["fg_waiting"] == 2
+        assert asked == [30, 20]  # the Telegram photo's limit, then the app's
+        note = {}
+        assert _turned_away(20, note)
+        assert note == {"ahead": 2}
+        assert _turned_away()
+        assert not waiting.acquire(blocking=False), "a third caller waited"
+        assert turns == []
+        release.set()
+        telegram.join(5)
+        app.join(5)
+        assert sorted(turns) == [("app", True), ("telegram", True)]
+    finally:
+        release.set()
+        for thread in (telegram, app, worker):
+            if thread.ident is not None:  # started
+                thread.join(5)
+    assert claude_analyzer._LOOKUP_STATE["fg_waiting"] == 0
+    assert claude_analyzer._CLI_LOCK.locked() is False
+
+
 def test_a_finished_lookup_is_not_relabelled_preempted(monkeypatch, tmp_path):
     cli, _ = make_cli(tmp_path, lines(FOUND))
     configure(monkeypatch, cli)

@@ -12,6 +12,9 @@ this VM) instead of a metered API key. The contract they must keep:
     retryable rather than burning it.
 """
 import io
+import json
+import threading
+from types import SimpleNamespace
 
 import pytest
 
@@ -952,3 +955,140 @@ def test_an_unavailable_backend_is_a_logged_503_naming_the_knob(
     assert (f"{label} refused: backend 'glm' unavailable "
             f"(GLM_PLAN_KEY is not set).") in [
                 r.getMessage() for r in caplog.records]
+
+
+# ─── A busy CLI: the request waits first, and the 503 says when to ask
+# again (2026-11-28) ───────────────────────────────────────────────────
+#
+# Through the real analyzer functions, with only the CLI process and the
+# wait itself stood in for. No test sleeps: a request that waits is seen
+# through an Event, and a wait that runs out answers "still busy" at once.
+
+@pytest.mark.parametrize("path,fn,busy,empty,for_photo", _CLI_ENDPOINTS,
+                         ids=[row[0] for row in _CLI_ENDPOINTS])
+def test_a_busy_503_carries_retry_after(client, monkeypatch, path, fn, busy,
+                                        empty, for_photo):
+    """For app builds to come: the busy 503 names its pause in a
+    Retry-After header (seconds). The body stays what the test above
+    pins, because installed builds read "retry" from it. The two other
+    503s carry no such header: "retry": false forbids the retry, and
+    "later" (a CLI timeout, a closed usage window) is not a matter of
+    seconds."""
+    monkeypatch.setattr(claude_analyzer, "backend_available",
+                        lambda b, for_photo=False: True)
+    h = {"X-API-Key": "secret-key"}
+
+    def raise_busy(*a, **kw):
+        raise claude_analyzer.AnalyzerBusy()
+
+    monkeypatch.setattr(claude_analyzer, fn, raise_busy)
+    resp = client.http.post(path, headers=h, json=_cli_body())
+    assert resp.status_code == 503
+    assert claude_analyzer.BUSY_RETRY_AFTER_SECONDS == 5
+    assert resp.headers["Retry-After"] == "5"
+    assert resp.get_json() == {"error": "claude_unavailable",
+                               "reason": busy, "retry": True}
+
+    monkeypatch.setattr(claude_analyzer, fn, lambda *a, **kw: None)
+    resp = client.http.post(path, headers=h, json=_cli_body())
+    assert resp.status_code == 503
+    assert resp.get_json()["retry"] is False
+    assert "Retry-After" not in resp.headers
+
+    def raise_timeout(*a, **kw):
+        raise claude_analyzer.AnalyzerTimeout(120)
+
+    monkeypatch.setattr(claude_analyzer, fn, raise_timeout)
+    resp = client.http.post(path, headers=h, json=_cli_body())
+    assert resp.status_code == 503
+    assert resp.get_json()["retry"] == "later"
+    assert "Retry-After" not in resp.headers
+
+
+def _real_analyzer_with_a_fake_cli(monkeypatch):
+    """The analyzer itself runs (nothing in claude_analyzer is replaced
+    but the CLI process), and the wait is at its default. Returns the
+    list of CLI starts."""
+    monkeypatch.setenv("CLAUDE_ANALYZER_ENABLED", "1")
+    monkeypatch.delenv("CLAUDE_ANALYZER_DISPATCH", raising=False)
+    monkeypatch.delenv("CLAUDE_API_BUSY_WAIT_SECONDS", raising=False)
+    monkeypatch.setattr(claude_analyzer.shutil, "which",
+                        lambda *a, **k: "/usr/local/bin/claude")
+    starts = []
+
+    def run(cmd, **kw):
+        starts.append(cmd)
+        return SimpleNamespace(returncode=0, stderr="", stdout=json.dumps({
+            "type": "result", "is_error": False,
+            "result": json.dumps(ANALYSIS)}))
+
+    monkeypatch.setattr(claude_analyzer.subprocess, "run", run)
+    return starts
+
+
+@pytest.mark.parametrize("path,fn,busy,empty,for_photo", _CLI_ENDPOINTS,
+                         ids=[row[0] for row in _CLI_ENDPOINTS])
+def test_a_request_during_another_analysis_waits_and_is_answered_200(
+        client, monkeypatch, path, fn, busy, empty, for_photo):
+    """Two uploads arrive together (2026-11-27). The second used to get
+    an instant 503; now it is answered once the first is done."""
+    starts = _real_analyzer_with_a_fake_cli(monkeypatch)
+    waiting = threading.Event()
+    real_wait = claude_analyzer._wait_for_cli
+
+    def wait(seconds):
+        waiting.set()
+        return real_wait(seconds)
+
+    monkeypatch.setattr(claude_analyzer, "_wait_for_cli", wait)
+    box = {}
+    second = threading.Thread(target=lambda: box.setdefault(
+        "resp", client.http.post(path, headers={"X-API-Key": "secret-key"},
+                                 json=_cli_body())))
+    assert claude_analyzer._CLI_LOCK.acquire(blocking=False)  # the first
+    held = True
+    try:
+        second.start()
+        assert waiting.wait(5), "the second request did not wait"
+        assert starts == [] and box == {}
+        claude_analyzer._CLI_LOCK.release()  # the first is done
+        held = False
+        second.join(5)
+    finally:
+        if held:
+            claude_analyzer._CLI_LOCK.release()
+        second.join(5)
+
+    resp = box["resp"]
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["ok"] is True and body["analyzed_by"] == "claude"
+    key = {"/api/analyze_photo": "analysis",
+           "/api/analyze_leftover": "leftover",
+           "/api/text_intent": "result"}[path]
+    assert body[key] == ANALYSIS
+    assert "Retry-After" not in resp.headers
+    assert len(starts) == 1
+    assert claude_analyzer._CLI_LOCK.locked() is False
+
+
+@pytest.mark.parametrize("path,fn,busy,empty,for_photo", _CLI_ENDPOINTS,
+                         ids=[row[0] for row in _CLI_ENDPOINTS])
+def test_a_request_still_waiting_at_the_limit_gets_the_unchanged_503(
+        client, monkeypatch, path, fn, busy, empty, for_photo):
+    starts = _real_analyzer_with_a_fake_cli(monkeypatch)
+    asked = []
+    monkeypatch.setattr(claude_analyzer, "_wait_for_cli",
+                        lambda seconds: asked.append(seconds) or False)
+    assert claude_analyzer._CLI_LOCK.acquire(blocking=False)
+    try:
+        resp = client.http.post(path, headers={"X-API-Key": "secret-key"},
+                                json=_cli_body())
+    finally:
+        claude_analyzer._CLI_LOCK.release()
+    assert asked == [20]
+    assert resp.status_code == 503
+    assert resp.get_json() == {"error": "claude_unavailable",
+                               "reason": busy, "retry": True}
+    assert resp.headers["Retry-After"] == "5"
+    assert starts == []

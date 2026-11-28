@@ -539,3 +539,114 @@ def test_photo_during_an_ok_teardown_beats_the_next_queued_job(
         == "found"
     _wait_state(service, b["job_id"], {"done"})
     assert starts[1] > photo_started + 0.3
+
+
+def test_a_queued_lookup_stays_behind_an_app_photo_that_waits_for_the_cli(
+        monkeypatch, services):
+    """An app photo waits for the analysis ahead of it (the busy wait,
+    2026-11-28) and a lookup job is queued. The analysis ends, and the
+    worker polls twice BEFORE the photo wakes: the CLI is free at both
+    polls, and the lookup still does not start, because a photo is
+    waiting for it. The lookup runs only after the photo's own analysis.
+
+    Through the real worker, the default runner and analyze_food_photo as
+    the endpoint calls it. Nothing here sleeps but the worker's own 10 ms
+    poll; the 5 and 30 only bound a failing run."""
+    from types import SimpleNamespace
+
+    monkeypatch.setenv("CLAUDE_ANALYZER_ENABLED", "1")
+    monkeypatch.delenv("CLAUDE_ANALYZER_DISPATCH", raising=False)
+    monkeypatch.delenv("CLAUDE_API_BUSY_WAIT_SECONDS", raising=False)
+    monkeypatch.setattr(claude_analyzer.shutil, "which",
+                        lambda *a, **k: "/usr/local/bin/claude")
+    order = []
+    photo_running = threading.Event()
+    photo_may_end = threading.Event()
+
+    def photo_cli(cmd, **kw):
+        order.append("photo starts")
+        photo_running.set()
+        photo_may_end.wait(30)
+        order.append("photo ends")
+        return SimpleNamespace(returncode=0, stderr="", stdout=json.dumps({
+            "type": "result", "is_error": False,
+            "result": json.dumps({"is_food": True, "total_calories": 640})}))
+
+    def fake_lookup(prompt, schema, model=None, on_proc=None, cancel=None,
+                    **kw):
+        order.append("lookup runs")
+        return _ok_run()
+
+    monkeypatch.setattr(claude_analyzer.subprocess, "run", photo_cli)
+    monkeypatch.setattr(claude_analyzer, "lookup_restaurant", fake_lookup)
+
+    polls = []  # (CLI held, photos waiting, the worker was told "busy")
+    polled = threading.Semaphore(0)
+    real_exclusive = claude_analyzer.run_lookup_exclusive
+
+    def exclusive(*a, **kw):
+        seen = (claude_analyzer._CLI_LOCK.locked(),
+                claude_analyzer._LOOKUP_STATE["fg_waiting"])
+        run = real_exclusive(*a, **kw)
+        polls.append(seen + (run is None,))
+        polled.release()
+        return run
+
+    monkeypatch.setattr(claude_analyzer, "run_lookup_exclusive", exclusive)
+
+    def polls_reach(count):
+        while len(polls) < count:
+            assert polled.acquire(timeout=5), "the worker stopped polling"
+
+    at_the_wait = threading.Event()
+    photo_may_wake = threading.Event()
+    real_wait = claude_analyzer._wait_for_cli
+
+    def wait(seconds):
+        at_the_wait.set()
+        photo_may_wake.wait(30)
+        return real_wait(seconds)
+
+    monkeypatch.setattr(claude_analyzer, "_wait_for_cli", wait)
+    box = {}
+    photo = threading.Thread(target=lambda: box.setdefault(
+        "answer", claude_analyzer.analyze_food_photo(
+            b"\xff\xd8\xff", allow_file_fallback=False, raise_on_busy=True)))
+    service = lookup_jobs.LookupService(Counter(), clock=Clock(),
+                                        poll_seconds=0.01,
+                                        model_fn=lambda: "sonnet")
+    services.append(service)
+    assert claude_analyzer._CLI_LOCK.acquire(blocking=False)  # the one ahead
+    held = True
+    try:
+        photo.start()
+        assert at_the_wait.wait(5), "the app photo did not wait"
+        claude_analyzer._CLI_LOCK.release()  # the analysis ahead ends
+        held = False
+        _, job = service.submit(_request())
+        polls_reach(2)
+        # Free CLI, one photo waiting, and the worker told to poll again.
+        assert polls[:2] == [(False, 1, True), (False, 1, True)]
+        assert order == []
+        photo_may_wake.set()
+        assert photo_running.wait(5), "the photo did not get the CLI"
+        polls_reach(len(polls) + 2)  # two more polls, during the photo's run
+        assert order == ["photo starts"]
+        assert all(busy for _, _, busy in polls)
+        photo_may_end.set()
+        photo.join(5)
+        done = _wait_state(service, job["job_id"], {"done"})
+    finally:
+        if held:
+            claude_analyzer._CLI_LOCK.release()
+        photo_may_wake.set()
+        photo_may_end.set()
+        photo.join(5)
+    assert box == {"answer": {"is_food": True, "total_calories": 640}}
+    assert done["lookup"]["chain_key"] == "chipotle"
+    assert order == ["photo starts", "photo ends", "lookup runs"]
+    # Every poll but the last was turned away; the last one ran the lookup.
+    assert [busy for _, _, busy in polls].count(False) == 1
+    assert polls[-1][2] is False
+    assert claude_analyzer._LOOKUP_STATE["fg_waiting"] == 0
+    assert claude_analyzer._CLI_LOCK.locked() is False
