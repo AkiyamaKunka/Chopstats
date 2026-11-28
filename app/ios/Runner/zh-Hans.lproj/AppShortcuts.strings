@@ -1,0 +1,5 @@
+/* 「检查新照片」App 快捷指令的 Siri 和聚焦搜索说法（CheckNewPhotosIntent.swift
+   ChopstatsShortcuts）。每一句都用 ${applicationName} 说出 App 的名字（筷拍）。 */
+
+"Check new photos in ${applicationName}" = "用${applicationName}检查新照片";
+"Log my meal photos with ${applicationName}" = "用${applicationName}记录餐食照片";
