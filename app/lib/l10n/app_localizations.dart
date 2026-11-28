@@ -2280,7 +2280,7 @@ abstract class AppLocalizations {
   /// **'the scan\'s time ran out before the AI service answered, or before its answer was saved ({count})'**
   String diagBgLeftDeadline(int count);
 
-  /// A reason in diagBgRunLeftWhy: the background scan had to end while the phone was still preparing the photo (decoding it); nothing had been sent.
+  /// A reason in diagBgRunLeftWhy: the background scan had to end while the phone was still preparing the photo (hashing it, reserving it, the on-phone food check of a glasses photo, or decoding it); nothing had been sent for it.
   ///
   /// In en, this message translates to:
   /// **'the scan\'s time ran out before the photo was sent ({count})'**

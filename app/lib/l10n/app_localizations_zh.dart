@@ -1306,7 +1306,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String diagBgLeftDeadline(int count) {
-    return 'AI 服务还没回复，或回复还没存好，扫描时间就用完了（$count）';
+    return 'AI 服务还没回复，或回复还没保存，扫描时间就用完了（$count）';
   }
 
   @override

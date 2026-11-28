@@ -842,7 +842,8 @@ void main() {
     // The words for "unreachable" and "deadline" in the lines below
     // changed with the review of 2026-11-28, and those for "busy" with its
     // second round: each now says both cases it is recorded for (the test
-    // after "in Chinese" says why).
+    // after "in Chinese" says why). In that round the Chinese "deadline"
+    // also took the app's word for a save, 保存 (it said 存好).
     group('why photos were left for later', () {
       BackgroundRunRecord left(Map<String, int> why, {int? released}) =>
           BackgroundRunRecord(
@@ -928,7 +929,9 @@ void main() {
             'before its answer was saved (1)');
         expect(zh.diagBgLeftBusy(1), 'AI 服务繁忙，或正在限流（1）');
         expect(zh.diagBgLeftUnreachable(2), '连不上 AI 服务，或 AI 服务返回了错误（2）');
-        expect(zh.diagBgLeftDeadline(1), 'AI 服务还没回复，或回复还没存好，扫描时间就用完了（1）');
+        // 保存, the word the app's other Chinese strings use for a save;
+        // it said 存好 (review, 2026-11-28, second round).
+        expect(zh.diagBgLeftDeadline(1), 'AI 服务还没回复，或回复还没保存，扫描时间就用完了（1）');
       });
 
       testWidgets('a run that recorded none (every earlier version) gets no '
@@ -968,8 +971,10 @@ void main() {
             backgroundRunLeftLine(AppLocalizationsZh(),
                 left({BackgroundLeft.busy: 1, BackgroundLeft.deadline: 1,
                     BackgroundLeft.notOffered: 2})),
+            // Busy and deadline as "a reason that covers two cases says
+            // both" pins them.
             '留待之后的原因：AI 服务繁忙，或正在限流（1）；'
-            'AI 服务还没回复，或回复还没存好，扫描时间就用完了（1）；'
+            'AI 服务还没回复，或回复还没保存，扫描时间就用完了（1）；'
             '扫描时间已到，没有开始（2）');
       });
     });

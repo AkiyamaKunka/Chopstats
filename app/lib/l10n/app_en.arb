@@ -1055,7 +1055,7 @@
   },
   "diagBgLeftPreparing": "the scan's time ran out before the photo was sent ({count})",
   "@diagBgLeftPreparing": {
-    "description": "A reason in diagBgRunLeftWhy: the background scan had to end while the phone was still preparing the photo (decoding it); nothing had been sent.",
+    "description": "A reason in diagBgRunLeftWhy: the background scan had to end while the phone was still preparing the photo (hashing it, reserving it, the on-phone food check of a glasses photo, or decoding it); nothing had been sent for it.",
     "placeholders": {
       "count": {
         "type": "int"
