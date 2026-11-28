@@ -5,6 +5,9 @@ docs/SERVER_DEPLOY.md (the knob table and the sentence above it) and
 sets up a server from those two files, not from the code, so a default
 that changes in claude_analyzer.py or lookup_jobs.py must change there
 too. These tests fail when one side moves without the other.
+
+The same holds for the app's busy wait, CLAUDE_API_BUSY_WAIT_SECONDS
+(2026-11-28): its tests are at the end of this file.
 """
 import os
 import re
@@ -114,3 +117,60 @@ def test_env_example_states_the_code_defaults_and_clamps(monkeypatch):
                 in lines[knob]), knob
     assert ("(%s)" % CODE_DEFAULTS["CLAUDE_LOOKUP_KEY_SOURCE"]
             in lines["CLAUDE_LOOKUP_KEY_SOURCE"])
+
+
+# ─── CLAUDE_API_BUSY_WAIT_SECONDS: the app's wait for a busy CLI ────────
+#
+# SERVER_DEPLOY.md gives the knob a table of its own ("Two app requests
+# at once"), SERVER.md repeats the numbers in its response contract, and
+# .env.example lists the knob with the other analyzer knobs.
+
+BUSY_KNOB = "CLAUDE_API_BUSY_WAIT_SECONDS"
+
+
+def _busy_deploy_row():
+    """(default cell, meaning cell) of the knob's row in SERVER_DEPLOY.md."""
+    rows = [m.groups() for m in (
+        re.match(r"^\| `%s` \| ([^|]+) \| (.*) \|$" % BUSY_KNOB, line)
+        for line in _read("docs", "SERVER_DEPLOY.md").splitlines()) if m]
+    assert len(rows) == 1, rows
+    return rows[0][0].strip().strip("`"), rows[0][1]
+
+
+def _busy_env_comment():
+    lines = re.findall(r"(?m)^# %s=\s*#\s*(.*)$" % BUSY_KNOB,
+                       _read(".env.example"))
+    assert len(lines) == 1, lines
+    return lines[0]
+
+
+def test_both_files_state_the_busy_wait_default_and_clamp(monkeypatch):
+    monkeypatch.delenv(BUSY_KNOB, raising=False)
+    default = claude_analyzer.busy_wait_seconds()
+    assert default == claude_analyzer.BUSY_WAIT_SECONDS_DEFAULT
+    low, high = _clamp(claude_analyzer.busy_wait_seconds, monkeypatch,
+                       BUSY_KNOB)
+    assert (low, high) == (0, claude_analyzer.BUSY_WAIT_SECONDS_MAX)
+
+    cell, meaning = _busy_deploy_row()
+    assert cell == str(default)
+    assert "(%d–%d)" % (low, high) in meaning
+    # 0 is a documented setting, not only the bottom of the clamp.
+    assert "`0` switches the wait off" in meaning
+    assert "(%d, clamp %d..%d)" % (default, low, high) in _busy_env_comment()
+
+
+def test_the_guides_state_the_busy_wait_numbers_the_code_uses():
+    """The default wait, how many requests may wait, and the Retry-After
+    of the busy 503: said in both guides. .env.example says how many may
+    wait as well (its default and clamp are pinned above)."""
+    wait = "the default wait is %d s" % claude_analyzer.BUSY_WAIT_SECONDS_DEFAULT
+    places = "at most %d requests wait" % claude_analyzer.BUSY_WAIT_MAX_WAITERS
+    header = "`Retry-After: %d`" % claude_analyzer.BUSY_RETRY_AFTER_SECONDS
+    for name in ("SERVER_DEPLOY.md", "SERVER.md"):
+        text = " ".join(_read("docs", name).split())
+        assert wait in text, name
+        assert places in text.lower(), name
+        assert header in text, name
+    assert places in " ".join(
+        _read(".env.example").replace("\n# ", " ").split())

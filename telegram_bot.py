@@ -5183,7 +5183,13 @@ def _build_api_app(bot: TelegramBot, gemini_client) -> Flask:
         apps key on via ServerAnalyzer.unavailableRetry).
 
           AnalyzerBusy    retry True: another photo owns the single-flight
-                          CLI, and seconds fix that.
+                          CLI, and seconds fix that. The analyzer has
+                          already made the request wait for it
+                          (CLAUDE_API_BUSY_WAIT_SECONDS), unless two were
+                          waiting already or the wait is off. The reply
+                          also carries Retry-After, for app builds to
+                          come; the installed ones read the body, which
+                          stays as it was, byte for byte.
           PlanRefused     _api_plan_refused: credits are terminal, a closed
                           usage window comes back later.
           AnalyzerTimeout retry "later": the model never answered, a slow
@@ -5201,7 +5207,9 @@ def _build_api_app(bot: TelegramBot, gemini_client) -> Flask:
         except claude_analyzer.AnalyzerBusy:
             return None, (jsonify({"error": "claude_unavailable",
                                    "reason": busy_reason,
-                                   "retry": True}), 503)
+                                   "retry": True}), 503,
+                          {"Retry-After": str(
+                              claude_analyzer.BUSY_RETRY_AFTER_SECONDS)})
         except claude_analyzer.PlanRefused as refusal:
             return None, _api_plan_refused(refusal)
         except claude_analyzer.AnalyzerTimeout as timeout:

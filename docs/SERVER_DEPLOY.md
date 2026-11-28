@@ -235,6 +235,47 @@ deploy either: it is the only end-to-end proof for the app build that is
 installed. Check `systemctl show caloriebot -p NRestarts` is still 0 an
 hour later.
 
+## Two app requests at once (the busy wait)
+
+The server runs one CLI analysis at a time. A request from the app (a
+photo, a leftover photo or a text request) that arrives while another
+analysis is running used to be answered `503` at once. Since 2026-11-28
+it waits for the CLI first:
+
+- It waits up to `CLAUDE_API_BUSY_WAIT_SECONDS`; the default wait is
+  20 s. When the CLI comes free in that time, the request is analyzed
+  and answered as usual.
+- At most 2 requests wait at a time. One more is answered at once.
+- A request that is still waiting at the limit, or that finds both
+  places taken, gets the same `503 {"retry": true}` as before, now with
+  a `Retry-After: 5` header as well. The app builds that are installed
+  read the body, which has not changed, and ask again a few seconds
+  later, as they always did (for a photo: after 5 s and after 10 s).
+- A photo that comes through Telegram or `/upload` never waits for
+  another analysis: it goes to Gemini at once, as before.
+- A restaurant lookup still gives way to all of these, and none starts
+  while a request is waiting.
+
+| Knob | Default | Meaning |
+|---|---|---|
+| `CLAUDE_API_BUSY_WAIT_SECONDS` | `20` | Seconds an app request waits for a busy CLI (0–60). `0` switches the wait off: the `503` comes at once, as before. |
+
+Keep it near 20. An iPhone background scan gives up on its request 22 s
+after the scan began. A request that has waited longer than that is
+analyzed for a phone that no longer listens: that is one run of your
+plan for an answer nobody reads, and the next photo waits behind it. A
+higher value only makes sense on a server that no iPhone uses.
+
+The journal has one line for each request that met a busy CLI, and it
+starts with `Claude CLI busy`. It says what happened to that request: it
+waited so many seconds and then ran; or it was refused, after the wait
+or at once (two were already waiting, or the wait is off); or, for a
+Telegram or `/upload` photo, it went to Gemini.
+
+The wait needs no setting and no app update. It starts when the server
+is deployed: until then the server on your VM still answers a busy
+request at once.
+
 ## Restaurant lookup (WebSearch on your server)
 
 The restaurant-assist work adds two app endpoints,

@@ -33,6 +33,9 @@ Configuration (env / .env):
   CLAUDE_ANALYZER_TIMEOUT_SECONDS   per-analysis wall clock (default: 120)
   CLAUDE_ANALYZER_EXTRA_FLAGS       optional extra CLI flags (shlex-split)
   CLAUDE_ANALYZER_DISPATCH          'stream' (default) or 'file' (see above)
+  CLAUDE_API_BUSY_WAIT_SECONDS      how long an app request waits for a busy
+                                    CLI before its 503 (default: 20, 0 = no
+                                    wait; see busy_wait_seconds)
   CLAUDE_CODE_OAUTH_TOKEN           subscription token (read by the CLI itself)
   GLM_PLAN_KEY                      Zhipu GLM Coding Plan key → 'glm' backend
   DOUBAO_PLAN_KEY                   Volcengine Agent Plan key → 'doubao' backend
@@ -82,7 +85,9 @@ from utils import parse_ai_json, parse_boolish
 log = logging.getLogger("claude_analyzer")
 
 class AnalyzerBusy(Exception):
-    """Another photo owns the single-flight CLI right now.
+    """Another photo owns the single-flight CLI right now — and still did
+    after the short wait an app request gets (busy_wait_seconds), or too
+    many requests were waiting for it already.
 
     Distinct from a None return, which means the run HAPPENED and failed
     (junk reply, blind GLM run) — those are terminal for this photo, and
@@ -117,50 +122,186 @@ class AnalyzerTimeout(Exception):
 # another photo's full CLI run (measured ~42-63s cards on album bursts). The
 # subprocess timeout bounds how long the one holder keeps the lock.
 #
-# The one exception to "a contended caller does not wait": a background
-# RESTAURANT LOOKUP (run_lookup_exclusive) never makes a photo, leftover
-# or text request wait or fail. Those callers pre-empt it — the lookup's
-# process group is killed and the caller waits at most
-# PREEMPT_WAIT_SECONDS for the lock (_acquire_cli_for_foreground). The
-# lookup job is requeued by lookup_jobs.
+# Two exceptions to "a contended caller does not wait":
+#
+# 1. A background RESTAURANT LOOKUP (run_lookup_exclusive) never makes a
+#    photo, leftover or text request wait or fail. Those callers pre-empt
+#    it — the lookup's process group is killed and the caller waits at
+#    most PREEMPT_WAIT_SECONDS for the lock (_acquire_cli_for_foreground).
+#    The lookup job is requeued by lookup_jobs.
+#
+# 2. An APP request (raise_on_busy=True: /api/analyze_photo,
+#    /api/analyze_leftover, /api/text_intent) has no Gemini to fall
+#    through to: refused, the phone can only ask again. It was refused at
+#    once until 2026-11-28, and the installed app asks again after 5 s
+#    and after 10 s and then lets the photo go until its next scan — so
+#    two senders scanning together (two phones, or the open app and its
+#    own background scan; 2026-11-27: one upload refused twice in a row)
+#    cost each other photos. Now it waits for the analysis ahead of it:
+#    up to busy_wait_seconds(), and at most BUSY_WAIT_MAX_WAITERS callers
+#    at a time, so request threads (each holds its photo) cannot pile up
+#    on a 1 GB server — one more than that is refused at once, as before.
+#    A Telegram or /upload photo still never waits for another analysis.
 #
 # A lookup takes AND releases _CLI_LOCK only while holding
 # _LOOKUP_STATE_LOCK, so a foreground caller that holds the state lock
-# sees a stable owner. While a foreground caller waits for a lookup to
-# let go ("fg_waiting"), no lookup may take the lock: the worker's next
-# queued job can never win the (non-FIFO) race against that caller.
+# sees a stable owner. While a foreground caller waits for the lock
+# ("fg_waiting": for a pre-empted lookup to let go, or for the analysis
+# ahead of it), no lookup may take the lock: the worker's next queued job
+# can never win the (non-FIFO) race against that caller.
 _CLI_LOCK = threading.Lock()
 PREEMPT_WAIT_SECONDS = 5
 
+# How long an app request waits for a busy CLI: the default and the
+# ceiling of CLAUDE_API_BUSY_WAIT_SECONDS (busy_wait_seconds).
+#
+# Why about 20 s and not a whole run's 120: an iPhone background scan
+# abandons its request 22 s after the scan began (iosRunDeadline in the
+# app's background_glue.dart). A request that had waited longer than that
+# would be analyzed for a phone that has stopped listening — a run of the
+# owner's plan spent on an answer nobody reads, with the next photo kept
+# waiting behind it. 20 s still outlasts the analysis ahead in the usual
+# case (8-15 s on the first server).
+#
+# The limit bounds that waste; it does not end it. This server cannot see
+# a phone hang up (the handler runs to its end either way), and a scan
+# that sent its photo late, or waited 15 s and then needs 10 s more, is
+# gone before its answer too. That was already so for a request that
+# reached a free CLI late in a scan. The phone offers such a photo again.
+#
+# The ceiling is for a server no iPhone uses; the app itself gives a
+# request 5 minutes, which a 60 s wait and a full 120 s run still fit.
+BUSY_WAIT_SECONDS_DEFAULT = 20
+BUSY_WAIT_SECONDS_MAX = 60
+# Foreground callers that may wait for _CLI_LOCK at one time (the
+# pre-empting caller of exception 1 counts as one of them).
+BUSY_WAIT_MAX_WAITERS = 2
+# The Retry-After (seconds) of a busy 503, for app builds to come; it is
+# the pause the installed builds already take before their second try.
+BUSY_RETRY_AFTER_SECONDS = 5
+
 # Who holds _CLI_LOCK for a lookup, its process and its cancel event
-# (for pre-emption), and how many foreground callers wait for it.
+# (for pre-emption), and how many foreground callers wait for the lock.
 _LOOKUP_STATE_LOCK = threading.Lock()
 _LOOKUP_STATE: Dict[str, object] = {
     "holding": False, "proc": None, "preempted": False, "cancel": None,
     "fg_waiting": 0}
 
 
-def _acquire_cli_for_foreground() -> bool:
-    """_CLI_LOCK for a photo/leftover/text request. Contended by another
-    FOREGROUND request: False at once, as always. Contended by a lookup:
-    kill the lookup and wait (bounded) for the lock it releases — the
-    first such caller only; a second one would lose to the first anyway,
-    so it is told False at once like any other contended caller."""
+def busy_wait_seconds() -> int:
+    """CLAUDE_API_BUSY_WAIT_SECONDS: how long an app request waits for a
+    busy CLI before it is told "busy". 0 = not at all (the answer at once,
+    as before 2026-11-28); junk reads as the default."""
+    try:
+        value = int(os.environ.get("CLAUDE_API_BUSY_WAIT_SECONDS",
+                                   str(BUSY_WAIT_SECONDS_DEFAULT)))
+    except ValueError:
+        return BUSY_WAIT_SECONDS_DEFAULT
+    return min(max(value, 0), BUSY_WAIT_SECONDS_MAX)
+
+
+def _wait_for_cli(seconds: float) -> bool:
+    """Block until _CLI_LOCK is this thread's (True) or [seconds] have
+    passed (False). The one place a foreground caller blocks, and a
+    function of its own so that a test can stand in for the wait."""
+    return _CLI_LOCK.acquire(timeout=seconds)
+
+
+def _acquire_cli_for_foreground(
+        wait_seconds: float = 0,
+        note: Optional[Dict[str, float]] = None) -> bool:
+    """_CLI_LOCK for a photo/leftover/text request.
+
+    Contended by a lookup: kill the lookup and wait (bounded) for the
+    lock it releases — the first such caller only.
+
+    Contended by another FOREGROUND request, or behind the caller that
+    pre-empted the lookup: with [wait_seconds] 0 (Telegram, /upload)
+    False at once, as always. An app request waits up to [wait_seconds]
+    for the lock instead, unless BUSY_WAIT_MAX_WAITERS callers are
+    waiting already (False at once).
+
+    Not a queue: threading.Lock promises its waiters no order, and a
+    request that arrives in the very instant the lock comes free can take
+    it first. The waiter then goes on waiting, inside its limit. A lookup
+    never takes it from a waiter (fg_waiting).
+
+    [note], when given, receives what the journal line needs: "waited"
+    (seconds, whenever this caller blocked) and "ahead" (how many were
+    waiting, when that is why it was turned away).
+    """
     if _CLI_LOCK.acquire(blocking=False):
         return True
+    acquired = False
+    start = time.monotonic()
     with _LOOKUP_STATE_LOCK:
         if _CLI_LOCK.acquire(blocking=False):  # released meanwhile
             return True
-        if not _LOOKUP_STATE["holding"] or _LOOKUP_STATE["fg_waiting"]:
+        waiting = _LOOKUP_STATE["fg_waiting"]
+        preempting = bool(_LOOKUP_STATE["holding"]) and not waiting
+        if preempting:
+            # Never a shorter wait than before for the caller that pre-empts.
+            limit = max(PREEMPT_WAIT_SECONDS, wait_seconds)
+            _preempt_locked()
+        elif wait_seconds <= 0:
             return False
-        _LOOKUP_STATE["fg_waiting"] += 1
-        _preempt_locked()
-    _lookup_log.info("Restaurant lookup pre-empted by a foreground request.")
+        elif waiting >= BUSY_WAIT_MAX_WAITERS:
+            if note is not None:
+                note["ahead"] = waiting
+            return False
+        else:
+            limit = wait_seconds
+        # Counted from here to the finally below, with nothing in between:
+        # a count that never came down would keep every lookup out, and
+        # turn app requests away at the cap, until the next restart.
+        _LOOKUP_STATE["fg_waiting"] = waiting + 1
     try:
-        return _CLI_LOCK.acquire(timeout=PREEMPT_WAIT_SECONDS)
+        if preempting:
+            _lookup_log.info(
+                "Restaurant lookup pre-empted by a foreground request.")
+        acquired = _wait_for_cli(limit)
+        return acquired
     finally:
         with _LOOKUP_STATE_LOCK:
             _LOOKUP_STATE["fg_waiting"] -= 1
+        if note is not None:
+            # A wait that ran out lasted its limit, by definition.
+            note["waited"] = time.monotonic() - start if acquired else limit
+
+
+def _cli_for_request(raise_on_busy: bool, kind: str, declined: str) -> bool:
+    """_CLI_LOCK for one photo, leftover or text request — or, when it is
+    not to be had, the journal line that says what happens to the request.
+
+    raise_on_busy False (Telegram, /upload): never waits for another
+    analysis. False at once, and [declined] names the caller's own way
+    out ("falling back to Gemini for this photo.").
+
+    raise_on_busy True (the app's API): waits up to busy_wait_seconds()
+    for the analysis ahead of it, then raises AnalyzerBusy — the
+    endpoint's 503 {"retry": true}, which the app retries. This path has
+    no Gemini fallback, so its line must not promise one (until
+    2026-11-28 the photo line did, for app requests too).
+    """
+    note: Dict[str, float] = {}
+    wait = busy_wait_seconds() if raise_on_busy else 0
+    if _acquire_cli_for_foreground(wait, note):
+        if raise_on_busy and "waited" in note:
+            log.info(f"Claude CLI busy — app {kind} request waited "
+                     f"{note['waited']:.1f} s for it.")
+        return True
+    if not raise_on_busy:
+        log.info(f"Claude CLI busy — {declined}")
+        return False
+    if "waited" in note:
+        how = f"after waiting {note['waited']:.0f} s"
+    elif "ahead" in note:
+        how = f"at once: {note['ahead']:.0f} requests already wait"
+    else:
+        how = "at once: waiting is off"
+    log.info(f"Claude CLI busy — app {kind} request refused {how} "
+             "(503, retry: true; the app retries).")
+    raise AnalyzerBusy()
 
 
 def _timeout_seconds() -> int:
@@ -833,9 +974,11 @@ def analyze_text_prompt(prompt: str, backend: str = "claude",
     Used by the app-facing /api/text_intent endpoint so the phone's NL
     corrections cost no API money either. Same discipline as the photo path:
     single turn, no tools, serialized by _CLI_LOCK, and a contended CLI
-    returns None (caller decides — the app falls back to its own provider)
-    rather than queueing behind a 120 s photo run. Text works on ALL three
-    backends: the vendor plans' Anthropic endpoints are text-native.
+    returns None (caller decides) rather than queueing behind a 120 s
+    photo run — or, for the endpoint (raise_on_busy), waits its short
+    turn and then raises AnalyzerBusy (_cli_for_request). Text works on
+    ALL three backends: the vendor plans' Anthropic endpoints are
+    text-native.
     """
     if backend not in SUBSCRIPTION_BACKENDS:
         return None
@@ -844,10 +987,8 @@ def analyze_text_prompt(prompt: str, backend: str = "claude",
     cli = _cli_path()
     if cli is None or not (prompt or "").strip():
         return None
-    if not _acquire_cli_for_foreground():
-        log.info("Claude CLI busy — text intent declined.")
-        if raise_on_busy:
-            raise AnalyzerBusy()
+    if not _cli_for_request(raise_on_busy, "text",
+                            "text intent declined."):
         return None
     start = time.time()
     try:
@@ -935,10 +1076,8 @@ def analyze_leftover_photo(
     cli = _cli_path()
     if cli is None or not image_bytes or not (prompt or "").strip():
         return None
-    if not _acquire_cli_for_foreground():
-        log.info("Claude CLI busy — leftover estimation declined.")
-        if raise_on_busy:
-            raise AnalyzerBusy()
+    if not _cli_for_request(raise_on_busy, "leftover",
+                            "leftover estimation declined."):
         return None
     start = time.time()
     try:
@@ -1006,13 +1145,13 @@ def analyze_food_photo(
 
     # Contended-CLI bypass: another photo already owns the (up to 120s) CLI
     # run. Don't queue behind it — Gemini answers this photo in seconds.
-    if not _acquire_cli_for_foreground():
-        log.info("Claude CLI busy — falling back to Gemini for this photo.")
-        # Default False keeps the TELEGRAM contract ("None → use Gemini")
-        # byte-identical; only the API endpoints opt in, because only they
-        # need to tell the app "retry in seconds" from "do not retry".
-        if raise_on_busy:
-            raise AnalyzerBusy()
+    # Default False keeps the TELEGRAM contract ("None → use Gemini")
+    # byte-identical; only the API endpoints opt in, because only they
+    # need to tell the app "retry in seconds" from "do not retry" — and
+    # only their requests, which have no Gemini, wait a short turn for
+    # the CLI before they are told so (_cli_for_request).
+    if not _cli_for_request(raise_on_busy, "photo",
+                            "falling back to Gemini for this photo."):
         return None
 
     # One photo = one CLI occupancy: the lock is held across BOTH attempts
