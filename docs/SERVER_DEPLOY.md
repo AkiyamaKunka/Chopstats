@@ -239,8 +239,8 @@ hour later.
 
 The server runs one CLI analysis at a time. A request from the app (a
 photo, a leftover photo or a text request) that arrives while another
-analysis is running used to be answered `503` at once. Since 2026-11-28
-it waits for the CLI first:
+analysis is running used to be answered `503` at once. Server code of
+2026-11-28 or later makes it wait for the CLI first:
 
 - It waits up to `CLAUDE_API_BUSY_WAIT_SECONDS`; the default wait is
   20 s. When the CLI comes free in that time, the request is analyzed
