@@ -774,6 +774,24 @@ abstract class AppLocalizations {
   /// **'Background scan is stuck — opening Chopstats once catches up.'**
   String get backgroundScanStuck;
 
+  /// iPhone, Settings › Photos: the Background scan row's value while iOS holds no request for the next background scan (it refused the last one the app made). Short: it shares the row with the title. The footer line under the group says why (backgroundScanNotScheduledUnavailable or backgroundScanNotScheduledRefused).
+  ///
+  /// In en, this message translates to:
+  /// **'Not scheduled'**
+  String get backgroundScanNotScheduled;
+
+  /// iPhone, Settings › Photos footer line while the Background scan row reads backgroundScanNotScheduled and iOS answered the request with 'unavailable' (BGTaskScheduler error 1). It must not name a cause the app cannot see: with Background App Refresh off the row shows the Off remedy instead.
+  ///
+  /// In en, this message translates to:
+  /// **'The next background scan is not scheduled: iOS is not taking background requests from Chopstats right now. Chopstats asks again each time you open or leave it; until then, new photos are logged when you open the app.'**
+  String get backgroundScanNotScheduledUnavailable;
+
+  /// As backgroundScanNotScheduledUnavailable, for any other refusal. {code} is the error's name as iOS gives it (notPermitted, tooManyPendingTaskRequests) or 'error 7'; never translated.
+  ///
+  /// In en, this message translates to:
+  /// **'The next background scan is not scheduled: iOS refused the request ({code}). Chopstats asks again each time you open or leave it; until then, new photos are logged when you open the app.'**
+  String backgroundScanNotScheduledRefused(String code);
+
   /// No description provided for @settingsSectionProfile.
   ///
   /// In en, this message translates to:
@@ -2226,6 +2244,60 @@ abstract class AppLocalizations {
     int later,
   );
 
+  /// Diagnostics › Recent background scans, under the counts line (diagBgRunCounts), only when the number is above 0: photos the scan listed and did not read again because a meal already has each one as its photo. iPhone only.
+  ///
+  /// In en, this message translates to:
+  /// **'Already logged, not read again: {count}'**
+  String diagBgRunAlreadyLogged(int count);
+
+  /// Diagnostics › Recent background scans, under the counts line of a scan that left photos for later (the 'left for later' number of diagBgRunCounts). {reasons} is one or more of the diagBgLeft* phrases, each with its count, joined by diagBgLeftJoin.
+  ///
+  /// In en, this message translates to:
+  /// **'Why they were left: {reasons}'**
+  String diagBgRunLeftWhy(String reasons);
+
+  /// What goes between two reasons in diagBgRunLeftWhy.
+  ///
+  /// In en, this message translates to:
+  /// **'; '**
+  String get diagBgLeftJoin;
+
+  /// A reason in diagBgRunLeftWhy: the AI service (the user's own server, or a provider) answered that it was busy, or that a rate limit was hit (HTTP 429: the provider's rate or spend limit). The app records both under this one reason, so the words must say both. {count} is how many photos.
+  ///
+  /// In en, this message translates to:
+  /// **'the AI service was busy, or a rate limit was hit ({count})'**
+  String diagBgLeftBusy(int count);
+
+  /// A reason in diagBgRunLeftWhy: no connection to the AI service, or it answered with a server error. The app records both under this one reason, so the words must say both.
+  ///
+  /// In en, this message translates to:
+  /// **'the AI service could not be reached, or answered with an error ({count})'**
+  String diagBgLeftUnreachable(int count);
+
+  /// A reason in diagBgRunLeftWhy: the photo had been sent, and the background scan had to end (iOS gives it about 30 seconds) before an answer came, or after one came and before the app had saved it. The app records both under this one reason, so the words must say both.
+  ///
+  /// In en, this message translates to:
+  /// **'the scan\'s time ran out before the AI service answered, or before its answer was saved ({count})'**
+  String diagBgLeftDeadline(int count);
+
+  /// A reason in diagBgRunLeftWhy: the background scan had to end while the phone was still preparing the photo (hashing it, reserving it, the on-phone food check of a glasses photo, or decoding it); nothing had been sent for it.
+  ///
+  /// In en, this message translates to:
+  /// **'the scan\'s time ran out before the photo was sent ({count})'**
+  String diagBgLeftPreparing(int count);
+
+  /// A reason in diagBgRunLeftWhy: the photos the scan listed and never started, because its time for starting photos was over.
+  ///
+  /// In en, this message translates to:
+  /// **'not started, the scan\'s time was over ({count})'**
+  String diagBgLeftNotOffered(int count);
+
+  /// A reason in diagBgRunLeftWhy: any other reason a photo waits for a later scan (it waits for the app to be opened, another scan holds it, …).
+  ///
+  /// In en, this message translates to:
+  /// **'another reason ({count})'**
+  String diagBgLeftOther(int count);
+
   /// No description provided for @diagBgRunKilled.
   ///
   /// In en, this message translates to:
@@ -2321,6 +2393,24 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'none'**
   String get diagBgRunWatermarkNone;
+
+  /// iPhone, Diagnostics › Recent background scans, first line: iOS holds a request for the next background scan. {time} is when the app last asked iOS, as a local 'yyyy-MM-dd HH:mm'.
+  ///
+  /// In en, this message translates to:
+  /// **'Next scan: scheduled. iOS holds the request and picks the time. Checked {time}.'**
+  String diagBgScheduleOk(String time);
+
+  /// As diagBgScheduleOk, when iOS answered the app's request with 'unavailable' and holds none.
+  ///
+  /// In en, this message translates to:
+  /// **'Next scan: not scheduled. iOS is not taking background requests from Chopstats right now. Checked {time}.'**
+  String diagBgScheduleUnavailable(String time);
+
+  /// As diagBgScheduleUnavailable, for any other refusal; {code} as in backgroundScanNotScheduledRefused.
+  ///
+  /// In en, this message translates to:
+  /// **'Next scan: not scheduled. iOS refused the request ({code}). Checked {time}.'**
+  String diagBgScheduleRefused(String code, String time);
 
   /// Diagnostics section: photos other apps (the Meta AI app for glasses, AirDrop, WeChat) added to the library after they were taken, which the automatic scan caught through the photo library's change history.
   ///

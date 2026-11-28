@@ -4,7 +4,7 @@
 // first device use — the watcher only worked while the app was foreground —
 // so these tests pin every seam of the fix.
 import 'dart:async';
-import 'dart:convert' show utf8;
+import 'dart:convert' show jsonEncode, utf8;
 import 'dart:io' show Directory;
 import 'dart:typed_data';
 
@@ -23,11 +23,13 @@ import 'package:calorie_tracker/services/analyzer/provider_analyzers.dart'
     show ServerAnalyzer;
 import 'package:calorie_tracker/services/photo/background.dart';
 import 'package:calorie_tracker/services/photo/background_runs.dart';
+import 'package:calorie_tracker/services/photo/background_schedule.dart';
 import 'package:calorie_tracker/services/photo/deferred_assets.dart';
 import 'package:calorie_tracker/services/photo/food_prefilter.dart';
 import 'package:calorie_tracker/services/local_store.dart';
 import 'package:calorie_tracker/services/photo/photo_changes.dart';
 import 'package:calorie_tracker/services/photo/photo_library.dart';
+import 'package:calorie_tracker/services/photo/run_traffic.dart';
 import 'package:calorie_tracker/services/photo/watcher.dart';
 import 'package:calorie_tracker/services/report/notifications.dart';
 import 'package:calorie_tracker/services/settings/app_settings.dart';
@@ -42,8 +44,10 @@ import 'package:calorie_tracker/ui/play_channel.dart'
     show watchRetiredNoticeOwed;
 import 'package:calorie_tracker/ui/services.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show PlatformException;
+import 'package:flutter/services.dart'
+    show MethodCall, MethodChannel, PlatformException;
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
 import 'package:http/testing.dart' show MockClient;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:workmanager/workmanager.dart' show ExistingPeriodicWorkPolicy;
@@ -232,6 +236,67 @@ class _ReleaseClockDao extends FakeDao {
   Future<void> releasePhotoHash(String imageHash, {String? ownerStamp}) {
     releasedAt = clock();
     return super.releasePhotoHash(imageHash, ownerStamp: ownerStamp);
+  }
+}
+
+/// A FakeDao whose reservation and release can each be held back: a
+/// database the open app is holding.
+class _SlowDao extends FakeDao {
+  /// While set, a reservation waits here before it is taken.
+  Completer<void>? reserveGate;
+
+  /// While set, a release waits here before it is done.
+  Completer<void>? releaseGate;
+
+  /// How many reservations and releases were asked for.
+  int reserves = 0, releases = 0;
+
+  @override
+  Future<PhotoReservationResult> reservePhotoHash(String imageHash,
+      {required String source,
+      bool reclaimDeliberate = false,
+      String assetId = '',
+      DateTime? capturedAt}) async {
+    reserves++;
+    await reserveGate?.future;
+    return super.reservePhotoHash(imageHash,
+        source: source,
+        reclaimDeliberate: reclaimDeliberate,
+        assetId: assetId,
+        capturedAt: capturedAt);
+  }
+
+  @override
+  Future<void> releasePhotoHash(String imageHash, {String? ownerStamp}) async {
+    releases++;
+    await releaseGate?.future;
+    return super.releasePhotoHash(imageHash, ownerStamp: ownerStamp);
+  }
+}
+
+/// An [EmittingIntake] whose scan, once its batch is delivered (every
+/// photo's verdict reported: [delivered]), waits for [end] before it
+/// returns: a run that has not reached its own end yet.
+class _OpenEndedIntake extends EmittingIntake {
+  final Completer<void> delivered = Completer<void>();
+  final Completer<void> end = Completer<void>();
+
+  @override
+  Future<DateTime?> backfillScan(
+      {int lookbackDays = 0,
+      DateTime? since,
+      bool Function()? shouldContinue,
+      Future<void> Function(DateTime safeFrontier)? onCovered,
+      bool newestDayFirst = false}) async {
+    final frontier = await super.backfillScan(
+        lookbackDays: lookbackDays,
+        since: since,
+        shouldContinue: shouldContinue,
+        onCovered: onCovered,
+        newestDayFirst: newestDayFirst);
+    delivered.complete();
+    await end.future;
+    return frontier;
   }
 }
 
@@ -606,6 +671,7 @@ void main() {
       final r = stored();
       expect(r.stopReason, BackgroundStop.budget);
       expect((r.offered, r.analyzed, r.saved, r.released), (1, 1, 1, 1));
+      expect(r.left, {BackgroundLeft.notOffered: 1});
     });
 
     test('a deferred photo (retryable) counts as left for later', () async {
@@ -625,6 +691,90 @@ void main() {
         recorder: recorder,
       );
       expect((stored().analyzed, stored().released), (1, 1));
+    });
+
+    // 2026-11-28: the entry said how many photos were left for later and
+    // never why, so the phone could not answer "why was nothing logged".
+    test('each photo left for later is recorded with its reason', () async {
+      final settings = await settingsWith(key: 'k');
+      final recorder = await begun();
+      PhotoOutcome kept(String message, AnalysisErrorKind kind) =>
+          PhotoOutcome(PhotoOutcomeKind.failed, message,
+              retryable: true, errorKind: kind);
+      await headlessBackfillWith(
+        settings: settings,
+        prefs: prefs,
+        intake: EmittingIntake()
+          ..batch = [for (var n = 1; n <= 7; n++) photo(n)],
+        pipeline: () async => _ScriptedPipeline([
+          kept('busy', AnalysisErrorKind.serverBusy),
+          kept('over the limit', AnalysisErrorKind.rateLimited),
+          kept('no connection', AnalysisErrorKind.network),
+          // Left for the app (a decode this engine cannot do), and held
+          // by another run: neither is the AI service's doing.
+          kept('decode failed', AnalysisErrorKind.badPhoto),
+          const PhotoOutcome(PhotoOutcomeKind.inFlight, 'held',
+              retryable: true),
+          // Verdicts: not left at all.
+          const PhotoOutcome(PhotoOutcomeKind.skipped, 'not food'),
+          const PhotoOutcome(PhotoOutcomeKind.failed, 'bad reply',
+              errorKind: AnalysisErrorKind.badResponse),
+        ]),
+        showMealCard: (_, _, {payload}) async {},
+        clock: () => t0,
+        recorder: recorder,
+      );
+      final r = stored();
+      expect(r.left, {
+        BackgroundLeft.busy: 2,
+        BackgroundLeft.unreachable: 1,
+        BackgroundLeft.other: 2,
+      });
+      expect((r.analyzed, r.released), (7, 5));
+    });
+
+    // The same, from what a real analyzer says: the own server's "busy"
+    // (after its in-place tries) and a server that cannot be reached.
+    test('a busy server and an unreachable one are told apart from what the '
+        'analyzer answers', () async {
+      final settings =
+          await AppSettings.load(prefs: prefs, keyStore: MemoryKeyStore());
+      await settings.setProvider(AiProvider.server);
+      await settings.setServerBaseUrl('https://10.0.0.5');
+      await settings.setServerApiKey('k');
+      await settings.setWatcherEnabled(true);
+      var requests = 0;
+      final server = MockClient((_) async {
+        // The first photo's three tries meet a busy server; the second
+        // photo's meet none at all.
+        if (requests++ < 3) {
+          return http.Response(
+              jsonEncode({'reason': 'Claude CLI busy', 'retry': true}), 503);
+        }
+        throw http.ClientException('Connection refused');
+      });
+      final recorder = await begun();
+      final dao = FakeDao();
+      await headlessBackfillWith(
+        settings: settings,
+        prefs: prefs,
+        intake: EmittingIntake()..batch = [photo(1), photo(2)],
+        pipeline: () async => PhotoPipeline(
+            dao: dao,
+            analyzer: ServerAnalyzer(settings,
+                client: server,
+                normalizer: (b) async => b,
+                sleep: (_) async {}),
+            hasher: (b) async => md5.convert(b).toString()),
+        showMealCard: (_, _, {payload}) async {},
+        clock: () => t0,
+        recorder: recorder,
+      );
+      final r = stored();
+      expect(r.left,
+          {BackgroundLeft.busy: 1, BackgroundLeft.unreachable: 1});
+      expect((r.offered, r.analyzed, r.saved, r.released), (2, 2, 0, 2));
+      expect(dao.ledger, isEmpty, reason: 'both released for the next run');
     });
 
     test('the guards name themselves: watcher off, no key, paused',
@@ -754,7 +904,9 @@ void main() {
       group('RunInFlight: the photo the deadline cuts off', () {
         final deadline = t0.add(iosRunDeadline);
 
-        /// One run cut off by the deadline while its analysis hangs, the
+        /// One run cut off by the deadline with the photo still in its
+        /// analyzer and nothing sent for it yet (a FakeAnalyzer makes no
+        /// request: to the run it is a photo still being prepared), the
         /// photo offered [offeredAfter] into the run.
         Future<void> cutOff(FakeDao dao,
             {Duration offeredAfter = const Duration(seconds: 5)}) async {
@@ -778,8 +930,9 @@ void main() {
               reason: 'released, so the next run can take it');
         }
 
-        test('with the full window, three cuts pass it over (too slow for '
-            'any run); two do not', () async {
+        test('with the full window and nothing sent, three cuts pass it '
+            'over (this engine cannot get it ready in any run); two do not',
+            () async {
           final dao = FakeDao();
           await cutOff(dao);
           await cutOff(dao);
@@ -821,7 +974,10 @@ void main() {
         // offering at 7, so every photo had more than iOS's 15 s left and
         // every cut counted: a photo offered late, as a hung server
         // answered nothing, was passed over after three such runs and got
-        // no background log or meal card until the app opened.
+        // no background log or meal card until the app opened. Since
+        // 2026-11-28 a cut with a request out counts on neither platform
+        // (the tests after this group); these keep Android's own window
+        // for the cuts that still can, with nothing sent.
         group('Android', () {
           /// One Android run cut off at its deadline, the photo offered
           /// [offeredAfter] into the run, as runHeadlessBackfill builds it.
@@ -861,8 +1017,8 @@ void main() {
                 isFalse);
           });
 
-          test('a photo that had a full attempt and still hung counts: '
-              'three pass it over, as on iOS', () async {
+          test('a photo still being prepared after Android\'s full window '
+              'counts: three pass it over, as on iOS', () async {
             final dao = FakeDao();
             for (var run = 0; run < 3; run++) {
               await androidCut(dao, const Duration(seconds: 5));
@@ -875,7 +1031,9 @@ void main() {
         // P1: the server (or a VPN, or the network) hangs through two
         // runs. The photo used to be passed over for good in the third,
         // healthy run: the watermark moved past it and it got no
-        // background log or meal card.
+        // background log or meal card. (With a FakeAnalyzer nothing is
+        // sent, so these two cuts are of the kind that still counts; the
+        // real hung server is the group after P2.)
         test('P1: after two hung runs, a healthy third run logs the photo',
             () async {
           final settings = await settingsWith(key: 'k');
@@ -983,6 +1141,659 @@ void main() {
               reason: 'offered 10 s in: 12 s left is not the full window');
           expect(dao.ledger.values,
               isNot(contains(IngestionStatus.processing)));
+        });
+
+        // 2026-11-28. The comment here said a photo cut off while the
+        // server or the network hung "costs nothing more than the retry";
+        // the code counted every cut with the full window, whatever the
+        // run had been waiting for, and three of them passed the photo
+        // over until the app was opened. The run now goes by what its
+        // analyzer sent for the photo (run_traffic.dart): a real analyzer
+        // here, sending through the run's own client as production does.
+        group('what the run was waiting for decides whether a cut counts',
+            () {
+          Future<AppSettings> ownServer() async {
+            final s = await AppSettings.load(
+                prefs: prefs, keyStore: MemoryKeyStore());
+            await s.setProvider(AiProvider.server);
+            await s.setServerBaseUrl('https://10.0.0.5');
+            await s.setServerApiKey('k');
+            await s.setWatcherEnabled(true);
+            return s;
+          }
+
+          http.Response busy() => http.Response(
+              jsonEncode({'reason': 'Claude CLI busy', 'retry': true}), 503);
+
+          /// One iOS run cut off at its deadline with photo(1) in flight,
+          /// offered 5 s in (the full window). [server] answers the
+          /// analyzer's requests; [decode] and [wait] are its decode and
+          /// its wait before another try (each never ends when null is
+          /// not given). The cut comes once [reached] says the photo is
+          /// where the test wants it.
+          Future<CutOffAt> cut(
+            FakeDao dao, {
+            required http.Client server,
+            required bool Function() reached,
+            Future<Uint8List?> Function(Uint8List)? decode,
+            Future<void> Function(Duration)? wait,
+            BackgroundRunRecorder? recorder,
+          }) async {
+            final run = RunInFlight(
+                deadline: deadline,
+                clock: () => t0.add(const Duration(seconds: 5)),
+                client: server)
+              ..deferred = await DeferredAssets.load(prefs)
+              ..recorder = recorder;
+            final pipeline = run.pipeline = PhotoPipeline(
+                dao: dao,
+                analyzer: ServerAnalyzer(await ownServer(),
+                    client: run.traffic,
+                    normalizer: decode ?? (b) async => b,
+                    sleep: wait ?? (_) => Completer<void>().future),
+                hasher: (b) async => md5.convert(b).toString());
+            run.offered();
+            unawaited(pipeline.process(photo(1)));
+            for (var i = 0; i < 500 && !reached(); i++) {
+              await Future<void>.delayed(const Duration(milliseconds: 1));
+            }
+            expect(reached(), isTrue, reason: 'the photo never got there');
+            expect(dao.ledger.values, contains(IngestionStatus.processing));
+            final at = run.traffic.cutOffAt;
+            await run.abandon();
+            expect(dao.ledger.values,
+                isNot(contains(IngestionStatus.processing)),
+                reason: 'released, so the next run can take it');
+            return at;
+          }
+
+          Future<bool> passedOver() async =>
+              (await DeferredAssets.load(prefs)).passOver('asset1');
+
+          test('its request was out and unanswered (a hung network, a busy '
+              'server that holds it, a slow answer): never counted',
+              () async {
+            final dao = FakeDao();
+            for (var run = 0; run < 4; run++) {
+              var asked = false;
+              expect(
+                  await cut(dao,
+                      server: MockClient((_) {
+                        asked = true;
+                        return Completer<http.Response>().future;
+                      }),
+                      reached: () => asked),
+                  CutOffAt.waiting);
+            }
+            expect(prefs.getString(deferredAssetsPrefsKey), isNull);
+            expect(await passedOver(), isFalse);
+          });
+
+          test('the server said it was busy, and the analyzer was waiting '
+              'to try again: never counted', () async {
+            final dao = FakeDao();
+            for (var run = 0; run < 4; run++) {
+              var waiting = false;
+              expect(
+                  await cut(dao,
+                      server: MockClient((_) async => busy()),
+                      wait: (_) {
+                        waiting = true;
+                        return Completer<void>().future;
+                      },
+                      reached: () => waiting),
+                  CutOffAt.busy);
+            }
+            expect(prefs.getString(deferredAssetsPrefsKey), isNull);
+            expect(await passedOver(), isFalse);
+          });
+
+          test('the server could not be reached: never counted', () async {
+            final dao = FakeDao();
+            for (var run = 0; run < 4; run++) {
+              var waiting = false;
+              expect(
+                  await cut(dao,
+                      server: MockClient((_) async =>
+                          throw http.ClientException('Connection refused')),
+                      wait: (_) {
+                        waiting = true;
+                        return Completer<void>().future;
+                      },
+                      reached: () => waiting),
+                  CutOffAt.unreachable);
+            }
+            expect(prefs.getString(deferredAssetsPrefsKey), isNull);
+            expect(await passedOver(), isFalse);
+          });
+
+          // The protection that stays: one photo this engine cannot get
+          // ready (the Oct 14 to 18 decode that never finished) must not
+          // eat every run and hold the watermark until the app opens.
+          test('still being decoded, nothing sent: counted, and three pass '
+              'it over', () async {
+            final dao = FakeDao();
+            Future<void> stuckDecode() async {
+              var decoding = false;
+              expect(
+                  await cut(dao,
+                      server: MockClient(
+                          (_) async => fail('nothing may be sent')),
+                      decode: (_) {
+                        decoding = true;
+                        return Completer<Uint8List?>().future;
+                      },
+                      reached: () => decoding),
+                  CutOffAt.preparing);
+            }
+
+            await stuckDecode();
+            await stuckDecode();
+            expect(await passedOver(), isFalse);
+            await stuckDecode();
+            expect(await passedOver(), isTrue);
+            expect(
+                decodeDeferredAssets(prefs.getString(deferredAssetsPrefsKey))
+                    .single
+                    .cuts,
+                3);
+          });
+
+          // The run's record: why the photo the deadline cut off was
+          // left. It used to show only as "1 read, 0 processed".
+          test('the run\'s entry says what the cut photo was waiting for, '
+              'and counts it as left for later', () async {
+            Future<BackgroundRunRecord> entryAfter(
+                Future<CutOffAt> Function(BackgroundRunRecorder r)
+                    cutOnce) async {
+              SharedPreferences.setMockInitialValues({});
+              prefs = await SharedPreferences.getInstance();
+              final recorder = await begun();
+              await recorder.offered();
+              await cutOnce(recorder);
+              // As finishWithinGrant does right after the release.
+              await recorder.finish(BackgroundStop.budget);
+              return stored();
+            }
+
+            Future<void> forever(Duration _) => Completer<void>().future;
+
+            var asked = false;
+            var e = await entryAfter((r) => cut(FakeDao(),
+                server: MockClient((_) {
+                  asked = true;
+                  return Completer<http.Response>().future;
+                }),
+                reached: () => asked,
+                recorder: r));
+            expect(e.left, {BackgroundLeft.deadline: 1});
+            expect((e.offered, e.analyzed, e.released, e.stopReason),
+                (1, 0, 1, BackgroundStop.budget));
+
+            var waiting = false;
+            e = await entryAfter((r) => cut(FakeDao(),
+                server: MockClient((_) async => busy()),
+                wait: (d) {
+                  waiting = true;
+                  return forever(d);
+                },
+                reached: () => waiting,
+                recorder: r));
+            expect(e.left, {BackgroundLeft.busy: 1});
+
+            waiting = false;
+            e = await entryAfter((r) => cut(FakeDao(),
+                server: MockClient((_) async =>
+                    throw http.ClientException('Connection refused')),
+                wait: (d) {
+                  waiting = true;
+                  return forever(d);
+                },
+                reached: () => waiting,
+                recorder: r));
+            expect(e.left, {BackgroundLeft.unreachable: 1});
+
+            var decoding = false;
+            e = await entryAfter((r) => cut(FakeDao(),
+                server: MockClient((_) async => fail('nothing may be sent')),
+                decode: (_) {
+                  decoding = true;
+                  return Completer<Uint8List?>().future;
+                },
+                reached: () => decoding,
+                recorder: r));
+            expect(e.left, {BackgroundLeft.preparing: 1});
+            expect(e.released, 1);
+          });
+
+          test('no photo held when the deadline comes (the scan was still '
+              'listing, or the run past its last photo): nothing is said',
+              () async {
+            final recorder = await begun();
+            final run = RunInFlight(deadline: deadline)..recorder = recorder;
+            await run.abandon(); // no pipeline yet
+            run.pipeline = PhotoPipeline(dao: FakeDao(), analyzer: FakeAnalyzer());
+            await run.abandon(); // a pipeline holding nothing
+            await recorder.finish(BackgroundStop.budget);
+            expect(stored().left, isEmpty);
+            expect(stored().released, 0);
+          });
+
+          // Review, 2026-11-28. The cut counts the photo the deadline cut
+          // off, and that photo's own verdict can still come: while it
+          // is being released (milliseconds on iOS), or on Android during
+          // the summary's re-arm after it. Counted too, one photo showed
+          // as two left for later: released 2, {deadline: 1, other: 1}.
+          group('the photo the deadline cut off is counted once, and only '
+              'when it was left', () {
+            http.Response answer() => http.Response(
+                jsonEncode({
+                  'ok': true,
+                  'analysis': {'is_food': true, 'food_items': []},
+                }),
+                200);
+
+            /// One run with photo(1) handed to its pipeline (offered at
+            /// the run start: the full window), as runHeadlessBackfill
+            /// builds it. [server] answers the analyzer; [intake]'s scan
+            /// stays open until its `end` is completed.
+            Future<
+                ({
+                  RunInFlight inFlight,
+                  Future<bool> run,
+                  _OpenEndedIntake intake,
+                  BackgroundRunRecorder recorder,
+                })> started(
+              FakeDao dao, {
+              required http.Client server,
+              Future<String> Function(Uint8List)? hasher,
+              Future<Uint8List?> Function(Uint8List)? thumbnailer,
+              bool android = false,
+              Future<void> Function()? rearm,
+            }) async {
+              final settings = await ownServer();
+              final recorder = await begun();
+              final inFlight = RunInFlight(
+                  deadline: android ? t0.add(androidRunDeadline) : deadline,
+                  window: android ? androidSlowPhotoWindow : slowPhotoWindow,
+                  clock: () => t0,
+                  client: server)
+                ..deferred = await DeferredAssets.load(prefs)
+                ..recorder = recorder
+                ..rearm = rearm;
+              final intake = _OpenEndedIntake()..batch = [photo(1)];
+              final run = headlessBackfillWith(
+                settings: settings,
+                prefs: prefs,
+                intake: intake,
+                pipeline: () async => inFlight.pipeline = PhotoPipeline(
+                    dao: dao,
+                    analyzer: ServerAnalyzer(settings,
+                        client: inFlight.traffic, normalizer: (b) async => b),
+                    hasher: hasher ?? (b) async => md5.convert(b).toString(),
+                    thumbnailer: thumbnailer ?? (_) async => null),
+                showMealCard: (_, _, {payload}) async {},
+                clock: () => t0,
+                photoOffered: inFlight.offered,
+                deferred: inFlight.deferred,
+                recorder: recorder,
+              );
+              return (
+                inFlight: inFlight,
+                run: run,
+                intake: intake,
+                recorder: recorder,
+              );
+            }
+
+            Future<void> until(bool Function() reached, String what) async {
+              for (var i = 0; i < 500 && !reached(); i++) {
+                await Future<void>.delayed(const Duration(milliseconds: 1));
+              }
+              expect(reached(), isTrue, reason: 'never got to: $what');
+            }
+
+            test('its answer lands while it is being released: one photo '
+                'left, with what the run was waiting for', () async {
+              final dao = _SlowDao()..releaseGate = Completer<void>();
+              final reply = Completer<http.Response>();
+              var sent = false;
+              final s = await started(dao, server: MockClient((_) {
+                sent = true;
+                return reply.future;
+              }));
+              await until(() => sent, 'the request');
+              // The deadline; the release is slow (a busy database).
+              final ended = finishWithinGrant(s.run,
+                  left: Duration.zero,
+                  recorder: s.recorder,
+                  abandon: s.inFlight.abandon);
+              await until(() => dao.releases == 1, 'the release');
+              // The answer lands, and the abandoned run reports its photo.
+              reply.complete(answer());
+              await s.intake.delivered.future;
+              // Then the release ends, and the deadline's reply goes.
+              dao.releaseGate!.complete();
+              expect(await ended, isTrue);
+              s.intake.end.complete();
+              await s.run;
+              final r = stored();
+              expect((r.offered, r.analyzed, r.saved, r.released),
+                  (1, 0, 0, 1));
+              expect(r.left, {BackgroundLeft.deadline: 1});
+              expect(r.stopReason, BackgroundStop.budget);
+              expect(dao.meals, isEmpty, reason: 'a late answer is dropped');
+              expect(dao.ledger.values,
+                  isNot(contains(IngestionStatus.processing)));
+            });
+
+            // Why the cut is counted BEFORE the release: the abandoned
+            // run, hearing its photo's verdict, can run on to its own end
+            // and close the entry while the release is still waiting.
+            test('the abandoned run ends before the release does: the cut is '
+                'in its entry all the same', () async {
+              final dao = _SlowDao()..releaseGate = Completer<void>();
+              final reply = Completer<http.Response>();
+              var sent = false;
+              final s = await started(dao, server: MockClient((_) {
+                sent = true;
+                return reply.future;
+              }));
+              await until(() => sent, 'the request');
+              final ended = finishWithinGrant(s.run,
+                  left: Duration.zero,
+                  recorder: s.recorder,
+                  abandon: s.inFlight.abandon);
+              await until(() => dao.releases == 1, 'the release');
+              reply.complete(answer());
+              s.intake.end.complete();
+              expect(await s.run, isTrue);
+              expect(stored().finished, isTrue,
+                  reason: 'the run closed its own entry');
+              dao.releaseGate!.complete();
+              expect(await ended, isTrue);
+              final r = stored();
+              expect((r.offered, r.analyzed, r.saved, r.released),
+                  (1, 0, 0, 1));
+              expect(r.left, {BackgroundLeft.deadline: 1});
+              // The deadline cut the run, so it ends as budget ("Used its
+              // time"), as when the release is quick. Closed by the run
+              // itself, it said done ("Finished.") over a photo left
+              // because the time ran out (review, 2026-11-28, second
+              // round).
+              expect(r.stopReason, BackgroundStop.budget);
+            });
+
+            test('Android: its answer lands during the summary\'s re-arm, '
+                'after the cut: still one photo', () async {
+              final dao = _SlowDao();
+              final reply = Completer<http.Response>();
+              final rearming = Completer<void>(), rearmed = Completer<void>();
+              var sent = false;
+              final s = await started(dao,
+                  android: true,
+                  rearm: () {
+                    rearming.complete();
+                    return rearmed.future;
+                  },
+                  server: MockClient((_) {
+                    sent = true;
+                    return reply.future;
+                  }));
+              await until(() => sent, 'the request');
+              final ended = finishWithinGrant(s.run,
+                  left: Duration.zero,
+                  recorder: s.recorder,
+                  abandon: s.inFlight.endAtDeadline,
+                  abandonLimit: androidDeadlineWrapUp);
+              await rearming.future; // released; the re-arm is running
+              expect(s.recorder.current!.left, {BackgroundLeft.deadline: 1});
+              reply.complete(answer());
+              await s.intake.delivered.future;
+              rearmed.complete();
+              expect(await ended, isTrue);
+              s.intake.end.complete();
+              await s.run;
+              final r = stored();
+              expect((r.offered, r.analyzed, r.saved, r.released),
+                  (1, 0, 0, 1));
+              expect(r.left, {BackgroundLeft.deadline: 1});
+              expect(r.stopReason, BackgroundStop.budget);
+            });
+
+            // Review, 2026-11-28: a photo cut off before its reservation
+            // holds nothing to release, so nothing was said of it at all
+            // ("1 read, 0 processed, 0 left for later"). It was left like
+            // any other. No cut counts against it, as before: only a photo
+            // that held its reservation can be passed over for cuts.
+            test('cut off while it was still being hashed: left, as not '
+                'sent yet, and nothing counts against it', () async {
+              final dao = _SlowDao();
+              var hashing = false;
+              final s = await started(dao,
+                  server:
+                      MockClient((_) async => fail('nothing may be sent')),
+                  hasher: (_) {
+                    hashing = true;
+                    return Completer<String>().future;
+                  });
+              await until(() => hashing, 'the hash');
+              await s.inFlight.abandon();
+              // As finishWithinGrant does right after.
+              await s.recorder.finish(BackgroundStop.budget);
+              final r = stored();
+              expect((r.offered, r.analyzed, r.released), (1, 0, 1));
+              expect(r.left, {BackgroundLeft.preparing: 1});
+              expect(dao.reserves, 0);
+              expect(prefs.getString(deferredAssetsPrefsKey), isNull,
+                  reason: 'the full window, and still no cut against it');
+            });
+
+            test('cut off while the database had not answered its '
+                'reservation: the same, and the reservation that comes '
+                'later is given back without a second count', () async {
+              final dao = _SlowDao()..reserveGate = Completer<void>();
+              final s = await started(dao,
+                  server:
+                      MockClient((_) async => fail('nothing may be sent')));
+              await until(() => dao.reserves == 1, 'the reservation');
+              await s.inFlight.abandon();
+              expect(s.recorder.current!.left, {BackgroundLeft.preparing: 1});
+              // The database answers after all.
+              dao.reserveGate!.complete();
+              await s.intake.delivered.future;
+              expect(dao.releases, 1, reason: 'the pipeline gave it back');
+              expect(dao.ledger.values,
+                  isNot(contains(IngestionStatus.processing)));
+              final r = s.recorder.current!;
+              expect((r.offered, r.analyzed, r.released), (1, 0, 1));
+              expect(r.left, {BackgroundLeft.preparing: 1});
+              expect(prefs.getString(deferredAssetsPrefsKey), isNull);
+            });
+
+            // The answer that comes after the cut can also say the photo
+            // was done with already: a not-food photo of the hour the run
+            // starts behind, read again (only a meal names its photo), whose
+            // reservation the database answers "already logged". Counted
+            // on top of the cut, it read as left for later and processed.
+            test('cut off while the database had not answered its '
+                'reservation, which then says "already logged": counted '
+                'once, as processed, not left', () async {
+              final dao = _SlowDao()..reserveGate = Completer<void>();
+              dao.ledger[md5.convert(photo(1).bytes).toString()] =
+                  IngestionStatus.skipped;
+              final s = await started(dao,
+                  server:
+                      MockClient((_) async => fail('nothing may be sent')));
+              await until(() => dao.reserves == 1, 'the reservation');
+              await s.inFlight.abandon();
+              expect(s.recorder.current!.left, {BackgroundLeft.preparing: 1},
+                  reason: 'all the run can tell at the deadline');
+              dao.reserveGate!.complete();
+              await s.intake.delivered.future;
+              final r = s.recorder.current!;
+              expect((r.offered, r.analyzed, r.saved, r.released),
+                  (1, 1, 0, 0));
+              expect(r.left, isEmpty);
+              expect(dao.releases, 0, reason: 'it never held a reservation');
+              expect(prefs.getString(deferredAssetsPrefsKey), isNull);
+              s.intake.end.complete();
+              await s.run;
+            });
+
+            // What "nothing held" must NOT be read as. A meal is committed
+            // before process() returns: its thumbnail comes after (up to
+            // 8 s in the iOS run). A deadline in that time finds nothing
+            // held either, and that photo was not left.
+            test('a photo whose meal is already saved when the deadline '
+                'comes (its thumbnail still on its way) was not left: '
+                'nothing is said, and its own verdict counts', () async {
+              final dao = _SlowDao();
+              final thumb = Completer<Uint8List?>();
+              final s = await started(dao,
+                  server: MockClient((_) async => answer()),
+                  thumbnailer: (_) => thumb.future);
+              await until(() => dao.meals.isNotEmpty, 'the save');
+              await s.inFlight.abandon();
+              var r = stored();
+              expect((r.offered, r.analyzed, r.released), (1, 0, 0));
+              expect(r.left, isEmpty);
+              expect(prefs.getString(deferredAssetsPrefsKey), isNull);
+              // Android's engine lives on through the re-arm, so the
+              // verdict can still come: counted as what it is.
+              thumb.complete(null);
+              s.intake.end.complete();
+              await s.run;
+              r = stored();
+              expect((r.offered, r.analyzed, r.saved, r.released),
+                  (1, 1, 1, 0));
+              expect(r.left, isEmpty);
+            });
+
+            // The same photo on Android, through the deadline itself. The
+            // run, its verdict counted during the summary's re-arm, reaches
+            // its own end and closes the entry. Nothing the deadline cut
+            // off was left, yet the entry read "Used its time; the rest
+            // waits for the next scan." over "1 logged, 0 left for later"
+            // (review, 2026-11-28, third round).
+            test('Android: that meal\'s verdict lands during the re-arm and '
+                'the run ends on its own: one logged, nothing left, and '
+                'the run finished', () async {
+              final dao = _SlowDao();
+              final thumb = Completer<Uint8List?>();
+              final rearming = Completer<void>(), rearmed = Completer<void>();
+              final s = await started(dao,
+                  android: true,
+                  rearm: () {
+                    rearming.complete();
+                    return rearmed.future;
+                  },
+                  server: MockClient((_) async => answer()),
+                  thumbnailer: (_) => thumb.future);
+              await until(() => dao.meals.isNotEmpty, 'the save');
+              final ended = finishWithinGrant(s.run,
+                  left: Duration.zero,
+                  recorder: s.recorder,
+                  abandon: s.inFlight.endAtDeadline,
+                  abandonLimit: androidDeadlineWrapUp);
+              await rearming.future; // released; the re-arm is running
+              expect(s.recorder.current!.left, isEmpty,
+                  reason: 'nothing held, something sent: not cut off');
+              thumb.complete(null);
+              s.intake.end.complete();
+              await s.run;
+              expect(stored().finished, isTrue,
+                  reason: 'the run closed its own entry during the re-arm');
+              rearmed.complete();
+              expect(await ended, isTrue);
+              final r = stored();
+              expect((r.offered, r.analyzed, r.saved, r.released),
+                  (1, 1, 1, 0));
+              expect(r.left, isEmpty);
+              expect(r.stopReason, BackgroundStop.done);
+            });
+          });
+
+          // The night of 2026-11-27, as it would have gone on: three runs
+          // in a row meet a server busy with another photo. The fourth
+          // used to pass the photo over, and it then waited for the app.
+          test('three runs that met a busy server, then one that finds it '
+              'free: that one logs the photo', () async {
+            final settings = await ownServer();
+            final dao = FakeDao();
+            var serverBusy = true;
+            Future<RunInFlight> runOnce({bool cutWhenRefused = false}) async {
+              final inFlight = RunInFlight(
+                  deadline: deadline,
+                  clock: () => t0,
+                  client: MockClient((_) async => serverBusy
+                      ? busy()
+                      : http.Response(
+                          jsonEncode({
+                            'ok': true,
+                            'analysis': {'is_food': true, 'food_items': []},
+                          }),
+                          200)));
+              final deferred =
+                  inFlight.deferred = await DeferredAssets.load(prefs);
+              final run = headlessBackfillWith(
+                settings: settings,
+                prefs: prefs,
+                intake: EmittingIntake()
+                  ..batch = [photo(1)]
+                  ..passOver = deferred.passOver,
+                pipeline: () async => inFlight.pipeline = PhotoPipeline(
+                    dao: dao,
+                    analyzer: ServerAnalyzer(settings,
+                        client: inFlight.traffic,
+                        normalizer: (b) async => b,
+                        // The wait before the next try outlasts the run.
+                        sleep: (_) => Completer<void>().future),
+                    hasher: (b) async => md5.convert(b).toString()),
+                showMealCard: (_, _, {payload}) async {},
+                clock: () => t0,
+                budget: iosBackgroundBudget,
+                startedAt: t0,
+                finishBy: deadline,
+                photoOffered: inFlight.offered,
+                deferred: deferred,
+                recorder: await begun(),
+              );
+              if (!cutWhenRefused) {
+                await run;
+              } else {
+                // The deadline comes once the refusal is in (not after a
+                // fixed wait, which a loaded machine can outlast or miss).
+                for (var i = 0;
+                    i < 5000 && inFlight.traffic.cutOffAt != CutOffAt.busy;
+                    i++) {
+                  await Future<void>.delayed(const Duration(milliseconds: 1));
+                }
+                await finishWithinGrant(run,
+                    left: Duration.zero,
+                    recorder: BackgroundRunRecorder(prefs, platform: 'ios'),
+                    abandon: inFlight.abandon);
+              }
+              return inFlight;
+            }
+
+            for (var night = 0; night < 3; night++) {
+              final cut = await runOnce(cutWhenRefused: true);
+              expect((cut.traffic.sent, cut.traffic.cutOffAt),
+                  (1, CutOffAt.busy),
+                  reason: 'the photo was sent, refused, and waiting to be '
+                      'sent again when the deadline came');
+              expect(dao.ledger.values,
+                  isNot(contains(IngestionStatus.processing)));
+            }
+            expect(dao.meals, isEmpty);
+            expect(prefs.getString(deferredAssetsPrefsKey), isNull,
+                reason: 'a busy server is not the photo\'s doing');
+            serverBusy = false;
+            await runOnce();
+            expect(dao.meals, hasLength(1),
+                reason: 'offered again, not passed over');
+          });
         });
       });
 
@@ -2407,6 +3218,109 @@ void main() {
       ]);
       expect(scheduler.frequency, backgroundScanFrequency);
     });
+
+    // 2026-11-28: iOS's request for the next scan is kept alive through a
+    // channel of its own (background_schedule.dart), asked right behind
+    // this submit and at every return to the app and every leave.
+    group('the request iOS holds for the next scan', () {
+      const channel = MethodChannel(backgroundScheduleChannelName);
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      late List<MethodCall> asked;
+
+      /// iOS's side of the channel: it holds [held] requests and answers a
+      /// submit with [refusal] (null: taken).
+      void ios({int held = 0, Map<String, Object?>? refusal}) {
+        asked = [];
+        messenger.setMockMethodCallHandler(channel, (call) async {
+          asked.add(call);
+          return call.method == 'pending' ? held : refusal;
+        });
+        addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+      }
+
+      // Android's whole background path is the WorkManager calls pinned
+      // above. Nothing here may add to it: not a channel call, not a
+      // scheduler call, not a stored value.
+      test('Android: the WorkManager calls and nothing else, at a launch, '
+          'a setting change, a return to the app or a leave', () async {
+        ios();
+        final settings = await settingsWith(key: 'k', lookback: 5);
+        final prefs = await SharedPreferences.getInstance();
+        final before = prefs.getKeys();
+        await syncBackgroundScan(settings);
+        // What the shell's hook would do, were it handed one on Android.
+        expect(await keepBackgroundScanScheduled(settings), isNull);
+        expect(await lastBackgroundSchedule(), isNull);
+        expect(scheduler.calls, [
+          'init',
+          'register:$photoBackfillUniqueName:$photoBackfillTaskName',
+        ]);
+        expect(scheduler.policy, ExistingPeriodicWorkPolicy.update);
+        expect(scheduler.frequency, backgroundScanFrequency);
+        expect(scheduler.inputData, {'lookbackDays': 5});
+        await settings.setWatcherEnabled(false);
+        await syncBackgroundScan(settings);
+        expect(await keepBackgroundScanScheduled(settings), isNull);
+        expect(scheduler.calls.last, 'cancel:$photoBackfillUniqueName');
+        expect(scheduler.calls, hasLength(3));
+        expect(asked, isEmpty, reason: 'the iOS channel is never called');
+        expect(prefs.getKeys().difference(before), isEmpty,
+            reason: 'nothing stored: ${prefs.getKeys().difference(before)}');
+        expect(prefs.getString(backgroundSchedulePrefsKey), isNull);
+      });
+
+      group('iOS', () {
+        setUp(() {
+          debugIsAndroidOverride = false;
+          debugIsIOSOverride = true;
+        });
+        tearDown(() => debugIsIOSOverride = null);
+
+        test('workmanager\'s submit was refused (it only logs that): one '
+            'more is made, and its refusal is recorded', () async {
+          ios(refusal: {'domain': 'BGTaskSchedulerErrorDomain', 'code': 1});
+          final settings = await settingsWith(key: 'k');
+          await syncBackgroundScan(settings);
+          expect(scheduler.calls, [
+            'init',
+            'cancel:$photoBackfillUniqueName',
+            'register:$photoBackfillUniqueName:$photoBackfillTaskName',
+          ]);
+          expect([for (final c in asked) c.method], ['pending', 'submit']);
+          final now = await lastBackgroundSchedule();
+          expect((now?.scheduled, now?.refusal),
+              (false, BackgroundRefusal.unavailable));
+        });
+
+        test('workmanager\'s submit was taken: iOS holds it, nothing more is '
+            'submitted, and "scheduled" is recorded', () async {
+          ios(held: 1);
+          final settings = await settingsWith(key: 'k', watcher: false);
+          await syncBackgroundScan(settings);
+          expect([for (final c in asked) c.method], ['pending']);
+          expect((await lastBackgroundSchedule())?.scheduled, isTrue);
+          // The shell's hook, at each return to the app and each leave:
+          // wanted on iOS whatever the Watch Camera Roll switch says, as
+          // the launch's own submit is.
+          final again = await keepBackgroundScanScheduled(settings);
+          expect((again?.scheduled, again?.submitted), (true, false));
+          expect([for (final c in asked) c.method], ['pending', 'pending']);
+        });
+
+        test('the request was lost since: the next return to the app makes '
+            'it again', () async {
+          ios(held: 0);
+          final settings = await settingsWith(key: 'k');
+          final now = await keepBackgroundScanScheduled(settings);
+          expect([for (final c in asked) c.method], ['pending', 'submit']);
+          expect((now?.scheduled, now?.submitted), (true, true));
+          expect(scheduler.calls, isEmpty,
+              reason: 'never through workmanager: its cancel-then-register '
+                  'would replace a request iOS holds');
+        });
+      });
+    });
   });
 
   // Review (finding 3): the run loads its settings at its start and arms
@@ -2850,6 +3764,207 @@ void main() {
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
       await tester.pump();
       expect(intake.backfillScans, before);
+    });
+  });
+
+  // 2026-11-28: a run starts an hour behind its watermark, so each one read
+  // and hashed the photos it had logged last time again before it reached
+  // a new one, out of the 15 s in which an iOS run may start a photo. On
+  // iOS the scan now counts a photo a meal names covered without a read
+  // (LibraryPhotoIntake.scanSkipsLogged), as the late-import pass does.
+  group('the run does not read a photo a meal already names (iOS)', () {
+    final breakfastAt = DateTime(2026, 11, 27, 8, 30);
+    final lunchAt = DateTime(2026, 11, 27, 12, 0);
+    final now = DateTime(2026, 11, 27, 12, 20);
+
+    /// One run over a library that holds the breakfast the last run logged
+    /// (the watermark sits on it) and a lunch photo taken since.
+    Future<
+        ({
+          List<String> reads,
+          List<String> hashed,
+          FakeDao dao,
+          BackgroundRunRecord record,
+          DateTime? watermark,
+        })> run({required bool skips}) async {
+      final settings = await settingsWith(key: 'k');
+      final p = await SharedPreferences.getInstance();
+      await p.setString(backgroundWatermarkPrefsKey,
+          breakfastAt.toUtc().toIso8601String());
+      final library = _Library()
+        ..assets.add(_Asset('breakfast', breakfastAt))
+        ..assets.add(_Asset('lunch', lunchAt));
+      final breakfastHash = md5.convert(utf8.encode('breakfast')).toString();
+      final dao = FakeDao()
+        ..seed(Meal(
+            id: 1,
+            date: '2026-11-27',
+            time: '08:30 AM',
+            timestamp: breakfastAt.toIso8601String(),
+            source: MealSource.appWatch,
+            imageHash: breakfastHash,
+            fileId: 'breakfast',
+            analysis: const {'is_food': true, 'total_calories': 320}));
+      dao.ledger[breakfastHash] = IngestionStatus.saved;
+      final hashed = <String>[];
+      final recorder =
+          BackgroundRunRecorder(p, platform: 'ios', clock: () => now);
+      await recorder.begin();
+      await headlessBackfillWith(
+        settings: settings,
+        prefs: p,
+        // As _runAfterLaunch builds it (production_wiring_test pins the
+        // arguments).
+        intake: LibraryPhotoIntake(
+            lookbackDays: () => settings.lookbackDays,
+            library: library,
+            clock: () => now,
+            onBackfillListed: recorder.listed,
+            loggedAssetIds: dao.loggedAssetIds,
+            scanSkipsLogged: skips,
+            onScanSkippedLogged: recorder.alreadyLogged),
+        pipeline: () async => PhotoPipeline(
+            dao: dao,
+            analyzer: FakeAnalyzer()
+              ..nextPhotoOutcome = const AnalysisOutcome(
+                  analysis: {'is_food': true, 'food_items': []},
+                  isFood: true,
+                  wall: Duration.zero),
+            hasher: (b) async {
+              hashed.add(utf8.decode(b));
+              return md5.convert(b).toString();
+            }),
+        showMealCard: (_, _, {payload}) async {},
+        clock: () => now,
+        recorder: recorder,
+      );
+      return (
+        reads: library.reads,
+        hashed: hashed,
+        dao: dao,
+        record: recorder.current!,
+        watermark:
+            readStoredInstant(p.getString(backgroundWatermarkPrefsKey)),
+      );
+    }
+
+    test('breakfast, logged by the last run, is neither read nor hashed; '
+        'lunch is logged, and the record says where the other photo went',
+        () async {
+      final r = await run(skips: true);
+      expect(r.reads, ['lunch']);
+      expect(r.hashed, ['lunch']);
+      expect([for (final m in r.dao.meals) m.fileId], ['breakfast', 'lunch']);
+      expect(r.watermark, lunchAt);
+      final rec = r.record;
+      expect(rec.stopReason, BackgroundStop.done);
+      expect(
+          (rec.enumerated, rec.offered, rec.analyzed, rec.saved, rec.released),
+          (2, 1, 1, 1, 0));
+      expect(rec.alreadyLogged, 1);
+    });
+
+    // 2026-11-27 as the phone would have shown it (review, 2026-11-28):
+    // the run lists breakfast (logged by the last run) and lunch (new),
+    // sends lunch, and its deadline comes before the server answers. The
+    // record heard of breakfast only at the scan's end, which such a run
+    // never reaches: "2 listed, 1 read", and no word of the other photo.
+    test('a run cut off on the new photo has still said which photo it did '
+        'not read, and why the new one was left', () async {
+      SharedPreferences.setMockInitialValues({});
+      final p = await SharedPreferences.getInstance();
+      final settings =
+          await AppSettings.load(prefs: p, keyStore: MemoryKeyStore());
+      await settings.setProvider(AiProvider.server);
+      await settings.setServerBaseUrl('https://10.0.0.5');
+      await settings.setServerApiKey('k');
+      await settings.setWatcherEnabled(true);
+      await p.setString(backgroundWatermarkPrefsKey,
+          breakfastAt.toUtc().toIso8601String());
+      final library = _Library()
+        ..assets.add(_Asset('breakfast', breakfastAt))
+        ..assets.add(_Asset('lunch', lunchAt));
+      final breakfastHash = md5.convert(utf8.encode('breakfast')).toString();
+      final dao = FakeDao()
+        ..seed(Meal(
+            id: 1,
+            date: '2026-11-27',
+            time: '08:30 AM',
+            timestamp: breakfastAt.toIso8601String(),
+            source: MealSource.appWatch,
+            imageHash: breakfastHash,
+            fileId: 'breakfast',
+            analysis: const {'is_food': true, 'total_calories': 320}));
+      dao.ledger[breakfastHash] = IngestionStatus.saved;
+      final recorder =
+          BackgroundRunRecorder(p, platform: 'ios', clock: () => now);
+      await recorder.begin();
+      var sent = false;
+      final inFlight = RunInFlight(
+          deadline: now.add(iosRunDeadline),
+          clock: () => now,
+          // The server never answers in time.
+          client: MockClient((_) {
+            sent = true;
+            return Completer<http.Response>().future;
+          }))
+        ..recorder = recorder;
+      final run = headlessBackfillWith(
+        settings: settings,
+        prefs: p,
+        intake: LibraryPhotoIntake(
+            lookbackDays: () => settings.lookbackDays,
+            library: library,
+            clock: () => now,
+            onBackfillListed: recorder.listed,
+            loggedAssetIds: dao.loggedAssetIds,
+            scanSkipsLogged: true,
+            onScanSkippedLogged: recorder.alreadyLogged),
+        pipeline: () async => inFlight.pipeline = PhotoPipeline(
+            dao: dao,
+            analyzer: ServerAnalyzer(settings,
+                client: inFlight.traffic, normalizer: (b) async => b),
+            hasher: (b) async => md5.convert(b).toString()),
+        showMealCard: (_, _, {payload}) async {},
+        clock: () => now,
+        photoOffered: inFlight.offered,
+        recorder: recorder,
+      );
+      for (var i = 0; i < 500 && !sent; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 1));
+      }
+      expect(sent, isTrue, reason: 'lunch was never sent');
+      expect(
+          await finishWithinGrant(run,
+              left: Duration.zero,
+              recorder: recorder,
+              abandon: inFlight.abandon),
+          isTrue);
+      final rec =
+          decodeBackgroundRuns(p.getString(backgroundRunsPrefsKey)).single;
+      expect(rec.stopReason, BackgroundStop.budget);
+      expect(library.reads, ['lunch']);
+      expect(
+          (rec.enumerated, rec.offered, rec.analyzed, rec.saved, rec.released),
+          (2, 1, 0, 0, 1));
+      expect(rec.alreadyLogged, 1, reason: 'breakfast: said as it was skipped');
+      expect(rec.left, {BackgroundLeft.deadline: 1});
+    });
+
+    // Android's run, and every run before this change: the same meals, the
+    // same ledger and the same watermark, reached by reading both photos.
+    test('a run that reads every photo ends in the same state', () async {
+      final skipped = await run(skips: true);
+      final read = await run(skips: false);
+      expect(read.reads, ['breakfast', 'lunch']);
+      expect(read.hashed, ['breakfast', 'lunch']);
+      expect(read.watermark, skipped.watermark);
+      expect([for (final m in read.dao.meals) m.fileId],
+          [for (final m in skipped.dao.meals) m.fileId]);
+      expect(read.dao.ledger, skipped.dao.ledger);
+      expect(read.record.alreadyLogged, 0);
+      expect((read.record.offered, read.record.analyzed, read.record.saved),
+          (2, 2, 1));
     });
   });
 

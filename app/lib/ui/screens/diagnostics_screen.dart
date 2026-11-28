@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 import '../../core/app_channel.dart' show AppChannel;
 import '../../services/android_backup_size.dart';
 import '../../services/photo/background_runs.dart';
+import '../../services/photo/background_schedule.dart';
 import '../../services/photo/glasses_check.dart'
     show GlassesCheckEntry, readGlassesChecks;
 import '../../services/photo/photo_changes.dart'
@@ -37,6 +38,12 @@ class DiagnosticsScreen extends StatefulWidget {
   /// The background-scan history (background_runs.dart), newest first.
   /// Null reads it from the device (readBackgroundRuns).
   final Future<List<BackgroundRunRecord>> Function()? loadBackgroundRuns;
+
+  /// iOS: what iOS last said about the request for the next background
+  /// scan (background_schedule.dart), said above the runs. Null reads it
+  /// from the device (lastBackgroundSchedule), which answers nothing on
+  /// Android: no line there.
+  final Future<BackgroundSchedule?> Function()? loadBackgroundSchedule;
 
   /// The late-import record (photo_changes.dart, design G1b); null reads
   /// it from the device (readLateImportStats). No record, no section:
@@ -73,6 +80,7 @@ class DiagnosticsScreen extends StatefulWidget {
       {super.key,
       required this.diagnostics,
       this.loadBackgroundRuns,
+      this.loadBackgroundSchedule,
       this.loadLateImports,
       this.loadGlassesChecks,
       this.loadRestaurantLookups,
@@ -91,6 +99,9 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
   bool _ran = false;
   late final Future<List<BackgroundRunRecord>> _backgroundRuns =
       (widget.loadBackgroundRuns ?? readBackgroundRuns)();
+  late final Future<BackgroundSchedule?> _backgroundSchedule =
+      _quiet<BackgroundSchedule?>(
+          widget.loadBackgroundSchedule ?? lastBackgroundSchedule);
   late final Future<LateImportStats?> _lateImports =
       (widget.loadLateImports ?? readLateImportStats)();
   late final Future<List<GlassesCheckEntry>> _glassesChecks =
@@ -272,7 +283,11 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
             FutureBuilder<List<BackgroundRunRecord>>(
               future: _backgroundRuns,
               builder: (context, snap) => snap.hasData
-                  ? _BackgroundRuns(snap.data!)
+                  ? FutureBuilder<BackgroundSchedule?>(
+                      future: _backgroundSchedule,
+                      builder: (context, schedule) =>
+                          _BackgroundRuns(snap.data!, schedule: schedule.data),
+                    )
                   : const SizedBox.shrink(),
             ),
             FutureBuilder<LateImportStats?>(
@@ -517,8 +532,12 @@ String? lateImportStatusLine(AppLocalizations l, String? status) =>
 /// background engine itself — the only view of a run iOS killed part-way
 /// (2026-10-18).
 class _BackgroundRuns extends StatelessWidget {
-  const _BackgroundRuns(this.runs);
+  const _BackgroundRuns(this.runs, {this.schedule});
   final List<BackgroundRunRecord> runs;
+
+  /// iOS's last answer about the request for the next scan; null: none
+  /// to show (Android, or never asked).
+  final BackgroundSchedule? schedule;
 
   @override
   Widget build(BuildContext context) {
@@ -535,6 +554,17 @@ class _BackgroundRuns extends StatelessWidget {
         const SizedBox(height: 4),
         Text(runs.isEmpty ? l.diagBgRunsNone : l.diagBgRunsIntro,
             style: muted),
+        // Whether a next scan can come at all, before what the last ones
+        // did: with no request waiting, iOS launches none (2026-11-28).
+        if (schedule != null) ...[
+          const SizedBox(height: 8),
+          Text(backgroundScheduleLine(l, schedule!),
+              key: const Key('diagBackgroundSchedule'),
+              style: schedule!.scheduled
+                  ? muted
+                  : theme.textTheme.bodySmall
+                      ?.copyWith(color: theme.colorScheme.error)),
+        ],
         for (final r in runs.take(diagBackgroundRunsShown)) ...[
           const SizedBox(height: 8),
           Card(
@@ -553,6 +583,16 @@ class _BackgroundRuns extends StatelessWidget {
                       l.diagBgRunCounts(r.enumerated, r.offered, r.analyzed,
                           r.saved, r.released),
                       style: muted),
+                  // iOS: listed, but not read again because a meal
+                  // already names them. Without the line the counts above
+                  // would not add up to the photos listed.
+                  if (r.alreadyLogged > 0)
+                    Text(l.diagBgRunAlreadyLogged(r.alreadyLogged),
+                        style: muted),
+                  // Why the photos left for later were left: the phone's
+                  // own answer to "why was nothing logged" (2026-11-28).
+                  if (backgroundRunLeftLine(l, r) case final why?)
+                    Text(why, style: muted),
                   Text(
                       l.diagBgRunWatermark(_stamp(l, r.watermarkBefore),
                           _stamp(l, r.watermarkAfter)),
@@ -575,6 +615,45 @@ class _BackgroundRuns extends StatelessWidget {
         ? l.diagBgRunUnfinished
         : l.diagBgRunSeconds(end.difference(r.start).inSeconds);
   }
+}
+
+/// One line on the request for the next background scan (iOS): held, or
+/// refused and why ([BackgroundRefusal]), with when the app last asked.
+String backgroundScheduleLine(AppLocalizations l, BackgroundSchedule s) {
+  final checked = localStamp(s.at);
+  if (s.scheduled) return l.diagBgScheduleOk(checked);
+  final refusal = s.refusal;
+  return refusal == null || refusal == BackgroundRefusal.unavailable
+      ? l.diagBgScheduleUnavailable(checked)
+      : l.diagBgScheduleRefused(refusal, checked);
+}
+
+/// Why the photos [r] left for later were left ([BackgroundLeft]), each
+/// reason with its count, in one line; null for a run that left none or
+/// recorded no reasons (every run before 2026-11-28). A reason this
+/// version has no words for (a later version's) counts as "another
+/// reason".
+String? backgroundRunLeftLine(AppLocalizations l, BackgroundRunRecord r) {
+  final counts = <String, int>{};
+  r.left.forEach((reason, count) {
+    final known =
+        BackgroundLeft.all.contains(reason) ? reason : BackgroundLeft.other;
+    counts[known] = (counts[known] ?? 0) + count;
+  });
+  if (counts.isEmpty) return null;
+  final parts = [
+    for (final reason in BackgroundLeft.all)
+      if (counts[reason] case final count?)
+        switch (reason) {
+          BackgroundLeft.busy => l.diagBgLeftBusy(count),
+          BackgroundLeft.unreachable => l.diagBgLeftUnreachable(count),
+          BackgroundLeft.deadline => l.diagBgLeftDeadline(count),
+          BackgroundLeft.preparing => l.diagBgLeftPreparing(count),
+          BackgroundLeft.notOffered => l.diagBgLeftNotOffered(count),
+          _ => l.diagBgLeftOther(count),
+        },
+  ];
+  return l.diagBgRunLeftWhy(parts.join(l.diagBgLeftJoin));
 }
 
 /// One line on how [r] ended: its stop reason, or — for a run with no end —

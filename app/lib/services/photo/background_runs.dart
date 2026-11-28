@@ -64,6 +64,51 @@ abstract final class BackgroundStop {
   static String error(Object e) => 'error:${e.runtimeType}';
 }
 
+/// Why a photo was left for a later run ([BackgroundRunRecord.left]):
+/// what the phone needs to answer "why was nothing logged" (2026-11-28).
+/// A run used to say only how many were left.
+abstract final class BackgroundLeft {
+  /// The AI service said it was busy or over its limit. As the photo's
+  /// verdict: the user's own server while it analyzes another photo, or a
+  /// rate limit (429); a provider's 503 or 529 reads as "network or
+  /// service issue" there, and counts as [unreachable]. As the last thing
+  /// heard for it before the run's deadline: a 503, 529 or 429.
+  static const busy = 'busy';
+
+  /// The AI service could not be reached, or answered with a server error.
+  static const unreachable = 'unreachable';
+
+  /// The run's deadline cut the photo off with its request out and no
+  /// answer yet (a slow answer, a busy server that holds the request and a
+  /// hung network all look like this from the phone), or with the answer
+  /// in and not saved yet.
+  static const deadline = 'deadline';
+
+  /// The run's deadline cut it off before anything was sent for it: the
+  /// phone was still preparing it (its hash and reservation, its food
+  /// check, its decode). The one cut that can count against the photo,
+  /// once it holds its reservation (deferred_assets.dart).
+  static const preparing = 'preparing';
+
+  /// Listed, never started: the run's time for starting photos was over.
+  static const notOffered = 'not_offered';
+
+  /// Any other verdict that keeps a photo for later: a photo this engine
+  /// left for the app, one another run holds, a preview copy waiting for
+  /// its full-size one.
+  static const other = 'other';
+
+  /// In the order the diagnostics page says them.
+  static const all = [
+    busy,
+    unreachable,
+    deadline,
+    preparing,
+    notOffered,
+    other,
+  ];
+}
+
 class BackgroundRunRecord {
   const BackgroundRunRecord({
     required this.start,
@@ -75,6 +120,8 @@ class BackgroundRunRecord {
     this.analyzed = 0,
     this.saved = 0,
     this.released = 0,
+    this.alreadyLogged = 0,
+    this.left = const {},
     this.stopReason,
     this.watermarkBefore,
     this.watermarkAfter,
@@ -104,9 +151,22 @@ class BackgroundRunRecord {
   /// New meals, or leftovers deducted from one.
   final int saved;
 
-  /// Photos left eligible for a later run: a retryable verdict, or not
-  /// started because the time budget ran out.
+  /// Photos left eligible for a later run: a retryable verdict, not
+  /// started because the time budget ran out, or (since 2026-11-28) the
+  /// one the run's deadline cut off and released.
   final int released;
+
+  /// Why they were left: a [BackgroundLeft] reason to how many. Adds up to
+  /// [released] for a run that recorded reasons; empty for every run
+  /// before 2026-11-28.
+  final Map<String, int> left;
+
+  /// Photos the scan counted covered without reading them, because a meal
+  /// already names each one (LibraryPhotoIntake.scanSkipsLogged, the iOS
+  /// run, 2026-11-28). In [enumerated] and in no other count: they used to
+  /// be read and processed again by every run, an hour behind the
+  /// watermark.
+  final int alreadyLogged;
   final String? stopReason;
 
   /// The watermark (UTC) when the run started, and as it last wrote it.
@@ -122,6 +182,20 @@ class BackgroundRunRecord {
 
   bool get finished => end != null;
 
+  /// [left] with [count] more photos left for [reason].
+  Map<String, int> leftWith(String reason, [int count = 1]) =>
+      {...left, reason: (left[reason] ?? 0) + count};
+
+  /// [left] with one photo fewer left for [reason]; a reason no photo is
+  /// left for any more is not in it.
+  Map<String, int> leftWithout(String reason) => {
+        for (final MapEntry(:key, :value) in left.entries)
+          if (key != reason)
+            key: value
+          else if (value > 1)
+            key: value - 1,
+      };
+
   BackgroundRunRecord copyWith({
     DateTime? end,
     BackgroundRunStage? stage,
@@ -130,6 +204,8 @@ class BackgroundRunRecord {
     int? analyzed,
     int? saved,
     int? released,
+    int? alreadyLogged,
+    Map<String, int>? left,
     String? stopReason,
     DateTime? watermarkAfter,
   }) =>
@@ -143,6 +219,8 @@ class BackgroundRunRecord {
         analyzed: analyzed ?? this.analyzed,
         saved: saved ?? this.saved,
         released: released ?? this.released,
+        alreadyLogged: alreadyLogged ?? this.alreadyLogged,
+        left: left ?? this.left,
         stopReason: stopReason ?? this.stopReason,
         watermarkBefore: watermarkBefore,
         watermarkAfter: watermarkAfter ?? this.watermarkAfter,
@@ -163,6 +241,10 @@ class BackgroundRunRecord {
         'wm_before': watermarkBefore?.toUtc().toIso8601String(),
         'wm_after': watermarkAfter?.toUtc().toIso8601String(),
         if (bootMs != null) 'boot_ms': bootMs,
+        // Only when there is something to say: an entry without them is
+        // exactly what every earlier version wrote, and reads back as 0.
+        if (alreadyLogged > 0) 'known': alreadyLogged,
+        if (left.isNotEmpty) 'left': left,
       };
 
   /// Null for an entry that cannot be read (a newer or damaged shape):
@@ -188,12 +270,31 @@ class BackgroundRunRecord {
       analyzed: count(json['analyzed']),
       saved: count(json['saved']),
       released: count(json['released']),
+      alreadyLogged: count(json['known']),
+      left: _leftFrom(json['left']),
       stopReason: stop is String ? stop : null,
       watermarkBefore: instant(json['wm_before']),
       watermarkAfter: instant(json['wm_after']),
       bootMs: json['boot_ms'] is int ? count(json['boot_ms']) : null,
     );
   }
+}
+
+/// The stored reasons: short names with a count above 0. Anything else in
+/// the map is dropped, and anything that is not a map reads as none. A
+/// name this version does not know (a later one's) is kept: the page says
+/// it with the others.
+Map<String, int> _leftFrom(Object? json) {
+  if (json is! Map) return const {};
+  return {
+    for (final MapEntry(:key, :value) in json.entries)
+      if (key is String &&
+          key.isNotEmpty &&
+          key.length <= 24 &&
+          value is int &&
+          value > 0)
+        key: value,
+  };
 }
 
 /// Parses the stored list, newest first; unreadable entries are skipped.
@@ -306,6 +407,17 @@ class BackgroundRunRecorder {
   /// This run's entry as last written (tests, and the run itself).
   BackgroundRunRecord? get current => _current;
 
+  /// Whether a photo is with the pipeline that nothing has counted yet:
+  /// handed over ([offered]), with neither its verdict ([processed]) nor a
+  /// cut ([cutOff]) in the entry.
+  bool get photoInFlight => _inFlight;
+  bool _inFlight = false;
+
+  /// The reason the run's deadline counted the photo in flight under
+  /// ([cutOff]), until the next photo is handed over; null: no cut is
+  /// counted for it.
+  String? _cut;
+
   /// [bootLead]: how long before the Dart entry the run started natively
   /// (zero or null: no native stamp for this run).
   ///
@@ -341,22 +453,103 @@ class BackgroundRunRecorder {
   /// A photo's bytes were handed to the pipeline: written BEFORE it is
   /// processed, so a kill mid-analysis reads "photo, offered n, analyzed
   /// n-1".
-  Future<void> offered() => _update((r) => r.copyWith(
-      stage: BackgroundRunStage.photo, offered: r.offered + 1));
+  Future<void> offered() {
+    _inFlight = true;
+    _cut = null; // another photo: a cut was the one before it
+    return _update((r) => r.copyWith(
+        stage: BackgroundRunStage.photo, offered: r.offered + 1));
+  }
 
-  Future<void> processed({required bool saved, required bool released}) =>
-      _update((r) => r.copyWith(
-          analyzed: r.analyzed + 1,
-          saved: r.saved + (saved ? 1 : 0),
-          released: r.released + (released ? 1 : 0)));
+  /// [left]: why a [released] photo was left ([BackgroundLeft]);
+  /// [BackgroundLeft.other] when the caller does not say.
+  ///
+  /// The photo the deadline cut off ([cutOff]) can still report: its
+  /// answer lands while it is being released, or on Android during the
+  /// summary's re-arm after it, and the abandoned run says "left for
+  /// later". That is the same photo, counted by the cut with what the run
+  /// was waiting for, and is not counted again (review, 2026-11-28: it
+  /// showed as two photos, {deadline: 1, other: 1}). A verdict that keeps
+  /// it instead (a meal saved, "already logged", "not food") says the
+  /// photo was not left after all: the cut is taken back and the verdict
+  /// counts, so the photo is never both left and processed.
+  Future<void> processed(
+      {required bool saved, required bool released, String? left}) {
+    final cut = _cut;
+    if (cut != null && released) return Future.value();
+    _cut = null;
+    _inFlight = false;
+    return _update((r) => r.copyWith(
+        analyzed: r.analyzed + 1,
+        saved: r.saved + (saved ? 1 : 0),
+        released: r.released + (released ? 1 : 0) - (cut != null ? 1 : 0),
+        left: cut != null
+            ? r.leftWithout(cut)
+            : released
+                ? r.leftWith(left ?? BackgroundLeft.other)
+                : null));
+  }
+
+  /// Photos the scan counted covered without a read, because a meal
+  /// already names them ([BackgroundRunRecord.alreadyLogged]).
+  Future<void> alreadyLogged(int count) => count <= 0
+      ? Future.value()
+      : _update((r) => r.copyWith(alreadyLogged: r.alreadyLogged + count));
 
   /// Photos released unprocessed (the time budget ran out).
   Future<void> releasedUnprocessed(int count) => count <= 0
       ? Future.value()
-      : _update((r) => r.copyWith(released: r.released + count));
+      : _update((r) => r.copyWith(
+          released: r.released + count,
+          left: r.leftWith(BackgroundLeft.notOffered, count)));
+
+  /// The run's deadline cut off the photo in flight (RunInFlight.abandon),
+  /// for [reason]: [BackgroundLeft.deadline], [BackgroundLeft.preparing],
+  /// or what the AI service last said. Called before [finish], which makes
+  /// the entry final. The entry holds it from the moment of the call,
+  /// whatever becomes of this write. From then on that photo's own "left
+  /// for later" is not counted too, and a verdict that keeps it takes the
+  /// cut back ([processed]).
+  Future<void> cutOff(String reason) {
+    _inFlight = false;
+    _cut = reason;
+    return _update((r) =>
+        r.copyWith(released: r.released + 1, left: r.leftWith(reason)));
+  }
+
+  /// Takes the last [cutOff] back: the photo turned out not to have been
+  /// left (RunInFlight.abandon says when). Its own verdict, when it comes,
+  /// counts as any other. Nothing to take back: nothing changes.
+  Future<void> cutWithdrawn() {
+    final reason = _cut;
+    if (reason == null) return Future.value();
+    _cut = null;
+    _inFlight = true;
+    return _update((r) => r.copyWith(
+        released: r.released - 1, left: r.leftWithout(reason)));
+  }
 
   Future<void> checkpoint(DateTime watermark) => _update((r) => r.copyWith(
       stage: BackgroundRunStage.checkpoint, watermarkAfter: watermark.toUtc()));
+
+  /// The run's deadline has come (finishWithinGrant, before its wrap-up:
+  /// the release of the photo in flight, and on Android the summary's
+  /// re-arm). From now on, while the photo the deadline cut off is still
+  /// counted as left ([cutOff]), the entry ends as [BackgroundStop.budget],
+  /// whoever finishes it. The run itself can, during that wrap-up: the
+  /// photo the deadline cut off was its last, its verdict landed, and the
+  /// run reached its own end. The entry then read "done" over a photo
+  /// left because the time ran out (review, 2026-11-28). A finished entry
+  /// stays as it is.
+  ///
+  /// With no such photo, the run that reaches its own end keeps its own
+  /// reason: the deadline cut off nothing, or the photo it cut off turned
+  /// out not to be left ([cutWithdrawn], or a verdict that keeps it:
+  /// [processed]). A meal saved just before an Android deadline, its
+  /// thumbnail still being made, read "Used its time; the rest waits for
+  /// the next scan." over "1 logged, 0 left for later" (review,
+  /// 2026-11-28, third round).
+  void deadlineReached() => _deadlineReached = true;
+  bool _deadlineReached = false;
 
   Future<void> finish(String stopReason, {DateTime? watermarkAfter}) =>
       _update((r) => r.finished
@@ -364,7 +557,9 @@ class BackgroundRunRecorder {
           : r.copyWith(
               end: _clock().toUtc(),
               stage: BackgroundRunStage.done,
-              stopReason: stopReason,
+              stopReason: _deadlineReached && _cut != null
+                  ? BackgroundStop.budget
+                  : stopReason,
               watermarkAfter: watermarkAfter?.toUtc()));
 
   /// A finished entry is final: a run abandoned at the iOS deadline

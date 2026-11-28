@@ -105,6 +105,92 @@ void main() {
         .stopReason, BackgroundStop.budget);
   });
 
+  // Review, 2026-11-28, second round. The deadline's wrap-up writes
+  // "budget" once the photo in flight is released, but the run itself can
+  // close the entry first: the photo the deadline cut off was its last,
+  // and its verdict, landing during the release, let the run reach its
+  // own end. The entry read "Finished." over a photo left because the
+  // time ran out; the same run read "budget" when the release was quick.
+  test('once the deadline has come and cut off a photo, the run ends as '
+      'budget whoever closes the entry; before it, the run\'s own reason '
+      'stands', () async {
+    final prefs = await _prefs();
+    final rec = BackgroundRunRecorder(prefs, platform: 'ios', clock: () => t0);
+    await rec.begin();
+    await rec.offered();
+    rec.deadlineReached();
+    await rec.cutOff(BackgroundLeft.deadline);
+    await rec.finish(BackgroundStop.done); // the run, on its way out
+    await rec.finish(BackgroundStop.budget); // the deadline's, too late
+    expect(rec.current!.stopReason, BackgroundStop.budget);
+    expect(decodeBackgroundRuns(prefs.getString(backgroundRunsPrefsKey))
+        .single
+        .stopReason, BackgroundStop.budget);
+
+    final before =
+        BackgroundRunRecorder(await _prefs(), platform: 'ios', clock: () => t0);
+    await before.begin();
+    await before.finish(BackgroundStop.paused);
+    before.deadlineReached(); // too late: the entry is final
+    await before.finish(BackgroundStop.budget);
+    expect(before.current!.stopReason, BackgroundStop.paused);
+  });
+
+  // Review, 2026-11-28, third round. That rule also held when the photo
+  // the deadline cut off turned out not to be left: a meal saved just
+  // before an Android deadline, its thumbnail still being made, read
+  // "Used its time; the rest waits for the next scan." over "1 logged, 0
+  // left for later". Budget holds only while the cut stands.
+  test('after the deadline, a run that reaches its own end with nothing '
+      'cut off left keeps its own reason', () async {
+    Future<BackgroundRunRecorder> cut() async {
+      final rec = BackgroundRunRecorder(await _prefs(),
+          platform: 'android', clock: () => t0);
+      await rec.begin();
+      await rec.offered();
+      rec.deadlineReached();
+      await rec.cutOff(BackgroundLeft.deadline);
+      return rec;
+    }
+
+    // Nothing held and something sent (RunInFlight.abandon): the meal was
+    // saved, its thumbnail still coming. Then its verdict counts.
+    final withdrawn = await cut();
+    await withdrawn.cutWithdrawn();
+    await withdrawn.processed(saved: true, released: false);
+    await withdrawn.finish(BackgroundStop.done);
+    var r = withdrawn.current!;
+    expect((r.offered, r.analyzed, r.saved, r.released), (1, 1, 1, 0));
+    expect(r.left, isEmpty);
+    expect(r.stopReason, BackgroundStop.done, reason: 'withdrawn');
+
+    // A verdict that keeps the photo ("already logged") takes it back.
+    final kept = await cut();
+    await kept.processed(saved: false, released: false);
+    await kept.finish(BackgroundStop.done);
+    r = kept.current!;
+    expect((r.offered, r.analyzed, r.saved, r.released), (1, 1, 0, 0));
+    expect(r.left, isEmpty);
+    expect(r.stopReason, BackgroundStop.done, reason: 'kept by its verdict');
+
+    // No photo in flight (the run past its last photo): nothing cut off.
+    final tail = BackgroundRunRecorder(await _prefs(),
+        platform: 'android', clock: () => t0);
+    await tail.begin();
+    tail.deadlineReached();
+    await tail.finish(BackgroundStop.paused);
+    expect(tail.current!.stopReason, BackgroundStop.paused,
+        reason: 'nothing cut off');
+
+    // The cut stands (the photo's late answer is dropped): budget.
+    final stands = await cut();
+    await stands.processed(saved: false, released: true);
+    await stands.finish(BackgroundStop.done);
+    r = stands.current!;
+    expect(r.left, {BackgroundLeft.deadline: 1});
+    expect(r.stopReason, BackgroundStop.budget, reason: 'the cut stands');
+  });
+
   test('newest first, and only the last 20 are kept', () async {
     final prefs = await _prefs();
     for (var i = 0; i < 23; i++) {
@@ -136,6 +222,275 @@ void main() {
     expect(entry['stop'], 'error:PlatformException');
     expect(prefs.getString(backgroundRunsPrefsKey), isNot(contains('http')));
     expect(prefs.getString(backgroundRunsPrefsKey), isNot(contains('key=')));
+  });
+
+  // 2026-11-28 (iOS): photos the scan listed and did not read again
+  // because a meal already names each one. Written only when there are
+  // any, so an entry without them is what every earlier version wrote,
+  // and what an earlier version reads from a newer entry is unchanged.
+  test('photos already logged and not read again: "known", only when above '
+      '0; an older entry reads as 0', () async {
+    final prefs = await _prefs();
+    final rec = BackgroundRunRecorder(prefs, platform: 'ios', clock: () => t0);
+    await rec.begin();
+    await rec.listed(5);
+    await rec.alreadyLogged(0);
+    expect(_stored(prefs).single.containsKey('known'), isFalse);
+    await rec.alreadyLogged(3);
+    await rec.alreadyLogged(1); // a second pass of the same scan
+    expect(_stored(prefs).single['known'], 4);
+    final r = decodeBackgroundRuns(prefs.getString(backgroundRunsPrefsKey))
+        .single;
+    expect((r.enumerated, r.alreadyLogged, r.offered), (5, 4, 0));
+    // Every other step keeps it.
+    await rec.offered();
+    await rec.finish(BackgroundStop.done);
+    expect(rec.current!.alreadyLogged, 4);
+    // An entry written before the count existed, and junk in its place.
+    final old = jsonEncode([
+      {'start': t0.toIso8601String(), 'stage': 'done', 'enumerated': 5},
+      {'start': t0.toIso8601String(), 'known': -2},
+      {'start': t0.toIso8601String(), 'known': 'three'},
+    ]);
+    expect([for (final e in decodeBackgroundRuns(old)) e.alreadyLogged],
+        [0, 0, 0]);
+  });
+
+  // 2026-11-28: a run said how many photos it left for later, never why.
+  // On 2026-11-27 the phone could not answer "why was nothing logged".
+  group('why photos were left for later', () {
+    test('each one is counted under its reason, and the reasons add up to '
+        '"left for later"', () async {
+      final prefs = await _prefs();
+      final rec =
+          BackgroundRunRecorder(prefs, platform: 'ios', clock: () => t0);
+      await rec.begin();
+      await rec.processed(
+          saved: false, released: true, left: BackgroundLeft.busy);
+      await rec.processed(
+          saved: false, released: true, left: BackgroundLeft.busy);
+      await rec.processed(
+          saved: false, released: true, left: BackgroundLeft.unreachable);
+      // A caller that does not say why: still counted, as another reason.
+      await rec.processed(saved: false, released: true);
+      // A photo that got its verdict was not left, whatever is handed in.
+      await rec.processed(
+          saved: true, released: false, left: BackgroundLeft.busy);
+      await rec.releasedUnprocessed(3);
+      await rec.releasedUnprocessed(0);
+      await rec.cutOff(BackgroundLeft.deadline);
+      final r = decodeBackgroundRuns(prefs.getString(backgroundRunsPrefsKey))
+          .single;
+      expect(r.left, {
+        BackgroundLeft.busy: 2,
+        BackgroundLeft.unreachable: 1,
+        BackgroundLeft.other: 1,
+        BackgroundLeft.notOffered: 3,
+        BackgroundLeft.deadline: 1,
+      });
+      expect(r.released, 8);
+      expect(r.left.values.fold<int>(0, (a, b) => a + b), r.released);
+      expect((r.analyzed, r.saved), (5, 1),
+          reason: 'the cut photo and the ones not started were never '
+              'processed');
+      expect(BackgroundLeft.all.toSet(), hasLength(6));
+      expect(BackgroundLeft.all, containsAll(r.left.keys));
+    });
+
+    // The stored format stays readable both ways: the key is there only
+    // when a run left something, every older key keeps its meaning, and
+    // an older version ignores the new one.
+    test('stored as "left", only when there is something to say', () async {
+      final prefs = await _prefs();
+      final rec =
+          BackgroundRunRecorder(prefs, platform: 'ios', clock: () => t0);
+      await rec.begin();
+      await rec.processed(saved: true, released: false);
+      expect(_stored(prefs).single.containsKey('left'), isFalse);
+      await rec.processed(
+          saved: false, released: true, left: BackgroundLeft.busy);
+      await rec.finish(BackgroundStop.done);
+      final entry = _stored(prefs).single;
+      expect(entry['left'], {'busy': 1});
+      expect(entry.keys.toSet(), {
+        'start', 'end', 'platform', 'stage', 'enumerated', 'offered',
+        'analyzed', 'saved', 'released', 'stop', 'wm_before', 'wm_after',
+        'left',
+      });
+      expect((entry['analyzed'], entry['saved'], entry['released']),
+          (2, 1, 1));
+    });
+
+    test('an entry from before reads as no reasons; junk is dropped; a '
+        'reason a later version adds is kept', () {
+      List<Map<String, int>> leftOf(Object? left) => [
+            for (final r in decodeBackgroundRuns(jsonEncode([
+              {
+                'start': t0.toIso8601String(),
+                'released': 2,
+                'left': ?left,
+              },
+            ])))
+              r.left,
+          ];
+      expect(leftOf(null), [isEmpty]);
+      for (final junk in ['busy', 3, ['busy'], true]) {
+        expect(leftOf(junk), [isEmpty], reason: '$junk');
+      }
+      expect(
+          leftOf({
+            'busy': 0,
+            'unreachable': -1,
+            'deadline': 'two',
+            'not_offered': 1.5,
+            '': 4,
+            'x' * 25: 4,
+            'a_later_reason': 2,
+            'other': 1,
+          }),
+          [
+            {'a_later_reason': 2, 'other': 1},
+          ]);
+      // The count keeps its own word either way.
+      expect(
+          decodeBackgroundRuns(jsonEncode([
+            {'start': t0.toIso8601String(), 'released': 2, 'left': 'junk'},
+          ])).single.released,
+          2);
+    });
+
+    // RunInFlight.abandon says why at the deadline, moments before
+    // finishWithinGrant finishes the entry; nothing waits for its write.
+    test('a cut said just before the entry is finished is in the final '
+        'entry, and nothing said after it is', () async {
+      final prefs = await _prefs();
+      final rec =
+          BackgroundRunRecorder(prefs, platform: 'ios', clock: () => t0);
+      await rec.begin();
+      await rec.offered();
+      final said = rec.cutOff(BackgroundLeft.preparing); // not awaited
+      await rec.finish(BackgroundStop.budget);
+      await said;
+      var r = decodeBackgroundRuns(prefs.getString(backgroundRunsPrefsKey))
+          .single;
+      expect(r.stopReason, BackgroundStop.budget);
+      expect((r.offered, r.analyzed, r.released), (1, 0, 1));
+      expect(r.left, {BackgroundLeft.preparing: 1});
+      await rec.cutOff(BackgroundLeft.busy);
+      await rec.releasedUnprocessed(2);
+      r = decodeBackgroundRuns(prefs.getString(backgroundRunsPrefsKey))
+          .single;
+      expect(r.left, {BackgroundLeft.preparing: 1});
+      expect(r.released, 1);
+    });
+
+    // Review, 2026-11-28: the photo the deadline cut off can still report
+    // (its answer lands while it is being released, or on Android during
+    // the summary's re-arm). The run then said "left for later" for it as
+    // well, and the entry showed two photos: released 2, {deadline: 1,
+    // other: 1}.
+    test('the photo the deadline cut off is counted once: its own "left for '
+        'later", coming after the cut, is the same photo', () async {
+      final prefs = await _prefs();
+      final rec =
+          BackgroundRunRecorder(prefs, platform: 'ios', clock: () => t0);
+      await rec.begin();
+      expect(rec.photoInFlight, isFalse, reason: 'none handed over yet');
+      await rec.offered();
+      expect(rec.photoInFlight, isTrue);
+      await rec.cutOff(BackgroundLeft.deadline);
+      expect(rec.photoInFlight, isFalse, reason: 'the cut has counted it');
+      await rec.processed(saved: false, released: true);
+      var r = decodeBackgroundRuns(prefs.getString(backgroundRunsPrefsKey))
+          .single;
+      expect((r.offered, r.analyzed, r.released), (1, 0, 1));
+      expect(r.left, {BackgroundLeft.deadline: 1});
+      // The next photo is another photo, counted as before.
+      await rec.offered();
+      expect(rec.photoInFlight, isTrue);
+      await rec.processed(
+          saved: false, released: true, left: BackgroundLeft.busy);
+      expect(rec.photoInFlight, isFalse, reason: 'its verdict is counted');
+      r = decodeBackgroundRuns(prefs.getString(backgroundRunsPrefsKey))
+          .single;
+      expect((r.offered, r.analyzed, r.released), (2, 1, 2));
+      expect(r.left,
+          {BackgroundLeft.deadline: 1, BackgroundLeft.busy: 1});
+    });
+
+    // A cut the deadline counted and then found was none: the photo's
+    // meal had been saved already (RunInFlight.abandon).
+    test('a cut taken back leaves no trace, and the photo\'s own verdict '
+        'then counts', () async {
+      final prefs = await _prefs();
+      final rec =
+          BackgroundRunRecorder(prefs, platform: 'ios', clock: () => t0);
+      await rec.begin();
+      await rec.processed(
+          saved: false, released: true, left: BackgroundLeft.deadline);
+      await rec.offered();
+      await rec.cutOff(BackgroundLeft.deadline);
+      expect(rec.current!.left, {BackgroundLeft.deadline: 2});
+      await rec.cutWithdrawn();
+      expect(rec.current!.left, {BackgroundLeft.deadline: 1},
+          reason: 'the earlier photo\'s stays');
+      expect(rec.current!.released, 1);
+      expect(rec.photoInFlight, isTrue, reason: 'not counted any more');
+      await rec.processed(saved: true, released: false);
+      await rec.cutWithdrawn(); // nothing to take back: nothing changes
+      final r = decodeBackgroundRuns(prefs.getString(backgroundRunsPrefsKey))
+          .single;
+      expect((r.offered, r.analyzed, r.saved, r.released), (1, 2, 1, 1));
+      expect(r.left, {BackgroundLeft.deadline: 1});
+      // The only photo left for a reason: the reason goes with it.
+      final only =
+          BackgroundRunRecorder(prefs, platform: 'ios', clock: () => t0);
+      await only.begin();
+      await only.offered();
+      await only.cutOff(BackgroundLeft.busy);
+      await only.cutWithdrawn();
+      expect(only.current!.left, isEmpty);
+      expect(_stored(prefs).first.containsKey('left'), isFalse);
+    });
+
+    // The verdict that comes after the cut can also keep the photo: a meal
+    // committed just before the deadline, or a reservation the database
+    // answers "already logged" once the cut is said. Counted on top of the
+    // cut, that photo read as left for later and as processed.
+    test('a verdict that keeps the cut-off photo takes the cut back: the '
+        'photo is processed, not left', () async {
+      final prefs = await _prefs();
+      final rec =
+          BackgroundRunRecorder(prefs, platform: 'ios', clock: () => t0);
+      await rec.begin();
+      await rec.offered();
+      await rec.processed(
+          saved: false, released: true, left: BackgroundLeft.busy);
+      await rec.offered();
+      await rec.cutOff(BackgroundLeft.deadline);
+      await rec.processed(saved: true, released: false);
+      expect(rec.photoInFlight, isFalse);
+      var r = decodeBackgroundRuns(prefs.getString(backgroundRunsPrefsKey))
+          .single;
+      expect((r.offered, r.analyzed, r.saved, r.released), (2, 2, 1, 1));
+      expect(r.left, {BackgroundLeft.busy: 1},
+          reason: 'the earlier photo\'s stays');
+      await rec.cutWithdrawn(); // taken back already: nothing changes
+      r = decodeBackgroundRuns(prefs.getString(backgroundRunsPrefsKey))
+          .single;
+      expect((r.analyzed, r.released), (2, 1));
+      // "Already logged" saves nothing, and keeps the photo all the same.
+      final only =
+          BackgroundRunRecorder(prefs, platform: 'ios', clock: () => t0);
+      await only.begin();
+      await only.offered();
+      await only.cutOff(BackgroundLeft.preparing);
+      await only.processed(saved: false, released: false);
+      r = only.current!;
+      expect((r.offered, r.analyzed, r.saved, r.released), (1, 1, 0, 0));
+      expect(r.left, isEmpty);
+      expect(_stored(prefs).first.containsKey('left'), isFalse);
+    });
   });
 
   test('a damaged store reads as what it can: bad entries skipped, bad JSON '

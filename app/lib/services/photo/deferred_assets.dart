@@ -14,17 +14,27 @@
 /// catch-up still offers it, and a verdict from either engine removes the
 /// entry.
 ///
-/// A photo the iOS run's deadline cuts off mid-analysis (finishWithinGrant
-/// releases it) is counted apart, as a cut, and passed over only after
+/// A photo the run's deadline cuts off (finishWithinGrant releases it) is
+/// counted apart, as a cut, and passed over only after
 /// [cutsBeforePassOver] of them. A cut is mostly not the photo's doing: a
-/// server or network that hangs for a while cuts off whatever photo each
-/// run meets, and a photo offered late in a run has only what the run has
-/// left. Passed over, it gets no background log or meal card until the app
-/// next opens, so a cut counts at all only when the photo had the run's
-/// full window to itself (background_glue.dart slowPhotoWindow), and it
-/// takes more of them: a photo really too slow for any run is still passed
-/// over in the end, instead of holding the watermark — and every photo shot
-/// after it — until the app opens.
+/// busy server, a hung network or a slow answer cuts off whatever photo
+/// each run meets, and a photo offered late in a run has only what the run
+/// has left. Passed over, it gets no background log or meal card until the
+/// app next opens. So a cut counts at all only when the run's own evidence
+/// points at the photo (background_glue.dart RunInFlight.abandon,
+/// 2026-11-28): it had the run's full window to itself (slowPhotoWindow),
+/// and in all that time nothing was sent for it, so the phone was still
+/// preparing it (its food check, its decode). A cut that came with a
+/// request out, or after the AI service refused one or could not be
+/// reached, is never counted. Until then every cut with the full window
+/// was, whatever the run had been waiting for, and three hung or busy
+/// runs passed a photo over.
+///
+/// A photo this engine cannot get ready in any run is still passed over in
+/// the end, instead of eating every run and holding the watermark — and
+/// every photo shot after it — until the app opens. One the AI service is
+/// too slow for in every run is not: from the phone that looks the same as
+/// a hung network, so each run sends it again.
 ///
 /// Asset ids, counts and the first deferral's time only. Both engines
 /// rewrite the list (read, change, write); two writes interleaving can at
@@ -36,7 +46,12 @@ import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// A JSON list of {id, n, first}, and c (the cuts) when there are any.
+/// A JSON list of {id, n, first}, and p (the cuts) when there are any.
+///
+/// Cuts were stored as c until 2026-11-28, counted by a rule that could
+/// not tell a hung network from the photo. Those are not carried over: an
+/// entry's c is not read, and one that holds nothing else is dropped, so
+/// a photo that rule had passed over is offered again by the next run.
 const String deferredAssetsPrefsKey = 'background.deferred_assets_v1';
 
 /// How many photos are tracked; past it the earliest-deferred goes.
@@ -45,10 +60,12 @@ const int deferredAssetsKept = 50;
 /// Deferrals after which later background runs pass a photo over.
 const int deferralsBeforePassOver = 2;
 
-/// Deadline cuts (each with the run's full window) after which later
-/// background runs pass a photo over. More than [deferralsBeforePassOver]:
-/// a cut can be a slow patch of the server or the network, which the next
-/// run may not meet; an undecodable photo stays undecodable.
+/// Deadline cuts that count (the run's full window, and nothing sent for
+/// the photo in it) after which later background runs pass a photo over.
+/// More than [deferralsBeforePassOver]: a deferral is the engine saying it
+/// cannot decode the photo, and it will say so again; a cut is only a
+/// preparation that had not finished, which a phone busy with something
+/// else that minute can cause too.
 const int cutsBeforePassOver = 3;
 
 class DeferredAsset {
@@ -58,7 +75,8 @@ class DeferredAsset {
   /// Deferrals: the run could not decode it.
   final int count;
 
-  /// Deadline cuts: the run's deadline released it mid-analysis.
+  /// Deadline cuts that count: the run's deadline released it while the
+  /// phone was still preparing it, after the run's full window.
   final int cuts;
 
   /// The first deferral or cut (UTC).
@@ -71,14 +89,15 @@ class DeferredAsset {
         'id': id,
         'n': count,
         'first': firstSeen.toUtc().toIso8601String(),
-        if (cuts > 0) 'c': cuts,
+        if (cuts > 0) 'p': cuts,
       };
 
   static DeferredAsset? fromJson(Object? json) {
     if (json is! Map) return null;
     final id = json['id'];
     final n = json['n'];
-    final c = json['c'] ?? 0;
+    // Never 'c': see [deferredAssetsPrefsKey].
+    final c = json['p'] ?? 0;
     final first = DateTime.tryParse('${json['first']}');
     if (id is! String ||
         id.isEmpty ||
@@ -140,8 +159,9 @@ class DeferredAssets {
   /// This run deferred [assetId] (again): it could not decode it.
   Future<void> deferred(String assetId) => _note(assetId, cut: false);
 
-  /// This run's deadline cut [assetId] off mid-analysis after it had the
-  /// run's full window (RunInFlight.abandon decides that).
+  /// This run's deadline cut [assetId] off while the phone was still
+  /// preparing it, after it had the run's full window (RunInFlight.abandon
+  /// decides both).
   Future<void> cutOff(String assetId) => _note(assetId, cut: true);
 
   Future<void> _note(String assetId, {required bool cut}) {

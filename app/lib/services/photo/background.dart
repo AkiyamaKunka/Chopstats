@@ -143,6 +143,11 @@ bool? debugIsAndroidOverride;
 @visibleForTesting
 bool? debugIsIOSOverride;
 
+/// Whether the background run here is iOS's (a BGAppRefreshTask, whose
+/// request the app keeps alive itself: background_schedule.dart) rather
+/// than a WorkManager chain.
+bool backgroundRunIsIOS() => debugIsIOSOverride ?? Platform.isIOS;
+
 /// Whether the periodic job is wanted at all (review 171, C8).
 ///
 /// iOS: always. Its background refresh also carries iCloud Backup and the

@@ -448,6 +448,18 @@ class AppLocalizationsZh extends AppLocalizations {
   String get backgroundScanStuck => '后台扫描卡住了 —— 打开筷拍一次即可补上。';
 
   @override
+  String get backgroundScanNotScheduled => '未安排';
+
+  @override
+  String get backgroundScanNotScheduledUnavailable =>
+      '下一次后台扫描还没有安排上：iOS 目前不接受筷拍的后台扫描申请。每次打开或离开筷拍时，筷拍都会重新申请；在那之前，新照片会在你打开筷拍时记录。';
+
+  @override
+  String backgroundScanNotScheduledRefused(String code) {
+    return '下一次后台扫描还没有安排上：iOS 拒绝了筷拍的申请（$code）。每次打开或离开筷拍时，筷拍都会重新申请；在那之前，新照片会在你打开筷拍时记录。';
+  }
+
+  @override
   String get settingsSectionProfile => '个人资料';
 
   @override
@@ -1270,6 +1282,49 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
+  String diagBgRunAlreadyLogged(int count) {
+    return '之前已记录，不再读取：$count';
+  }
+
+  @override
+  String diagBgRunLeftWhy(String reasons) {
+    return '留待之后的原因：$reasons';
+  }
+
+  @override
+  String get diagBgLeftJoin => '；';
+
+  @override
+  String diagBgLeftBusy(int count) {
+    return 'AI 服务繁忙，或正在限流（$count）';
+  }
+
+  @override
+  String diagBgLeftUnreachable(int count) {
+    return '连不上 AI 服务，或 AI 服务返回了错误（$count）';
+  }
+
+  @override
+  String diagBgLeftDeadline(int count) {
+    return 'AI 服务还没回复，或回复还没保存，扫描时间就用完了（$count）';
+  }
+
+  @override
+  String diagBgLeftPreparing(int count) {
+    return '照片还没发出，扫描时间就用完了（$count）';
+  }
+
+  @override
+  String diagBgLeftNotOffered(int count) {
+    return '扫描时间已到，没有开始（$count）';
+  }
+
+  @override
+  String diagBgLeftOther(int count) {
+    return '其他原因（$count）';
+  }
+
+  @override
   String diagBgRunKilled(String step) {
     return '在完成前被系统结束，最后一步：$step。';
   }
@@ -1322,6 +1377,21 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get diagBgRunWatermarkNone => '无';
+
+  @override
+  String diagBgScheduleOk(String time) {
+    return '下一次扫描：已安排。iOS 已收下申请，何时运行由 iOS 决定。检查时间：$time。';
+  }
+
+  @override
+  String diagBgScheduleUnavailable(String time) {
+    return '下一次扫描：未安排。iOS 目前不接受筷拍的后台扫描申请。检查时间：$time。';
+  }
+
+  @override
+  String diagBgScheduleRefused(String code, String time) {
+    return '下一次扫描：未安排。iOS 拒绝了筷拍的申请（$code）。检查时间：$time。';
+  }
 
   @override
   String get diagLateImportsTitle => '后导入的照片（其他 App、眼镜）';

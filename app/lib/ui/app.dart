@@ -2,7 +2,8 @@
 /// FAB → add flow. Also the startup-failure screen used by main.dart.
 library;
 
-import 'dart:async' show StreamSubscription, scheduleMicrotask, unawaited;
+import 'dart:async'
+    show StreamSubscription, Timer, scheduleMicrotask, unawaited;
 import 'dart:io' show File, Platform;
 
 import '../core/ai_consent.dart' show aiConsentRoute, aiRoutesInMainlandChina;
@@ -464,6 +465,9 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
         }
       }, onError: (Object _) {}));
     }
+    // A meal a background run saves while Today is on screen (the app
+    // starts in front; the lifecycle hook stops and restarts the look).
+    _startOtherEnginePoll();
     // The consent text changed what is sent since the current recipient
     // was allowed: asked once, over the first frame.
     _askConsentUpdateWhenIdle();
@@ -797,6 +801,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     widget.services.cloudBackup?.prompt.removeListener(_onBackupPrompt);
     widget.services.sharedPhotoConsent?.detach(_askShareConsent);
     _linkSub?.cancel();
+    _otherEnginePoll?.cancel();
     mealsChangedSignal.removeListener(_onMealsChanged);
     widget.services.restaurantAssist?.consentNeeded
         ?.removeListener(_onConsentNeeded);
@@ -977,6 +982,24 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       // iCloud Backup's background-entry run (inside a background task).
       s.cloudBackup?.onLifecycle(false);
     }
+    // iOS: the request for the next background scan, asked for again when
+    // iOS holds none — each time the app comes to the foreground and each
+    // time it leaves (2026-11-28). It used to be made at a cold start only,
+    // so a request lost once (a refused submit, a run that ended before
+    // asking) meant no background scan until the app was closed and
+    // opened. 'hidden' and 'paused' arrive together and share one check.
+    // No hook on Android.
+    if (state == AppLifecycleState.resumed ||
+        state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.paused) {
+      final keep = s.keepBackgroundScan;
+      if (keep != null) {
+        unawaited(keep().then((_) {}, onError: (Object _) {}));
+      }
+    }
+    // The look for a meal the other engine saved runs only while the app
+    // is in front (it restarts below).
+    if (state != AppLifecycleState.resumed) _otherEnginePoll?.cancel();
     if (state != AppLifecycleState.resumed) return;
     if (_leftApp) {
       _leftApp = false;
@@ -987,12 +1010,57 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     }
     // The background job may have logged meals while we were away — the
     // IndexedStack keeps stale screens alive, so refresh them now.
-    _todayKey.currentState?.reload();
-    if (_index == 1) _historyKey.currentState?.reload();
+    _startOtherEnginePoll();
+    final elsewhere = s.mealsChangedElsewhere;
+    if (elsewhere == null) {
+      _reloadOnReturn();
+    } else {
+      // One reload either way: the meals-changed signal's when the other
+      // engine left word of a save (it reloads History too), this one
+      // otherwise. A look that fails or is slow is not waited for.
+      unawaited(elsewhere()
+          .timeout(const Duration(seconds: 2), onTimeout: () => false)
+          .then((signalled) => signalled, onError: (Object _) => false)
+          .then((signalled) {
+        if (!signalled) _reloadOnReturn();
+      }));
+    }
     // Never in the Google Play build, whatever the setting
     // (core/app_channel.dart): it has no Watch Camera Roll.
     if (!s.settings.watcherEnabled || !photoLibraryInBuild) return;
     unawaited(_resumeCatchUp());
+  }
+
+  /// The plain reload at a return to the app: Today, and History when it
+  /// is the tab on screen.
+  void _reloadOnReturn() {
+    if (!mounted) return;
+    _todayKey.currentState?.reload();
+    if (_index == 1) _historyKey.currentState?.reload();
+  }
+
+  /// How often, while Today is on screen, the shell looks for a meal the
+  /// other engine saved ([UiServices.mealsChangedElsewhere]). A background
+  /// run takes up to 22 s on iPhone, so the meal shows within about a
+  /// third of that; one look is one small file read.
+  static const otherEngineMealsPoll = Duration(seconds: 10);
+
+  Timer? _otherEnginePoll;
+
+  /// Starts the look every [otherEngineMealsPoll], if there is one to make
+  /// (none in tests and in the Play build). While the app is in front
+  /// only: [didChangeAppLifecycleState] cancels it as the app leaves.
+  /// Today's tab only: History reloads when its tab is selected, and the
+  /// other two show no meals.
+  void _startOtherEnginePoll() {
+    _otherEnginePoll?.cancel();
+    final elsewhere = widget.services.mealsChangedElsewhere;
+    if (elsewhere == null) return;
+    _otherEnginePoll = Timer.periodic(otherEngineMealsPoll, (_) {
+      if (!mounted || _index != 0) return;
+      // A new one sends the meals-changed signal, which reloads Today.
+      unawaited(elsewhere().then((_) {}, onError: (Object _) {}));
+    });
   }
 
   Future<void> _resumeCatchUp() async {
@@ -1111,6 +1179,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
               lastBackgroundScan: s.lastBackgroundScan,
               backgroundRefreshEnabled: s.backgroundRefreshEnabled,
               backgroundScanStuck: s.backgroundScanStuck,
+              backgroundSchedule: s.backgroundSchedule,
               changes: s.settingsChanges,
               restaurantAssist: s.restaurantAssist,
               cloudBackup: s.cloudBackup,

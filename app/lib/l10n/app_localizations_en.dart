@@ -478,6 +478,18 @@ class AppLocalizationsEn extends AppLocalizations {
       'Background scan is stuck — opening Chopstats once catches up.';
 
   @override
+  String get backgroundScanNotScheduled => 'Not scheduled';
+
+  @override
+  String get backgroundScanNotScheduledUnavailable =>
+      'The next background scan is not scheduled: iOS is not taking background requests from Chopstats right now. Chopstats asks again each time you open or leave it; until then, new photos are logged when you open the app.';
+
+  @override
+  String backgroundScanNotScheduledRefused(String code) {
+    return 'The next background scan is not scheduled: iOS refused the request ($code). Chopstats asks again each time you open or leave it; until then, new photos are logged when you open the app.';
+  }
+
+  @override
   String get settingsSectionProfile => 'Profile';
 
   @override
@@ -1369,6 +1381,49 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String diagBgRunAlreadyLogged(int count) {
+    return 'Already logged, not read again: $count';
+  }
+
+  @override
+  String diagBgRunLeftWhy(String reasons) {
+    return 'Why they were left: $reasons';
+  }
+
+  @override
+  String get diagBgLeftJoin => '; ';
+
+  @override
+  String diagBgLeftBusy(int count) {
+    return 'the AI service was busy, or a rate limit was hit ($count)';
+  }
+
+  @override
+  String diagBgLeftUnreachable(int count) {
+    return 'the AI service could not be reached, or answered with an error ($count)';
+  }
+
+  @override
+  String diagBgLeftDeadline(int count) {
+    return 'the scan\'s time ran out before the AI service answered, or before its answer was saved ($count)';
+  }
+
+  @override
+  String diagBgLeftPreparing(int count) {
+    return 'the scan\'s time ran out before the photo was sent ($count)';
+  }
+
+  @override
+  String diagBgLeftNotOffered(int count) {
+    return 'not started, the scan\'s time was over ($count)';
+  }
+
+  @override
+  String diagBgLeftOther(int count) {
+    return 'another reason ($count)';
+  }
+
+  @override
   String diagBgRunKilled(String step) {
     return 'Ended by the system before it finished — last step: $step.';
   }
@@ -1422,6 +1477,21 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get diagBgRunWatermarkNone => 'none';
+
+  @override
+  String diagBgScheduleOk(String time) {
+    return 'Next scan: scheduled. iOS holds the request and picks the time. Checked $time.';
+  }
+
+  @override
+  String diagBgScheduleUnavailable(String time) {
+    return 'Next scan: not scheduled. iOS is not taking background requests from Chopstats right now. Checked $time.';
+  }
+
+  @override
+  String diagBgScheduleRefused(String code, String time) {
+    return 'Next scan: not scheduled. iOS refused the request ($code). Checked $time.';
+  }
 
   @override
   String get diagLateImportsTitle => 'Late imports (other apps, glasses)';

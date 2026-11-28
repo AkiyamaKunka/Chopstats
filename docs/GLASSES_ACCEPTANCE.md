@@ -57,12 +57,12 @@ Go to **Settings > Apps > Meta AI** (设置 > App > Meta AI):
 
 ### 1.5 Where Bitewise's diagnostics are
 In Bitewise, go to **Settings > AI Provider > Test This Provider** (AI 服务 > 测试当前服务). This opens the **Test AI provider** screen (测试 AI 服务). You do **not** need to tap "Run the checks", which spends two small AI calls. Scroll down to these sections:
-- **Recent background scans** (最近的后台扫描), already in the app.
+- **Recent background scans** (最近的后台扫描), already in the app. Its first line, **Next scan** (下一次扫描), says whether iOS holds a request for the next background scan, and when the app last asked. Each scan lists its counts; a scan that left photos for later also says **Why they were left** (留待之后的原因), and an iPhone scan that skipped photos a meal already has says **Already logged, not read again** (之前已记录，不再读取).
 - **Late imports (other apps, glasses)** (后导入的照片（其他 App、眼镜）), stage G1b.
 - **Glasses check** (眼镜检查), stage G3.
 - **Restaurant lookups** (餐厅查询) and the last decisions, stage R7b.
 
-Bitewise **Settings > Photos** also has a **Background scan** row (后台扫描) that shows when the last background scan ran.
+Bitewise **Settings > Photos** also has a **Background scan** row (后台扫描) that shows when the last background scan ran. If it reads **Not scheduled** (未安排) in red, iOS refused the app's request for the next scan; the line under the group says why. Bitewise asks again each time you open or leave it.
 
 ---
 
@@ -255,7 +255,7 @@ Set **Restaurant nutrition lookup** back to what you want to keep: **When unsure
 | A6 | Photos shows the fold time, not the shutter time | Nothing to fix in Meta; Bitewise's dating guard handles this if the EXIF time is right | Shutter time, fold time, the time Photos shows, and A8 output if you ran it |
 | A6 | Many copies per shot | Dynamic photo / Ultra HDR in Meta AI capture settings | Copies per press, their sizes (MP), and whether turning Dynamic photo off stops it |
 | A6 | No location with "Always" | Meta AI Location Always + Precise | "GPS: no", the Location setting, and whether the pin is at the restaurant or at home in the fold-at-home test |
-| B1 | Not logged before you opened the app | **Recent background scans**: any scans between the fold and the open? If none: Background App Refresh (global and Bitewise), Low Power Mode, Bitewise swiped away? Also the Bitewise **Settings > Photos > Background scan** row | The start time and the counts line ("listed / read / processed / logged / left for later") of each scan since the fold, and each one's stop reason; the Background scan row text; the Late imports line, with any status line under it ("History expired — rescanning" or "Needs iOS 16") |
+| B1 | Not logged before you opened the app | **Recent background scans**: any scans between the fold and the open? If none: Background App Refresh (global and Bitewise), Low Power Mode, Bitewise swiped away? Also the Bitewise **Settings > Photos > Background scan** row | The "Next scan" line; the start time and the counts line ("listed / read / processed / logged / left for later") of each scan since the fold, each one's stop reason and its "Why they were left" line if it has one; the Background scan row text; the Late imports line, with any status line under it ("History expired — rescanning" or "Needs iOS 16") |
 | B1 / B2 / B3 | Photo is in Photos but missing from the Glasses check card | Bitewise Photos access is **Full** (not Limited); Watch Camera Roll ON; Include Meta glasses photos ON | The access level shown in Settings > Apps > Bitewise > Photos; the Late imports line; whether the meal appeared after opening the app, and how many minutes later |
 | B1 | Card row has no outcome and a blank food score | The on-phone food check could not run in the background, so the photo waits for the app to open | The row as shown, and whether it changed to logged or not food after opening |
 | B4 | Wrong meal time | Is the error a whole number of hours (time zone) or the fold time? | Shutter time, fold time, Bitewise meal time, and the card's import lag |
