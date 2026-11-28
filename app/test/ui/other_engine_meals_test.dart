@@ -215,7 +215,7 @@ void main() {
       expect(out.kind, PhotoOutcomeKind.saved);
       await pumpEventQueue();
       // The note is written off the pipeline's path: wait for the file.
-      for (var i = 0; i < 200 && !await app.check(); i++) {
+      for (var i = 0; i < 2000 && !await app.check(); i++) {
         await Future<void>.delayed(const Duration(milliseconds: 5));
       }
       expect(signals, 1);

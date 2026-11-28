@@ -1326,7 +1326,7 @@ void main() {
             final settings = await ownServer();
             final dao = FakeDao();
             var serverBusy = true;
-            Future<RunInFlight> runOnce({Duration? cutAfter}) async {
+            Future<RunInFlight> runOnce({bool cutWhenRefused = false}) async {
               final inFlight = RunInFlight(
                   deadline: deadline,
                   clock: () => t0,
@@ -1363,11 +1363,18 @@ void main() {
                 deferred: deferred,
                 recorder: await begun(),
               );
-              if (cutAfter == null) {
+              if (!cutWhenRefused) {
                 await run;
               } else {
+                // The deadline comes once the refusal is in (not after a
+                // fixed wait, which a loaded machine can outlast or miss).
+                for (var i = 0;
+                    i < 5000 && inFlight.traffic.cutOffAt != CutOffAt.busy;
+                    i++) {
+                  await Future<void>.delayed(const Duration(milliseconds: 1));
+                }
                 await finishWithinGrant(run,
-                    left: cutAfter,
+                    left: Duration.zero,
                     recorder: BackgroundRunRecorder(prefs, platform: 'ios'),
                     abandon: inFlight.abandon);
               }
@@ -1375,8 +1382,7 @@ void main() {
             }
 
             for (var night = 0; night < 3; night++) {
-              final cut =
-                  await runOnce(cutAfter: const Duration(milliseconds: 60));
+              final cut = await runOnce(cutWhenRefused: true);
               expect((cut.traffic.sent, cut.traffic.cutOffAt),
                   (1, CutOffAt.busy),
                   reason: 'the photo was sent, refused, and waiting to be '
