@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import '../../core/app_channel.dart' show photoLibraryInBuild;
 import '../../core/contracts.dart';
 import '../../services/garmin_client.dart';
+import '../../services/photo/scan_status.dart' show PhotoScanStatus;
 import '../format.dart';
 import 'dart:io' show File;
 import 'dart:ui' as ui show Image;
@@ -31,6 +32,7 @@ import '../widgets/usual_chip.dart';
 import '../widgets/usual_offer_card.dart'
     show showUsualSnack, showUsualUsedSnack;
 import '../widgets/meal_card.dart';
+import '../widgets/photo_scan_row.dart';
 import '../widgets/reveal_highlight.dart';
 import '../widgets/small_spinner.dart';
 import 'meal_editor_screen.dart';
@@ -71,6 +73,16 @@ class TodayScreen extends StatefulWidget {
   /// The clock that says which day is today; null is the device's (tests
   /// inject one to cross midnight).
   final DateTime Function()? now;
+
+  /// What the automatic photo scan is doing now (Watch Camera Roll): the
+  /// row under the totals that says photos are still being checked, or
+  /// could not be (widgets/photo_scan_row.dart). Null (the Google Play
+  /// build, tests) shows none.
+  final PhotoScanStatus? scanStatus;
+
+  /// That row's Retry: starts the catch-up again and completes when it is
+  /// over. Null shows no Retry.
+  final Future<void> Function()? onRetryScan;
   const TodayScreen(
       {super.key,
       required this.dao,
@@ -81,7 +93,9 @@ class TodayScreen extends StatefulWidget {
       this.settings,
       this.noteCorrector,
       this.usual,
-      this.now});
+      this.now,
+      this.scanStatus,
+      this.onRetryScan});
 
   @override
   State<TodayScreen> createState() => TodayScreenState();
@@ -275,6 +289,16 @@ class TodayScreenState extends State<TodayScreen>
     );
   }
 
+  /// Retry on the photo scan's row: the catch-up again, then the list as
+  /// it stands (a photo another run of the app logged meanwhile is found
+  /// already logged, and saves nothing here to reload for).
+  Future<void> _retryScan() async {
+    final retry = widget.onRetryScan;
+    if (retry == null) return;
+    await retry();
+    if (mounted) await reload();
+  }
+
   /// The 'updated' dots; none when the assist cannot say (never fails
   /// the list).
   Future<Set<int>> _readUnseen() async {
@@ -444,6 +468,11 @@ class TodayScreenState extends State<TodayScreen>
           padding: const EdgeInsets.only(bottom: AppSpace.fabClearance),
           sliver: SliverList.list(children: [
           _totalsHeader(context, foodMeals),
+          // Under the totals, so they never move when it comes and goes.
+          if (widget.scanStatus != null)
+            PhotoScanRow(
+                status: widget.scanStatus!,
+                onRetry: widget.onRetryScan == null ? null : _retryScan),
           if (foodMeals.isEmpty)
             // Empty copy per spec §5.1; the hint below is app-only (§9) —
             // the bare sentence was a dead-ish end for a user who just

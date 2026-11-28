@@ -19,6 +19,7 @@ import 'filename_dates.dart';
 import 'glasses.dart';
 import 'photo_changes.dart';
 import 'photo_library.dart';
+import 'scan_status.dart';
 
 /// §8: SYNC_LOOKBACK_DAYS range 1–30.
 int clampLookbackDays(int days) => days < 1 ? 1 : (days > 30 ? 30 : days);
@@ -36,6 +37,14 @@ class BackfillWindowTruncated implements Exception {
   String toString() =>
       'BackfillWindowTruncated: >$backfillQueryLimit images in the window';
 }
+
+/// One round of Today's "Checking photos" row for the app's catch-up
+/// (ui/background_glue.dart foregroundCatchUp), held from the catch-up's
+/// start to its end ([PhotoScanStatus.begin], untilEnd); null when [intake]
+/// reports its scans to no status (the background run's, a test's).
+PhotoScan? beginCatchUpRound(Object intake) => intake is ReportsPhotoScans
+    ? intake.scanStatus?.begin(untilEnd: true)
+    : null;
 
 /// Backfill window math (spec §6.4): include photos whose create-date DAY
 /// falls within the last [lookbackDays] days — i.e. the cutoff is local
@@ -65,11 +74,15 @@ DateTime lookbackCutoff(DateTime now, int lookbackDays) {
 /// analysis could succeed and the app is open
 /// ([LibraryPhotoIntake.liveLateShouldContinue]), as every other automatic
 /// trigger does. [liveHeld]: see [LibraryPhotoIntake.liveHeld].
+/// [scanStatus], [checkedThrough]: the app's own engine only, for Today's
+/// "Checking photos" row (see [LibraryPhotoIntake.scanStatus]).
 PhotoIntake createPhotoIntake(AppSettings settings,
     {FutureOr<void> Function(int count)? onBackfillListed,
     bool Function(String assetId)? passOver,
     Future<Set<String>> Function(List<String> assetIds)? loggedAssetIds,
     bool Function()? liveHeld,
+    PhotoScanStatus? scanStatus,
+    FutureOr<DateTime?> Function()? checkedThrough,
     @visibleForTesting bool? isIOS}) {
   final changes = platformPhotoChangeSource(isIOS: isIOS);
   return LibraryPhotoIntake(
@@ -91,6 +104,8 @@ PhotoIntake createPhotoIntake(AppSettings settings,
           ? null
           : () => settings.canAutoAnalyze && appEngineInForeground(),
       liveHeld: liveHeld,
+      scanStatus: scanStatus,
+      checkedThrough: checkedThrough,
       metaAlbumIds: changes == null
           ? null
           : (since) => metaAlbumAssetIds(changes, since: since),
@@ -153,7 +168,7 @@ class _EmitTally {
   bool get complete => unread == 0 && released == 0 && !stopped;
 }
 
-class LibraryPhotoIntake implements PhotoIntake {
+class LibraryPhotoIntake implements PhotoIntake, ReportsPhotoScans {
   LibraryPhotoIntake(
       {required this._lookbackDays,
       required this._library,
@@ -167,6 +182,8 @@ class LibraryPhotoIntake implements PhotoIntake {
       this.onLateImportPass,
       this.liveLateShouldContinue,
       this.liveHeld,
+      this.scanStatus,
+      this.checkedThrough,
       this.metaAlbumIds,
       @visibleForTesting this.metaAlbumTimeout = metaAlbumLookupTimeout,
       this.assetAddedDate,
@@ -238,6 +255,25 @@ class LibraryPhotoIntake implements PhotoIntake {
   /// hold, or the next change, offers it. A probe that throws holds
   /// nothing. Null: never held.
   final bool Function()? liveHeld;
+
+  /// Hears what each scan is about to read and is done with: Today's
+  /// "Checking photos" row (scan_status.dart). The app's own engine only.
+  /// Null (the background run, tests): nothing is reported, and no scan
+  /// waits a moment for it.
+  @override
+  final PhotoScanStatus? scanStatus;
+
+  /// The newest creation date up to which every photo is known to have a
+  /// verdict: in production the persisted background watermark, which the
+  /// app's catch-up and the background run both move, and only over
+  /// photos terminally handled (ui/background_glue.dart
+  /// cachedBackgroundWatermark). Asked once per scan, and only to tell
+  /// [scanStatus] which unread photos look unchecked: a cold launch lists
+  /// the whole lookback window, most of it logged long ago, and the row
+  /// counts the photos taken since. It never decides what a scan reads.
+  /// Null, a throw or a null answer: every photo this session has not
+  /// handled looks unchecked.
+  final FutureOr<DateTime?> Function()? checkedThrough;
 
   /// [liveHeld] as a read gate for [_emit] (null when there is none).
   bool Function()? get _liveReads {
@@ -326,6 +362,9 @@ class LibraryPhotoIntake implements PhotoIntake {
     if (!_started) return;
     _started = false;
     _generation++; // quiesce in-flight emission loops
+    // Switched off: Today's row says nothing more about photos no scan
+    // will take up.
+    scanStatus?.reset();
     await _library.stopChangeNotify();
   }
 
@@ -353,10 +392,19 @@ class LibraryPhotoIntake implements PhotoIntake {
       // OLDER tail — the cutoff must not advance over unseen photos
       // (recovered by the full-window backfill layers meanwhile).
       final truncated = listedCount(assets) >= 500;
-      final frontier = await _emit(assets,
-          reportFrontier: !truncated,
-          shouldContinue: _liveReads,
-          glassesQuota: GlassesQuota(limit: glassesPerScan));
+      // Today's row: what this scan is about to check. Nothing is asked
+      // (or waited for) without a status.
+      final scan =
+          scanStatus?.begin(expected: await _lookUnchecked(assets));
+      final DateTime? frontier;
+      try {
+        frontier = await _emit(assets,
+            reportFrontier: !truncated,
+            shouldContinue: _liveReads,
+            glassesQuota: GlassesQuota(limit: glassesPerScan));
+      } finally {
+        scan?.end();
+      }
       // Advance ONLY over the contiguous run of successfully-covered
       // photos (oldest-first), and never past the wall clock: a transient
       // read failure must stay inside the window so the next change event
@@ -457,12 +505,18 @@ class LibraryPhotoIntake implements PhotoIntake {
             // behind every cutoff and watermark, and must not move one.
             // When this pass ran is the dating guard's evidence where the
             // library cannot say when a photo was added (G2b).
-            await _emit(assets,
-                reportFrontier: false,
-                shouldContinue: shouldContinue,
-                onSettled: onSettled,
-                importPassAt: _clock(),
-                glassesQuota: quota);
+            final scan = scanStatus?.begin(
+                expected: await _lookUnchecked(assets, late: true));
+            try {
+              await _emit(assets,
+                  reportFrontier: false,
+                  shouldContinue: shouldContinue,
+                  onSettled: onSettled,
+                  importPassAt: _clock(),
+                  glassesQuota: quota);
+            } finally {
+              scan?.end();
+            }
           },
         ),
       );
@@ -516,21 +570,39 @@ class LibraryPhotoIntake implements PhotoIntake {
     final tally = _EmitTally();
     // One allowance of glasses photos for both passes (design G3).
     final quota = GlassesQuota(limit: glassesPerScan);
-    if (newestDayFirst) {
-      await _emit(_newestDay(assets),
-          reportFrontier: false,
+    // One generation for both passes: each used to take its own as it
+    // began, so a stop() during the first pass (Watch Camera Roll switched
+    // off mid catch-up) ended that pass, and the next one, begun after the
+    // stop, delivered the rest of the window all the same.
+    final generation = _generation;
+    // Today's row (scan_status.dart): what this scan is about to check. A
+    // capped listing hides the window's oldest photos, so it cannot say
+    // that a photo still waiting is gone.
+    final scan = scanStatus?.begin(
+        expected: await _lookUnchecked(assets),
+        wholeWindow: lookbackDays <= 0 && !narrowed && !truncated);
+    final DateTime? frontier;
+    try {
+      if (newestDayFirst) {
+        await _emit(_newestDay(assets),
+            reportFrontier: false,
+            shouldContinue: shouldContinue,
+            released: released,
+            tally: tally,
+            glassesQuota: quota,
+            generation: generation);
+      }
+      frontier = await _emit(assets,
+          reportFrontier: !truncated,
           shouldContinue: shouldContinue,
+          onCovered: onCovered,
           released: released,
           tally: tally,
-          glassesQuota: quota);
+          glassesQuota: quota,
+          generation: generation);
+    } finally {
+      scan?.end();
     }
-    final frontier = await _emit(assets,
-        reportFrontier: !truncated,
-        shouldContinue: shouldContinue,
-        onCovered: onCovered,
-        released: released,
-        tally: tally,
-        glassesQuota: quota);
     // Signal AFTER emitting: the caller processes what was seen, but a
     // watermark must not advance over the unseen tail.
     if (truncated) throw const BackfillWindowTruncated();
@@ -573,6 +645,51 @@ class LibraryPhotoIntake implements PhotoIntake {
           addedDate: added, importPassAt: importPassAt);
     } catch (_) {
       return capture;
+    }
+  }
+
+  /// Those of [assets] a scan is about to read that look unchecked, for
+  /// [scanStatus]: not handled by this session, taken after
+  /// [checkedThrough] (or let go for a retry by this session, whatever
+  /// their date), and not a meal's photo already ([loggedAssetIds]).
+  /// [late]: a late-import pass's photos, whose dates say nothing (they lie
+  /// behind every watermark) and which its cursor has already checked
+  /// against the meals. An estimate: no byte is read for it, and the ledger
+  /// has the last word (scan_status.dart). Never throws.
+  Future<List<String>> _lookUnchecked(List<LibraryAsset> assets,
+      {bool late = false}) async {
+    try {
+      final unread = [
+        for (final a in assets)
+          if (!_seenAssetIds.contains(a.id)) a,
+      ];
+      if (late || unread.isEmpty) return [for (final a in unread) a.id];
+      DateTime? through;
+      try {
+        through = await checkedThrough?.call();
+      } catch (_) {
+        through = null;
+      }
+      final ids = [
+        for (final a in unread)
+          if (through == null ||
+              a.createDateTime.isAfter(through) ||
+              _releasedIds.contains(a.id))
+            a.id,
+      ];
+      if (ids.isEmpty) return ids;
+      Set<String> logged;
+      try {
+        logged = await loggedAssetIds?.call(ids) ?? const <String>{};
+      } catch (_) {
+        logged = const <String>{};
+      }
+      return [
+        for (final id in ids)
+          if (!logged.contains(id)) id,
+      ];
+    } catch (_) {
+      return const <String>[];
     }
   }
 
@@ -628,12 +745,16 @@ class LibraryPhotoIntake implements PhotoIntake {
           onSettled,
       _EmitTally? tally,
       DateTime? importPassAt,
-      GlassesQuota? glassesQuota}) async {
+      GlassesQuota? glassesQuota,
+      int? generation}) async {
     // §6: newest-LAST emission — oldest first, so downstream meal rows land
     // in chronological order.
     final ordered = [...assets]
       ..sort((a, b) => a.createDateTime.compareTo(b.createDateTime));
-    final generation = _generation;
+    // The generation a scan of several passes began under (a stop() since
+    // then ends this pass before it reads anything); else the one current
+    // now.
+    generation ??= _generation;
     DateTime? frontier;
     var frontierOpen = true;
     final settled = <(String, bool)>[];
@@ -679,7 +800,15 @@ class LibraryPhotoIntake implements PhotoIntake {
       }
     }
 
+    // Today's row (scan_status.dart) hears each photo the loop is done
+    // with. One that got a verdict was counted by the pipeline; any other
+    // (handled before, left unread, unreadable) is no longer about to be
+    // checked by this pass.
+    final status = scanStatus;
+    String? behind;
     for (final asset in ordered) {
+      if (behind != null) status?.passed(behind);
+      behind = asset.id;
       if (onSettled != null) await reportSettled(onSettled);
       if (_controller.isClosed || _generation != generation) {
         tally?.stopped = true; // stop(): quiesce mid-batch
@@ -831,6 +960,7 @@ class LibraryPhotoIntake implements PhotoIntake {
         _inFlightIds.remove(asset.id);
       }
     }
+    if (behind != null) status?.passed(behind);
     if (onSettled != null) await reportSettled(onSettled);
     return frontier;
   }

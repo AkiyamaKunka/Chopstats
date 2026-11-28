@@ -146,6 +146,16 @@ and does not vanish, so a broken watcher looks broken. The meal screen draws
 protein, carbs and fat as shares of energy (4, 4 and 9 kcal per gram) and
 updates as you edit.
 
+A photo becomes a meal only when its analysis answers, one photo at a time, so
+a day's backlog used to read as an empty day while the catch-up worked through
+it. While the automatic scan is sending photos that had no verdict yet, Today
+shows a row under the totals ("Checking photos: 3 of 12", "Keep Chopstats
+open."). When photos were let go because the analysis could not be had (the
+server unreachable or busy, a rate limit), the row says how many are not
+checked yet and why, with Retry, which starts the catch-up again. A photo that
+is not food is a photo checked and says nothing. The row is fed by
+`app/lib/services/photo/scan_status.dart`.
+
 ### Tests and CI
 
 Both suites run in CI on every push: more than 3,500 Dart tests and more than

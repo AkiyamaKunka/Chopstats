@@ -30,6 +30,8 @@ import '../services/photo/glasses.dart'
 import '../services/photo/glasses_check.dart'
     show GlassesCheckEntry, GlassesCheckOutcome;
 import '../services/photo/photo_hash.dart' show originalBytesMd5;
+import '../services/photo/scan_status.dart'
+    show PhotoScanStatus, ScanVerdict;
 import 'format.dart';
 
 Future<String> _computeMd5(Uint8List bytes) =>
@@ -221,6 +223,94 @@ String? glassesCheckOutcome(PhotoOutcome o) => switch (o.kind) {
         null,
     };
 
+/// How an AUTOMATIC photo's turn ended, as Today's "Checking photos" row
+/// counts it (services/photo/scan_status.dart).
+///
+/// Waiting: let go because the analysis could not be had this time — the
+/// server or the provider unreachable, busy or rate-limiting through every
+/// retry ([couldNotBeHad]) — or because another run holds the photo. The
+/// scan used to drop these without a word until the next one (2026-11-27).
+/// The row words the reason itself (outcome_text.dart retryReason), never
+/// [PhotoOutcome.message].
+///
+/// Checked: every verdict the photo was looked at for. "Not food" is one,
+/// and is no error. A failure kept as failed is one too; process()
+/// announces it itself.
+///
+/// None: a photo logged before, and every hold that is no failure of the
+/// send. Those with a [PhotoOutcome.reason] of their own or no classified
+/// error (the app in the background, an iCloud restore offer, a glasses
+/// preview or allowance, the AI consent, a leftover conflict, a photo this
+/// engine could not decode with its GPU off). And the pauses and settings
+/// every photo shares (the daily quota, a rejected key, a blocked region,
+/// an empty balance, a missing key or server address): no catch-up runs
+/// while one holds, so a Retry could do nothing, and Settings says why.
+ScanVerdict scanVerdictOf(PhotoOutcome o) => switch (o.kind) {
+      PhotoOutcomeKind.saved ||
+      PhotoOutcomeKind.leftoverApplied =>
+        ScanVerdict.checked,
+      PhotoOutcomeKind.skipped => o.reason == glassesExcludedReason
+          ? ScanVerdict.none
+          : ScanVerdict.checked,
+      PhotoOutcomeKind.inFlight => ScanVerdict.waiting,
+      PhotoOutcomeKind.failed when !o.retryable => ScanVerdict.checked,
+      PhotoOutcomeKind.failed =>
+        o.reason == null && couldNotBeHad(o.errorKind)
+            ? ScanVerdict.waiting
+            : ScanVerdict.none,
+      PhotoOutcomeKind.duplicate ||
+      PhotoOutcomeKind.alreadyTracked ||
+      PhotoOutcomeKind.refusedFiles =>
+        ScanVerdict.none,
+    };
+
+/// The released failures that mean "not this time": the request did not
+/// get through or was not answered, and the same photo may well go through
+/// on the next try. What Today's row counts as waiting, and offers Retry
+/// for ([scanVerdictOf]).
+bool couldNotBeHad(AnalysisErrorKind kind) =>
+    kind == AnalysisErrorKind.network ||
+    kind == AnalysisErrorKind.serverBusy ||
+    kind == AnalysisErrorKind.serverError ||
+    kind == AnalysisErrorKind.rateLimited;
+
+/// What Today's "Checking photos" row hears of each photo's turn
+/// ([PhotoPipeline.scanReports]); [scanStatusReports] is the app engine's.
+class PhotoTurnReports {
+  const PhotoTurnReports({required this.sending, required this.ended});
+
+  /// The photo is about to be sent: the ledger held no verdict for it, its
+  /// reservation is this run's, and every gate before the send let it
+  /// through. Never called for a photo let go or answered before that
+  /// point (logged before, held back, the latch, a verdict reached on the
+  /// phone). Synchronous, so nothing awaits between the consent check and
+  /// the send.
+  final void Function(IntakePhoto photo) sending;
+
+  /// The photo's turn ended with [outcome]: every photo process() was
+  /// handed, sent or not.
+  final void Function(IntakePhoto photo, PhotoOutcome outcome) ended;
+}
+
+/// The app engine's reports to [status] (services/photo/scan_status.dart).
+/// The row counts the AUTOMATIC photos: the scans', which is what it is
+/// about. A deliberate add (picked in the add flow, logged from Photo
+/// Coverage) is not counted, but once it has a verdict a photo of the same
+/// library asset that was waiting waits no longer.
+PhotoTurnReports scanStatusReports(PhotoScanStatus status) => PhotoTurnReports(
+      sending: (photo) {
+        if (!photo.deliberate) status.checking(photo.assetId);
+      },
+      ended: (photo, outcome) {
+        if (!photo.deliberate) {
+          status.finished(photo.assetId, scanVerdictOf(outcome),
+              kind: outcome.errorKind);
+        } else if (!outcome.retryable) {
+          status.settled(photo.assetId);
+        }
+      },
+    );
+
 /// What to announce for a verdict NOBODY is awaiting — a shared photo
 /// (bindStream), or a picked one whose add-flow screen was closed
 /// mid-analysis — or null when process() already announced it itself
@@ -401,6 +491,12 @@ class PhotoPipeline {
   /// app settled it (deferred_assets.dart). A throw is contained.
   final void Function(IntakePhoto photo, PhotoOutcome outcome)? onOutcome;
 
+  /// Hears each photo's turn for Today's "Checking photos" row: as it is
+  /// about to be sent, and how its turn ended ([PhotoTurnReports]). The
+  /// app's own engine only ([scanStatusReports]); null everywhere else. A
+  /// throw is contained.
+  final PhotoTurnReports? scanReports;
+
   /// Asked for an AUTOMATIC Meta glasses photo below 2 MP (design G2b,
   /// glasses.dart isGlassesPreview) that the ledger holds no verdict for:
   /// true holds it back — released, retryable, no ledger row, nothing
@@ -509,6 +605,7 @@ class PhotoPipeline {
       this.keepAlive,
       this.backgrounded,
       this.onOutcome,
+      this.scanReports,
       this.previewHold,
       this.includeGlasses,
       this.foodCheck,
@@ -996,6 +1093,9 @@ class PhotoPipeline {
       try {
         onOutcome?.call(photo, outcome);
       } catch (_) {}
+      try {
+        scanReports?.ended(photo, outcome);
+      } catch (_) {}
       await _recordGlasses(photo, outcome, checked, hashed: hashed);
       return outcome;
     } finally {
@@ -1227,6 +1327,13 @@ class PhotoPipeline {
           recentMealCompact(time: m.time, analysis: m.analysis),
       ];
       final gpuOffSkips = gpuOffDecodeSkips;
+      // No verdict yet, and about to be sent: Today says so. A plain
+      // synchronous call: the consent read above still holds at the send.
+      if (held == null) {
+        try {
+          scanReports?.sending(photo);
+        } catch (_) {}
+      }
       final outcome = held?.outcome ??
           await analyzer.analyzePhoto(photo.bytes, recentMeals: compacts);
       // The run's deadline passed during the analysis: abandon() released
