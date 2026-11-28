@@ -457,7 +457,8 @@ def test_the_knob_at_zero_keeps_nothing_and_hands_nothing_out(
         client, monkeypatch, path, body, field, word):
     """On by default; CLAUDE_API_ANSWER_MEMO_SECONDS=0 is every request a
     run of its own again: an answer kept before is not handed out, and
-    nothing new is kept."""
+    nothing new is kept, so another photo sent at 0 is analyzed again
+    once the memo is back on."""
     cli = _fake_cli(monkeypatch)
     for _ in range(2):
         assert client.http.post(path, headers=KEY,
@@ -468,7 +469,13 @@ def test_the_knob_at_zero_keeps_nothing_and_hands_nothing_out(
         assert client.http.post(path, headers=KEY,
                                 json=body()).status_code == 200
     assert len(cli.starts) == 3
+    other = body(image_b64=_b64(OTHER_JPEG))
+    assert client.http.post(path, headers=KEY, json=other).status_code == 200
+    assert len(cli.starts) == 4
     assert len(claude_analyzer._ANSWER_MEMO) == 1  # the one from before
+    monkeypatch.delenv(KNOB)
+    assert client.http.post(path, headers=KEY, json=other).status_code == 200
+    assert len(cli.starts) == 5, "an answer was kept while the knob was 0"
 
 
 def test_answer_memo_knob_default_zero_clamp_and_junk(monkeypatch):
@@ -685,6 +692,46 @@ def test_many_copies_of_one_request_at_once_lead_to_one_run(
     assert not claude_analyzer._CLI_LOCK.locked()
 
 
+@pytest.mark.parametrize("path,body,field,word", ENDPOINTS, ids=ENDPOINT_IDS)
+def test_a_memo_line_that_cannot_be_written_still_answers(
+        client, monkeypatch, path, body, field, word):
+    """The second lookup runs with the CLI's lock held. A logger that
+    raises on the hit's line must neither cost the request its answer nor
+    keep the lock: the line is lost, the answer goes out, the lock comes
+    back. Both lookups: one before the lock, one behind a run."""
+    cli = _fake_cli(monkeypatch)
+    assert client.http.post(path, headers=KEY, json=body()).status_code == 200
+    real_info = claude_analyzer.log.info
+    lost = []
+
+    def info(message, *args, **kwargs):
+        if str(message).startswith("Answered from memory"):
+            lost.append(message)
+            raise RuntimeError("the journal cannot take this line")
+        return real_info(message, *args, **kwargs)
+
+    monkeypatch.setattr(claude_analyzer.log, "info", info)
+    # Before the lock.
+    resp = client.http.post(path, headers=KEY, json=body())
+    assert resp.status_code == 200 and resp.get_json()[field] == ANSWER
+    # With the lock held: the first lookup misses (the stand-in below
+    # answers "nothing kept" once), the second finds the answer.
+    real_lookup = claude_analyzer._remembered_answer
+    calls = []
+
+    def lookup(key, kind):
+        calls.append(kind)
+        return None if len(calls) == 1 else real_lookup(key, kind)
+
+    monkeypatch.setattr(claude_analyzer, "_remembered_answer", lookup)
+    resp = client.http.post(path, headers=KEY, json=body())
+    assert resp.status_code == 200 and resp.get_json()[field] == ANSWER
+    assert calls == [word, word]
+    assert len(lost) == 2
+    assert not claude_analyzer._CLI_LOCK.locked()
+    assert len(cli.starts) == 1
+
+
 # ─── A phone that hung up ─────────────────────────────────────────────
 
 def test_a_phone_that_hung_up_mid_run_still_leaves_its_answer(client,
@@ -700,6 +747,7 @@ def test_a_phone_that_hung_up_mid_run_still_leaves_its_answer(client,
     cli = _fake_cli(monkeypatch)
     cli.go = threading.Event()
     handled = threading.Event()
+    dropped = []
 
     class Handler(WSGIRequestHandler):
         def handle(self):
@@ -707,6 +755,10 @@ def test_a_phone_that_hung_up_mid_run_still_leaves_its_answer(client,
                 super().handle()
             finally:
                 handled.set()
+
+        def connection_dropped(self, error, environ=None):
+            # werkzeug's hook for a client that is gone (a no-op there).
+            dropped.append(type(error).__name__)
 
         def log_request(self, *args, **kwargs):
             pass  # no access line in the test output
@@ -743,6 +795,8 @@ def test_a_phone_that_hung_up_mid_run_still_leaves_its_answer(client,
         server.shutdown()
         server.server_close()
         serving.join(5)
+    assert dropped, ("werkzeug delivered the reply: the phone had not hung "
+                     "up before the analysis ended")
     assert len(cli.starts) == 1
     assert len(claude_analyzer._ANSWER_MEMO) == 1, "the answer was lost"
 
