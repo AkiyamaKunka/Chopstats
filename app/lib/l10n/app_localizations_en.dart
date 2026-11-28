@@ -1400,12 +1400,12 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String diagBgLeftUnreachable(int count) {
-    return 'the AI service could not be reached ($count)';
+    return 'the AI service could not be reached, or answered with an error ($count)';
   }
 
   @override
   String diagBgLeftDeadline(int count) {
-    return 'the scan\'s time ran out before the AI service answered ($count)';
+    return 'the scan\'s time ran out before the AI service answered, or before its answer was saved ($count)';
   }
 
   @override

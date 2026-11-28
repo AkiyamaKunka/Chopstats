@@ -632,7 +632,8 @@ Future<bool> headlessBackfillWith({
 
 /// Why a photo whose verdict keeps it for later was left, for the run's
 /// record ([BackgroundLeft]): the AI service was busy or over its limit,
-/// it could not be reached, or anything else.
+/// it could not be reached or answered with an error (the analyzers' one
+/// "network or service issue"), or anything else.
 @visibleForTesting
 String backgroundLeftFor(PhotoOutcome o) => switch (o.errorKind) {
       AnalysisErrorKind.serverBusy ||

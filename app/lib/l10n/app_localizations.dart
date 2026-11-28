@@ -2268,16 +2268,16 @@ abstract class AppLocalizations {
   /// **'the AI service was busy ({count})'**
   String diagBgLeftBusy(int count);
 
-  /// A reason in diagBgRunLeftWhy: no connection to the AI service, or it answered with a server error.
+  /// A reason in diagBgRunLeftWhy: no connection to the AI service, or it answered with a server error. The app records both under this one reason, so the words must say both.
   ///
   /// In en, this message translates to:
-  /// **'the AI service could not be reached ({count})'**
+  /// **'the AI service could not be reached, or answered with an error ({count})'**
   String diagBgLeftUnreachable(int count);
 
-  /// A reason in diagBgRunLeftWhy: the photo had been sent, and the background scan had to end (iOS gives it about 30 seconds) before an answer came.
+  /// A reason in diagBgRunLeftWhy: the photo had been sent, and the background scan had to end (iOS gives it about 30 seconds) before an answer came, or after one came and before the app had saved it. The app records both under this one reason, so the words must say both.
   ///
   /// In en, this message translates to:
-  /// **'the scan\'s time ran out before the AI service answered ({count})'**
+  /// **'the scan\'s time ran out before the AI service answered, or before its answer was saved ({count})'**
   String diagBgLeftDeadline(int count);
 
   /// A reason in diagBgRunLeftWhy: the background scan had to end while the phone was still preparing the photo (decoding it); nothing had been sent.

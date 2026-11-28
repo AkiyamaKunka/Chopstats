@@ -839,6 +839,9 @@ void main() {
 
     // 2026-11-28: "3 left for later" said nothing about why. On
     // 2026-11-27 the phone could not answer "why was nothing logged".
+    // The words for "unreachable" and "deadline" in the lines below
+    // changed with the review of 2026-11-28: each now says both cases it
+    // is recorded for (the test after "in Chinese" says why).
     group('why photos were left for later', () {
       BackgroundRunRecord left(Map<String, int> why, {int? released}) =>
           BackgroundRunRecord(
@@ -867,8 +870,9 @@ void main() {
                 '5 left for later'),
             findsOneWidget);
         final why = find.text('Why they were left: the AI service was busy '
-            '(1); the scan\'s time ran out before the AI service answered '
-            '(1); not started, the scan\'s time was over (3)');
+            '(1); the scan\'s time ran out before the AI service answered, '
+            'or before its answer was saved (1); not started, the scan\'s '
+            'time was over (3)');
         expect(why, findsOneWidget);
         expect(
             tester.getTopLeft(why).dy,
@@ -889,9 +893,33 @@ void main() {
             ],
             locale: const Locale('zh'));
         expect(
-            find.text('留待之后的原因：连不上 AI 服务（2）；'
+            find.text('留待之后的原因：连不上 AI 服务，或 AI 服务返回了错误（2）；'
                 '照片还没发出，扫描时间就用完了（1）；其他原因（1）'),
             findsOneWidget);
+      });
+
+      // Review, 2026-11-28: a label has to be true of every case its
+      // reason is recorded for, and two reasons cover two cases each.
+      // "Unreachable" is no answer at all, or a server error (a 5xx that
+      // is not "busy": run_traffic.dart, and the analyzers' own "network
+      // or service issue"). "Deadline" is a request out and unanswered, or
+      // an answer that had come and was not saved yet (CutOffAt.waiting).
+      // The labels said only the first half: "could not be reached" of a
+      // server that answered 500, and "before the AI service answered" of
+      // an answer that was in.
+      test('a reason that covers two cases says both, in both languages',
+          () {
+        final en = AppLocalizationsEn(), zh = AppLocalizationsZh();
+        expect(
+            en.diagBgLeftUnreachable(2),
+            'the AI service could not be reached, or answered with an error '
+            '(2)');
+        expect(
+            en.diagBgLeftDeadline(1),
+            'the scan\'s time ran out before the AI service answered, or '
+            'before its answer was saved (1)');
+        expect(zh.diagBgLeftUnreachable(2), '连不上 AI 服务，或 AI 服务返回了错误（2）');
+        expect(zh.diagBgLeftDeadline(1), 'AI 服务还没回复，或回复还没存好，扫描时间就用完了（1）');
       });
 
       testWidgets('a run that recorded none (every earlier version) gets no '
@@ -931,7 +959,8 @@ void main() {
             backgroundRunLeftLine(AppLocalizationsZh(),
                 left({BackgroundLeft.busy: 1, BackgroundLeft.deadline: 1,
                     BackgroundLeft.notOffered: 2})),
-            '留待之后的原因：AI 服务繁忙（1）；AI 服务还没回复，扫描时间就用完了（1）；'
+            '留待之后的原因：AI 服务繁忙（1）；'
+            'AI 服务还没回复，或回复还没存好，扫描时间就用完了（1）；'
             '扫描时间已到，没有开始（2）');
       });
     });

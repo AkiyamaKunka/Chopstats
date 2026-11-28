@@ -1301,12 +1301,12 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String diagBgLeftUnreachable(int count) {
-    return '连不上 AI 服务（$count）';
+    return '连不上 AI 服务，或 AI 服务返回了错误（$count）';
   }
 
   @override
   String diagBgLeftDeadline(int count) {
-    return 'AI 服务还没回复，扫描时间就用完了（$count）';
+    return 'AI 服务还没回复，或回复还没存好，扫描时间就用完了（$count）';
   }
 
   @override

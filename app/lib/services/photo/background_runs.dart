@@ -68,18 +68,20 @@ abstract final class BackgroundStop {
 /// what the phone needs to answer "why was nothing logged" (2026-11-28).
 /// A run used to say only how many were left.
 abstract final class BackgroundLeft {
-  /// The AI service said it was busy or over its limit: the user's own
-  /// server while it analyzes another photo, a provider's 503, 529 or 429.
-  /// As the photo's verdict, or as the last thing heard for it before the
-  /// run's deadline.
+  /// The AI service said it was busy or over its limit. As the photo's
+  /// verdict: the user's own server while it analyzes another photo, or a
+  /// rate limit (429); a provider's 503 or 529 reads as "network or
+  /// service issue" there, and counts as [unreachable]. As the last thing
+  /// heard for it before the run's deadline: a 503, 529 or 429.
   static const busy = 'busy';
 
   /// The AI service could not be reached, or answered with a server error.
   static const unreachable = 'unreachable';
 
   /// The run's deadline cut the photo off with its request out and no
-  /// answer yet. A slow answer, a busy server that holds the request and a
-  /// hung network all look like this from the phone.
+  /// answer yet (a slow answer, a busy server that holds the request and a
+  /// hung network all look like this from the phone), or with the answer
+  /// in and not saved yet.
   static const deadline = 'deadline';
 
   /// The run's deadline cut it off before anything was sent for it: the
