@@ -35,6 +35,7 @@ import '../services/analyzer/platform_decode.dart' show isHeadlessEngine;
 import '../services/analyzer/provider_analyzers.dart';
 import '../services/backup/backup_coordinator.dart';
 import '../services/backup/backup_prefs.dart' show backupHoldsCatchUp;
+import '../services/local_store.dart' show LocalNoBackupStore;
 import '../services/photo/background.dart';
 import '../services/photo/background_runs.dart';
 import '../services/photo/background_schedule.dart';
@@ -54,6 +55,7 @@ import '../services/settings/app_language_sync.dart'
 import '../services/settings/app_settings.dart';
 import 'photo_pipeline.dart';
 import 'play_channel.dart' show retireWatchCameraRoll;
+import 'refresh_signal.dart' show noteMealsChangedForOtherEngine;
 import 'os_summary.dart';
 import 'outcome_text.dart';
 
@@ -929,6 +931,10 @@ Future<bool> _runAfterLaunch({
     return true;
   }
   final deferred = inFlight.deferred = await DeferredAssets.load(prefs);
+  // Where this engine leaves word of a meal it saved: its own
+  // meals-changed signal has no listener, and the app may be open
+  // (refresh_signal.dart).
+  final localStore = LocalNoBackupStore.platform();
   // Time-derived id seed: cards from successive runs stack instead of
   // overwriting each other. Base 10000 keeps the whole range clear of the
   // fixed daily-report id 9001 (a colliding meal card would silently
@@ -969,6 +975,11 @@ Future<bool> _runAfterLaunch({
           onScanSkippedLogged: recorder.alreadyLogged),
       pipeline: () async => inFlight.pipeline = PhotoPipeline(
           dao: await createMealsDao(),
+          // A meal saved, or cut for leftovers: the open app, if there is
+          // one, is told through a note it looks for (it used to find out
+          // at its next return, tab tap or save of its own).
+          onMealSaved: () =>
+              unawaited(noteMealsChangedForOtherEngine(localStore)),
           // B14's previous-night candidates, under the consent that says so.
           previousDayContext: () => settings.previousDayLeftoverContext,
           // Through the run's own client, whichever AI service it is: what

@@ -447,6 +447,15 @@ class UiServices {
   /// kind, and in tests.
   final Future<void> Function()? keepBackgroundScan;
 
+  /// Looks for a meal the OTHER engine (a background run) saved since the
+  /// last look, and sends this engine's meals-changed signal once when
+  /// there is one; true then (refresh_signal.dart OtherEngineMeals). The
+  /// shell asks at each return to the app and every few seconds while
+  /// Today is on screen: such a meal used to stay invisible until the next
+  /// return, tab tap or save of the app's own. Null (the Play build,
+  /// tests): nothing is asked, and no timer runs.
+  final Future<bool> Function()? mealsChangedElsewhere;
+
   /// Re-arms the OS-scheduled daily summary (iOS). The shell calls it on
   /// every lifecycle transition so the pending card is never staler than
   /// the last time the user had the app open. Null on Android (the
@@ -528,6 +537,7 @@ class UiServices {
     this.backgroundScanStuck,
     this.backgroundSchedule,
     this.keepBackgroundScan,
+    this.mealsChangedElsewhere,
     this.mealInUse,
     this.restaurantAssist,
     this.usualFoods,

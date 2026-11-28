@@ -33,6 +33,7 @@ import '../services/backup/cloud_backup_channel.dart';
 import '../services/backup/save_file_channel.dart' show takeLateSaveResult;
 import '../services/nl/executor.dart';
 import '../services/garmin_client.dart';
+import '../services/local_store.dart' show LocalNoBackupStore;
 import '../services/photo/background_restriction.dart'
     show androidBackgroundAllowed;
 import '../services/photo/background_schedule.dart'
@@ -302,6 +303,15 @@ class AppServices {
       }
     }());
 
+    // A meal a background run saves while the app is open reaches no
+    // listener here: that run is another engine, with its own signal. It
+    // leaves a note instead, which this engine looks for after each photo
+    // of its own scan (below) and from the shell (refresh_signal.dart).
+    // Primed now, before any screen reads the meals.
+    final otherEngineMeals =
+        OtherEngineMeals(store: LocalNoBackupStore.platform());
+    await otherEngineMeals.prime();
+
     // Photo pipeline glue (spec §2.3/§3/§6): intake streams → md5 → reserve
     // → analyze → save/skip/fail, notification-style snackbar on save.
     // Worded HERE, in the app language read live at each call, so a
@@ -355,6 +365,9 @@ class AppServices {
           if (!o.retryable && o.kind != PhotoOutcomeKind.alreadyTracked) {
             unawaited(clearDeferredAsset(photo.assetId));
           }
+          // The background run may have saved a meal while this photo was
+          // being analyzed here (at most one look every two seconds).
+          unawaited(otherEngineMeals.check());
         },
         // A glasses preview copy waits once for its full-size one (G2b).
         previewHold: holdGlassesPreview,
@@ -614,6 +627,14 @@ class AppServices {
       keepBackgroundScan:
           Platform.isIOS ? () => keepBackgroundScanScheduled(settings) : null,
       backgroundSchedule: Platform.isIOS ? lastBackgroundSchedule : null,
+      // Both phones: a background run can save a meal while the app is
+      // open. Only while Watch Camera Roll is on, which is the only time
+      // one scans; never in the Play build, which has none.
+      mealsChangedElsewhere: photoLibraryInBuild
+          ? () => settings.watcherEnabled
+              ? otherEngineMeals.check(force: true)
+              : Future<bool>.value(false)
+          : null,
       // BGTaskScheduler refuses every request (error 1, swallowed by the
       // plugin) while Background App Refresh is off — without this the
       // row would say "not run yet" forever and never say why. Android's

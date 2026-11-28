@@ -1338,6 +1338,64 @@ void main() {
       expect(after(), _wired(r'\n\s*photoOffered: inFlight\.offered,'));
     });
 
+    // 2026-11-28: the run's own meals-changed signal has no listener (it
+    // is another engine), so a meal it saved while the app was open stayed
+    // invisible until the next return to the app. The run leaves a note
+    // and the app looks for it (refresh_signal.dart; the note, the look
+    // and the shell are behaviour-tested in other_engine_meals_test).
+    // Without these lines nothing is ever written or looked for, and that
+    // suite stays green.
+    test('the run leaves word of a meal it saved, and the app looks for it '
+        'after each photo of its scan and from the shell', () {
+      expect(
+        after(),
+        _wired(r'final localStore = LocalNoBackupStore\.platform\(\);'),
+      );
+      expect(
+        after(),
+        _wired(
+          r'onMealSaved: \(\) => '
+          r'unawaited\(noteMealsChangedForOtherEngine\(localStore\)\),',
+        ),
+      );
+      final init = _body(
+        _source('lib/ui/di.dart'),
+        'static Future<AppServices> init(',
+        indent: '  ',
+      );
+      expect(
+        init,
+        _wired(
+          r'final otherEngineMeals = '
+          r'OtherEngineMeals\(store: LocalNoBackupStore\.platform\(\)\); '
+          r'await otherEngineMeals\.prime\(\);',
+        ),
+      );
+      // Primed before the pipeline, the scans and the screens exist.
+      expect(
+        init.indexOf('await otherEngineMeals.prime();'),
+        lessThan(init.indexOf('final pipeline = PhotoPipeline(')),
+      );
+      expect(
+        init,
+        _wired(
+          r'unawaited\(clearDeferredAsset\(photo\.assetId\)\); \} '
+          r'(//[^\n]*\n\s*)*'
+          r'unawaited\(otherEngineMeals\.check\(\)\); \},',
+        ),
+      );
+      // The shell's looks: only while a background scan can exist.
+      expect(
+        init,
+        _wired(
+          r'mealsChangedElsewhere: photoLibraryInBuild \? \(\) => '
+          r'settings\.watcherEnabled \? '
+          r'otherEngineMeals\.check\(force: true\) : '
+          r'Future<bool>\.value\(false\) : null,',
+        ),
+      );
+    });
+
     // 2026-11-28: a cut with the full window counted whatever the run had
     // been waiting for, so three hung or busy runs passed a photo over.
     // The run's deadline now goes by what its analyzer sent for the photo
