@@ -252,8 +252,16 @@ Future<void> _onPhone(WidgetTester tester,
   await _reveal(tester, 'mealNoteField');
 }
 
-bool _noteFocused(WidgetTester tester) =>
-    tester.widget<TextField>(_key('mealNoteField')).focusNode!.hasFocus;
+/// Whether the note's field has the focus. A focused field stays built (it
+/// keeps itself alive in the list), so one the list let go has none: with
+/// the description and item names wrapping, the test font (CI has no iPhone
+/// fonts) makes the form tall enough that revealing the description drops
+/// the note's field.
+bool _noteFocused(WidgetTester tester) {
+  final field = find.byKey(const Key('mealNoteField'), skipOffstage: false);
+  return field.evaluate().isNotEmpty &&
+      tester.widget<TextField>(field).focusNode!.hasFocus;
+}
 
 /// Save's question about a note in the field that no answer put into the
 /// form. Its title is true whether or not the note went to the AI: it said

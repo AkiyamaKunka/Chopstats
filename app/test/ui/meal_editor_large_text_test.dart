@@ -49,6 +49,22 @@ Meal _meal() => Meal(
   },
 );
 
+/// [_meal] with [desc] as its description and [name] as its first item's.
+Meal _mealWith({required String desc, required String name}) {
+  final m = _meal();
+  final items = [...m.analysis['food_items'] as List];
+  items[0] = {...items[0] as Map<String, Object?>, 'name': name};
+  return Meal(
+    id: m.id,
+    date: m.date,
+    time: m.time,
+    timestamp: m.timestamp,
+    source: m.source,
+    imageHash: m.imageHash,
+    analysis: {...m.analysis, 'meal_description': desc, 'food_items': items},
+  );
+}
+
 Rect _global(RenderBox box) =>
     MatrixUtils.transformRect(box.getTransformTo(null), Offset.zero & box.size);
 
@@ -766,24 +782,97 @@ void main() {
     );
   });
 
+  RenderEditable editableAt(WidgetTester tester, String key) => tester
+      .state<EditableTextState>(find.descendant(
+          of: find.byKey(Key(key)), matching: find.byType(EditableText)))
+      .renderEditable;
+
   testWidgets('at the default size the fields are one line, 8 pt apart, as '
       'before', (tester) async {
-    final dao = FakeDao()..seed(_meal());
+    final dao = FakeDao()
+      ..seed(_mealWith(desc: 'Dumplings', name: 'Dumplings (8)'));
     await pumpApp(
       tester,
       MealEditorScreen(dao: dao, meal: dao.meals.first),
       size: const Size(390, 4000),
     );
-    expect(
-      tester
-          .widget<TextField>(find.byKey(const Key('editorDescription')))
-          .maxLines,
-      1,
-    );
+    // They wrap at every size, but a description or item name that fits
+    // draws one line, so its field is as high as before; so does an empty
+    // one (a new meal, an added row).
+    void expectOneLine(String key) {
+      final editable = editableAt(tester, key);
+      expect(
+        editable.size.height,
+        moreOrLessEquals(editable.preferredLineHeight, epsilon: 0.01),
+        reason: '$key "${editable.text?.toPlainText()}" is one line high',
+      );
+    }
+
+    for (final key in ['editorDescription', 'itemName0']) {
+      expectOneLine(key);
+    }
+    for (final key in ['editorDescription', 'itemName0']) {
+      await tester.enterText(find.byKey(Key(key)), '');
+      await tester.pump();
+      expectOneLine(key);
+    }
     expect(
       tester.getTopLeft(find.byKey(const Key('editorProtein'))).dy -
           tester.getBottomLeft(find.byKey(const Key('editorCalories'))).dy,
       8,
     );
+  });
+
+  // The AI ends each item name with the portion it assumed ('(~170 g)').
+  // On one line that was what got cut: 'Caesar salad, croutons, parmesan
+  // (~170 g' on a 6.9-inch iPhone at the default size, more on a 375-pt
+  // one. The long ones wrap now, whole, and Return still finishes the
+  // field: a text keyboard with Done, the text one paragraph.
+  testWidgets('at the default size on 375 pt a long item name and '
+      'description wrap, whole, and Return still finishes them',
+      (tester) async {
+    const name = 'Caesar salad, croutons, parmesan (~170 g)';
+    const desc = 'Caesar salad with croutons and parmesan, and an iced tea';
+    final dao = FakeDao()..seed(_mealWith(desc: desc, name: name));
+    await pumpApp(
+      tester,
+      MealEditorScreen(dao: dao, meal: dao.meals.first),
+      size: const Size(375, 4000),
+    );
+    for (final (key, text) in [('itemName0', name), ('editorDescription', desc)]) {
+      final editable = editableAt(tester, key);
+      expect(editable.text?.toPlainText(), text);
+      expect(
+        editable.size.height,
+        greaterThan(editable.preferredLineHeight * 1.5),
+        reason: '"$text" shows on more than one line',
+      );
+      // Every glyph, the closing ')' too, is inside the field.
+      for (final box in editable.getBoxesForSelection(
+          TextSelection(baseOffset: 0, extentOffset: text.length))) {
+        expect(box.right, lessThanOrEqualTo(editable.size.width + 0.5),
+            reason: '"$text" runs past the field');
+      }
+
+      final field = find.byKey(Key(key));
+      await tester.showKeyboard(field);
+      final input = tester.testTextInput.setClientArgs!;
+      expect((input['inputType'] as Map)['name'], 'TextInputType.text',
+          reason: '$key asks for a one-line keyboard');
+      expect(input['inputAction'], 'TextInputAction.done');
+      final focus = tester
+          .widget<EditableText>(
+              find.descendant(of: field, matching: find.byType(EditableText)))
+          .focusNode;
+      expect(focus.hasFocus, isTrue);
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pump();
+      expect(focus.hasFocus, isFalse, reason: 'Return finished $key');
+      expect(editable.text?.toPlainText(), text);
+      // A newline that gets in anyway (a paste) is dropped.
+      await tester.enterText(field, 'Caesar salad\n(~170 g)');
+      await tester.pump();
+      expect(editable.text?.toPlainText(), 'Caesar salad(~170 g)');
+    }
   });
 }
