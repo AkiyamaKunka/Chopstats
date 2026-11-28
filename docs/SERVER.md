@@ -399,13 +399,16 @@ For the Claude route you can pick the analysis model (fable, opus, sonnet or hai
 
 Everything the Flutter app's "your own server" provider uses. All routes
 require the `X-API-Key` header (the server's `ANDROID_API_KEY`); analysis
-routes are *pure* — they return the analysis and write no meal row, the
-phone owns its own database.
+routes are *pure* — they return the analysis and write no meal row, no
+ledger entry and nothing to disk, the phone owns its own database. The
+photo and leftover routes keep each answer in memory for 10 minutes, for
+the same request sent again (below).
 
 | Endpoint | Purpose |
 | --- | --- |
 | `POST /api/auth_check` | Free readiness probe: validates the key and reports which analysis backends are available, plus a `features` map of the newer contracts this server speaks (`estimate_confidence`, `restaurant_lookup`, `lookup_jobs`; an older server omits it and the app treats every feature as off). Never spends a CLI run. |
 | `POST /api/analyze_photo` | Analyze one photo. The server composes the prompt from its own `shared/` copy — the phone may contribute only a bounded dietary-profile appendix, never the prompt itself. |
+| `POST /api/analyze_leftover` | Estimate how much of a logged meal is left, from a photo of the rest. The server composes the prompt from its own `shared/` template and a re-sanitized copy of that meal's analysis; the phone sends no prompt. |
 | `POST /api/text_intent` | Natural-language intent parsing for corrections and text-described meals, and per-meal note corrections from Edit meal (the phone composes the prompt; nothing changes on the server). |
 | `POST /api/restaurant_lookup` | Queue a published-nutrition lookup for chain-restaurant items (off unless `CLAUDE_LOOKUP_ENABLED=1`). Structured fields only; `202 {job_id}` or `200` from the 24 h cache. |
 | `POST /api/restaurant_lookup/status` | `{job_id}` → `queued` / `running` / `done` (with the result) / `failed` / `unknown`. |
@@ -434,6 +437,18 @@ Response contract worth knowing:
   `/upload` photos never wait for another analysis: they go to Gemini at
   once. The knob and the reason for 20 s are in
   [SERVER_DEPLOY.md](SERVER_DEPLOY.md#two-app-requests-at-once-the-busy-wait).
+- That answer is not lost. The server keeps the answer of each photo
+  and leftover analysis that succeeded in memory for
+  `CLAUDE_API_ANSWER_MEMO_SECONDS` (the default is 600 s, at most 64
+  answers), and a request that is the same in everything that goes into
+  the analysis gets it at once: the same `200` reply, with no CLI run and
+  no wait, also while another analysis runs. A copy that waited behind
+  its own first copy gets that copy's answer. Only the answer and a hash
+  of the request are kept, never the photo; nothing goes to disk, and a
+  restart empties it. A busy, refused, timed-out or empty answer is not
+  kept, and text requests, Telegram and `/upload` never use it. The knob
+  and the journal's line are in
+  [SERVER_DEPLOY.md](SERVER_DEPLOY.md#the-same-photo-again-the-answer-memo).
 
 ## Restaurant lookup (WebSearch, off by default)
 

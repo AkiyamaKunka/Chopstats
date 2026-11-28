@@ -7,7 +7,8 @@ that changes in claude_analyzer.py or lookup_jobs.py must change there
 too. These tests fail when one side moves without the other.
 
 The same holds for the app's busy wait, CLAUDE_API_BUSY_WAIT_SECONDS
-(2026-11-28): its tests are at the end of this file.
+(2026-11-28), and for the answer memo, CLAUDE_API_ANSWER_MEMO_SECONDS
+(2026-11-28): their tests are at the end of this file.
 """
 import os
 import re
@@ -262,3 +263,113 @@ def test_the_deploy_guide_quotes_the_journal_lines_the_code_writes():
                  "Restaurant lookup pre-empted by a foreground request."):
         assert "`%s`" % line in guide, line
         assert '"%s' % line in source, line
+
+
+# ─── CLAUDE_API_ANSWER_MEMO_SECONDS: the answer kept for the same request
+# (2026-11-28) ─────────────────────────────────────────────────────────
+#
+# SERVER_DEPLOY.md gives the knob a table of its own ("The same photo
+# again"), SERVER.md repeats the numbers in its response contract, and
+# .env.example lists the knob after the busy wait.
+
+MEMO_KNOB = "CLAUDE_API_ANSWER_MEMO_SECONDS"
+
+
+def _knob_deploy_row(knob):
+    """(default cell, meaning cell) of [knob]'s row in SERVER_DEPLOY.md."""
+    rows = [m.groups() for m in (
+        re.match(r"^\| `%s` \| ([^|]+) \| (.*) \|$" % knob, line)
+        for line in _read("docs", "SERVER_DEPLOY.md").splitlines()) if m]
+    assert len(rows) == 1, rows
+    return rows[0][0].strip().strip("`"), rows[0][1]
+
+
+def _knob_env_comment(knob):
+    lines = re.findall(r"(?m)^# %s=\s*#\s*(.*)$" % knob,
+                       _read(".env.example"))
+    assert len(lines) == 1, lines
+    return lines[0]
+
+
+def _flat(text):
+    return " ".join(text.replace("\n# ", " ").split())
+
+
+def test_both_files_state_the_answer_memo_default_and_clamp(monkeypatch):
+    monkeypatch.delenv(MEMO_KNOB, raising=False)
+    default = claude_analyzer.answer_memo_seconds()
+    assert default == claude_analyzer.ANSWER_MEMO_SECONDS_DEFAULT
+    low, high = _clamp(claude_analyzer.answer_memo_seconds, monkeypatch,
+                       MEMO_KNOB)
+    assert (low, high) == (0, claude_analyzer.ANSWER_MEMO_SECONDS_MAX)
+
+    cell, meaning = _knob_deploy_row(MEMO_KNOB)
+    assert cell == str(default)
+    assert "(%d–%d)" % (low, high) in meaning
+    # 0 is a documented setting, not only the bottom of the clamp.
+    assert "`0` switches it off" in meaning
+    assert ("(%d, clamp %d..%d)" % (default, low, high)
+            in _knob_env_comment(MEMO_KNOB))
+    # The same systemd trap as the busy wait's: a comment after the value
+    # makes it junk, and junk reads as the default, which is "on". The
+    # journal's line for it is pinned in tests/test_answer_memo.py.
+    advice = ("Write the number alone on its line: systemd keeps a comment "
+              "after it as part of the value, the value is then not a "
+              "number, and answers are still kept for %d s" % default)
+    assert advice in meaning
+    assert advice in _flat(_read(".env.example"))
+
+
+def test_the_guides_state_the_answer_memo_numbers_the_code_uses():
+    """How long an answer is kept and how many: in both guides and in
+    .env.example, from the code's constants. The 10 minutes of the smoke
+    test F paragraph and of the "on purpose" paragraph are the default,
+    said in minutes."""
+    seconds = claude_analyzer.ANSWER_MEMO_SECONDS_DEFAULT
+    assert seconds % 60 == 0, seconds
+    minutes = seconds // 60
+    entries = claude_analyzer.ANSWER_MEMO_MAX_ENTRIES
+    deploy = _flat(_read("docs", "SERVER_DEPLOY.md"))
+    assert ("the default is %d s (%d minutes). At most %d answers are kept"
+            % (seconds, minutes, entries)) in deploy
+    assert "A repeat within %d minutes proves nothing new" % minutes in deploy
+    assert ("A request you repeat on purpose within the %d minutes"
+            % minutes) in deploy
+    server = _flat(_read("docs", "SERVER.md"))
+    assert ("keep each answer in memory for %d minutes" % minutes) in server
+    assert ("(the default is %d s, at most %d answers)" % (seconds, entries)
+            ) in server
+    assert "at most %d answers" % entries in _flat(_read(".env.example"))
+
+
+def test_the_memo_section_gives_the_iphone_scan_deadline_the_app_has():
+    """The reason the memo exists is the app's deadline, as for the busy
+    wait: the new section in the deploy guide quotes it too."""
+    seconds = _iphone_scan_deadline()
+    assert ("an iPhone background scan gives up on its request %d s after "
+            "the scan began, and the app's own scan stops when you leave "
+            "the app" % seconds) in _flat(_read("docs", "SERVER_DEPLOY.md"))
+
+
+def test_the_deploy_guide_quotes_the_memo_line_the_code_writes(monkeypatch,
+                                                               caplog):
+    """The deploy guide's example of the journal's line for an answer
+    from memory is what the analyzer writes for an answer 42 s old,
+    word for word."""
+    import logging
+    monkeypatch.delenv(MEMO_KNOB, raising=False)
+    now = [5000.0]
+    monkeypatch.setattr(claude_analyzer, "_memo_clock", lambda: now[0])
+    key = b"k" * 32
+    claude_analyzer.clear_answer_memo()
+    claude_analyzer._remember_answer(key, {"is_food": True})
+    now[0] += 42
+    with caplog.at_level(logging.INFO, logger="claude_analyzer"):
+        assert claude_analyzer._remembered_answer(key, "photo") == {
+            "is_food": True}
+    claude_analyzer.clear_answer_memo()
+    lines = [r.getMessage() for r in caplog.records
+             if r.name == "claude_analyzer"]
+    assert len(lines) == 1, lines
+    assert "`%s`" % lines[0] in _flat(_read("docs", "SERVER_DEPLOY.md"))
+    assert lines[0].startswith("Answered from memory — app photo request")
