@@ -331,13 +331,19 @@ enum CheckNewPhotos {
   /// the engine is created there.
   @MainActor
   static func startBackgroundScan() {
-    var task: UIBackgroundTaskIdentifier = .invalid
-    task = UIApplication.shared.beginBackgroundTask(withName: "Check new photos") {
-      UIApplication.shared.endBackgroundTask(task)
+    let task = BackgroundTaskBox()
+    task.id = UIApplication.shared.beginBackgroundTask(withName: "Check new photos") {
+      UIApplication.shared.endBackgroundTask(task.id)
     }
     WorkmanagerPlugin.startOneOffTask(
-      identifier: AppDelegate.photoBackfillIdentifier, taskIdentifier: task, inputData: nil,
+      identifier: AppDelegate.photoBackfillIdentifier, taskIdentifier: task.id, inputData: nil,
       delaySeconds: 0)
+  }
+
+  /// The task's id, set once beginBackgroundTask returns, for its expiry
+  /// handler (which iOS may call on any thread).
+  private final class BackgroundTaskBox: @unchecked Sendable {
+    var id: UIBackgroundTaskIdentifier = .invalid
   }
 
   /// Seconds since this process started (sysctl), to tell a launch made
